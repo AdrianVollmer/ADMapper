@@ -50,6 +50,62 @@
   .menu-separator {
     @apply my-1 border-t border-gray-600;
   }
+
+  /* Submenu support */
+  .menu-submenu {
+    @apply relative;
+  }
+
+  .menu-submenu-trigger {
+    @apply w-full px-3 py-1.5 flex items-center justify-between gap-4
+           text-sm text-gray-300 hover:bg-blue-600 hover:text-white
+           focus:outline-none focus:bg-blue-600 focus:text-white
+           transition-colors text-left cursor-default;
+  }
+
+  .menu-submenu-trigger::after {
+    content: "▶";
+    @apply text-xs text-gray-500;
+  }
+
+  .menu-submenu:hover .menu-submenu-trigger::after,
+  .menu-submenu-trigger:focus::after {
+    @apply text-blue-200;
+  }
+
+  .menu-submenu-dropdown {
+    @apply absolute left-full top-0 min-w-[180px] py-1 ml-0.5
+           bg-gray-800 border border-gray-600 rounded shadow-xl z-50
+           hidden;
+  }
+
+  .menu-submenu:hover .menu-submenu-dropdown,
+  .menu-submenu:focus-within .menu-submenu-dropdown {
+    @apply block;
+  }
+
+  /* Radio-style menu options */
+  .menu-radio {
+    @apply w-full px-3 py-1.5 flex items-center gap-2
+           text-sm text-gray-300 hover:bg-blue-600 hover:text-white
+           focus:outline-none focus:bg-blue-600 focus:text-white
+           transition-colors text-left;
+  }
+
+  .menu-radio::before {
+    content: "○";
+    @apply text-gray-500;
+  }
+
+  .menu-radio[data-checked="true"]::before {
+    content: "●";
+    @apply text-blue-400;
+  }
+
+  .menu-radio:hover::before,
+  .menu-radio:focus::before {
+    @apply text-white;
+  }
 }
 
 /* ============================================

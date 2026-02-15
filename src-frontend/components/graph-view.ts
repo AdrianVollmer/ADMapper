@@ -5,11 +5,12 @@
  */
 
 import { loadGraph, createRenderer, applyLayout, getGraphStats } from "../graph";
-import type { ADGraphRenderer } from "../graph";
+import type { ADGraphRenderer, LayoutType } from "../graph";
 import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel } from "./sidebars";
 
 let renderer: ADGraphRenderer | null = null;
+let currentLayout: LayoutType = "force";
 
 /** Initialize the graph view */
 export function initGraph(): void {
@@ -93,16 +94,44 @@ function handleGraphAction(action: string | null): void {
     case "layout-graph":
       relayoutGraph();
       break;
+
+    case "layout-force":
+      setLayout("force");
+      break;
+
+    case "layout-hierarchical":
+      setLayout("hierarchical");
+      break;
   }
 }
 
-/** Re-run layout algorithm */
+/** Set the layout type and re-layout */
+function setLayout(layout: LayoutType): void {
+  currentLayout = layout;
+  relayoutGraph();
+  updateLayoutIndicator();
+}
+
+/** Update UI to show current layout */
+function updateLayoutIndicator(): void {
+  // Update radio-style menu checkmarks
+  for (const el of document.querySelectorAll("[data-action^='layout-']")) {
+    const action = el.getAttribute("data-action");
+    const isActive =
+      (action === "layout-force" && currentLayout === "force") ||
+      (action === "layout-hierarchical" && currentLayout === "hierarchical");
+    el.setAttribute("data-checked", isActive ? "true" : "false");
+  }
+}
+
+/** Re-run layout algorithm with current layout type */
 function relayoutGraph(): void {
   if (!renderer) return;
 
   const graph = renderer.sigma.getGraph();
-  applyLayout(graph);
+  applyLayout(graph, { type: currentLayout });
   renderer.refresh();
+  renderer.resetCamera();
 }
 
 /** Get the current renderer */

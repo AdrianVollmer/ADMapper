@@ -12,7 +12,6 @@ import type { ADGraphType } from "./ADGraph";
 import type { ADNodeAttributes, ADEdgeAttributes } from "./types";
 import {
   HIGHLIGHT_COLORS,
-  DIM_COLORS,
   HIGHLIGHT_SIZE_MULTIPLIER,
   BACKGROUND_COLOR,
   LABEL_COLOR,

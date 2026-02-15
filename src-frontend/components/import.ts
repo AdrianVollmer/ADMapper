@@ -55,7 +55,6 @@ let cancelBtn: HTMLElement | null = null;
 
 // State
 let eventSource: EventSource | null = null;
-let currentJobId: string | null = null;
 
 /** Initialize the import handler */
 export function initImport(): void {
@@ -137,7 +136,6 @@ async function handleFileSelect(event: Event): Promise<void> {
     }
 
     const result = await response.json();
-    currentJobId = result.job_id;
 
     // Subscribe to progress updates
     subscribeToProgress(result.job_id);
@@ -282,7 +280,6 @@ function cleanup(): void {
     eventSource.close();
     eventSource = null;
   }
-  currentJobId = null;
 }
 
 /** Refresh graph data from server */
