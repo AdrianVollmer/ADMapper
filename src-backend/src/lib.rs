@@ -9,10 +9,12 @@ use tower_http::{
     services::ServeDir,
 };
 
+#[cfg(feature = "desktop")]
 #[cfg(debug_assertions)]
 use tauri::Manager;
 
 /// Run as Tauri desktop application.
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run_desktop() {
     tauri::Builder::default()
@@ -28,6 +30,13 @@ pub fn run_desktop() {
         .invoke_handler(tauri::generate_handler![])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(not(feature = "desktop"))]
+pub fn run_desktop() {
+    eprintln!("Error: Desktop mode not available. Build with --features desktop");
+    eprintln!("Or use --headless to run as web server.");
+    std::process::exit(1);
 }
 
 /// Run as standalone web service.
