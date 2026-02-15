@@ -11,13 +11,7 @@ import { NODE_COLORS } from "../graph/theme";
 import type { ADNodeType } from "../graph/types";
 import type { RawADGraph } from "../graph/types";
 import { escapeHtml } from "../utils/html";
-
-/** Search result from API */
-interface SearchResult {
-  id: string;
-  label: string;
-  type: string;
-}
+import type { SearchResult, PathStep } from "../api/types";
 
 let nodeSearchInput: HTMLInputElement | null = null;
 let nodeSearchResults: HTMLElement | null = null;
@@ -318,16 +312,6 @@ async function findPath(): Promise<void> {
     console.error("Path finding error:", err);
     showPathError(`Error: ${err}`);
   }
-}
-
-/** Path step from API response */
-interface PathStep {
-  node: {
-    id: string;
-    label: string;
-    type: string;
-  };
-  edge_type?: string;
 }
 
 /** Display path results from API response */

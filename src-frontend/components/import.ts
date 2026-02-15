@@ -6,39 +6,7 @@
 
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph, ADNodeType, ADEdgeType } from "../graph/types";
-
-/** Import progress from server */
-interface ImportProgress {
-  job_id: string;
-  status: "running" | "completed" | "failed";
-  current_file: string | null;
-  files_processed: number;
-  total_files: number;
-  nodes_imported: number;
-  edges_imported: number;
-  error: string | null;
-}
-
-/** Graph node from API */
-interface ApiGraphNode {
-  id: string;
-  label: string;
-  type: string;
-  properties: Record<string, unknown>;
-}
-
-/** Graph edge from API */
-interface ApiGraphEdge {
-  source: string;
-  target: string;
-  type: string;
-}
-
-/** Full graph response from API */
-interface ApiGraph {
-  nodes: ApiGraphNode[];
-  edges: ApiGraphEdge[];
-}
+import type { ImportProgress, GraphData } from "../api/types";
 
 // DOM element references
 let fileInput: HTMLInputElement | null = null;
@@ -288,7 +256,7 @@ async function refreshGraphData(): Promise<void> {
       return;
     }
 
-    const data: ApiGraph = await response.json();
+    const data: GraphData = await response.json();
 
     // Convert to RawADGraph format
     const graph: RawADGraph = {
@@ -296,7 +264,7 @@ async function refreshGraphData(): Promise<void> {
         id: n.id,
         label: n.label,
         type: mapNodeType(n.type),
-        properties: n.properties,
+        properties: n.properties ?? {},
       })),
       edges: data.edges.map((e) => ({
         source: e.source,

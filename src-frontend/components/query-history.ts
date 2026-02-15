@@ -6,15 +6,10 @@
  */
 
 import { escapeHtml } from "../utils/html";
+import type { QueryHistoryEntry } from "../api/types";
 
-/** Query history entry from API */
-export interface QueryHistoryEntry {
-  id: string;
-  name: string;
-  query: string;
-  timestamp: number;
-  result_count: number | null;
-}
+// Re-export for backwards compatibility
+export type { QueryHistoryEntry } from "../api/types";
 
 /** Pagination state */
 interface PaginationState {
