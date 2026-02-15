@@ -5,10 +5,11 @@
  * Uses the /api/graph/search endpoint for autocomplete.
  */
 
-import { getRenderer } from "./graph-view";
+import { getRenderer, loadGraphData } from "./graph-view";
 import { updateDetailPanel } from "./sidebars";
 import { NODE_COLORS } from "../graph/theme";
 import type { ADNodeType } from "../graph/types";
+import type { RawADGraph } from "../graph/types";
 
 /** Search result from API */
 interface SearchResult {
@@ -201,12 +202,13 @@ function handleResultClick(e: Event): void {
 function handleResultSelection(resultItem: HTMLElement, context: string): void {
   const nodeId = resultItem.getAttribute("data-node-id");
   const nodeLabel = resultItem.getAttribute("data-node-label") || nodeId;
+  const nodeType = resultItem.querySelector(".node-badge")?.textContent || "Unknown";
 
   if (!nodeId) return;
 
   switch (context) {
     case "node":
-      selectNode(nodeId);
+      loadSingleNode(nodeId, nodeLabel || nodeId, nodeType);
       clearSearch(nodeSearchInput, nodeSearchResults);
       break;
     case "path-start":
@@ -237,22 +239,31 @@ function clearSearch(input: HTMLInputElement | null, resultsEl: HTMLElement | nu
   }
 }
 
-/** Select a node by ID */
-function selectNode(nodeId: string): void {
+/** Load a single node as a trivial graph */
+function loadSingleNode(nodeId: string, label: string, nodeType: string): void {
+  // Create a minimal graph with just this one node
+  const graph: RawADGraph = {
+    nodes: [
+      {
+        id: nodeId,
+        label: label,
+        type: nodeType as ADNodeType,
+        properties: {},
+      },
+    ],
+    edges: [],
+  };
+
+  // Load the graph
+  loadGraphData(graph);
+
+  // After loading, select the node and show details
   const renderer = getRenderer();
-  if (!renderer) return;
-
-  const graph = renderer.sigma.getGraph();
-  if (!graph.hasNode(nodeId)) return;
-
-  const attrs = graph.getNodeAttributes(nodeId);
-
-  // Select and focus on the node
-  renderer.selectNode(nodeId);
-  renderer.focusNode(nodeId);
-
-  // Update detail panel
-  updateDetailPanel(nodeId, attrs);
+  if (renderer) {
+    renderer.selectNode(nodeId);
+    const attrs = renderer.sigma.getGraph().getNodeAttributes(nodeId);
+    updateDetailPanel(nodeId, attrs);
+  }
 }
 
 /** Find path between start and end nodes using the API */
