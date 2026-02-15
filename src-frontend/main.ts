@@ -9,6 +9,7 @@ import { initSidebars } from "./components/sidebars";
 import { initGraph } from "./components/graph-view";
 import { initKeyboardShortcuts } from "./components/keyboard";
 import { initImport } from "./components/import";
+import { initSearch } from "./components/search";
 
 /** Application state */
 export interface AppState {
@@ -30,6 +31,7 @@ function init(): void {
   initGraph();
   initKeyboardShortcuts();
   initImport();
+  initSearch();
 
   console.log("ADMapper initialized");
 }

@@ -197,6 +197,72 @@
            focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500
            transition-colors;
   }
+
+  .search-results {
+    @apply mt-2 max-h-48 overflow-y-auto;
+  }
+
+  .search-results[hidden] {
+    display: none;
+  }
+
+  .search-result-item {
+    @apply flex items-center gap-2 px-2 py-1.5 text-sm rounded cursor-pointer
+           hover:bg-gray-700 transition-colors;
+  }
+
+  .search-result-item .node-badge {
+    @apply flex-none;
+  }
+
+  .search-result-item .node-name {
+    @apply text-gray-200 truncate;
+  }
+
+  .search-no-results {
+    @apply text-sm text-gray-500 italic py-2;
+  }
+
+  /* Path finding */
+  .path-inputs {
+    @apply space-y-0;
+  }
+
+  .path-results {
+    @apply text-sm;
+  }
+
+  .path-results[hidden] {
+    display: none;
+  }
+
+  .path-length {
+    @apply text-gray-400 mb-2;
+  }
+
+  .path-steps {
+    @apply space-y-1;
+  }
+
+  .path-step {
+    @apply flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-700 cursor-pointer transition-colors;
+  }
+
+  .path-step-node {
+    @apply text-gray-200;
+  }
+
+  .path-step-edge {
+    @apply text-xs text-gray-500 flex items-center gap-1;
+  }
+
+  .path-step-edge svg {
+    @apply w-3 h-3;
+  }
+
+  .path-error {
+    @apply text-red-400;
+  }
 }
 
 /* ============================================

@@ -224,65 +224,64 @@
             </button>
           </div>
           <div class="sidebar-content">
-            <!-- Search -->
+            <!-- Node Search -->
             <div class="sidebar-section">
+              <h3 class="section-title">Find Node</h3>
               <div class="search-box">
                 <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="11" cy="11" r="8" />
                   <path d="M21 21l-4.35-4.35" />
                 </svg>
-                <input type="text" placeholder="Search nodes..." class="search-input" id="node-search" />
+                <input
+                  type="text"
+                  placeholder="Search nodes..."
+                  class="search-input"
+                  id="node-search"
+                  aria-label="Search for nodes"
+                />
               </div>
+              <div id="node-search-results" class="search-results" hidden></div>
             </div>
 
-            <!-- Node Types Filter -->
+            <!-- Path Finding -->
             <div class="sidebar-section">
-              <h3 class="section-title">Node Types</h3>
-              <div class="node-type-filters">
-                <label class="filter-item">
-                  <input type="checkbox" checked data-node-type="User" />
-                  <span class="node-badge user">User</span>
-                </label>
-                <label class="filter-item">
-                  <input type="checkbox" checked data-node-type="Group" />
-                  <span class="node-badge group">Group</span>
-                </label>
-                <label class="filter-item">
-                  <input type="checkbox" checked data-node-type="Computer" />
-                  <span class="node-badge computer">Computer</span>
-                </label>
-                <label class="filter-item">
-                  <input type="checkbox" checked data-node-type="Domain" />
-                  <span class="node-badge domain">Domain</span>
-                </label>
-                <label class="filter-item">
-                  <input type="checkbox" checked data-node-type="GPO" />
-                  <span class="node-badge gpo">GPO</span>
-                </label>
-                <label class="filter-item">
-                  <input type="checkbox" checked data-node-type="OU" />
-                  <span class="node-badge ou">OU</span>
-                </label>
+              <h3 class="section-title">Find Path</h3>
+              <div class="path-inputs">
+                <div class="search-box">
+                  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="5" cy="12" r="3" />
+                    <path d="M8 12h13" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Start node..."
+                    class="search-input"
+                    id="path-start"
+                    aria-label="Path start node"
+                  />
+                </div>
+                <div class="search-box mt-2">
+                  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="19" cy="12" r="3" />
+                    <path d="M3 12h13" />
+                    <path d="M12 8l4 4-4 4" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="End node..."
+                    class="search-input"
+                    id="path-end"
+                    aria-label="Path end node"
+                  />
+                </div>
               </div>
-            </div>
-
-            <!-- Saved Queries -->
-            <div class="sidebar-section">
-              <h3 class="section-title">Saved Queries</h3>
-              <ul class="query-list">
-                <li class="query-item" data-query="domain-admins">
-                  <span>Domain Admins</span>
-                </li>
-                <li class="query-item" data-query="kerberoastable">
-                  <span>Kerberoastable Users</span>
-                </li>
-                <li class="query-item" data-query="unconstrained">
-                  <span>Unconstrained Delegation</span>
-                </li>
-                <li class="query-item" data-query="dcsync">
-                  <span>DCSync Rights</span>
-                </li>
-              </ul>
+              <button
+                id="find-path-btn"
+                class="w-full mt-3 px-3 py-2 text-sm font-medium rounded bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+              >
+                Find Shortest Path
+              </button>
+              <div id="path-results" class="path-results mt-3" hidden></div>
             </div>
           </div>
         </aside>

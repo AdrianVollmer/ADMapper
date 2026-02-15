@@ -56,6 +56,8 @@ export interface ADGraphRenderer {
   clearSelection: () => void;
   /** Set theme */
   setTheme: (theme: "light" | "dark") => void;
+  /** Highlight a path (list of node IDs) */
+  highlightPath: (path: string[]) => void;
 }
 
 /** Create an AD graph renderer */
@@ -73,6 +75,8 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   let hoveredNode: string | null = null;
   let hoveredReachableEdges: Set<string> = new Set();
   const selectedNodes = new Set<string>();
+  const highlightedPath = new Set<string>();
+  const highlightedPathEdges = new Set<string>();
   let currentTheme = theme;
   let draggedNode: string | null = null;
 
@@ -201,14 +205,20 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       }) as any,
     },
 
-    // Node reducer: bring hovered/selected nodes to front, keep others unchanged
+    // Node reducer: bring hovered/selected/path nodes to front
     nodeReducer: (nodeId, data) => {
       const res: Record<string, unknown> = { ...data };
+
+      // Path nodes get highlighted
+      if (highlightedPath.has(nodeId)) {
+        res.zIndex = 2;
+        res.highlighted = true;
+      }
 
       // Selected nodes get higher z-index and will show stronger glow via drawNodeHover
       if (selectedNodes.has(nodeId)) {
         res.zIndex = 2;
-        res.highlighted = true; // Mark for stronger glow
+        res.highlighted = true;
       }
 
       // Bring hovered node to front
@@ -219,12 +229,17 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       return res;
     },
 
-    // Edge reducer: highlight transitive outgoing edges on hover, keep others normal
+    // Edge reducer: highlight path edges, transitive edges on hover
     edgeReducer: (edge, data) => {
       const res: Record<string, unknown> = { ...data };
 
-      // On hover: highlight edges reachable from hovered node, keep others normal
-      if (hoveredNode && hoveredReachableEdges.has(edge)) {
+      // Path edges get special highlight
+      if (highlightedPathEdges.has(edge)) {
+        res.color = "#22c55e"; // Green for path
+        res.size = ((data.size as number | undefined) ?? 3) * 1.5;
+        res.zIndex = 2;
+      } else if (hoveredNode && hoveredReachableEdges.has(edge)) {
+        // On hover: highlight edges reachable from hovered node
         res.color = HIGHLIGHT_COLORS.edge;
         res.size = ((data.size as number | undefined) ?? 3) * HIGHLIGHT_SIZE_MULTIPLIER;
         res.zIndex = 1;
@@ -373,6 +388,55 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     setTheme(t: "light" | "dark") {
       currentTheme = t;
       updateThemeStyles(t);
+      sigma.refresh();
+    },
+
+    highlightPath(path: string[]) {
+      // Clear current selection and set the path nodes as selected
+      selectedNodes.clear();
+      highlightedPath.clear();
+      highlightedPathEdges.clear();
+
+      if (path.length === 0) {
+        sigma.refresh();
+        return;
+      }
+
+      // Add all path nodes
+      for (const nodeId of path) {
+        highlightedPath.add(nodeId);
+      }
+
+      // Find and highlight edges between consecutive path nodes
+      for (let i = 0; i < path.length - 1; i++) {
+        const source = path[i];
+        const target = path[i + 1];
+        graph.forEachEdge(source, target, (edge) => {
+          highlightedPathEdges.add(edge);
+        });
+      }
+
+      // Focus on the path
+      if (path.length > 0) {
+        // Calculate bounding box of path nodes
+        let minX = Infinity,
+          maxX = -Infinity,
+          minY = Infinity,
+          maxY = -Infinity;
+        for (const nodeId of path) {
+          const pos = sigma.getNodeDisplayData(nodeId);
+          if (pos) {
+            minX = Math.min(minX, pos.x);
+            maxX = Math.max(maxX, pos.x);
+            minY = Math.min(minY, pos.y);
+            maxY = Math.max(maxY, pos.y);
+          }
+        }
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        sigma.getCamera().animate({ x: centerX, y: centerY, ratio: 0.3 }, { duration: 300 });
+      }
+
       sigma.refresh();
     },
   };

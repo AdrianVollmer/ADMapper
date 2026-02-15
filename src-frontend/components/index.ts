@@ -8,3 +8,4 @@ export { initGraph, loadGraphData, getRenderer } from "./graph-view";
 export { initKeyboardShortcuts } from "./keyboard";
 export { dispatchAction } from "./actions";
 export { initImport, triggerBloodHoundImport } from "./import";
+export { initSearch, setPathStart, setPathEnd } from "./search";
