@@ -54,7 +54,8 @@ so never worry about backwards compatibility.
   focus on the "why" instead of "how". The "how" can be deduced from the
   diff. However, a short summary of the "how" can't hurt to convey
   intent.
-- Before commiting, run linters, formatters, and the test suite.
+- Before commiting, run linters, formatters, and the test suite using
+  the scripts in `scripts/`.
 - When fixing bugs, add test cases.
 - When adding features, update the docs and/or README.
 
