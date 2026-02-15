@@ -116,7 +116,7 @@ export function initDemo(containerId: string, nodeCount = 100): void {
     },
     onNodeHover: (nodeId, attrs) => {
       if (nodeId) {
-        console.log("Node hover:", nodeId, attrs?.type);
+        console.log("Node hover:", nodeId, attrs?.nodeType);
       }
     },
   });

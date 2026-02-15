@@ -60,8 +60,8 @@ export type ADEdgeType =
 export interface ADNodeAttributes {
   /** Display label */
   label: string;
-  /** AD object type */
-  type: ADNodeType;
+  /** AD object type (named nodeType to avoid Sigma's reserved 'type' attribute) */
+  nodeType: ADNodeType;
   /** Node x position */
   x: number;
   /** Node y position */
@@ -80,8 +80,8 @@ export interface ADNodeAttributes {
 export interface ADEdgeAttributes {
   /** Display label */
   label?: string;
-  /** Relationship type */
-  type: ADEdgeType;
+  /** Relationship type (named edgeType to avoid Sigma's reserved 'type' attribute) */
+  edgeType: ADEdgeType;
   /** Edge color */
   color?: string;
   /** Edge size/weight */

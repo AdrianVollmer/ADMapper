@@ -30,11 +30,11 @@ export function createGraph(): ADGraphType {
 function rawNodeToAttributes(node: RawADNode): ADNodeAttributes {
   const attrs: ADNodeAttributes = {
     label: node.label,
-    type: node.type,
+    nodeType: node.type,
     x: node.x ?? Math.random() * 1000,
     y: node.y ?? Math.random() * 1000,
-    size: NODE_SIZES[node.type],
-    color: NODE_COLORS[node.type],
+    size: NODE_SIZES[node.type] ?? NODE_SIZES.Unknown,
+    color: NODE_COLORS[node.type] ?? NODE_COLORS.Unknown,
   };
   if (node.properties) {
     attrs.properties = node.properties;
@@ -45,8 +45,8 @@ function rawNodeToAttributes(node: RawADNode): ADNodeAttributes {
 /** Convert a raw edge to graphology attributes */
 function rawEdgeToAttributes(edge: RawADEdge): ADEdgeAttributes {
   const attrs: ADEdgeAttributes = {
-    type: edge.type,
-    color: EDGE_COLORS[edge.type],
+    edgeType: edge.type,
+    color: EDGE_COLORS[edge.type] ?? EDGE_COLORS.Unknown,
     size: DEFAULT_EDGE_SIZE,
   };
   if (edge.label) {
@@ -94,7 +94,7 @@ export function loadGraph(data: RawADGraph): ADGraphType {
 export function getNodesByType(graph: ADGraphType, type: ADNodeType): string[] {
   const nodes: string[] = [];
   graph.forEachNode((nodeId, attrs) => {
-    if (attrs.type === type) {
+    if (attrs.nodeType === type) {
       nodes.push(nodeId);
     }
   });
@@ -142,7 +142,7 @@ export function getGraphStats(graph: ADGraphType): {
   const nodesByType: Record<string, number> = {};
 
   graph.forEachNode((_, attrs) => {
-    nodesByType[attrs.type] = (nodesByType[attrs.type] ?? 0) + 1;
+    nodesByType[attrs.nodeType] = (nodesByType[attrs.nodeType] ?? 0) + 1;
   });
 
   return {
@@ -166,7 +166,7 @@ export function exportGraph(graph: ADGraphType): RawADGraph {
     const node: RawADNode = {
       id,
       label: attrs.label,
-      type: attrs.type,
+      type: attrs.nodeType,
       x: attrs.x,
       y: attrs.y,
     };
@@ -180,7 +180,7 @@ export function exportGraph(graph: ADGraphType): RawADGraph {
     const edge: RawADEdge = {
       source,
       target,
-      type: attrs.type,
+      type: attrs.edgeType,
     };
     if (attrs.label) {
       edge.label = attrs.label;

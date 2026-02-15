@@ -9,14 +9,19 @@ import type { ADNodeType, ADEdgeType } from "./types";
 
 /** Color palette for node types */
 export const NODE_COLORS: Record<ADNodeType, string> = {
-  User: "#17a2b8",      // Teal - users are common, neutral color
-  Group: "#ffc107",     // Amber - groups connect users to permissions
-  Computer: "#dc3545",  // Red - computers are attack targets
-  Domain: "#6f42c1",    // Purple - domains are high-value
-  GPO: "#fd7e14",       // Orange - GPOs control configuration
-  OU: "#20c997",        // Mint - organizational containers
-  Container: "#6c757d", // Gray - generic containers
-  Unknown: "#adb5bd",   // Light gray - unknown types
+  User: "#17a2b8",        // Teal - users are common, neutral color
+  Group: "#ffc107",       // Amber - groups connect users to permissions
+  Computer: "#dc3545",    // Red - computers are attack targets
+  Domain: "#6f42c1",      // Purple - domains are high-value
+  GPO: "#fd7e14",         // Orange - GPOs control configuration
+  OU: "#20c997",          // Mint - organizational containers
+  Container: "#6c757d",   // Gray - generic containers
+  CertTemplate: "#e83e8c", // Pink - certificate templates (PKI)
+  EnterpriseCA: "#e83e8c", // Pink - enterprise CAs (PKI)
+  RootCA: "#e83e8c",       // Pink - root CAs (PKI)
+  AIACA: "#e83e8c",        // Pink - AIA CAs (PKI)
+  NTAuthStore: "#e83e8c",  // Pink - NTAuth store (PKI)
+  Unknown: "#adb5bd",     // Light gray - unknown types
 };
 
 /** Color palette for edge types (grouped by category) */
@@ -25,6 +30,7 @@ export const EDGE_COLORS: Record<ADEdgeType, string> = {
   MemberOf: "#6c757d",
   Contains: "#6c757d",
   GPLink: "#6c757d",
+  LocalGroupMember: "#6c757d",
 
   // Session/access (blue)
   HasSession: "#0d6efd",
@@ -41,15 +47,29 @@ export const EDGE_COLORS: Record<ADEdgeType, string> = {
   Owns: "#dc3545",
   ForceChangePassword: "#fd7e14",
   AddMember: "#fd7e14",
+  AllExtendedRights: "#fd7e14",
+  AddKeyCredentialLink: "#fd7e14",
+  WriteSPN: "#fd7e14",
+  WriteAccountRestrictions: "#fd7e14",
 
   // Delegation (purple)
   AllowedToDelegate: "#6f42c1",
+  AllowedToAct: "#6f42c1",
+  AddAllowedToAct: "#6f42c1",
   TrustedBy: "#6f42c1",
 
-  // DCSync (critical - bright red)
+  // DCSync / replication (critical - bright red)
   DCSync: "#ff0040",
   GetChanges: "#ff0040",
   GetChangesAll: "#ff0040",
+  GetChangesInFilteredSet: "#ff0040",
+
+  // Credential access (pink)
+  ReadLAPSPassword: "#e83e8c",
+  ReadGMSAPassword: "#e83e8c",
+
+  // Generic ACE (gray)
+  ACE: "#adb5bd",
 
   Unknown: "#adb5bd",
 };
@@ -63,6 +83,11 @@ export const NODE_SIZES: Record<ADNodeType, number> = {
   Group: 10,
   Computer: 8,
   User: 6,
+  CertTemplate: 10,
+  EnterpriseCA: 14,
+  RootCA: 14,
+  AIACA: 10,
+  NTAuthStore: 10,
   Unknown: 6,
 };
 

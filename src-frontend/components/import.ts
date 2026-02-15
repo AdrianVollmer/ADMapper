@@ -88,9 +88,21 @@ export function initImport(): void {
 export function triggerBloodHoundImport(): void {
   // Fallback: try to find element if not initialized
   if (!fileInput) {
-    fileInput = document.getElementById("bloodhound-file-input") as HTMLInputElement;
+    fileInput = document.querySelector<HTMLInputElement>("#bloodhound-file-input");
   }
-  fileInput?.click();
+  if (fileInput) {
+    fileInput.click();
+  } else {
+    // Last resort: create the input dynamically
+    fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".json,.zip";
+    fileInput.multiple = true;
+    fileInput.style.display = "none";
+    fileInput.addEventListener("change", handleFileSelect);
+    document.body.appendChild(fileInput);
+    fileInput.click();
+  }
 }
 
 /** Handle file selection */

@@ -86,8 +86,8 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
     return;
   }
 
-  const typeColor = NODE_COLORS[attrs.type] || "#6c757d";
-  const typeLower = attrs.type.toLowerCase();
+  const typeColor = NODE_COLORS[attrs.nodeType] || "#6c757d";
+  const typeLower = attrs.nodeType.toLowerCase();
 
   // Build properties list
   let propsHtml = "";
@@ -107,7 +107,7 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   content.innerHTML = `
     <div class="detail-header">
       <span class="detail-node-type node-badge ${typeLower}" style="background-color: ${typeColor}">
-        ${escapeHtml(attrs.type)}
+        ${escapeHtml(attrs.nodeType)}
       </span>
       <h2 class="detail-node-name">${escapeHtml(attrs.label)}</h2>
     </div>
