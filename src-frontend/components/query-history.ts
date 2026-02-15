@@ -6,8 +6,9 @@
  */
 
 import { escapeHtml } from "../utils/html";
-import { api, ApiClientError } from "../api/client";
-import type { QueryHistoryEntry, QueryHistoryResponse, QueryResponse } from "../api/types";
+import { api } from "../api/client";
+import type { QueryHistoryEntry, QueryHistoryResponse } from "../api/types";
+import { executeQuery, getQueryErrorMessage } from "../utils/query";
 
 // Re-export for backwards compatibility
 export type { QueryHistoryEntry } from "../api/types";
@@ -159,30 +160,23 @@ async function clearHistory(): Promise<void> {
 async function runQuery(query: string, name: string): Promise<void> {
   closeQueryHistory();
 
-  // Execute the query via the API
   try {
-    const data = await api.post<QueryResponse>("/api/graph/query", {
-      query,
-      extract_graph: true,
-    });
-
-    const resultCount = data.results?.rows?.length ?? 0;
+    const result = await executeQuery(query, true);
 
     // Add to history
-    await addToHistory(name, query, resultCount);
+    await addToHistory(name, query, result.resultCount);
 
     // Show results
-    if (data.graph && data.graph.nodes.length > 0) {
+    if (result.graph && result.graph.nodes.length > 0) {
       // TODO: Load graph into renderer
-      console.log("Query returned graph:", data.graph);
-      alert(`Query returned ${data.graph.nodes.length} nodes and ${data.graph.edges.length} edges`);
+      console.log("Query returned graph:", result.graph);
+      alert(`Query returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
     } else {
-      alert(`Query returned ${resultCount} rows`);
+      alert(`Query returned ${result.resultCount} rows`);
     }
   } catch (err) {
     console.error("Query execution failed:", err);
-    const message = err instanceof ApiClientError ? err.message : String(err);
-    alert(`Query failed: ${message}`);
+    alert(`Query failed: ${getQueryErrorMessage(err)}`);
   }
 }
 
