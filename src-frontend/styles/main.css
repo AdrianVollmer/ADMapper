@@ -135,11 +135,11 @@
   }
 
   .sidebar-content {
-    @apply flex-1 overflow-y-auto overflow-x-hidden;
+    @apply flex-1 overflow-y-auto;
   }
 
   .sidebar-section {
-    @apply p-3 border-b border-gray-700;
+    @apply p-3 border-b border-gray-700 overflow-visible;
   }
 
   .sidebar-section:last-child {
@@ -184,7 +184,7 @@
    ============================================ */
 @layer components {
   .search-box {
-    @apply relative;
+    @apply relative overflow-visible;
   }
 
   .search-icon {
@@ -199,7 +199,12 @@
   }
 
   .search-results {
-    @apply mt-2 max-h-48 overflow-y-auto;
+    @apply fixed max-h-64 overflow-y-auto
+           bg-gray-800 border border-gray-600 rounded-md shadow-xl;
+    min-width: 320px;
+    width: max-content;
+    max-width: 450px;
+    z-index: 9999;
   }
 
   .search-results[hidden] {
@@ -207,7 +212,7 @@
   }
 
   .search-result-item {
-    @apply flex items-center gap-2 px-2 py-1.5 text-sm rounded cursor-pointer
+    @apply flex items-center gap-2 px-3 py-2 text-sm cursor-pointer
            hover:bg-gray-700 transition-colors;
   }
 
@@ -220,11 +225,11 @@
   }
 
   .search-result-item .node-name {
-    @apply text-gray-200 truncate;
+    @apply text-gray-200;
   }
 
   .search-no-results {
-    @apply text-sm text-gray-500 italic py-2;
+    @apply text-sm text-gray-500 italic px-3 py-2;
   }
 
   /* Path finding */

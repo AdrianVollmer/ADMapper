@@ -11,7 +11,7 @@ import { NODE_COLORS } from "../graph/theme";
 import type { ADNodeType, ADEdgeType, RawADGraph } from "../graph/types";
 import { escapeHtml } from "../utils/html";
 import { api, ApiClientError } from "../api/client";
-import type { SearchResult, PathStep, PathResponse } from "../api/types";
+import type { SearchResult, PathResponse } from "../api/types";
 
 let nodeSearchInput: HTMLInputElement | null = null;
 let nodeSearchResults: HTMLElement | null = null;
@@ -26,6 +26,9 @@ let findPathBtn: HTMLElement | null = null;
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 const SEARCH_DEBOUNCE_MS = 200;
 
+/** Map inputs to their result containers for positioning */
+const inputToResults = new Map<HTMLInputElement, HTMLElement>();
+
 /** Initialize search functionality */
 export function initSearch(): void {
   nodeSearchInput = document.getElementById("node-search") as HTMLInputElement;
@@ -38,6 +41,17 @@ export function initSearch(): void {
   // Create result containers for path inputs if they don't exist
   pathStartResults = createResultsContainer(pathStartInput, "path-start-results");
   pathEndResults = createResultsContainer(pathEndInput, "path-end-results");
+
+  // Register input-to-results mappings for positioning
+  if (nodeSearchInput && nodeSearchResults) {
+    inputToResults.set(nodeSearchInput, nodeSearchResults);
+  }
+  if (pathStartInput && pathStartResults) {
+    inputToResults.set(pathStartInput, pathStartResults);
+  }
+  if (pathEndInput && pathEndResults) {
+    inputToResults.set(pathEndInput, pathEndResults);
+  }
 
   if (nodeSearchInput) {
     nodeSearchInput.addEventListener("input", () => handleSearch(nodeSearchInput!, nodeSearchResults!, "node"));
@@ -56,6 +70,9 @@ export function initSearch(): void {
     pathEndInput.addEventListener("keydown", (e) => handleSearchKeydown(e, pathEndResults!, "path-end"));
     pathEndInput.addEventListener("blur", () => hideResultsDelayed(pathEndResults!));
   }
+
+  // Reposition popovers on window resize
+  window.addEventListener("resize", repositionAllPopovers);
 
   if (findPathBtn) {
     findPathBtn.addEventListener("click", findPath);
@@ -87,6 +104,22 @@ function hideResultsDelayed(resultsEl: HTMLElement): void {
   }, 150);
 }
 
+/** Position a results popover below its input */
+function positionPopover(input: HTMLInputElement, resultsEl: HTMLElement): void {
+  const rect = input.getBoundingClientRect();
+  resultsEl.style.top = `${rect.bottom + 4}px`;
+  resultsEl.style.left = `${rect.left}px`;
+}
+
+/** Reposition all visible popovers */
+function repositionAllPopovers(): void {
+  for (const [input, results] of inputToResults) {
+    if (!results.hidden) {
+      positionPopover(input, results);
+    }
+  }
+}
+
 /** Handle search input with debouncing */
 function handleSearch(input: HTMLInputElement, resultsEl: HTMLElement, context: string): void {
   const query = input.value.trim();
@@ -102,16 +135,19 @@ function handleSearch(input: HTMLInputElement, resultsEl: HTMLElement, context: 
   }
 
   searchDebounceTimer = setTimeout(() => {
-    performSearch(query, resultsEl, context);
+    performSearch(input, query, resultsEl, context);
   }, SEARCH_DEBOUNCE_MS);
 }
 
 /** Perform the actual API search */
-async function performSearch(query: string, resultsEl: HTMLElement, context: string): Promise<void> {
+async function performSearch(
+  input: HTMLInputElement,
+  query: string,
+  resultsEl: HTMLElement,
+  context: string
+): Promise<void> {
   try {
-    const results = await api.get<SearchResult[]>(
-      `/api/graph/search?q=${encodeURIComponent(query)}&limit=10`
-    );
+    const results = await api.get<SearchResult[]>(`/api/graph/search?q=${encodeURIComponent(query)}&limit=10`);
 
     if (results.length === 0) {
       resultsEl.innerHTML = '<div class="search-no-results">No nodes found</div>';
@@ -129,6 +165,7 @@ async function performSearch(query: string, resultsEl: HTMLElement, context: str
         .join("");
     }
 
+    positionPopover(input, resultsEl);
     resultsEl.hidden = false;
   } catch (err) {
     console.error("Search error:", err);
@@ -273,9 +310,8 @@ async function findPath(): Promise<void> {
     return;
   }
 
-  // Show loading state
-  pathResultsEl.innerHTML = '<div class="text-gray-400">Finding path...</div>';
-  pathResultsEl.hidden = false;
+  // Hide any previous results
+  pathResultsEl.hidden = true;
 
   try {
     const data = await api.get<PathResponse>(
@@ -286,9 +322,6 @@ async function findPath(): Promise<void> {
       showPathError("No path found between these nodes");
       return;
     }
-
-    // Display the path from API response
-    displayPathFromApi(data.path);
 
     // Load the path graph data into the view
     if (data.graph && data.graph.nodes.length > 0) {
@@ -321,44 +354,6 @@ async function findPath(): Promise<void> {
     const message = err instanceof ApiClientError ? err.message : String(err);
     showPathError(`Path finding failed: ${message}`);
   }
-}
-
-/** Display path results from API response */
-function displayPathFromApi(path: PathStep[]): void {
-  if (!pathResultsEl) return;
-
-  const steps: string[] = [];
-
-  for (let i = 0; i < path.length; i++) {
-    const step = path[i]!;
-    const { id, label, type } = step.node;
-    const color = NODE_COLORS[type as ADNodeType] || "#6c757d";
-
-    steps.push(`
-      <div class="path-step" data-node-id="${escapeHtml(id)}">
-        <span class="node-badge" style="background-color: ${color}">${escapeHtml(type)}</span>
-        <span class="path-step-node">${escapeHtml(label)}</span>
-      </div>
-    `);
-
-    // Add edge indicator if there's a next step
-    if (step.edge_type && i < path.length - 1) {
-      steps.push(`
-        <div class="path-step-edge">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 5v14M19 12l-7 7-7-7"/>
-          </svg>
-          <span>${escapeHtml(step.edge_type)}</span>
-        </div>
-      `);
-    }
-  }
-
-  pathResultsEl.innerHTML = `
-    <div class="path-length">${path.length} nodes, ${path.length - 1} hops</div>
-    <div class="path-steps">${steps.join("")}</div>
-  `;
-  pathResultsEl.hidden = false;
 }
 
 /** Show path error */
