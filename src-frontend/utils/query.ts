@@ -25,20 +25,20 @@ export interface QueryExecutionResult {
  * @returns Query execution result
  * @throws ApiClientError on API errors
  */
-export async function executeQuery(
-  query: string,
-  extractGraph: boolean = true
-): Promise<QueryExecutionResult> {
+export async function executeQuery(query: string, extractGraph: boolean = true): Promise<QueryExecutionResult> {
   const response = await api.post<QueryResponse>("/api/graph/query", {
     query,
     extract_graph: extractGraph,
   });
 
-  return {
+  const result: QueryExecutionResult = {
     resultCount: response.results?.rows?.length ?? 0,
-    graph: response.graph,
     response,
   };
+  if (response.graph !== undefined) {
+    result.graph = response.graph;
+  }
+  return result;
 }
 
 /**

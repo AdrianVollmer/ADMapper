@@ -60,9 +60,7 @@ describe("isGraphNode", () => {
 
 describe("isGraphEdge", () => {
   it("returns true for valid edge", () => {
-    expect(
-      isGraphEdge({ source: "a", target: "b", type: "MemberOf" })
-    ).toBe(true);
+    expect(isGraphEdge({ source: "a", target: "b", type: "MemberOf" })).toBe(true);
   });
 
   it("returns false for missing source", () => {
@@ -108,9 +106,7 @@ describe("isGraphData", () => {
 
 describe("isSearchResult", () => {
   it("returns true for valid result", () => {
-    expect(isSearchResult({ id: "1", label: "Admin", type: "User" })).toBe(
-      true
-    );
+    expect(isSearchResult({ id: "1", label: "Admin", type: "User" })).toBe(true);
   });
 
   it("returns false for missing type", () => {
@@ -305,9 +301,7 @@ describe("isPaginatedResponse", () => {
     expect(
       isPaginatedResponse(
         {
-          entries: [
-            { id: "1", name: "Q", query: "?", timestamp: 1, result_count: null },
-          ],
+          entries: [{ id: "1", name: "Q", query: "?", timestamp: 1, result_count: null }],
           total: 1,
           page: 1,
           per_page: 10,
@@ -318,12 +312,7 @@ describe("isPaginatedResponse", () => {
   });
 
   it("returns true for empty entries", () => {
-    expect(
-      isPaginatedResponse(
-        { entries: [], total: 0, page: 1, per_page: 10 },
-        isQueryHistoryEntry
-      )
-    ).toBe(true);
+    expect(isPaginatedResponse({ entries: [], total: 0, page: 1, per_page: 10 }, isQueryHistoryEntry)).toBe(true);
   });
 
   it("returns false for invalid entry", () => {
@@ -341,12 +330,7 @@ describe("isPaginatedResponse", () => {
   });
 
   it("returns false for missing total", () => {
-    expect(
-      isPaginatedResponse(
-        { entries: [], page: 1, per_page: 10 },
-        isQueryHistoryEntry
-      )
-    ).toBe(false);
+    expect(isPaginatedResponse({ entries: [], page: 1, per_page: 10 }, isQueryHistoryEntry)).toBe(false);
   });
 });
 
@@ -356,24 +340,16 @@ describe("isPaginatedResponse", () => {
 
 describe("assertValidResponse", () => {
   it("does not throw for valid data", () => {
-    expect(() =>
-      assertValidResponse(
-        { id: "1", label: "A", type: "User" },
-        isGraphNode,
-        "GraphNode"
-      )
-    ).not.toThrow();
+    expect(() => assertValidResponse({ id: "1", label: "A", type: "User" }, isGraphNode, "GraphNode")).not.toThrow();
   });
 
   it("throws for invalid data", () => {
-    expect(() =>
-      assertValidResponse({ invalid: true }, isGraphNode, "GraphNode")
-    ).toThrow("Invalid API response: expected GraphNode");
+    expect(() => assertValidResponse({ invalid: true }, isGraphNode, "GraphNode")).toThrow(
+      "Invalid API response: expected GraphNode"
+    );
   });
 
   it("includes truncated value in error", () => {
-    expect(() =>
-      assertValidResponse({ wrong: "data" }, isGraphNode, "GraphNode")
-    ).toThrow(/got.*wrong/);
+    expect(() => assertValidResponse({ wrong: "data" }, isGraphNode, "GraphNode")).toThrow(/got.*wrong/);
   });
 });

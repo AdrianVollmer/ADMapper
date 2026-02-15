@@ -1041,10 +1041,7 @@ mod tests {
     fn test_get_nodes_by_ids_all_exist() {
         let db = setup_test_db();
 
-        let ids = vec![
-            "S-1-5-21-USER1".to_string(),
-            "S-1-5-21-GROUP1".to_string(),
-        ];
+        let ids = vec!["S-1-5-21-USER1".to_string(), "S-1-5-21-GROUP1".to_string()];
         let nodes = db.get_nodes_by_ids(&ids).unwrap();
 
         assert_eq!(nodes.len(), 2);
@@ -1107,10 +1104,7 @@ mod tests {
         let db = setup_test_db();
 
         // These two nodes have no direct edges between them
-        let ids = vec![
-            "S-1-5-21-USER1".to_string(),
-            "S-1-5-21-USER2".to_string(),
-        ];
+        let ids = vec!["S-1-5-21-USER1".to_string(), "S-1-5-21-USER2".to_string()];
         let edges = db.get_edges_between(&ids).unwrap();
 
         assert!(edges.is_empty());

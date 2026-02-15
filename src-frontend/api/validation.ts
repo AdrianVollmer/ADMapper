@@ -44,31 +44,20 @@ function isArray(value: unknown): value is unknown[] {
 /** Validate a GraphNode structure */
 export function isGraphNode(value: unknown): value is GraphNode {
   if (!isObject(value)) return false;
-  return (
-    isString(value.id) &&
-    isString(value.label) &&
-    isString(value.type)
-  );
+  return isString(value.id) && isString(value.label) && isString(value.type);
 }
 
 /** Validate a GraphEdge structure */
 export function isGraphEdge(value: unknown): value is GraphEdge {
   if (!isObject(value)) return false;
-  return (
-    isString(value.source) &&
-    isString(value.target) &&
-    isString(value.type)
-  );
+  return isString(value.source) && isString(value.target) && isString(value.type);
 }
 
 /** Validate a GraphData structure */
 export function isGraphData(value: unknown): value is GraphData {
   if (!isObject(value)) return false;
   if (!isArray(value.nodes) || !isArray(value.edges)) return false;
-  return (
-    value.nodes.every(isGraphNode) &&
-    value.edges.every(isGraphEdge)
-  );
+  return value.nodes.every(isGraphNode) && value.edges.every(isGraphEdge);
 }
 
 // ============================================================================
@@ -78,11 +67,7 @@ export function isGraphData(value: unknown): value is GraphData {
 /** Validate a SearchResult structure */
 export function isSearchResult(value: unknown): value is SearchResult {
   if (!isObject(value)) return false;
-  return (
-    isString(value.id) &&
-    isString(value.label) &&
-    isString(value.type)
-  );
+  return isString(value.id) && isString(value.label) && isString(value.type);
 }
 
 /** Validate an array of SearchResults */
@@ -172,8 +157,6 @@ export function assertValidResponse<T>(
   typeName: string
 ): asserts value is T {
   if (!guard(value)) {
-    throw new Error(
-      `Invalid API response: expected ${typeName}, got ${JSON.stringify(value).slice(0, 100)}`
-    );
+    throw new Error(`Invalid API response: expected ${typeName}, got ${JSON.stringify(value).slice(0, 100)}`);
   }
 }

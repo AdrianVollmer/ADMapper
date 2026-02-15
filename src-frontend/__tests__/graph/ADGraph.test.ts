@@ -15,7 +15,7 @@ import {
   clearGraph,
   exportGraph,
 } from "../../graph/ADGraph";
-import type { RawADGraph, RawADNode, RawADEdge } from "../../graph/types";
+import type { RawADGraph, RawADNode, RawADEdge, ADNodeType } from "../../graph/types";
 
 // ============================================================================
 // createGraph
@@ -105,7 +105,7 @@ describe("loadGraph", () => {
 
   it("handles unknown node types", () => {
     const data: RawADGraph = {
-      nodes: [{ id: "x", label: "Unknown Thing", type: "SomethingNew" as any }],
+      nodes: [{ id: "x", label: "Unknown Thing", type: "SomethingNew" as unknown as ADNodeType }],
       edges: [],
     };
 
@@ -173,7 +173,7 @@ describe("edge curvatures", () => {
     // Should have opposite curvatures
     expect(curvatures[0]).not.toBe(curvatures[1]);
     // Sum should be close to 0 (symmetric spread)
-    expect(curvatures[0] + curvatures[1]).toBeCloseTo(0, 5);
+    expect(curvatures[0]! + curvatures[1]!).toBeCloseTo(0, 5);
   });
 
   it("distributes curvatures evenly for multiple parallel edges", () => {
@@ -469,10 +469,10 @@ describe("exportGraph", () => {
     const exported = exportGraph(graph);
 
     expect(exported.nodes).toHaveLength(1);
-    expect(exported.nodes[0].id).toBe("user1");
-    expect(exported.nodes[0].label).toBe("jsmith");
-    expect(exported.nodes[0].type).toBe("User");
-    expect(exported.nodes[0].properties).toEqual({ enabled: true });
+    expect(exported.nodes[0]!.id).toBe("user1");
+    expect(exported.nodes[0]!.label).toBe("jsmith");
+    expect(exported.nodes[0]!.type).toBe("User");
+    expect(exported.nodes[0]!.properties).toEqual({ enabled: true });
   });
 
   it("exports edges with correct structure", () => {
@@ -488,9 +488,9 @@ describe("exportGraph", () => {
     const exported = exportGraph(graph);
 
     expect(exported.edges).toHaveLength(1);
-    expect(exported.edges[0].source).toBe("a");
-    expect(exported.edges[0].target).toBe("b");
-    expect(exported.edges[0].type).toBe("MemberOf");
+    expect(exported.edges[0]!.source).toBe("a");
+    expect(exported.edges[0]!.target).toBe("b");
+    expect(exported.edges[0]!.type).toBe("MemberOf");
   });
 
   it("round-trips graph data", () => {

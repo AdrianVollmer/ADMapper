@@ -8,13 +8,7 @@ import { describe, it, expect, beforeAll, afterEach, afterAll } from "vitest";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { api, ApiClientError } from "../../api/client";
-import type {
-  GraphData,
-  SearchResult,
-  PathResponse,
-  QueryResponse,
-  QueryHistoryResponse,
-} from "../../api/types";
+import type { GraphData, SearchResult, PathResponse, QueryResponse, QueryHistoryResponse } from "../../api/types";
 
 // Create MSW server
 const server = setupServer();
@@ -108,9 +102,7 @@ describe("api.post", () => {
       })
     );
 
-    await expect(
-      api.post("/api/validate", { invalid: true })
-    ).rejects.toMatchObject({
+    await expect(api.post("/api/validate", { invalid: true })).rejects.toMatchObject({
       status: 400,
       message: "Invalid input: name required",
     });
@@ -156,9 +148,7 @@ describe("GET /api/graph/all", () => {
         { id: "user-1", label: "admin@corp.local", type: "User" },
         { id: "group-1", label: "Domain Admins", type: "Group" },
       ],
-      edges: [
-        { source: "user-1", target: "group-1", type: "MemberOf" },
-      ],
+      edges: [{ source: "user-1", target: "group-1", type: "MemberOf" }],
     };
 
     server.use(
@@ -210,7 +200,7 @@ describe("GET /api/graph/search", () => {
 
     const results = await api.get<SearchResult[]>("/api/graph/search?q=admin");
     expect(results).toHaveLength(2);
-    expect(results[0].label).toBe("admin@corp.local");
+    expect(results[0]!.label).toBe("admin@corp.local");
   });
 
   it("returns empty array for no matches", async () => {
@@ -220,9 +210,7 @@ describe("GET /api/graph/search", () => {
       })
     );
 
-    const results = await api.get<SearchResult[]>(
-      "/api/graph/search?q=nonexistent"
-    );
+    const results = await api.get<SearchResult[]>("/api/graph/search?q=nonexistent");
     expect(results).toEqual([]);
   });
 });
@@ -237,7 +225,7 @@ describe("GET /api/graph/path", () => {
       found: true,
       path: [
         { node: { id: "a", label: "A", type: "User" }, edge_type: "MemberOf" },
-        { node: { id: "b", label: "B", type: "Group" }, edge_type: undefined },
+        { node: { id: "b", label: "B", type: "Group" } },
       ],
       graph: { nodes: [], edges: [] },
     };
@@ -292,7 +280,7 @@ describe("POST /api/graph/query", () => {
       extract_graph: false,
     });
 
-    expect(result.results.rows[0][0]).toBe(2);
+    expect(result.results.rows[0]![0]).toBe(2);
   });
 
   it("returns 400 for invalid syntax", async () => {
@@ -361,9 +349,7 @@ describe("Query History API", () => {
       })
     );
 
-    const result = await api.get<QueryHistoryResponse>(
-      "/api/query-history?page=1&per_page=10"
-    );
+    const result = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=10");
     expect(result.entries).toHaveLength(1);
     expect(result.total).toBe(1);
   });
@@ -371,7 +357,7 @@ describe("Query History API", () => {
   it("POST /api/query-history adds entry", async () => {
     server.use(
       http.post("/api/query-history", async ({ request }) => {
-        const body = await request.json();
+        const body = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json({
           id: "new-id",
           ...body,

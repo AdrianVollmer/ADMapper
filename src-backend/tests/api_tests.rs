@@ -26,7 +26,10 @@ impl TestApp {
         let db_clone = db.clone();
         let state = AppState::new(db);
         let router = create_api_router(state);
-        Self { router, db: db_clone }
+        Self {
+            router,
+            db: db_clone,
+        }
     }
 
     fn router(&self) -> &Router {
@@ -458,10 +461,7 @@ async fn test_graph_edges_with_data() {
     assert_eq!(edges.len(), 2);
 
     // Verify edge structure
-    let member_edge = edges
-        .iter()
-        .find(|e| e["type"] == "MemberOf")
-        .unwrap();
+    let member_edge = edges.iter().find(|e| e["type"] == "MemberOf").unwrap();
     assert_eq!(member_edge["source"], "user-admin");
     assert_eq!(member_edge["target"], "group-admins");
 }
@@ -716,20 +716,14 @@ async fn test_debug_actual_db() {
         println!("\n=== TESTING PATH FROM {} TO {} ===", from_id, to_id);
 
         // Check if there's an edge
-        let edges_from_admin: Vec<_> = edges
-            .iter()
-            .filter(|e| e.source == *from_id)
-            .collect();
+        let edges_from_admin: Vec<_> = edges.iter().filter(|e| e.source == *from_id).collect();
         println!("  Edges FROM {}: {:?}", from_id, edges_from_admin.len());
         for e in &edges_from_admin {
             println!("    -> {} ({})", e.target, e.edge_type);
         }
 
         // Check edges TO domain admins
-        let edges_to_da: Vec<_> = edges
-            .iter()
-            .filter(|e| e.target == *to_id)
-            .collect();
+        let edges_to_da: Vec<_> = edges.iter().filter(|e| e.target == *to_id).collect();
         println!("  Edges TO {}: {:?}", to_id, edges_to_da.len());
         for e in edges_to_da.iter().take(10) {
             // Also resolve the source to see who it is
@@ -742,7 +736,10 @@ async fn test_debug_actual_db() {
         println!("\n  Looking for users with -500 SID (built-in Administrator):");
         for node in &nodes {
             if node.id.ends_with("-500") {
-                println!("    Found: ID={}, Label={}, Type={}", node.id, node.label, node.node_type);
+                println!(
+                    "    Found: ID={}, Label={}, Type={}",
+                    node.id, node.label, node.node_type
+                );
                 // Check edges from this node
                 let edges_from: Vec<_> = edges.iter().filter(|e| e.source == node.id).collect();
                 println!("    Edges from this node: {}", edges_from.len());
@@ -842,7 +839,10 @@ async fn test_graph_path_bloodhound_style() {
             "S-1-5-21-2697957641-2271029196-387917394-512",
         )
         .unwrap();
-    assert!(path_direct.is_some(), "Direct shortest_path call should find path");
+    assert!(
+        path_direct.is_some(),
+        "Direct shortest_path call should find path"
+    );
 
     // Test 1: Find path using full labels (as frontend would send)
     let (status, json) = get_json(
@@ -852,7 +852,11 @@ async fn test_graph_path_bloodhound_style() {
     .await;
 
     assert_eq!(status, StatusCode::OK, "Expected 200 OK, got {}", status);
-    assert_eq!(json["found"], true, "Path should be found. Response: {:?}", json);
+    assert_eq!(
+        json["found"], true,
+        "Path should be found. Response: {:?}",
+        json
+    );
 
     let path = json["path"].as_array().unwrap();
     assert_eq!(path.len(), 2, "Path should have 2 nodes");

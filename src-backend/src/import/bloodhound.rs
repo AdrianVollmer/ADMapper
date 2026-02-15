@@ -804,10 +804,7 @@ mod tests {
         assert_eq!(generic_all.edge_type, "GenericAll");
         assert_eq!(generic_all.properties["inherited"], false);
 
-        let write_dacl = edges
-            .iter()
-            .find(|e| e.source == "S-1-5-21-USER1")
-            .unwrap();
+        let write_dacl = edges.iter().find(|e| e.source == "S-1-5-21-USER1").unwrap();
         assert_eq!(write_dacl.edge_type, "WriteDacl");
         assert_eq!(write_dacl.properties["inherited"], true);
     }

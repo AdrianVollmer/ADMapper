@@ -41,10 +41,7 @@ export class ApiClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new ApiClientError(
-        response.status,
-        text || response.statusText || `HTTP ${response.status}`
-      );
+      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
     }
 
     return response.json();
@@ -63,10 +60,7 @@ export class ApiClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new ApiClientError(
-        response.status,
-        text || response.statusText || `HTTP ${response.status}`
-      );
+      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
     }
 
     return response.json();
@@ -77,18 +71,18 @@ export class ApiClient {
    * @throws {ApiClientError} If the request fails or response is not OK
    */
   async postNoContent(url: string, body?: unknown): Promise<void> {
-    const response = await fetch(url, {
+    const init: RequestInit = {
       method: "POST",
       headers: body ? { "Content-Type": "application/json" } : {},
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+    const response = await fetch(url, init);
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new ApiClientError(
-        response.status,
-        text || response.statusText || `HTTP ${response.status}`
-      );
+      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
     }
   }
 
@@ -101,10 +95,7 @@ export class ApiClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new ApiClientError(
-        response.status,
-        text || response.statusText || `HTTP ${response.status}`
-      );
+      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
     }
   }
 
@@ -125,10 +116,7 @@ export class ApiClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new ApiClientError(
-        response.status,
-        text || response.statusText || `HTTP ${response.status}`
-      );
+      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
     }
 
     return response.json();

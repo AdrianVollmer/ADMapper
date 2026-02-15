@@ -29,9 +29,7 @@ describe("escapeHtml", () => {
   });
 
   it("escapes nested HTML tags", () => {
-    expect(escapeHtml("<div><span>text</span></div>")).toBe(
-      "&lt;div&gt;&lt;span&gt;text&lt;/span&gt;&lt;/div&gt;"
-    );
+    expect(escapeHtml("<div><span>text</span></div>")).toBe("&lt;div&gt;&lt;span&gt;text&lt;/span&gt;&lt;/div&gt;");
   });
 
   it("handles unicode characters", () => {
