@@ -22,7 +22,7 @@ export function createGraph(): ADGraphType {
   return new Graph<ADNodeAttributes, ADEdgeAttributes>({
     type: "directed",
     multi: true,  // Allow multiple edges between same nodes (e.g., MemberOf + GenericAll)
-    allowSelfLoops: false,
+    allowSelfLoops: true,
   });
 }
 
