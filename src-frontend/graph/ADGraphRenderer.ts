@@ -82,6 +82,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   let hoveredNode: string | null = null;
   const selectedNodes = new Set<string>();
   let currentTheme = theme;
+  let draggedNode: string | null = null;
 
   // Custom label renderer: draws label below node, centered
   function drawLabel(
@@ -240,6 +241,42 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   sigma.on("clickStage", () => {
     if (onBackgroundClick) {
       onBackgroundClick();
+    }
+  });
+
+  // Node dragging: start drag on mousedown over a node
+  sigma.on("downNode", (event) => {
+    draggedNode = event.node;
+    // Disable camera drag while dragging a node
+    sigma.getCamera().disable();
+  });
+
+  // Track mouse movement for dragging
+  sigma.getMouseCaptor().on("mousemovebody", (event) => {
+    if (!draggedNode) return;
+
+    // Convert viewport coordinates to graph coordinates
+    const pos = sigma.viewportToGraph(event);
+
+    // Update node position in the graph
+    graph.setNodeAttribute(draggedNode, "x", pos.x);
+    graph.setNodeAttribute(draggedNode, "y", pos.y);
+  });
+
+  // End drag on mouseup
+  sigma.getMouseCaptor().on("mouseup", () => {
+    if (draggedNode) {
+      draggedNode = null;
+      // Re-enable camera drag
+      sigma.getCamera().enable();
+    }
+  });
+
+  // Also handle mouse leaving the container
+  sigma.getMouseCaptor().on("mouseleave", () => {
+    if (draggedNode) {
+      draggedNode = null;
+      sigma.getCamera().enable();
     }
   });
 
