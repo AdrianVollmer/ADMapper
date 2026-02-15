@@ -165,8 +165,8 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       curvedArrow: createEdgeCurveProgram({
         arrowHead: {
           extremity: "target",
-          lengthToThicknessRatio: 2.5,
-          widenessToThicknessRatio: 2,
+          lengthToThicknessRatio: 4,
+          widenessToThicknessRatio: 4,
         },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any,

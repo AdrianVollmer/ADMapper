@@ -119,7 +119,7 @@ function assignEdgeCurvatures(graph: ADGraphType): void {
       graph.setEdgeAttribute(edges[0], "type", "triangle");
       graph.setEdgeAttribute(edges[0], "curvature", 0);
     } else {
-      // Multiple edges: spread them with curvature
+      // Multiple edges: spread them with curvature, use thinner lines
       const count = edges.length;
       for (let i = 0; i < count; i++) {
         // Spread curvatures symmetrically around 0
@@ -128,6 +128,7 @@ function assignEdgeCurvatures(graph: ADGraphType): void {
         const curvature = ((i - (count - 1) / 2) / count) * 0.6;
         graph.setEdgeAttribute(edges[i], "type", "curvedArrow");
         graph.setEdgeAttribute(edges[i], "curvature", curvature);
+        graph.setEdgeAttribute(edges[i], "size", 3);  // Thinner than tapered edges but still visible
       }
     }
   }
