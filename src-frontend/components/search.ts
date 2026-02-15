@@ -2,20 +2,33 @@
  * Search and Path Finding
  *
  * Handles node search and path finding functionality.
+ * Uses the /api/graph/search endpoint for autocomplete.
  */
 
 import { getRenderer } from "./graph-view";
 import { updateDetailPanel } from "./sidebars";
 import { NODE_COLORS } from "../graph/theme";
-import type { ADNodeType, ADNodeAttributes, ADEdgeAttributes } from "../graph/types";
-import type { ADGraphType } from "../graph/ADGraph";
+import type { ADNodeType } from "../graph/types";
+
+/** Search result from API */
+interface SearchResult {
+  id: string;
+  label: string;
+  type: string;
+}
 
 let nodeSearchInput: HTMLInputElement | null = null;
 let nodeSearchResults: HTMLElement | null = null;
 let pathStartInput: HTMLInputElement | null = null;
+let pathStartResults: HTMLElement | null = null;
 let pathEndInput: HTMLInputElement | null = null;
+let pathEndResults: HTMLElement | null = null;
 let pathResultsEl: HTMLElement | null = null;
 let findPathBtn: HTMLElement | null = null;
+
+/** Debounce timeout for search */
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const SEARCH_DEBOUNCE_MS = 200;
 
 /** Initialize search functionality */
 export function initSearch(): void {
@@ -26,17 +39,26 @@ export function initSearch(): void {
   pathResultsEl = document.getElementById("path-results");
   findPathBtn = document.getElementById("find-path-btn");
 
+  // Create result containers for path inputs if they don't exist
+  pathStartResults = createResultsContainer(pathStartInput, "path-start-results");
+  pathEndResults = createResultsContainer(pathEndInput, "path-end-results");
+
   if (nodeSearchInput) {
-    nodeSearchInput.addEventListener("input", handleNodeSearch);
-    nodeSearchInput.addEventListener("keydown", handleNodeSearchKeydown);
+    nodeSearchInput.addEventListener("input", () => handleSearch(nodeSearchInput!, nodeSearchResults!, "node"));
+    nodeSearchInput.addEventListener("keydown", (e) => handleSearchKeydown(e, nodeSearchResults!, "node"));
+    nodeSearchInput.addEventListener("blur", () => hideResultsDelayed(nodeSearchResults!));
   }
 
-  if (pathStartInput) {
-    pathStartInput.addEventListener("keydown", handlePathKeydown);
+  if (pathStartInput && pathStartResults) {
+    pathStartInput.addEventListener("input", () => handleSearch(pathStartInput!, pathStartResults!, "path-start"));
+    pathStartInput.addEventListener("keydown", (e) => handleSearchKeydown(e, pathStartResults!, "path-start"));
+    pathStartInput.addEventListener("blur", () => hideResultsDelayed(pathStartResults!));
   }
 
-  if (pathEndInput) {
-    pathEndInput.addEventListener("keydown", handlePathKeydown);
+  if (pathEndInput && pathEndResults) {
+    pathEndInput.addEventListener("input", () => handleSearch(pathEndInput!, pathEndResults!, "path-end"));
+    pathEndInput.addEventListener("keydown", (e) => handleSearchKeydown(e, pathEndResults!, "path-end"));
+    pathEndInput.addEventListener("blur", () => hideResultsDelayed(pathEndResults!));
   }
 
   if (findPathBtn) {
@@ -44,106 +66,174 @@ export function initSearch(): void {
   }
 
   // Click handler for search results
-  document.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    const resultItem = target.closest(".search-result-item") as HTMLElement;
-    if (resultItem) {
-      const nodeId = resultItem.getAttribute("data-node-id");
-      if (nodeId) {
-        selectNode(nodeId);
-        clearNodeSearch();
-      }
-    }
-  });
+  document.addEventListener("click", handleResultClick);
 }
 
-/** Handle node search input */
-function handleNodeSearch(): void {
-  if (!nodeSearchInput || !nodeSearchResults) return;
+/** Create a results container next to an input if it doesn't exist */
+function createResultsContainer(input: HTMLInputElement | null, id: string): HTMLElement | null {
+  if (!input) return null;
 
-  const query = nodeSearchInput.value.trim().toLowerCase();
+  let container = document.getElementById(id);
+  if (!container) {
+    container = document.createElement("div");
+    container.id = id;
+    container.className = "search-results";
+    container.hidden = true;
+    input.parentElement?.appendChild(container);
+  }
+  return container;
+}
+
+/** Hide results after a short delay (allows click to register) */
+function hideResultsDelayed(resultsEl: HTMLElement): void {
+  setTimeout(() => {
+    resultsEl.hidden = true;
+  }, 150);
+}
+
+/** Handle search input with debouncing */
+function handleSearch(input: HTMLInputElement, resultsEl: HTMLElement, context: string): void {
+  const query = input.value.trim();
+
   if (query.length < 2) {
-    nodeSearchResults.hidden = true;
+    resultsEl.hidden = true;
     return;
   }
 
-  const renderer = getRenderer();
-  if (!renderer) {
-    nodeSearchResults.hidden = true;
-    return;
+  // Debounce the search
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer);
   }
 
-  const graph = renderer.sigma.getGraph();
-  const results: Array<{ id: string; label: string; type: string }> = [];
-
-  graph.forEachNode((nodeId, attrs) => {
-    const label = attrs.label || nodeId;
-    if (label.toLowerCase().includes(query) || nodeId.toLowerCase().includes(query)) {
-      results.push({
-        id: nodeId,
-        label,
-        type: attrs.nodeType,
-      });
-    }
-  });
-
-  // Limit results
-  const limited = results.slice(0, 10);
-
-  if (limited.length === 0) {
-    nodeSearchResults.innerHTML = '<div class="search-no-results">No nodes found</div>';
-  } else {
-    nodeSearchResults.innerHTML = limited
-      .map((r) => {
-        const color = NODE_COLORS[r.type as ADNodeType] || "#6c757d";
-        return `
-        <div class="search-result-item" data-node-id="${escapeHtml(r.id)}">
-          <span class="node-badge" style="background-color: ${color}">${escapeHtml(r.type)}</span>
-          <span class="node-name">${escapeHtml(r.label)}</span>
-        </div>
-      `;
-      })
-      .join("");
-  }
-
-  nodeSearchResults.hidden = false;
+  searchDebounceTimer = setTimeout(() => {
+    performSearch(query, resultsEl, context);
+  }, SEARCH_DEBOUNCE_MS);
 }
 
-/** Handle keydown on node search */
-function handleNodeSearchKeydown(e: KeyboardEvent): void {
+/** Perform the actual API search */
+async function performSearch(query: string, resultsEl: HTMLElement, context: string): Promise<void> {
+  try {
+    const response = await fetch(`/api/graph/search?q=${encodeURIComponent(query)}&limit=10`);
+
+    if (!response.ok) {
+      console.error("Search failed:", response.status);
+      resultsEl.hidden = true;
+      return;
+    }
+
+    const results: SearchResult[] = await response.json();
+
+    if (results.length === 0) {
+      resultsEl.innerHTML = '<div class="search-no-results">No nodes found</div>';
+    } else {
+      resultsEl.innerHTML = results
+        .map((r) => {
+          const color = NODE_COLORS[r.type as ADNodeType] || "#6c757d";
+          return `
+          <div class="search-result-item" data-node-id="${escapeHtml(r.id)}" data-node-label="${escapeHtml(r.label)}" data-context="${context}">
+            <span class="node-badge" style="background-color: ${color}">${escapeHtml(r.type)}</span>
+            <span class="node-name">${escapeHtml(r.label)}</span>
+          </div>
+        `;
+        })
+        .join("");
+    }
+
+    resultsEl.hidden = false;
+  } catch (err) {
+    console.error("Search error:", err);
+    resultsEl.hidden = true;
+  }
+}
+
+/** Handle keydown on search inputs */
+function handleSearchKeydown(e: KeyboardEvent, resultsEl: HTMLElement, context: string): void {
   if (e.key === "Enter") {
     e.preventDefault();
-    // Select the first result
-    const firstResult = nodeSearchResults?.querySelector(".search-result-item") as HTMLElement;
-    if (firstResult) {
-      const nodeId = firstResult.getAttribute("data-node-id");
-      if (nodeId) {
-        selectNode(nodeId);
-        clearNodeSearch();
-      }
+    // Select the first result if visible
+    const firstResult = resultsEl.querySelector(".search-result-item") as HTMLElement;
+    if (firstResult && !resultsEl.hidden) {
+      handleResultSelection(firstResult, context);
+    } else if (context === "path-start" || context === "path-end") {
+      // If no results shown, try to find path
+      findPath();
     }
   } else if (e.key === "Escape") {
-    clearNodeSearch();
-    nodeSearchInput?.blur();
-  }
-}
-
-/** Handle keydown on path inputs */
-function handlePathKeydown(e: KeyboardEvent): void {
-  if (e.key === "Enter") {
+    resultsEl.hidden = true;
+    (e.target as HTMLInputElement)?.blur();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
-    findPath();
+    navigateResults(resultsEl, e.key === "ArrowDown" ? 1 : -1);
   }
 }
 
-/** Clear node search */
-function clearNodeSearch(): void {
-  if (nodeSearchInput) {
-    nodeSearchInput.value = "";
+/** Navigate through results with arrow keys */
+function navigateResults(resultsEl: HTMLElement, direction: number): void {
+  const items = resultsEl.querySelectorAll(".search-result-item");
+  if (items.length === 0) return;
+
+  const focused = resultsEl.querySelector(".search-result-item.focused");
+  let index = -1;
+
+  if (focused) {
+    index = Array.from(items).indexOf(focused);
+    focused.classList.remove("focused");
   }
-  if (nodeSearchResults) {
-    nodeSearchResults.hidden = true;
-    nodeSearchResults.innerHTML = "";
+
+  index += direction;
+  if (index < 0) index = items.length - 1;
+  if (index >= items.length) index = 0;
+
+  items[index]?.classList.add("focused");
+}
+
+/** Handle click on search results */
+function handleResultClick(e: Event): void {
+  const target = e.target as HTMLElement;
+  const resultItem = target.closest(".search-result-item") as HTMLElement;
+  if (resultItem) {
+    const context = resultItem.getAttribute("data-context") || "node";
+    handleResultSelection(resultItem, context);
+  }
+}
+
+/** Handle selection of a search result */
+function handleResultSelection(resultItem: HTMLElement, context: string): void {
+  const nodeId = resultItem.getAttribute("data-node-id");
+  const nodeLabel = resultItem.getAttribute("data-node-label") || nodeId;
+
+  if (!nodeId) return;
+
+  switch (context) {
+    case "node":
+      selectNode(nodeId);
+      clearSearch(nodeSearchInput, nodeSearchResults);
+      break;
+    case "path-start":
+      if (pathStartInput) {
+        pathStartInput.value = nodeLabel || "";
+        pathStartInput.setAttribute("data-node-id", nodeId);
+      }
+      clearSearch(null, pathStartResults);
+      break;
+    case "path-end":
+      if (pathEndInput) {
+        pathEndInput.value = nodeLabel || "";
+        pathEndInput.setAttribute("data-node-id", nodeId);
+      }
+      clearSearch(null, pathEndResults);
+      break;
+  }
+}
+
+/** Clear search input and results */
+function clearSearch(input: HTMLInputElement | null, resultsEl: HTMLElement | null): void {
+  if (input) {
+    input.value = "";
+  }
+  if (resultsEl) {
+    resultsEl.hidden = true;
+    resultsEl.innerHTML = "";
   }
 }
 
@@ -165,159 +255,95 @@ function selectNode(nodeId: string): void {
   updateDetailPanel(nodeId, attrs);
 }
 
-/** Find path between start and end nodes */
-function findPath(): void {
+/** Find path between start and end nodes using the API */
+async function findPath(): Promise<void> {
   if (!pathStartInput || !pathEndInput || !pathResultsEl) return;
 
-  const startQuery = pathStartInput.value.trim().toLowerCase();
-  const endQuery = pathEndInput.value.trim().toLowerCase();
+  // Get node IDs from data attributes or fall back to input values
+  const startId = pathStartInput.getAttribute("data-node-id") || pathStartInput.value.trim();
+  const endId = pathEndInput.getAttribute("data-node-id") || pathEndInput.value.trim();
 
-  if (!startQuery || !endQuery) {
+  if (!startId || !endId) {
     showPathError("Please enter both start and end nodes");
     return;
   }
 
-  const renderer = getRenderer();
-  if (!renderer) {
-    showPathError("No graph loaded");
-    return;
-  }
-
-  const graph = renderer.sigma.getGraph();
-
-  // Find nodes matching the queries
-  const startNode = findNodeByQuery(graph, startQuery);
-  const endNode = findNodeByQuery(graph, endQuery);
-
-  if (!startNode) {
-    showPathError(`Start node "${pathStartInput.value}" not found`);
-    return;
-  }
-
-  if (!endNode) {
-    showPathError(`End node "${pathEndInput.value}" not found`);
-    return;
-  }
-
-  if (startNode === endNode) {
+  if (startId === endId) {
     showPathError("Start and end nodes are the same");
     return;
   }
 
-  // BFS to find shortest path
-  const path = findShortestPath(graph, startNode, endNode);
+  // Show loading state
+  pathResultsEl.innerHTML = '<div class="text-gray-400">Finding path...</div>';
+  pathResultsEl.hidden = false;
 
-  if (!path) {
-    showPathError("No path found between these nodes");
-    return;
-  }
+  try {
+    const response = await fetch(`/api/graph/path?from=${encodeURIComponent(startId)}&to=${encodeURIComponent(endId)}`);
 
-  // Display the path
-  displayPath(graph, path);
-
-  // Highlight the path on the graph
-  renderer.highlightPath(path);
-}
-
-/** Find a node by query (label or ID) */
-function findNodeByQuery(graph: ADGraphType, query: string): string | null {
-  let found: string | null = null;
-
-  graph.forEachNode((nodeId: string, attrs: ADNodeAttributes) => {
-    if (found) return;
-    const label = (attrs.label || nodeId).toLowerCase();
-    if (label === query || nodeId.toLowerCase() === query) {
-      found = nodeId;
-    }
-  });
-
-  // If no exact match, try partial match
-  if (!found) {
-    graph.forEachNode((nodeId: string, attrs: ADNodeAttributes) => {
-      if (found) return;
-      const label = (attrs.label || nodeId).toLowerCase();
-      if (label.includes(query) || nodeId.toLowerCase().includes(query)) {
-        found = nodeId;
-      }
-    });
-  }
-
-  return found;
-}
-
-/** BFS shortest path */
-function findShortestPath(graph: ADGraphType, start: string, end: string): string[] | null {
-  const visited = new Set<string>();
-  const parent = new Map<string, { node: string; edge: string }>();
-  const queue: string[] = [start];
-  visited.add(start);
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-
-    if (current === end) {
-      // Reconstruct path
-      const path: string[] = [end];
-      let node = end;
-      while (parent.has(node)) {
-        const p = parent.get(node)!;
-        path.unshift(p.node);
-        node = p.node;
-      }
-      return path;
+    if (!response.ok) {
+      const text = await response.text();
+      showPathError(`Path finding failed: ${text}`);
+      return;
     }
 
-    // Check outgoing edges
-    graph.forEachOutEdge(current, (edge: string, _attrs: ADEdgeAttributes, _source: string, target: string) => {
-      if (!visited.has(target)) {
-        visited.add(target);
-        parent.set(target, { node: current, edge });
-        queue.push(target);
-      }
-    });
-  }
+    const data = await response.json();
 
-  return null;
+    if (!data.found) {
+      showPathError("No path found between these nodes");
+      return;
+    }
+
+    // Display the path from API response
+    displayPathFromApi(data.path);
+
+    // Highlight the path on the graph
+    const renderer = getRenderer();
+    if (renderer) {
+      const nodeIds = data.path.map((step: { node: { id: string } }) => step.node.id);
+      renderer.highlightPath(nodeIds);
+    }
+  } catch (err) {
+    console.error("Path finding error:", err);
+    showPathError(`Error: ${err}`);
+  }
 }
 
-/** Display path results */
-function displayPath(graph: ADGraphType, path: string[]): void {
+/** Path step from API response */
+interface PathStep {
+  node: {
+    id: string;
+    label: string;
+    type: string;
+  };
+  edge_type?: string;
+}
+
+/** Display path results from API response */
+function displayPathFromApi(path: PathStep[]): void {
   if (!pathResultsEl) return;
 
   const steps: string[] = [];
 
   for (let i = 0; i < path.length; i++) {
-    const nodeId = path[i]!;
-    const attrs = graph.getNodeAttributes(nodeId);
-    const label = attrs.label || nodeId;
-    const type = attrs.nodeType;
+    const step = path[i]!;
+    const { id, label, type } = step.node;
     const color = NODE_COLORS[type as ADNodeType] || "#6c757d";
 
-    if (i < path.length - 1) {
-      // Find the edge between this node and the next
-      const nextNode = path[i + 1]!;
-      let edgeType = "";
-      graph.forEachEdge(nodeId, nextNode, (_edge: string, edgeAttrs: ADEdgeAttributes) => {
-        edgeType = edgeAttrs.edgeType || edgeAttrs.label || "";
-      });
+    steps.push(`
+      <div class="path-step" data-node-id="${escapeHtml(id)}">
+        <span class="node-badge" style="background-color: ${color}">${escapeHtml(type)}</span>
+        <span class="path-step-node">${escapeHtml(label)}</span>
+      </div>
+    `);
 
+    // Add edge indicator if there's a next step
+    if (step.edge_type && i < path.length - 1) {
       steps.push(`
-        <div class="path-step" data-node-id="${escapeHtml(nodeId)}">
-          <span class="node-badge" style="background-color: ${color}">${escapeHtml(type)}</span>
-          <span class="path-step-node">${escapeHtml(label)}</span>
-        </div>
         <div class="path-step-edge">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 5v14M19 12l-7 7-7-7"/>
           </svg>
-          <span>${escapeHtml(edgeType)}</span>
-        </div>
-      `);
-    } else {
-      steps.push(`
-        <div class="path-step" data-node-id="${escapeHtml(nodeId)}">
-          <span class="node-badge" style="background-color: ${color}">${escapeHtml(type)}</span>
-          <span class="path-step-node">${escapeHtml(label)}</span>
+          <span>${escapeHtml(step.edge_type)}</span>
         </div>
       `);
     }

@@ -211,6 +211,10 @@
            hover:bg-gray-700 transition-colors;
   }
 
+  .search-result-item.focused {
+    @apply bg-gray-700;
+  }
+
   .search-result-item .node-badge {
     @apply flex-none;
   }
