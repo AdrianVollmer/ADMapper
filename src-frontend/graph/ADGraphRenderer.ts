@@ -106,6 +106,26 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     context.fillText(label, data.x, data.y + yOffset);
   }
 
+  // Custom hover renderer: draws a glow effect behind the hovered node
+  function drawNodeHover(
+    context: CanvasRenderingContext2D,
+    data: { x: number; y: number; size: number; color: string }
+  ): void {
+    const glowRadius = data.size * 2;
+    const gradient = context.createRadialGradient(
+      data.x, data.y, data.size * 0.5,
+      data.x, data.y, glowRadius
+    );
+    gradient.addColorStop(0, "rgba(255, 247, 0, 0.6)");
+    gradient.addColorStop(0.5, "rgba(255, 247, 0, 0.2)");
+    gradient.addColorStop(1, "rgba(255, 247, 0, 0)");
+
+    context.beginPath();
+    context.arc(data.x, data.y, glowRadius, 0, Math.PI * 2);
+    context.fillStyle = gradient;
+    context.fill();
+  }
+
   // Create node image program for rendering icons
   // "background" mode draws the node color as a circle behind the icon
   const NodeImageProgram = createNodeImageProgram({
@@ -130,25 +150,20 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     defaultEdgeColor: "#6c757d",
     labelColor: { color: LABEL_COLOR[theme] },
     defaultDrawNodeLabel: drawLabel,
+    defaultDrawNodeHover: drawNodeHover,
     defaultNodeType: "image",
     nodeProgramClasses: {
       image: NodeImageProgram,
     },
 
-    // Node reducer: apply highlighting/dimming
+    // Node reducer: apply highlighting/dimming only for selection (not hover)
     nodeReducer: (nodeId, data) => {
       const res: Record<string, unknown> = { ...data };
 
-      // If there's a hovered node or selection, dim unrelated nodes
-      if (hoveredNode || selectedNodes.size > 0) {
-        const isHighlighted =
-          nodeId === hoveredNode ||
-          selectedNodes.has(nodeId) ||
-          (hoveredNode && graph.hasEdge(hoveredNode, nodeId)) ||
-          (hoveredNode && graph.hasEdge(nodeId, hoveredNode));
-
-        if (isHighlighted) {
-          res.color = nodeId === hoveredNode ? HIGHLIGHT_COLORS.node : HIGHLIGHT_COLORS.neighbor;
+      // Only dim nodes when there's a selection (not on hover)
+      if (selectedNodes.size > 0) {
+        const isSelected = selectedNodes.has(nodeId);
+        if (isSelected) {
           res.zIndex = 1;
         } else {
           res.color = DIM_COLORS.node;
@@ -156,22 +171,23 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
         }
       }
 
+      // Bring hovered node to front
+      if (nodeId === hoveredNode) {
+        res.zIndex = 2;
+      }
+
       return res;
     },
 
-    // Edge reducer: apply highlighting/dimming
+    // Edge reducer: apply highlighting/dimming only for selection (not hover)
     edgeReducer: (edge, data) => {
       const res: Record<string, unknown> = { ...data };
       const source = graph.source(edge);
       const target = graph.target(edge);
 
-      if (hoveredNode || selectedNodes.size > 0) {
-        const isHighlighted =
-          source === hoveredNode ||
-          target === hoveredNode ||
-          selectedNodes.has(source) ||
-          selectedNodes.has(target);
-
+      // Only dim edges when there's a selection (not on hover)
+      if (selectedNodes.size > 0) {
+        const isHighlighted = selectedNodes.has(source) || selectedNodes.has(target);
         if (isHighlighted) {
           res.color = HIGHLIGHT_COLORS.edge;
           res.size = ((data.size as number | undefined) ?? 1) * HIGHLIGHT_SIZE_MULTIPLIER;
