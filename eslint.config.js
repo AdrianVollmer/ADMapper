@@ -40,6 +40,7 @@ export default [
         Node: "readonly",
         CanvasRenderingContext2D: "readonly",
         performance: "readonly",
+        navigator: "readonly",
       },
     },
     plugins: {

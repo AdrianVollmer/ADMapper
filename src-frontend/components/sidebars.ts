@@ -11,6 +11,119 @@ import { NODE_COLORS } from "../graph/theme";
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
 
+/** Pretty labels for common AD properties */
+const PROPERTY_LABELS: Record<string, string> = {
+  // Identity
+  objectid: "Object ID",
+  objectsid: "Object SID",
+  distinguishedname: "Distinguished Name",
+  samaccountname: "SAM Account Name",
+  userprincipalname: "User Principal Name",
+  displayname: "Display Name",
+  name: "Name",
+  cn: "Common Name",
+  description: "Description",
+
+  // Domain
+  domain: "Domain",
+  domainsid: "Domain SID",
+  functionallevel: "Functional Level",
+
+  // Account status
+  enabled: "Enabled",
+  pwdneverexpires: "Password Never Expires",
+  pwdlastset: "Password Last Set",
+  lastlogon: "Last Logon",
+  lastlogontimestamp: "Last Logon Timestamp",
+  whencreated: "Created",
+  whenchanged: "Changed",
+  admincount: "Admin Count",
+  sensitive: "Sensitive",
+
+  // Computer
+  operatingsystem: "Operating System",
+  operatingsystemversion: "OS Version",
+  serviceprincipalname: "Service Principal Name",
+  unconstraineddelegation: "Unconstrained Delegation",
+
+  // Group
+  grouptype: "Group Type",
+  membercount: "Member Count",
+
+  // OU/GPO
+  gpopath: "GPO Path",
+  blocksinheritance: "Blocks Inheritance",
+
+  // Trust
+  trusttype: "Trust Type",
+  trustdirection: "Trust Direction",
+  trustattributes: "Trust Attributes",
+  sidfilteringenabled: "SID Filtering Enabled",
+
+  // Certificate
+  certificatetemplatename: "Template Name",
+  enrollmentflag: "Enrollment Flag",
+  certificatenameflags: "Name Flags",
+
+  // Email
+  email: "Email",
+  mail: "Email",
+
+  // Misc
+  highvalue: "High Value",
+  hasspn: "Has SPN",
+  serviceprincipalnames: "SPNs",
+  owned: "Owned",
+  notes: "Notes",
+};
+
+/** Action definitions with icons */
+const ACTIONS = [
+  {
+    id: "expand-node",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M12 5v2M12 17v2M5 12h2M17 12h2M7.05 7.05l1.41 1.41M15.54 15.54l1.41 1.41M7.05 16.95l1.41-1.41M15.54 8.46l1.41-1.41"/>
+    </svg>`,
+    tooltip: "Expand Connections",
+  },
+  {
+    id: "find-path-from",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="5" cy="12" r="2"/>
+      <circle cx="19" cy="12" r="2"/>
+      <path d="M7 12h10"/>
+      <path d="M14 8l4 4-4 4"/>
+    </svg>`,
+    tooltip: "Find Path From Here",
+  },
+  {
+    id: "find-path-to",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="5" cy="12" r="2"/>
+      <circle cx="19" cy="12" r="2"/>
+      <path d="M7 12h10"/>
+      <path d="M10 8l-4 4 4 4"/>
+    </svg>`,
+    tooltip: "Find Path To Here",
+  },
+  {
+    id: "set-start-node",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 12h4l3 9 4-18 3 9h4"/>
+    </svg>`,
+    tooltip: "Set as Start Node",
+  },
+  {
+    id: "set-end-node",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+      <line x1="4" y1="22" x2="4" y2="15"/>
+    </svg>`,
+    tooltip: "Set as End Node",
+  },
+];
+
 /** Initialize sidebars */
 export function initSidebars(): void {
   // Set up toggle buttons
@@ -26,6 +139,44 @@ export function initSidebars(): void {
       toggleDetailSidebar();
     }
   });
+
+  // Set up click-to-copy for property values
+  document.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const valueEl = target.closest(".detail-prop-value") as HTMLElement;
+    if (!valueEl) return;
+
+    const text = valueEl.getAttribute("data-value") || valueEl.textContent || "";
+    copyToClipboard(text, valueEl);
+  });
+}
+
+/** Copy text to clipboard and show feedback */
+async function copyToClipboard(text: string, element: HTMLElement): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+
+    // Show copied indicator
+    element.classList.add("copied");
+    setTimeout(() => {
+      element.classList.remove("copied");
+    }, 1500);
+  } catch {
+    // Fallback for older browsers
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textArea);
+
+    element.classList.add("copied");
+    setTimeout(() => {
+      element.classList.remove("copied");
+    }, 1500);
+  }
 }
 
 /** Toggle the navigation sidebar */
@@ -66,6 +217,47 @@ export function toggleDetailSidebar(): void {
   }
 }
 
+/** Get a pretty label for a property key */
+function getPrettyLabel(key: string): string {
+  const lower = key.toLowerCase();
+  if (PROPERTY_LABELS[lower]) {
+    return PROPERTY_LABELS[lower];
+  }
+  // Convert camelCase or snake_case to Title Case
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Format a property value for display */
+function formatValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  if (typeof value === "number") {
+    // Check if it's a timestamp (large number that looks like epoch)
+    if (value > 1000000000000 && value < 2000000000000) {
+      return new Date(value).toLocaleString();
+    }
+    // Windows FILETIME (100-nanosecond intervals since 1601)
+    if (value > 100000000000000000) {
+      const epoch = (value - 116444736000000000) / 10000;
+      if (epoch > 0) {
+        return new Date(epoch).toLocaleString();
+      }
+    }
+    return value.toLocaleString();
+  }
+  if (Array.isArray(value)) {
+    return value.join(", ");
+  }
+  return String(value);
+}
+
 /** Update the detail sidebar with node information */
 export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes | null): void {
   const content = document.getElementById("detail-content");
@@ -89,27 +281,58 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   const typeColor = NODE_COLORS[attrs.nodeType] || "#6c757d";
   const typeLower = attrs.nodeType.toLowerCase();
 
-  // Build properties list
+  // Build actions bar
+  const actionsHtml = ACTIONS.map(
+    (action) => `
+    <button
+      class="detail-action-btn"
+      data-action="${action.id}"
+      data-node-id="${escapeHtml(nodeId)}"
+      title="${action.tooltip}"
+      aria-label="${action.tooltip}"
+    >
+      ${action.icon}
+    </button>
+  `
+  ).join("");
+
+  // Build properties list - show ALL properties
   let propsHtml = "";
   if (attrs.properties) {
-    for (const [key, value] of Object.entries(attrs.properties)) {
-      if (value !== null && value !== undefined && value !== "") {
-        propsHtml += `
-          <div class="detail-prop">
-            <span class="detail-prop-label">${escapeHtml(key)}</span>
-            <span class="detail-prop-value">${escapeHtml(String(value))}</span>
-          </div>
-        `;
-      }
+    // Sort properties: known labels first, then alphabetically
+    const entries = Object.entries(attrs.properties);
+    entries.sort((a, b) => {
+      const aKnown = PROPERTY_LABELS[a[0].toLowerCase()] ? 0 : 1;
+      const bKnown = PROPERTY_LABELS[b[0].toLowerCase()] ? 0 : 1;
+      if (aKnown !== bKnown) return aKnown - bKnown;
+      return a[0].localeCompare(b[0]);
+    });
+
+    for (const [key, value] of entries) {
+      const formatted = formatValue(value);
+      const rawValue = value === null || value === undefined ? "" : String(value);
+      propsHtml += `
+        <div class="detail-prop">
+          <span class="detail-prop-label">${escapeHtml(getPrettyLabel(key))}</span>
+          <span class="detail-prop-value" data-value="${escapeHtml(rawValue)}" title="Click to copy">
+            ${escapeHtml(formatted)}
+          </span>
+        </div>
+      `;
     }
   }
 
   content.innerHTML = `
     <div class="detail-header">
-      <span class="detail-node-type node-badge ${typeLower}" style="background-color: ${typeColor}">
-        ${escapeHtml(attrs.nodeType)}
-      </span>
+      <div class="detail-header-top">
+        <span class="detail-node-type node-badge ${typeLower}" style="background-color: ${typeColor}">
+          ${escapeHtml(attrs.nodeType)}
+        </span>
+      </div>
       <h2 class="detail-node-name">${escapeHtml(attrs.label)}</h2>
+      <div class="detail-actions">
+        ${actionsHtml}
+      </div>
     </div>
 
     ${
@@ -122,23 +345,12 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
       </div>
     </div>
     `
-        : ""
-    }
-
+        : `
     <div class="detail-section">
-      <h3 class="detail-section-title">Actions</h3>
-      <div class="space-y-1">
-        <button class="w-full px-3 py-1.5 text-sm text-left rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors" data-action="expand-node" data-node-id="${escapeHtml(nodeId)}">
-          Expand Connections
-        </button>
-        <button class="w-full px-3 py-1.5 text-sm text-left rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors" data-action="find-path-from" data-node-id="${escapeHtml(nodeId)}">
-          Find Path From Here
-        </button>
-        <button class="w-full px-3 py-1.5 text-sm text-left rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors" data-action="find-path-to" data-node-id="${escapeHtml(nodeId)}">
-          Find Path To Here
-        </button>
-      </div>
+      <p class="text-sm text-gray-500">No properties available</p>
     </div>
+    `
+    }
   `;
 }
 
