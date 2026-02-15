@@ -392,52 +392,43 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     },
 
     highlightPath(path: string[]) {
-      // Clear current selection and set the path nodes as selected
+      // Clear ALL highlight state first
       selectedNodes.clear();
       highlightedPath.clear();
       highlightedPathEdges.clear();
+      hoveredNode = null;
+      hoveredReachableEdges = new Set();
 
       if (path.length === 0) {
         sigma.refresh();
         return;
       }
 
-      // Add all path nodes
+      // Add path nodes to highlight set
       for (const nodeId of path) {
         highlightedPath.add(nodeId);
       }
 
       // Find and highlight edges between consecutive path nodes
+      // Check both directions since the path might traverse edges in reverse
       for (let i = 0; i < path.length - 1; i++) {
         const source = path[i];
         const target = path[i + 1];
+        // Try source -> target
         graph.forEachEdge(source, target, (edge) => {
+          highlightedPathEdges.add(edge);
+        });
+        // Also try target -> source (in case edge is reversed)
+        graph.forEachEdge(target, source, (edge) => {
           highlightedPathEdges.add(edge);
         });
       }
 
-      // Focus on the path
-      if (path.length > 0) {
-        // Calculate bounding box of path nodes
-        let minX = Infinity,
-          maxX = -Infinity,
-          minY = Infinity,
-          maxY = -Infinity;
-        for (const nodeId of path) {
-          const pos = sigma.getNodeDisplayData(nodeId);
-          if (pos) {
-            minX = Math.min(minX, pos.x);
-            maxX = Math.max(maxX, pos.x);
-            minY = Math.min(minY, pos.y);
-            maxY = Math.max(maxY, pos.y);
-          }
-        }
-        const centerX = (minX + maxX) / 2;
-        const centerY = (minY + maxY) / 2;
-        sigma.getCamera().animate({ x: centerX, y: centerY, ratio: 0.3 }, { duration: 300 });
-      }
-
+      // Refresh to apply highlight styles
       sigma.refresh();
+
+      // Reset camera to show all nodes (the path graph should only contain path nodes)
+      sigma.getCamera().animatedReset({ duration: 300 });
     },
   };
 

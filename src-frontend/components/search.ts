@@ -306,13 +306,15 @@ async function findPath(): Promise<void> {
         })),
       };
       loadGraphData(pathGraph);
-    }
 
-    // Highlight the path on the graph
-    const renderer = getRenderer();
-    if (renderer) {
+      // Wait for next frame so sigma can compute positions, then highlight
       const nodeIds = data.path.map((step) => step.node.id);
-      renderer.highlightPath(nodeIds);
+      requestAnimationFrame(() => {
+        const renderer = getRenderer();
+        if (renderer) {
+          renderer.highlightPath(nodeIds);
+        }
+      });
     }
   } catch (err) {
     console.error("Path finding error:", err);
