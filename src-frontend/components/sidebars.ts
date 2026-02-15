@@ -12,6 +12,56 @@ import { escapeHtml } from "../utils/html";
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
 
+/**
+ * Priority order for properties in the detail panel.
+ * Lower numbers appear first. Properties not listed get a default priority of 100.
+ */
+const PROPERTY_PRIORITY: Record<string, number> = {
+  // Core identity (top priority)
+  name: 1,
+  displayname: 2,
+  samaccountname: 3,
+  userprincipalname: 4,
+  cn: 5,
+
+  // Domain & location
+  domain: 10,
+  distinguishedname: 11,
+
+  // Identifiers
+  objectsid: 20,
+  objectid: 21,
+  domainsid: 22,
+
+  // Contact
+  email: 30,
+  mail: 30,
+
+  // Description
+  description: 40,
+
+  // Account status
+  enabled: 50,
+  admincount: 51,
+  highvalue: 52,
+  sensitive: 53,
+
+  // Computer info
+  operatingsystem: 60,
+  operatingsystemversion: 61,
+
+  // Group info
+  grouptype: 70,
+  membercount: 71,
+
+  // Timestamps (lower priority)
+  whencreated: 80,
+  whenchanged: 81,
+  lastlogon: 82,
+  lastlogontimestamp: 83,
+  pwdlastset: 84,
+};
+
 /** Pretty labels for common AD properties */
 const PROPERTY_LABELS: Record<string, string> = {
   // Identity
@@ -300,12 +350,12 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   // Build properties list - show ALL properties
   let propsHtml = "";
   if (attrs.properties) {
-    // Sort properties: known labels first, then alphabetically
+    // Sort properties by priority, then alphabetically
     const entries = Object.entries(attrs.properties);
     entries.sort((a, b) => {
-      const aKnown = PROPERTY_LABELS[a[0].toLowerCase()] ? 0 : 1;
-      const bKnown = PROPERTY_LABELS[b[0].toLowerCase()] ? 0 : 1;
-      if (aKnown !== bKnown) return aKnown - bKnown;
+      const aPriority = PROPERTY_PRIORITY[a[0].toLowerCase()] ?? 100;
+      const bPriority = PROPERTY_PRIORITY[b[0].toLowerCase()] ?? 100;
+      if (aPriority !== bPriority) return aPriority - bPriority;
       return a[0].localeCompare(b[0]);
     });
 
