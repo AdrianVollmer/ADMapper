@@ -1,0 +1,168 @@
+/**
+ * Action Dispatcher
+ *
+ * Central handler for all application actions triggered by menu items,
+ * keyboard shortcuts, or UI buttons.
+ */
+
+import { toggleNavSidebar, toggleDetailSidebar } from "./sidebars";
+import { getRenderer } from "./graph-view";
+
+/** Dispatch an action by name */
+export function dispatchAction(action: string): void {
+  switch (action) {
+    // File menu
+    case "new-project":
+      console.log("Action: new-project");
+      // TODO: Implement
+      break;
+
+    case "open-file":
+      console.log("Action: open-file");
+      // TODO: Open file dialog
+      break;
+
+    case "save":
+      console.log("Action: save");
+      // TODO: Save current state
+      break;
+
+    case "save-as":
+      console.log("Action: save-as");
+      // TODO: Save as dialog
+      break;
+
+    case "export":
+      console.log("Action: export");
+      // TODO: Export dialog
+      break;
+
+    case "settings":
+      console.log("Action: settings");
+      // TODO: Settings dialog
+      break;
+
+    case "quit":
+      console.log("Action: quit");
+      // In Tauri, we'd call tauri.exit()
+      if ("__TAURI__" in window) {
+        // @ts-expect-error Tauri global
+        window.__TAURI__.process.exit(0);
+      }
+      break;
+
+    // Edit menu
+    case "undo":
+      console.log("Action: undo");
+      // TODO: Implement undo
+      break;
+
+    case "redo":
+      console.log("Action: redo");
+      // TODO: Implement redo
+      break;
+
+    case "select-all":
+      console.log("Action: select-all");
+      // TODO: Select all nodes
+      break;
+
+    case "find":
+      console.log("Action: find");
+      // Focus the search input
+      document.getElementById("node-search")?.focus();
+      break;
+
+    // View menu
+    case "toggle-nav-sidebar":
+      toggleNavSidebar();
+      break;
+
+    case "toggle-detail-sidebar":
+      toggleDetailSidebar();
+      break;
+
+    case "zoom-in": {
+      const renderer = getRenderer();
+      renderer?.sigma.getCamera().animatedZoom({ duration: 200 });
+      break;
+    }
+
+    case "zoom-out": {
+      const renderer = getRenderer();
+      renderer?.sigma.getCamera().animatedUnzoom({ duration: 200 });
+      break;
+    }
+
+    case "zoom-reset":
+    case "fit-graph": {
+      const renderer = getRenderer();
+      renderer?.resetCamera();
+      break;
+    }
+
+    case "fullscreen":
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else {
+        document.documentElement.requestFullscreen();
+      }
+      break;
+
+    // Tools menu
+    case "import-bloodhound":
+      console.log("Action: import-bloodhound");
+      // TODO: Import dialog
+      break;
+
+    case "run-query":
+      console.log("Action: run-query");
+      // TODO: Query runner
+      break;
+
+    case "saved-queries":
+      console.log("Action: saved-queries");
+      // TODO: Show saved queries
+      break;
+
+    case "find-path":
+      console.log("Action: find-path");
+      // TODO: Path finder dialog
+      break;
+
+    case "find-attack-path":
+      console.log("Action: find-attack-path");
+      // TODO: Attack path finder
+      break;
+
+    case "layout-graph": {
+      console.log("Action: layout-graph");
+      // Re-layout is handled in graph-view.ts via the button click
+      break;
+    }
+
+    // Help menu
+    case "documentation":
+      console.log("Action: documentation");
+      window.open("https://github.com/admapper/admapper", "_blank");
+      break;
+
+    case "keyboard-shortcuts":
+      console.log("Action: keyboard-shortcuts");
+      // TODO: Show shortcuts dialog
+      break;
+
+    case "check-updates":
+      console.log("Action: check-updates");
+      // TODO: Update checker
+      break;
+
+    case "about":
+      console.log("Action: about");
+      // TODO: About dialog
+      break;
+
+    default:
+      console.log(`Unknown action: ${action}`);
+  }
+}
