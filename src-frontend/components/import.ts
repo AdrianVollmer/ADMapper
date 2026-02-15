@@ -8,6 +8,7 @@ import { loadGraphData } from "./graph-view";
 import type { RawADGraph, ADNodeType, ADEdgeType } from "../graph/types";
 import { api } from "../api/client";
 import type { ImportProgress, GraphData } from "../api/types";
+import { showError as showNotification } from "../utils/notifications";
 
 // DOM element references
 let fileInput: HTMLInputElement | null = null;
@@ -272,6 +273,7 @@ async function refreshGraphData(): Promise<void> {
     loadGraphData(graph);
   } catch (err) {
     console.error("Failed to refresh graph:", err);
+    showNotification("Failed to load graph data. Please refresh the page.");
   }
 }
 
