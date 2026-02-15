@@ -7,6 +7,8 @@
 import { getRenderer } from "./graph-view";
 import { addToHistory } from "./query-history";
 import { escapeHtml } from "../utils/html";
+import { api, ApiClientError } from "../api/client";
+import type { QueryResponse } from "../api/types";
 
 /** Query definition */
 export interface Query {
@@ -488,19 +490,11 @@ async function runQuery(queryId: string): Promise<void> {
   }
 
   try {
-    const response = await fetch("/api/graph/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: query.query, extract_graph: true }),
+    const data = await api.post<QueryResponse>("/api/graph/query", {
+      query: query.query,
+      extract_graph: true,
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      alert(`Query failed: ${text}`);
-      return;
-    }
-
-    const data = await response.json();
     const resultCount = data.results?.rows?.length ?? 0;
 
     // Add to history
@@ -516,7 +510,8 @@ async function runQuery(queryId: string): Promise<void> {
     }
   } catch (err) {
     console.error("Query execution failed:", err);
-    alert(`Query failed: ${err}`);
+    const message = err instanceof ApiClientError ? err.message : String(err);
+    alert(`Query failed: ${message}`);
   }
 }
 

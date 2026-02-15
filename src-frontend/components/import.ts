@@ -6,6 +6,7 @@
 
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph, ADNodeType, ADEdgeType } from "../graph/types";
+import { api } from "../api/client";
 import type { ImportProgress, GraphData } from "../api/types";
 
 // DOM element references
@@ -250,13 +251,7 @@ function cleanup(): void {
 /** Refresh graph data from server */
 async function refreshGraphData(): Promise<void> {
   try {
-    const response = await fetch("/api/graph/all");
-    if (!response.ok) {
-      console.error("Failed to fetch graph data");
-      return;
-    }
-
-    const data: GraphData = await response.json();
+    const data = await api.get<GraphData>("/api/graph/all");
 
     // Convert to RawADGraph format
     const graph: RawADGraph = {

@@ -11,7 +11,8 @@ import { NODE_COLORS } from "../graph/theme";
 import type { ADNodeType } from "../graph/types";
 import type { RawADGraph } from "../graph/types";
 import { escapeHtml } from "../utils/html";
-import type { SearchResult, PathStep } from "../api/types";
+import { api, ApiClientError } from "../api/client";
+import type { SearchResult, PathStep, PathResponse } from "../api/types";
 
 let nodeSearchInput: HTMLInputElement | null = null;
 let nodeSearchResults: HTMLElement | null = null;
@@ -109,15 +110,9 @@ function handleSearch(input: HTMLInputElement, resultsEl: HTMLElement, context: 
 /** Perform the actual API search */
 async function performSearch(query: string, resultsEl: HTMLElement, context: string): Promise<void> {
   try {
-    const response = await fetch(`/api/graph/search?q=${encodeURIComponent(query)}&limit=10`);
-
-    if (!response.ok) {
-      console.error("Search failed:", response.status);
-      resultsEl.hidden = true;
-      return;
-    }
-
-    const results: SearchResult[] = await response.json();
+    const results = await api.get<SearchResult[]>(
+      `/api/graph/search?q=${encodeURIComponent(query)}&limit=10`
+    );
 
     if (results.length === 0) {
       resultsEl.innerHTML = '<div class="search-no-results">No nodes found</div>';
@@ -284,15 +279,9 @@ async function findPath(): Promise<void> {
   pathResultsEl.hidden = false;
 
   try {
-    const response = await fetch(`/api/graph/path?from=${encodeURIComponent(startId)}&to=${encodeURIComponent(endId)}`);
-
-    if (!response.ok) {
-      const text = await response.text();
-      showPathError(`Path finding failed: ${text}`);
-      return;
-    }
-
-    const data = await response.json();
+    const data = await api.get<PathResponse>(
+      `/api/graph/path?from=${encodeURIComponent(startId)}&to=${encodeURIComponent(endId)}`
+    );
 
     if (!data.found) {
       showPathError("No path found between these nodes");
@@ -305,12 +294,13 @@ async function findPath(): Promise<void> {
     // Highlight the path on the graph
     const renderer = getRenderer();
     if (renderer) {
-      const nodeIds = data.path.map((step: { node: { id: string } }) => step.node.id);
+      const nodeIds = data.path.map((step) => step.node.id);
       renderer.highlightPath(nodeIds);
     }
   } catch (err) {
     console.error("Path finding error:", err);
-    showPathError(`Error: ${err}`);
+    const message = err instanceof ApiClientError ? err.message : String(err);
+    showPathError(`Path finding failed: ${message}`);
   }
 }
 

@@ -6,7 +6,8 @@
  */
 
 import { escapeHtml } from "../utils/html";
-import type { QueryHistoryEntry } from "../api/types";
+import { api, ApiClientError } from "../api/client";
+import type { QueryHistoryEntry, QueryHistoryResponse, QueryResponse } from "../api/types";
 
 // Re-export for backwards compatibility
 export type { QueryHistoryEntry } from "../api/types";
@@ -96,13 +97,9 @@ async function loadHistory(): Promise<void> {
   renderModal();
 
   try {
-    const response = await fetch(`/api/query-history?page=${pagination.page}&per_page=${pagination.perPage}`);
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = await api.get<QueryHistoryResponse>(
+      `/api/query-history?page=${pagination.page}&per_page=${pagination.perPage}`
+    );
     entries = data.entries;
     pagination.total = data.total;
   } catch (err) {
@@ -118,14 +115,10 @@ async function loadHistory(): Promise<void> {
 /** Add a query to history */
 export async function addToHistory(name: string, query: string, resultCount?: number): Promise<void> {
   try {
-    await fetch("/api/query-history", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        query,
-        result_count: resultCount ?? null,
-      }),
+    await api.post("/api/query-history", {
+      name,
+      query,
+      result_count: resultCount ?? null,
     });
   } catch (err) {
     console.error("Failed to add to history:", err);
@@ -135,7 +128,7 @@ export async function addToHistory(name: string, query: string, resultCount?: nu
 /** Delete a query from history */
 async function deleteEntry(id: string): Promise<void> {
   try {
-    await fetch(`/api/query-history/${id}`, { method: "DELETE" });
+    await api.delete(`/api/query-history/${id}`);
     if (selectedEntry?.id === id) {
       selectedEntry = null;
       isEditing = false;
@@ -153,7 +146,7 @@ async function clearHistory(): Promise<void> {
   }
 
   try {
-    await fetch("/api/query-history/clear", { method: "POST" });
+    await api.postNoContent("/api/query-history/clear");
     selectedEntry = null;
     isEditing = false;
     await loadHistory();
@@ -168,19 +161,11 @@ async function runQuery(query: string, name: string): Promise<void> {
 
   // Execute the query via the API
   try {
-    const response = await fetch("/api/graph/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, extract_graph: true }),
+    const data = await api.post<QueryResponse>("/api/graph/query", {
+      query,
+      extract_graph: true,
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      alert(`Query failed: ${text}`);
-      return;
-    }
-
-    const data = await response.json();
     const resultCount = data.results?.rows?.length ?? 0;
 
     // Add to history
@@ -196,7 +181,8 @@ async function runQuery(query: string, name: string): Promise<void> {
     }
   } catch (err) {
     console.error("Query execution failed:", err);
-    alert(`Query failed: ${err}`);
+    const message = err instanceof ApiClientError ? err.message : String(err);
+    alert(`Query failed: ${message}`);
   }
 }
 
