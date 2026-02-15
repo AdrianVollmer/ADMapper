@@ -6,9 +6,9 @@
 
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph, ADNodeType, ADEdgeType } from "../graph/types";
-import { api } from "../api/client";
-import type { ImportProgress, GraphData } from "../api/types";
+import type { ImportProgress } from "../api/types";
 import { showError as showNotification } from "../utils/notifications";
+import { executeQuery } from "../utils/query";
 
 // DOM element references
 let fileInput: HTMLInputElement | null = null;
@@ -134,7 +134,7 @@ function subscribeToProgress(jobId: string): void {
         eventSource?.close();
         eventSource = null;
         showCompleted();
-        refreshGraphData();
+        loadDomainAdmins();
       } else if (progress.status === "failed") {
         eventSource?.close();
         eventSource = null;
@@ -249,31 +249,44 @@ function cleanup(): void {
   }
 }
 
-/** Refresh graph data from server */
-async function refreshGraphData(): Promise<void> {
+/** Query to find all members of Domain Admin groups (SID ends with -512) */
+const DOMAIN_ADMINS_QUERY = `
+?[member] :=
+  *nodes{object_id: dagroup, node_type: "Group"},
+  ends_with(dagroup, "-512"),
+  *edges{source: member, target: dagroup, edge_type: "MemberOf"},
+  *nodes{object_id: member}
+`;
+
+/** Load Domain Admin members after import */
+async function loadDomainAdmins(): Promise<void> {
   try {
-    const data = await api.get<GraphData>("/api/graph/all");
+    const result = await executeQuery(DOMAIN_ADMINS_QUERY, true);
 
-    // Convert to RawADGraph format
-    const graph: RawADGraph = {
-      nodes: data.nodes.map((n) => ({
-        id: n.id,
-        label: n.label,
-        type: mapNodeType(n.type),
-        properties: n.properties ?? {},
-      })),
-      edges: data.edges.map((e) => ({
-        source: e.source,
-        target: e.target,
-        type: mapEdgeType(e.type),
-      })),
-    };
+    if (result.graph && result.graph.nodes.length > 0) {
+      // Convert to RawADGraph format
+      const graph: RawADGraph = {
+        nodes: result.graph.nodes.map((n) => ({
+          id: n.id,
+          label: n.label,
+          type: mapNodeType(n.type),
+          properties: n.properties ?? {},
+        })),
+        edges: result.graph.edges.map((e) => ({
+          source: e.source,
+          target: e.target,
+          type: mapEdgeType(e.type),
+        })),
+      };
 
-    // Load into graph view
-    loadGraphData(graph);
+      loadGraphData(graph);
+    } else {
+      // No Domain Admins found - show empty graph
+      loadGraphData({ nodes: [], edges: [] });
+    }
   } catch (err) {
-    console.error("Failed to refresh graph:", err);
-    showNotification("Failed to load graph data. Please refresh the page.");
+    console.error("Failed to load Domain Admins:", err);
+    showNotification("Failed to load Domain Admin members. Use the query panel to explore the data.");
   }
 }
 
