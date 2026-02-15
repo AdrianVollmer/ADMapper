@@ -1,6 +1,6 @@
 //! BloodHound JSON/ZIP importer.
 
-use crate::db::GraphDatabase;
+use crate::db::{DbEdge, DbNode, GraphDatabase};
 use crate::import::types::ImportProgress;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -186,14 +186,14 @@ impl BloodHoundImporter {
             "Importing entities"
         );
 
-        let mut node_batch = Vec::with_capacity(BATCH_SIZE);
-        let mut edge_batch = Vec::with_capacity(BATCH_SIZE);
+        let mut node_batch: Vec<DbNode> = Vec::with_capacity(BATCH_SIZE);
+        let mut edge_batch: Vec<DbEdge> = Vec::with_capacity(BATCH_SIZE);
 
         for entity in &file.data {
             // Extract node
             if let Some(node) = self.extract_node(&data_type, entity) {
-                if !self.seen_nodes.contains(&node.0) {
-                    self.seen_nodes.insert(node.0.clone());
+                if !self.seen_nodes.contains(&node.id) {
+                    self.seen_nodes.insert(node.id.clone());
                     node_batch.push(node);
 
                     if node_batch.len() >= BATCH_SIZE {
@@ -221,22 +221,18 @@ impl BloodHoundImporter {
     }
 
     /// Extract a node from a BloodHound entity.
-    fn extract_node(
-        &self,
-        data_type: &str,
-        entity: &JsonValue,
-    ) -> Option<(String, String, String, JsonValue)> {
-        let object_id = entity
+    fn extract_node(&self, data_type: &str, entity: &JsonValue) -> Option<DbNode> {
+        let id = entity
             .get("ObjectIdentifier")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())?;
 
         let properties = entity.get("Properties").cloned().unwrap_or(JsonValue::Null);
 
-        let name = properties
+        let label = properties
             .get("name")
             .and_then(|v| v.as_str())
-            .unwrap_or(&object_id)
+            .unwrap_or(&id)
             .to_string();
 
         let node_type = match data_type.to_lowercase().as_str() {
@@ -255,15 +251,16 @@ impl BloodHoundImporter {
             _ => "Unknown",
         };
 
-        Some((object_id, name, node_type.to_string(), properties))
+        Some(DbNode {
+            id,
+            label,
+            node_type: node_type.to_string(),
+            properties,
+        })
     }
 
     /// Extract edges from a BloodHound entity.
-    fn extract_edges(
-        &self,
-        data_type: &str,
-        entity: &JsonValue,
-    ) -> Vec<(String, String, String, JsonValue)> {
+    fn extract_edges(&self, data_type: &str, entity: &JsonValue) -> Vec<DbEdge> {
         let mut edges = Vec::new();
 
         let object_id = match entity.get("ObjectIdentifier").and_then(|v| v.as_str()) {
@@ -275,12 +272,12 @@ impl BloodHoundImporter {
         if let Some(members) = entity.get("Members").and_then(|v| v.as_array()) {
             for member in members {
                 if let Some(member_id) = member.get("ObjectIdentifier").and_then(|v| v.as_str()) {
-                    edges.push((
-                        member_id.to_string(),
-                        object_id.clone(),
-                        "MemberOf".to_string(),
-                        JsonValue::Null,
-                    ));
+                    edges.push(DbEdge {
+                        source: member_id.to_string(),
+                        target: object_id.clone(),
+                        edge_type: "MemberOf".to_string(),
+                        properties: JsonValue::Null,
+                    });
                 }
             }
         }
@@ -294,12 +291,12 @@ impl BloodHoundImporter {
             {
                 for session in sessions {
                     if let Some(user_sid) = session.get("UserSID").and_then(|v| v.as_str()) {
-                        edges.push((
-                            user_sid.to_string(),
-                            object_id.clone(),
-                            "HasSession".to_string(),
-                            JsonValue::Null,
-                        ));
+                        edges.push(DbEdge {
+                            source: user_sid.to_string(),
+                            target: object_id.clone(),
+                            edge_type: "HasSession".to_string(),
+                            properties: JsonValue::Null,
+                        });
                     }
                 }
             }
@@ -316,12 +313,12 @@ impl BloodHoundImporter {
                         if let Some(member_id) =
                             member.get("ObjectIdentifier").and_then(|v| v.as_str())
                         {
-                            edges.push((
-                                member_id.to_string(),
-                                object_id.clone(),
-                                edge_type.to_string(),
-                                JsonValue::Null,
-                            ));
+                            edges.push(DbEdge {
+                                source: member_id.to_string(),
+                                target: object_id.clone(),
+                                edge_type: edge_type.to_string(),
+                                properties: JsonValue::Null,
+                            });
                         }
                     }
                 }
@@ -341,12 +338,12 @@ impl BloodHoundImporter {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
 
-                    edges.push((
-                        principal_sid.to_string(),
-                        object_id.clone(),
-                        edge_type.to_string(),
-                        serde_json::json!({"inherited": is_inherited}),
-                    ));
+                    edges.push(DbEdge {
+                        source: principal_sid.to_string(),
+                        target: object_id.clone(),
+                        edge_type: edge_type.to_string(),
+                        properties: serde_json::json!({"inherited": is_inherited}),
+                    });
                 }
             }
         }
@@ -357,12 +354,12 @@ impl BloodHoundImporter {
                 .get("ObjectIdentifier")
                 .and_then(|v| v.as_str())
             {
-                edges.push((
-                    container_id.to_string(),
-                    object_id.clone(),
-                    "Contains".to_string(),
-                    JsonValue::Null,
-                ));
+                edges.push(DbEdge {
+                    source: container_id.to_string(),
+                    target: object_id.clone(),
+                    edge_type: "Contains".to_string(),
+                    properties: JsonValue::Null,
+                });
             }
         }
 
@@ -370,12 +367,12 @@ impl BloodHoundImporter {
         if let Some(delegates) = entity.get("AllowedToDelegate").and_then(|v| v.as_array()) {
             for delegate in delegates {
                 if let Some(target_id) = delegate.get("ObjectIdentifier").and_then(|v| v.as_str()) {
-                    edges.push((
-                        object_id.clone(),
-                        target_id.to_string(),
-                        "AllowedToDelegate".to_string(),
-                        JsonValue::Null,
-                    ));
+                    edges.push(DbEdge {
+                        source: object_id.clone(),
+                        target: target_id.to_string(),
+                        edge_type: "AllowedToDelegate".to_string(),
+                        properties: JsonValue::Null,
+                    });
                 }
             }
         }
@@ -384,12 +381,12 @@ impl BloodHoundImporter {
         if let Some(actors) = entity.get("AllowedToAct").and_then(|v| v.as_array()) {
             for actor in actors {
                 if let Some(actor_id) = actor.get("ObjectIdentifier").and_then(|v| v.as_str()) {
-                    edges.push((
-                        actor_id.to_string(),
-                        object_id.clone(),
-                        "AllowedToAct".to_string(),
-                        JsonValue::Null,
-                    ));
+                    edges.push(DbEdge {
+                        source: actor_id.to_string(),
+                        target: object_id.clone(),
+                        edge_type: "AllowedToAct".to_string(),
+                        properties: JsonValue::Null,
+                    });
                 }
             }
         }
@@ -403,12 +400,12 @@ impl BloodHoundImporter {
         if let Some(links) = entity.get("Links").and_then(|v| v.as_array()) {
             for link in links {
                 if let Some(gpo_id) = link.get("GUID").and_then(|v| v.as_str()) {
-                    edges.push((
-                        object_id.clone(),
-                        gpo_id.to_string(),
-                        "GPLink".to_string(),
-                        JsonValue::Null,
-                    ));
+                    edges.push(DbEdge {
+                        source: object_id.clone(),
+                        target: gpo_id.to_string(),
+                        edge_type: "GPLink".to_string(),
+                        properties: JsonValue::Null,
+                    });
                 }
             }
         }
@@ -424,21 +421,21 @@ impl BloodHoundImporter {
 
                     // Bidirectional or outbound trust
                     if trust_direction == 2 || trust_direction == 3 {
-                        edges.push((
-                            target_sid.to_string(),
-                            object_id.clone(),
-                            "TrustedBy".to_string(),
-                            serde_json::json!({"direction": trust_direction}),
-                        ));
+                        edges.push(DbEdge {
+                            source: target_sid.to_string(),
+                            target: object_id.clone(),
+                            edge_type: "TrustedBy".to_string(),
+                            properties: serde_json::json!({"direction": trust_direction}),
+                        });
                     }
                     // Bidirectional or inbound trust
                     if trust_direction == 1 || trust_direction == 3 {
-                        edges.push((
-                            object_id.clone(),
-                            target_sid.to_string(),
-                            "TrustedBy".to_string(),
-                            serde_json::json!({"direction": trust_direction}),
-                        ));
+                        edges.push(DbEdge {
+                            source: object_id.clone(),
+                            target: target_sid.to_string(),
+                            edge_type: "TrustedBy".to_string(),
+                            properties: serde_json::json!({"direction": trust_direction}),
+                        });
                     }
                 }
             }
@@ -484,7 +481,7 @@ impl BloodHoundImporter {
 
     fn flush_nodes(
         &self,
-        batch: &mut Vec<(String, String, String, JsonValue)>,
+        batch: &mut Vec<DbNode>,
         progress: &mut ImportProgress,
     ) -> Result<(), String> {
         if batch.is_empty() {
@@ -512,7 +509,7 @@ impl BloodHoundImporter {
 
     fn flush_edges(
         &self,
-        batch: &mut Vec<(String, String, String, JsonValue)>,
+        batch: &mut Vec<DbEdge>,
         progress: &mut ImportProgress,
     ) -> Result<(), String> {
         if batch.is_empty() {

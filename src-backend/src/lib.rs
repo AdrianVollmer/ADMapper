@@ -16,7 +16,7 @@ use axum::{
     Router,
 };
 use dashmap::DashMap;
-use db::GraphDatabase;
+use db::{DbEdge, DbNode, GraphDatabase};
 use import::{BloodHoundImporter, ImportProgress};
 use parking_lot::RwLock;
 use serde::Deserialize;
@@ -332,6 +332,27 @@ struct GraphEdge {
     edge_type: String,
 }
 
+impl From<DbNode> for GraphNode {
+    fn from(node: DbNode) -> Self {
+        GraphNode {
+            id: node.id,
+            label: node.label,
+            node_type: node.node_type,
+            properties: node.properties,
+        }
+    }
+}
+
+impl From<DbEdge> for GraphEdge {
+    fn from(edge: DbEdge) -> Self {
+        GraphEdge {
+            source: edge.source,
+            target: edge.target,
+            edge_type: edge.edge_type,
+        }
+    }
+}
+
 /// Get all graph nodes.
 async fn graph_nodes(
     State(state): State<AppState>,
@@ -341,15 +362,7 @@ async fn graph_nodes(
         .get_all_nodes()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let result: Vec<GraphNode> = nodes
-        .into_iter()
-        .map(|(id, label, node_type, properties)| GraphNode {
-            id,
-            label,
-            node_type,
-            properties,
-        })
-        .collect();
+    let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
 
     Ok(Json(result))
 }
@@ -363,14 +376,7 @@ async fn graph_edges(
         .get_all_edges()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let result: Vec<GraphEdge> = edges
-        .into_iter()
-        .map(|(source, target, edge_type, _)| GraphEdge {
-            source,
-            target,
-            edge_type,
-        })
-        .collect();
+    let result: Vec<GraphEdge> = edges.into_iter().map(GraphEdge::from).collect();
 
     Ok(Json(result))
 }
@@ -395,23 +401,8 @@ async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>, (St
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let result = FullGraph {
-        nodes: nodes
-            .into_iter()
-            .map(|(id, label, node_type, properties)| GraphNode {
-                id,
-                label,
-                node_type,
-                properties,
-            })
-            .collect(),
-        edges: edges
-            .into_iter()
-            .map(|(source, target, edge_type, _)| GraphEdge {
-                source,
-                target,
-                edge_type,
-            })
-            .collect(),
+        nodes: nodes.into_iter().map(GraphNode::from).collect(),
+        edges: edges.into_iter().map(GraphEdge::from).collect(),
     };
 
     Ok(Json(result))
@@ -447,15 +438,7 @@ async fn graph_search(
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         })?;
 
-    let result: Vec<GraphNode> = nodes
-        .into_iter()
-        .map(|(id, label, node_type, properties)| GraphNode {
-            id,
-            label,
-            node_type,
-            properties,
-        })
-        .collect();
+    let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
 
     debug!(query = %params.q, results = result.len(), "Search complete");
     Ok(Json(result))
@@ -521,34 +504,23 @@ async fn graph_path(
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
             // Build node lookup
-            let node_map: std::collections::HashMap<String, (String, String, String, JsonValue)> =
-                nodes
-                    .into_iter()
-                    .map(|(id, label, node_type, props)| {
-                        (id.clone(), (id, label, node_type, props))
-                    })
-                    .collect();
+            let node_map: std::collections::HashMap<String, DbNode> = nodes
+                .into_iter()
+                .map(|node| (node.id.clone(), node))
+                .collect();
 
             // Build path steps
             let path_steps: Vec<PathStep> = path
                 .iter()
                 .map(|(id, edge_type)| {
-                    let (node_id, label, node_type, properties) =
-                        node_map.get(id).cloned().unwrap_or_else(|| {
-                            (
-                                id.clone(),
-                                id.clone(),
-                                "Unknown".to_string(),
-                                JsonValue::Null,
-                            )
-                        });
+                    let node = node_map.get(id).cloned().unwrap_or_else(|| DbNode {
+                        id: id.clone(),
+                        label: id.clone(),
+                        node_type: "Unknown".to_string(),
+                        properties: JsonValue::Null,
+                    });
                     PathStep {
-                        node: GraphNode {
-                            id: node_id,
-                            label,
-                            node_type,
-                            properties,
-                        },
+                        node: GraphNode::from(node),
                         edge_type: edge_type.clone(),
                     }
                 })
@@ -562,14 +534,7 @@ async fn graph_path(
 
             let graph = FullGraph {
                 nodes: path_steps.iter().map(|s| s.node.clone()).collect(),
-                edges: edges
-                    .into_iter()
-                    .map(|(source, target, edge_type, _)| GraphEdge {
-                        source,
-                        target,
-                        edge_type,
-                    })
-                    .collect(),
+                edges: edges.into_iter().map(GraphEdge::from).collect(),
             };
 
             debug!(
@@ -644,23 +609,8 @@ async fn graph_query(
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
             Some(FullGraph {
-                nodes: nodes
-                    .into_iter()
-                    .map(|(id, label, node_type, properties)| GraphNode {
-                        id,
-                        label,
-                        node_type,
-                        properties,
-                    })
-                    .collect(),
-                edges: edges
-                    .into_iter()
-                    .map(|(source, target, edge_type, _)| GraphEdge {
-                        source,
-                        target,
-                        edge_type,
-                    })
-                    .collect(),
+                nodes: nodes.into_iter().map(GraphNode::from).collect(),
+                edges: edges.into_iter().map(GraphEdge::from).collect(),
             })
         } else {
             None

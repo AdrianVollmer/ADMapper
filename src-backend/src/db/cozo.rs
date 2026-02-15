@@ -9,6 +9,24 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, info, trace};
 
+/// A node stored in the database.
+#[derive(Clone, Debug)]
+pub struct DbNode {
+    pub id: String,
+    pub label: String,
+    pub node_type: String,
+    pub properties: JsonValue,
+}
+
+/// An edge stored in the database.
+#[derive(Clone, Debug)]
+pub struct DbEdge {
+    pub source: String,
+    pub target: String,
+    pub edge_type: String,
+    pub properties: JsonValue,
+}
+
 #[derive(Error, Debug)]
 pub enum DbError {
     #[error("Database error: {0}")]
@@ -138,19 +156,19 @@ impl GraphDatabase {
     }
 
     /// Insert a batch of nodes.
-    pub fn insert_nodes(&self, nodes: &[(String, String, String, JsonValue)]) -> Result<usize> {
+    pub fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
         if nodes.is_empty() {
             return Ok(0);
         }
 
         // Build the data rows
         let mut rows = Vec::with_capacity(nodes.len());
-        for (object_id, label, node_type, properties) in nodes {
-            let props_str = serde_json::to_string(properties)?;
+        for node in nodes {
+            let props_str = serde_json::to_string(&node.properties)?;
             rows.push(vec![
-                DataValue::Str(object_id.clone().into()),
-                DataValue::Str(label.clone().into()),
-                DataValue::Str(node_type.clone().into()),
+                DataValue::Str(node.id.clone().into()),
+                DataValue::Str(node.label.clone().into()),
+                DataValue::Str(node.node_type.clone().into()),
                 DataValue::Str(props_str.into()),
             ]);
         }
@@ -174,18 +192,18 @@ impl GraphDatabase {
     }
 
     /// Insert a batch of edges.
-    pub fn insert_edges(&self, edges: &[(String, String, String, JsonValue)]) -> Result<usize> {
+    pub fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
         if edges.is_empty() {
             return Ok(0);
         }
 
         let mut rows = Vec::with_capacity(edges.len());
-        for (source, target, edge_type, properties) in edges {
-            let props_str = serde_json::to_string(properties)?;
+        for edge in edges {
+            let props_str = serde_json::to_string(&edge.properties)?;
             rows.push(vec![
-                DataValue::Str(source.clone().into()),
-                DataValue::Str(target.clone().into()),
-                DataValue::Str(edge_type.clone().into()),
+                DataValue::Str(edge.source.clone().into()),
+                DataValue::Str(edge.target.clone().into()),
+                DataValue::Str(edge.edge_type.clone().into()),
                 DataValue::Str(props_str.into()),
             ]);
         }
@@ -238,7 +256,7 @@ impl GraphDatabase {
     }
 
     /// Get all nodes (for graph rendering).
-    pub fn get_all_nodes(&self) -> Result<Vec<(String, String, String, JsonValue)>> {
+    pub fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
         let result = self.db.run_script(
             "?[object_id, label, node_type, properties] := *nodes{object_id, label, node_type, properties}",
             Default::default(),
@@ -251,20 +269,20 @@ impl GraphDatabase {
         let mut nodes = Vec::new();
         if let Some(rows) = rows {
             for row in rows {
-                if let (Some(object_id), Some(label), Some(node_type), Some(properties)) = (
+                if let (Some(id), Some(label), Some(node_type), Some(properties)) = (
                     row.get(0).and_then(|v| v.as_str()),
                     row.get(1).and_then(|v| v.as_str()),
                     row.get(2).and_then(|v| v.as_str()),
                     row.get(3).and_then(|v| v.as_str()),
                 ) {
-                    let props: JsonValue =
+                    let properties: JsonValue =
                         serde_json::from_str(properties).unwrap_or(JsonValue::Null);
-                    nodes.push((
-                        object_id.to_string(),
-                        label.to_string(),
-                        node_type.to_string(),
-                        props,
-                    ));
+                    nodes.push(DbNode {
+                        id: id.to_string(),
+                        label: label.to_string(),
+                        node_type: node_type.to_string(),
+                        properties,
+                    });
                 }
             }
         }
@@ -273,7 +291,7 @@ impl GraphDatabase {
     }
 
     /// Get all edges (for graph rendering).
-    pub fn get_all_edges(&self) -> Result<Vec<(String, String, String, JsonValue)>> {
+    pub fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
         let result = self.db.run_script(
             "?[source, target, edge_type, properties] := *edges{source, target, edge_type, properties}",
             Default::default(),
@@ -292,14 +310,14 @@ impl GraphDatabase {
                     row.get(2).and_then(|v| v.as_str()),
                     row.get(3).and_then(|v| v.as_str()),
                 ) {
-                    let props: JsonValue =
+                    let properties: JsonValue =
                         serde_json::from_str(properties).unwrap_or(JsonValue::Null);
-                    edges.push((
-                        source.to_string(),
-                        target.to_string(),
-                        edge_type.to_string(),
-                        props,
-                    ));
+                    edges.push(DbEdge {
+                        source: source.to_string(),
+                        target: target.to_string(),
+                        edge_type: edge_type.to_string(),
+                        properties,
+                    });
                 }
             }
         }
@@ -308,11 +326,7 @@ impl GraphDatabase {
     }
 
     /// Search nodes by label (case-insensitive substring match).
-    pub fn search_nodes(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<(String, String, String, JsonValue)>> {
+    pub fn search_nodes(&self, query: &str, limit: usize) -> Result<Vec<DbNode>> {
         let query_lower = query.to_lowercase();
         debug!(query = %query, limit = limit, "Searching nodes");
 
@@ -330,24 +344,24 @@ impl GraphDatabase {
         let mut nodes = Vec::new();
         if let Some(rows) = rows {
             for row in rows {
-                if let (Some(object_id), Some(label), Some(node_type), Some(properties)) = (
+                if let (Some(id), Some(label), Some(node_type), Some(properties)) = (
                     row.get(0).and_then(|v| v.as_str()),
                     row.get(1).and_then(|v| v.as_str()),
                     row.get(2).and_then(|v| v.as_str()),
                     row.get(3).and_then(|v| v.as_str()),
                 ) {
-                    // Case-insensitive search on label and object_id
+                    // Case-insensitive search on label and id
                     if label.to_lowercase().contains(&query_lower)
-                        || object_id.to_lowercase().contains(&query_lower)
+                        || id.to_lowercase().contains(&query_lower)
                     {
-                        let props: JsonValue =
+                        let properties: JsonValue =
                             serde_json::from_str(properties).unwrap_or(JsonValue::Null);
-                        nodes.push((
-                            object_id.to_string(),
-                            label.to_string(),
-                            node_type.to_string(),
-                            props,
-                        ));
+                        nodes.push(DbNode {
+                            id: id.to_string(),
+                            label: label.to_string(),
+                            node_type: node_type.to_string(),
+                            properties,
+                        });
                         if nodes.len() >= limit {
                             break;
                         }
@@ -376,10 +390,10 @@ impl GraphDatabase {
         // Build adjacency list
         let mut adj: std::collections::HashMap<String, Vec<(String, String)>> =
             std::collections::HashMap::new();
-        for (source, target, edge_type, _) in &edges {
-            adj.entry(source.clone())
+        for edge in &edges {
+            adj.entry(edge.source.clone())
                 .or_default()
-                .push((target.clone(), edge_type.clone()));
+                .push((edge.target.clone(), edge.edge_type.clone()));
         }
 
         // BFS
@@ -430,10 +444,7 @@ impl GraphDatabase {
     }
 
     /// Get nodes by their IDs.
-    pub fn get_nodes_by_ids(
-        &self,
-        ids: &[String],
-    ) -> Result<Vec<(String, String, String, JsonValue)>> {
+    pub fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -443,15 +454,12 @@ impl GraphDatabase {
 
         Ok(all_nodes
             .into_iter()
-            .filter(|(id, _, _, _)| id_set.contains(id.as_str()))
+            .filter(|node| id_set.contains(node.id.as_str()))
             .collect())
     }
 
     /// Get edges between a set of nodes.
-    pub fn get_edges_between(
-        &self,
-        node_ids: &[String],
-    ) -> Result<Vec<(String, String, String, JsonValue)>> {
+    pub fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>> {
         if node_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -461,8 +469,8 @@ impl GraphDatabase {
 
         Ok(all_edges
             .into_iter()
-            .filter(|(source, target, _, _)| {
-                id_set.contains(source.as_str()) && id_set.contains(target.as_str())
+            .filter(|edge| {
+                id_set.contains(edge.source.as_str()) && id_set.contains(edge.target.as_str())
             })
             .collect())
     }
@@ -622,18 +630,18 @@ mod tests {
         let db = GraphDatabase::in_memory().unwrap();
 
         let nodes = vec![
-            (
-                "user-1".to_string(),
-                "admin@corp.local".to_string(),
-                "User".to_string(),
-                serde_json::json!({"enabled": true}),
-            ),
-            (
-                "group-1".to_string(),
-                "Domain Admins".to_string(),
-                "Group".to_string(),
-                serde_json::json!({}),
-            ),
+            DbNode {
+                id: "user-1".to_string(),
+                label: "admin@corp.local".to_string(),
+                node_type: "User".to_string(),
+                properties: serde_json::json!({"enabled": true}),
+            },
+            DbNode {
+                id: "group-1".to_string(),
+                label: "Domain Admins".to_string(),
+                node_type: "Group".to_string(),
+                properties: serde_json::json!({}),
+            },
         ];
 
         let count = db.insert_nodes(&nodes).unwrap();
@@ -647,12 +655,12 @@ mod tests {
     fn test_insert_edges() {
         let db = GraphDatabase::in_memory().unwrap();
 
-        let edges = vec![(
-            "user-1".to_string(),
-            "group-1".to_string(),
-            "MemberOf".to_string(),
-            serde_json::json!({}),
-        )];
+        let edges = vec![DbEdge {
+            source: "user-1".to_string(),
+            target: "group-1".to_string(),
+            edge_type: "MemberOf".to_string(),
+            properties: serde_json::json!({}),
+        }];
 
         let count = db.insert_edges(&edges).unwrap();
         assert_eq!(count, 1);
@@ -665,12 +673,12 @@ mod tests {
     fn test_clear() {
         let db = GraphDatabase::in_memory().unwrap();
 
-        let nodes = vec![(
-            "user-1".to_string(),
-            "admin".to_string(),
-            "User".to_string(),
-            serde_json::json!({}),
-        )];
+        let nodes = vec![DbNode {
+            id: "user-1".to_string(),
+            label: "admin".to_string(),
+            node_type: "User".to_string(),
+            properties: serde_json::json!({}),
+        }];
         db.insert_nodes(&nodes).unwrap();
 
         db.clear().unwrap();

@@ -2,4 +2,4 @@
 
 mod cozo;
 
-pub use cozo::GraphDatabase;
+pub use cozo::{DbEdge, DbNode, GraphDatabase};
