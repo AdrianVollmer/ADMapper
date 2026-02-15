@@ -447,7 +447,19 @@
   }
 
   .detail-header-top {
-    @apply flex items-center justify-between mb-1;
+    @apply flex items-center gap-2 mb-1;
+  }
+
+  .user-indicators {
+    @apply flex items-center gap-1;
+  }
+
+  .user-indicator {
+    @apply inline-flex items-center justify-center w-5 h-5;
+  }
+
+  .user-indicator svg {
+    @apply w-4 h-4;
   }
 
   .detail-node-type {

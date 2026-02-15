@@ -8,6 +8,8 @@ import { appState } from "../main";
 import type { ADNodeAttributes } from "../graph/types";
 import { NODE_COLORS } from "../graph/theme";
 import { escapeHtml } from "../utils/html";
+import { api } from "../api/client";
+import type { PathResponse } from "../api/types";
 
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
@@ -183,6 +185,99 @@ const ACTIONS = [
     tooltip: "Set as End Node",
   },
 ];
+
+/** Well-known high-value RIDs */
+const HIGH_VALUE_RIDS = new Set([
+  "-500", // Built-in Administrator
+  "-502", // KRBTGT
+  "-512", // Domain Admins
+  "-516", // Domain Controllers
+  "-518", // Schema Admins
+  "-519", // Enterprise Admins
+  "-544", // Builtin Administrators
+]);
+
+/** User status indicator icons */
+const USER_INDICATORS = {
+  owned: {
+    icon: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-red-500">
+      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+    </svg>`,
+    tooltip: "Owned",
+  },
+  enterpriseAdmin: {
+    icon: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-purple-500">
+      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+    </svg>`,
+    tooltip: "Enterprise Admin",
+  },
+  domainAdmin: {
+    icon: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-yellow-500">
+      <path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z"/>
+      <path d="M5 19h14v2H5z"/>
+    </svg>`,
+    tooltip: "Domain Admin",
+  },
+  highValue: {
+    icon: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-orange-500">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+    </svg>`,
+    tooltip: "High Value Target",
+  },
+  hasPath: {
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4 text-blue-500">
+      <path d="M13 17l5-5-5-5M6 17l5-5-5-5"/>
+    </svg>`,
+    tooltip: "Has Path to High Value",
+  },
+  checking: {
+    icon: `<span class="spinner-sm"></span>`,
+    tooltip: "Checking paths...",
+  },
+  noPath: {
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4 text-gray-500">
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M8 12h8"/>
+    </svg>`,
+    tooltip: "No path to high value targets",
+  },
+};
+
+/** Check if a SID ends with a high-value RID */
+function hasHighValueRID(sid: string | undefined): boolean {
+  if (!sid) return false;
+  for (const rid of HIGH_VALUE_RIDS) {
+    if (sid.endsWith(rid)) return true;
+  }
+  return false;
+}
+
+/** Check if user is in a specific admin group based on properties */
+function isInAdminGroup(props: Record<string, unknown>, groupRid: string): boolean {
+  // Check admincount property
+  if (groupRid === "-512" || groupRid === "-519") {
+    const adminCount = props.admincount ?? props.AdminCount;
+    if (adminCount === true || adminCount === 1 || adminCount === "1") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Get the domain SID from a user SID */
+function getDomainSID(userSid: string): string | null {
+  // User SID format: S-1-5-21-DOMAIN-RID
+  // Domain SID is everything except the last part
+  const parts = userSid.split("-");
+  if (parts.length < 5) return null;
+  return parts.slice(0, -1).join("-");
+}
+
+/** Render a user status indicator */
+function renderIndicator(type: keyof typeof USER_INDICATORS): string {
+  const indicator = USER_INDICATORS[type];
+  return `<span class="user-indicator" title="${indicator.tooltip}">${indicator.icon}</span>`;
+}
 
 /** Initialize sidebars */
 export function initSidebars(): void {
@@ -411,6 +506,47 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   const typeColor = NODE_COLORS[attrs.nodeType] || "#6c757d";
   const typeLower = attrs.nodeType.toLowerCase();
 
+  // Build user status indicators (for User nodes only)
+  let indicatorsHtml = "";
+  let needsPathCheck = false;
+  if (attrs.nodeType === "User" && attrs.properties) {
+    const props = attrs.properties;
+    const sid = (props.objectsid ?? props.objectSid ?? props.ObjectSid ?? "") as string;
+    const owned = props.owned ?? props.Owned;
+    const highValue = props.highvalue ?? props.HighValue ?? props.highValue;
+
+    const indicators: string[] = [];
+
+    // Check owned status
+    if (owned === true || owned === "true" || owned === 1) {
+      indicators.push(renderIndicator("owned"));
+    }
+
+    // Check if Enterprise Admin (RID -519)
+    if (sid.endsWith("-519") || isInAdminGroup(props, "-519")) {
+      indicators.push(renderIndicator("enterpriseAdmin"));
+    }
+    // Check if Domain Admin (RID -512)
+    else if (sid.endsWith("-512") || isInAdminGroup(props, "-512")) {
+      indicators.push(renderIndicator("domainAdmin"));
+    }
+    // Check high value based on RID or property
+    else if (highValue === true || highValue === "true" || hasHighValueRID(sid)) {
+      indicators.push(renderIndicator("highValue"));
+    }
+    // Need to check for path to high value
+    else {
+      needsPathCheck = true;
+      indicators.push(
+        `<span id="path-check-indicator" class="inline-flex items-center" title="Checking paths...">${USER_INDICATORS.checking.icon}</span>`
+      );
+    }
+
+    if (indicators.length > 0) {
+      indicatorsHtml = `<span class="user-indicators">${indicators.join("")}</span>`;
+    }
+  }
+
   // Build actions bar
   const actionsHtml = ACTIONS.map(
     (action) => `
@@ -458,6 +594,7 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
         <span class="detail-node-type node-badge ${typeLower}" style="background-color: ${typeColor}">
           ${escapeHtml(attrs.nodeType)}
         </span>
+        ${indicatorsHtml}
       </div>
       <h2 class="detail-node-name">${escapeHtml(attrs.label)}</h2>
       <div class="detail-actions">
@@ -482,4 +619,61 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
     `
     }
   `;
+
+  // Async path check for users without obvious high-value indicators
+  if (needsPathCheck && attrs.properties) {
+    checkPathToHighValue(nodeId, attrs.properties);
+  }
+}
+
+/** Check if user has a path to high-value targets */
+async function checkPathToHighValue(nodeId: string, props: Record<string, unknown>): Promise<void> {
+  const indicator = document.getElementById("path-check-indicator");
+  if (!indicator) return;
+
+  const sid = (props.objectsid ?? props.objectSid ?? props.ObjectSid ?? "") as string;
+  const domainSid = getDomainSID(sid);
+
+  if (!domainSid) {
+    indicator.innerHTML = USER_INDICATORS.noPath.icon;
+    indicator.title = USER_INDICATORS.noPath.tooltip;
+    return;
+  }
+
+  // High-value targets to check paths to
+  const targets = [
+    `${domainSid}-512`, // Domain Admins
+    `${domainSid}-519`, // Enterprise Admins
+    `${domainSid}-518`, // Schema Admins
+  ];
+
+  try {
+    for (const target of targets) {
+      const response = await api.get<PathResponse>(
+        `/api/graph/path?from=${encodeURIComponent(nodeId)}&to=${encodeURIComponent(target)}`
+      );
+
+      // Check if we're still showing the same node
+      if (appState.selectedNodeId !== nodeId) return;
+
+      if (response.found && response.path.length > 1) {
+        indicator.innerHTML = USER_INDICATORS.hasPath.icon;
+        indicator.title = `${USER_INDICATORS.hasPath.tooltip} (${response.path.length - 1} hops)`;
+        indicator.classList.add("cursor-pointer");
+        return;
+      }
+    }
+
+    // No path found to any target
+    if (appState.selectedNodeId === nodeId) {
+      indicator.innerHTML = USER_INDICATORS.noPath.icon;
+      indicator.title = USER_INDICATORS.noPath.tooltip;
+    }
+  } catch (err) {
+    console.error("Path check failed:", err);
+    if (appState.selectedNodeId === nodeId) {
+      indicator.innerHTML = USER_INDICATORS.noPath.icon;
+      indicator.title = "Path check failed";
+    }
+  }
 }
