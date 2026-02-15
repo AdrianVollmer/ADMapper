@@ -1,11 +1,14 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  root: "src-frontend",
   build: {
     target: "ES2022",
-    outDir: "dist",
+    outDir: "../build",
+    emptyOutDir: true,
     sourcemap: true,
   },
+  publicDir: "../public",
   server: {
     port: 3000,
     strictPort: true,

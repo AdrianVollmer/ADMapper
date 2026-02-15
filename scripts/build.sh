@@ -88,7 +88,7 @@ build_frontend() {
 build_rust() {
 	log_info "Building Rust application (debug)..."
 	# Ensure frontend is built first (Rust needs manifest.json at compile time)
-	if [ ! -f "dist/manifest.json" ]; then
+	if [ ! -f "build/manifest.json" ]; then
 		log_warn "manifest.json not found, building frontend first..."
 		build_frontend
 	fi
@@ -98,7 +98,7 @@ build_rust() {
 build_rust_release() {
 	log_info "Building Rust application (release)..."
 	# Ensure frontend is built first
-	if [ ! -f "dist/manifest.json" ]; then
+	if [ ! -f "build/manifest.json" ]; then
 		log_warn "manifest.json not found, building frontend first..."
 		build_frontend
 	fi
@@ -121,7 +121,7 @@ clean() {
 	log_info "Cleaning build artifacts..."
 
 	# Frontend build output
-	rm -rf dist
+	rm -rf build
 
 	# Rust artifacts
 	cargo clean 2>/dev/null || true

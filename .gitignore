@@ -4,7 +4,12 @@ _*
 node_modules/
 
 # Build output
+build/
 dist/
+target/
+
+# Rust
+Cargo.lock
 
 # Cache
 .mypy_cache/

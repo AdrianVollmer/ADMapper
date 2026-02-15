@@ -8,7 +8,7 @@ const path = require("path");
 const isWatch = process.argv.includes("--watch");
 const srcDir = "src/graph";
 const outDir = "dist";
-const manifestPath = "dist/manifest.json";
+const manifestPath = "build/manifest.json";
 
 // Get all TypeScript entry points
 function getEntryPoints() {

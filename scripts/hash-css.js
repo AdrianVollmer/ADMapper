@@ -12,9 +12,9 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const cssDir = "dist/css";
+const cssDir = "build/css";
 const cssFile = "tailwind.css";
-const manifestPath = "dist/manifest.json";
+const manifestPath = "build/manifest.json";
 
 const cssPath = path.join(cssDir, cssFile);
 if (!fs.existsSync(cssPath)) {
