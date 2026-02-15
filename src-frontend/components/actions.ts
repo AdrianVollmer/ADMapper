@@ -7,6 +7,7 @@
 
 import { toggleNavSidebar, toggleDetailSidebar } from "./sidebars";
 import { getRenderer } from "./graph-view";
+import { triggerBloodHoundImport } from "./import";
 
 /** Dispatch an action by name */
 export function dispatchAction(action: string): void {
@@ -111,8 +112,7 @@ export function dispatchAction(action: string): void {
 
     // Tools menu
     case "import-bloodhound":
-      console.log("Action: import-bloodhound");
-      // TODO: Import dialog
+      triggerBloodHoundImport();
       break;
 
     case "run-query":

@@ -8,6 +8,7 @@ import { initMenuBar } from "./components/menubar";
 import { initSidebars } from "./components/sidebars";
 import { initGraph } from "./components/graph-view";
 import { initKeyboardShortcuts } from "./components/keyboard";
+import { initImport } from "./components/import";
 
 /** Application state */
 export interface AppState {
@@ -28,6 +29,7 @@ function init(): void {
   initSidebars();
   initGraph();
   initKeyboardShortcuts();
+  initImport();
 
   console.log("ADMapper initialized");
 }

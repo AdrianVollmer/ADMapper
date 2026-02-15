@@ -362,6 +362,61 @@
     </div>
   </div>
 
+  <!-- Hidden file input for BloodHound import -->
+  <input
+    type="file"
+    id="bloodhound-file-input"
+    accept=".json,.zip"
+    multiple
+    hidden
+  >
+
+  <!-- Import Modal -->
+  <div id="import-modal" class="modal-overlay" hidden>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">Importing BloodHound Data</h2>
+      </div>
+      <div class="modal-body">
+        <!-- Progress bar -->
+        <div class="import-progress">
+          <div class="progress-bar">
+            <div class="progress-fill" id="import-progress-fill" style="width: 0%"></div>
+          </div>
+          <div class="progress-text">
+            <span id="import-progress-percent">0%</span>
+            <span id="import-progress-files">0 / 0 files</span>
+          </div>
+        </div>
+
+        <!-- Current file -->
+        <div class="import-status">
+          <span class="status-label">Processing:</span>
+          <span id="import-current-file" class="status-value">-</span>
+        </div>
+
+        <!-- Stats -->
+        <div class="import-stats">
+          <div class="stat-item">
+            <span class="stat-value" id="import-nodes-count">0</span>
+            <span class="stat-label">Nodes</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value" id="import-edges-count">0</span>
+            <span class="stat-label">Edges</span>
+          </div>
+        </div>
+
+        <!-- Error display -->
+        <div id="import-error" class="import-error" hidden></div>
+      </div>
+      <div class="modal-footer">
+        <button id="import-done-btn" class="btn btn-primary" hidden>Done</button>
+        <button id="import-cancel-btn" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="./main.ts"></script>
 </body>
 </html>

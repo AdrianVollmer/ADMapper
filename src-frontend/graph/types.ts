@@ -14,6 +14,11 @@ export type ADNodeType =
   | "GPO"
   | "OU"
   | "Container"
+  | "CertTemplate"
+  | "EnterpriseCA"
+  | "RootCA"
+  | "AIACA"
+  | "NTAuthStore"
   | "Unknown";
 
 /** Common AD edge/relationship types */
@@ -25,6 +30,7 @@ export type ADEdgeType =
   | "CanPSRemote"
   | "ExecuteDCOM"
   | "AllowedToDelegate"
+  | "AllowedToAct"
   | "AddMember"
   | "ForceChangePassword"
   | "GenericAll"
@@ -38,6 +44,16 @@ export type ADEdgeType =
   | "DCSync"
   | "GetChanges"
   | "GetChangesAll"
+  | "AllExtendedRights"
+  | "AddKeyCredentialLink"
+  | "AddAllowedToAct"
+  | "ReadLAPSPassword"
+  | "ReadGMSAPassword"
+  | "GetChangesInFilteredSet"
+  | "WriteSPN"
+  | "WriteAccountRestrictions"
+  | "LocalGroupMember"
+  | "ACE"
   | "Unknown";
 
 /** Node data stored in graphology */
