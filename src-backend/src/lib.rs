@@ -10,13 +10,13 @@ use axum::{
     http::StatusCode,
     response::{
         sse::{Event, Sse},
-        Json,
+        IntoResponse, Json, Response,
     },
     routing::{get, post},
     Router,
 };
 use dashmap::DashMap;
-use db::{DbEdge, DbNode, GraphDatabase};
+use db::{DbEdge, DbError, DbNode, GraphDatabase};
 use import::{BloodHoundImporter, ImportProgress};
 use parking_lot::RwLock;
 use serde::Deserialize;
@@ -38,6 +38,56 @@ use tracing::{debug, error, info, instrument, warn};
 #[cfg(feature = "desktop")]
 #[cfg(debug_assertions)]
 use tauri::Manager;
+
+// ============================================================================
+// API Error Type
+// ============================================================================
+
+/// API error type with automatic response conversion.
+#[derive(Debug)]
+pub enum ApiError {
+    /// Database operation failed
+    Database(DbError),
+    /// Invalid request from client
+    BadRequest(String),
+    /// Requested resource not found
+    NotFound(String),
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApiError::Database(e) => write!(f, "Database error: {e}"),
+            ApiError::BadRequest(msg) => write!(f, "Bad request: {msg}"),
+            ApiError::NotFound(msg) => write!(f, "Not found: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ApiError {}
+
+impl From<DbError> for ApiError {
+    fn from(e: DbError) -> Self {
+        error!(error = %e, "Database error");
+        ApiError::Database(e)
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let (status, message) = match &self {
+            ApiError::Database(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+            ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+        };
+
+        (status, message).into_response()
+    }
+}
+
+// ============================================================================
+// Application State
+// ============================================================================
 
 /// Import job state: channel for live updates + optional final state for late subscribers.
 pub struct ImportJob {
@@ -159,7 +209,7 @@ async fn health_check() -> &'static str {
 async fn import_bloodhound(
     State(state): State<AppState>,
     mut multipart: Multipart,
-) -> Result<Json<JsonValue>, (StatusCode, String)> {
+) -> Result<Json<JsonValue>, ApiError> {
     let job_id = uuid::Uuid::new_v4().to_string();
     info!(job_id = %job_id, "Starting import job");
 
@@ -176,7 +226,7 @@ async fn import_bloodhound(
 
     while let Some(field) = multipart.next_field().await.map_err(|e| {
         error!(error = %e, "Multipart read error");
-        (StatusCode::BAD_REQUEST, format!("Multipart error: {e}"))
+        ApiError::BadRequest(format!("Multipart error: {e}"))
     })? {
         let filename = field.file_name().unwrap_or("unknown").to_string();
         let data = field
@@ -184,7 +234,7 @@ async fn import_bloodhound(
             .await
             .map_err(|e| {
                 error!(error = %e, filename = %filename, "Failed to read file data");
-                (StatusCode::BAD_REQUEST, format!("Read error: {e}"))
+                ApiError::BadRequest(format!("Read error: {e}"))
             })?
             .to_vec();
         debug!(filename = %filename, size = data.len(), "Received file");
@@ -193,7 +243,7 @@ async fn import_bloodhound(
 
     if files.is_empty() {
         warn!("Import request with no files");
-        return Err((StatusCode::BAD_REQUEST, "No files uploaded".to_string()));
+        return Err(ApiError::BadRequest("No files uploaded".to_string()));
     }
 
     info!(file_count = files.len(), "Processing uploaded files");
@@ -261,15 +311,14 @@ async fn import_bloodhound(
 async fn import_progress(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
-) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
-{
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
     use futures::future::Either;
 
     let job = state
         .import_jobs
         .get(&job_id)
         .map(|r| r.value().clone())
-        .ok_or((StatusCode::NOT_FOUND, "Job not found".to_string()))?;
+        .ok_or_else(|| ApiError::NotFound("Job not found".to_string()))?;
 
     // Check if import already completed (late subscriber)
     let final_state = job.final_state.read().clone();
@@ -294,13 +343,8 @@ async fn import_progress(
 
 /// Get graph statistics.
 #[instrument(skip(state))]
-async fn graph_stats(
-    State(state): State<AppState>,
-) -> Result<Json<JsonValue>, (StatusCode, String)> {
-    let (node_count, edge_count) = state.db.get_stats().map_err(|e| {
-        error!(error = %e, "Failed to get graph stats");
-        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-    })?;
+async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue>, ApiError> {
+    let (node_count, edge_count) = state.db.get_stats()?;
 
     debug!(
         nodes = node_count,
@@ -354,30 +398,16 @@ impl From<DbEdge> for GraphEdge {
 }
 
 /// Get all graph nodes.
-async fn graph_nodes(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<GraphNode>>, (StatusCode, String)> {
-    let nodes = state
-        .db
-        .get_all_nodes()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
+async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<GraphNode>>, ApiError> {
+    let nodes = state.db.get_all_nodes()?;
     let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
-
     Ok(Json(result))
 }
 
 /// Get all graph edges.
-async fn graph_edges(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<GraphEdge>>, (StatusCode, String)> {
-    let edges = state
-        .db
-        .get_all_edges()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
+async fn graph_edges(State(state): State<AppState>) -> Result<Json<Vec<GraphEdge>>, ApiError> {
+    let edges = state.db.get_all_edges()?;
     let result: Vec<GraphEdge> = edges.into_iter().map(GraphEdge::from).collect();
-
     Ok(Json(result))
 }
 
@@ -389,16 +419,9 @@ struct FullGraph {
 }
 
 /// Get full graph (nodes and edges).
-async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>, (StatusCode, String)> {
-    let nodes = state
-        .db
-        .get_all_nodes()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let edges = state
-        .db
-        .get_all_edges()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>, ApiError> {
+    let nodes = state.db.get_all_nodes()?;
+    let edges = state.db.get_all_edges()?;
 
     let result = FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
@@ -425,19 +448,12 @@ fn default_limit() -> usize {
 async fn graph_search(
     State(state): State<AppState>,
     Query(params): Query<SearchParams>,
-) -> Result<Json<Vec<GraphNode>>, (StatusCode, String)> {
+) -> Result<Json<Vec<GraphNode>>, ApiError> {
     if params.q.len() < 2 {
         return Ok(Json(Vec::new()));
     }
 
-    let nodes = state
-        .db
-        .search_nodes(&params.q, params.limit)
-        .map_err(|e| {
-            error!(error = %e, "Search failed");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
-
+    let nodes = state.db.search_nodes(&params.q, params.limit)?;
     let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
 
     debug!(query = %params.q, results = result.len(), "Search complete");
@@ -472,14 +488,8 @@ struct PathResponse {
 async fn graph_path(
     State(state): State<AppState>,
     Query(params): Query<PathParams>,
-) -> Result<Json<PathResponse>, (StatusCode, String)> {
-    let path_result = state
-        .db
-        .shortest_path(&params.from, &params.to)
-        .map_err(|e| {
-            error!(error = %e, "Path finding failed");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+) -> Result<Json<PathResponse>, ApiError> {
+    let path_result = state.db.shortest_path(&params.from, &params.to)?;
 
     match path_result {
         None => {
@@ -498,10 +508,7 @@ async fn graph_path(
             let node_ids: Vec<String> = path.iter().map(|(id, _)| id.clone()).collect();
 
             // Get full node data
-            let nodes = state
-                .db
-                .get_nodes_by_ids(&node_ids)
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            let nodes = state.db.get_nodes_by_ids(&node_ids)?;
 
             // Build node lookup
             let node_map: std::collections::HashMap<String, DbNode> = nodes
@@ -527,10 +534,7 @@ async fn graph_path(
                 .collect();
 
             // Get edges between path nodes
-            let edges = state
-                .db
-                .get_edges_between(&node_ids)
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            let edges = state.db.get_edges_between(&node_ids)?;
 
             let graph = FullGraph {
                 nodes: path_steps.iter().map(|s| s.node.clone()).collect(),
@@ -577,13 +581,13 @@ struct QueryResponse {
 async fn graph_query(
     State(state): State<AppState>,
     Json(body): Json<QueryRequest>,
-) -> Result<Json<QueryResponse>, (StatusCode, String)> {
+) -> Result<Json<QueryResponse>, ApiError> {
     info!(query = %body.query, "Executing custom query");
 
-    let results = state.db.run_custom_query(&body.query).map_err(|e| {
-        error!(error = %e, "Query execution failed");
-        (StatusCode::BAD_REQUEST, format!("Query error: {e}"))
-    })?;
+    let results = state
+        .db
+        .run_custom_query(&body.query)
+        .map_err(|e| ApiError::BadRequest(format!("Query error: {e}")))?;
 
     let graph = if body.extract_graph {
         // Try to extract node IDs from the first column of results
@@ -598,15 +602,8 @@ async fn graph_query(
         }
 
         if !node_ids.is_empty() {
-            let nodes = state
-                .db
-                .get_nodes_by_ids(&node_ids)
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-            let edges = state
-                .db
-                .get_edges_between(&node_ids)
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            let nodes = state.db.get_nodes_by_ids(&node_ids)?;
+            let edges = state.db.get_edges_between(&node_ids)?;
 
             Some(FullGraph {
                 nodes: nodes.into_iter().map(GraphNode::from).collect(),
@@ -667,15 +664,12 @@ fn default_per_page() -> usize {
 async fn get_query_history(
     State(state): State<AppState>,
     Query(params): Query<HistoryParams>,
-) -> Result<Json<QueryHistoryResponse>, (StatusCode, String)> {
+) -> Result<Json<QueryHistoryResponse>, ApiError> {
     let page = params.page.max(1);
     let per_page = params.per_page.clamp(1, 100);
     let offset = (page - 1) * per_page;
 
-    let (history, total) = state.db.get_query_history(per_page, offset).map_err(|e| {
-        error!(error = %e, "Failed to get query history");
-        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-    })?;
+    let (history, total) = state.db.get_query_history(per_page, offset)?;
 
     let entries: Vec<QueryHistoryEntry> = history
         .into_iter()
@@ -717,7 +711,7 @@ struct AddHistoryRequest {
 async fn add_query_history(
     State(state): State<AppState>,
     Json(body): Json<AddHistoryRequest>,
-) -> Result<Json<QueryHistoryEntry>, (StatusCode, String)> {
+) -> Result<Json<QueryHistoryEntry>, ApiError> {
     let id = uuid::Uuid::new_v4().to_string();
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -726,11 +720,7 @@ async fn add_query_history(
 
     state
         .db
-        .add_query_history(&id, &body.name, &body.query, timestamp, body.result_count)
-        .map_err(|e| {
-            error!(error = %e, "Failed to add query to history");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+        .add_query_history(&id, &body.name, &body.query, timestamp, body.result_count)?;
 
     info!(id = %id, name = %body.name, "Query added to history");
     Ok(Json(QueryHistoryEntry {
@@ -747,26 +737,16 @@ async fn add_query_history(
 async fn delete_query_history(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    state.db.delete_query_history(&id).map_err(|e| {
-        error!(error = %e, id = %id, "Failed to delete query from history");
-        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-    })?;
-
+) -> Result<StatusCode, ApiError> {
+    state.db.delete_query_history(&id)?;
     info!(id = %id, "Query deleted from history");
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// Clear all query history.
 #[instrument(skip(state))]
-async fn clear_query_history(
-    State(state): State<AppState>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    state.db.clear_query_history().map_err(|e| {
-        error!(error = %e, "Failed to clear query history");
-        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-    })?;
-
+async fn clear_query_history(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
+    state.db.clear_query_history()?;
     info!("Query history cleared");
     Ok(StatusCode::NO_CONTENT)
 }

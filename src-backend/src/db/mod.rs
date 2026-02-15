@@ -2,4 +2,4 @@
 
 mod cozo;
 
-pub use cozo::{DbEdge, DbNode, GraphDatabase};
+pub use cozo::{DbEdge, DbError, DbNode, GraphDatabase};
