@@ -652,6 +652,224 @@ async fn test_graph_path_nonexistent_node() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+/// Debug test to examine actual database contents
+/// Run with: cargo test --no-default-features test_debug_actual_db -- --nocapture --ignored
+#[tokio::test]
+#[ignore] // Only run manually for debugging
+async fn test_debug_actual_db() {
+    use std::path::Path;
+
+    let db_path = Path::new("/workspace/admapper.db");
+    if !db_path.exists() {
+        println!("Database not found at {:?}", db_path);
+        return;
+    }
+
+    let db = admapper::GraphDatabase::new(db_path).expect("Failed to open database");
+
+    // Get all nodes
+    let nodes = db.get_all_nodes().unwrap();
+    println!("\n=== NODES ({} total) ===", nodes.len());
+    for node in nodes.iter().take(10) {
+        println!("  ID: {}", node.id);
+        println!("  Label: {}", node.label);
+        println!("  Type: {}", node.node_type);
+        println!();
+    }
+
+    // Get all edges
+    let edges = db.get_all_edges().unwrap();
+    println!("\n=== EDGES ({} total, showing first 20) ===", edges.len());
+    for edge in edges.iter().take(20) {
+        println!("  {} -> {} ({})", edge.source, edge.target, edge.edge_type);
+    }
+
+    // Search for ADMINISTRATOR
+    println!("\n=== SEARCHING FOR ADMINISTRATOR ===");
+    let results = db.search_nodes("ADMINISTRATOR", 10).unwrap();
+    for node in &results {
+        println!("  Found: ID={}, Label={}", node.id, node.label);
+
+        // Try to resolve this identifier
+        let resolved = db.resolve_node_identifier(&node.label).unwrap();
+        println!("    Resolved label '{}' to: {:?}", node.label, resolved);
+    }
+
+    // Search for Domain Admins
+    println!("\n=== SEARCHING FOR DOMAIN ADMINS ===");
+    let results = db.search_nodes("DOMAIN ADMINS", 10).unwrap();
+    for node in &results {
+        println!("  Found: ID={}, Label={}", node.id, node.label);
+
+        let resolved = db.resolve_node_identifier(&node.label).unwrap();
+        println!("    Resolved label '{}' to: {:?}", node.label, resolved);
+    }
+
+    // Try to find path between them if we found both
+    let admin_results = db.search_nodes("ADMINISTRATOR", 1).unwrap();
+    let da_results = db.search_nodes("DOMAIN ADMINS", 1).unwrap();
+
+    if !admin_results.is_empty() && !da_results.is_empty() {
+        let from_id = &admin_results[0].id;
+        let to_id = &da_results[0].id;
+
+        println!("\n=== TESTING PATH FROM {} TO {} ===", from_id, to_id);
+
+        // Check if there's an edge
+        let edges_from_admin: Vec<_> = edges
+            .iter()
+            .filter(|e| e.source == *from_id)
+            .collect();
+        println!("  Edges FROM {}: {:?}", from_id, edges_from_admin.len());
+        for e in &edges_from_admin {
+            println!("    -> {} ({})", e.target, e.edge_type);
+        }
+
+        // Check edges TO domain admins
+        let edges_to_da: Vec<_> = edges
+            .iter()
+            .filter(|e| e.target == *to_id)
+            .collect();
+        println!("  Edges TO {}: {:?}", to_id, edges_to_da.len());
+        for e in edges_to_da.iter().take(10) {
+            // Also resolve the source to see who it is
+            let source_node = nodes.iter().find(|n| n.id == e.source);
+            let source_label = source_node.map(|n| n.label.as_str()).unwrap_or("UNKNOWN");
+            println!("    {} ({}) -> ({})", e.source, source_label, e.edge_type);
+        }
+
+        // Check if there's a user with the expected SID pattern (-500 for Administrator)
+        println!("\n  Looking for users with -500 SID (built-in Administrator):");
+        for node in &nodes {
+            if node.id.ends_with("-500") {
+                println!("    Found: ID={}, Label={}, Type={}", node.id, node.label, node.node_type);
+                // Check edges from this node
+                let edges_from: Vec<_> = edges.iter().filter(|e| e.source == node.id).collect();
+                println!("    Edges from this node: {}", edges_from.len());
+                for e in edges_from.iter().take(5) {
+                    let target_node = nodes.iter().find(|n| n.id == e.target);
+                    let target_label = target_node.map(|n| n.label.as_str()).unwrap_or("UNKNOWN");
+                    println!("      -> {} ({}) [{}]", e.target, target_label, e.edge_type);
+                }
+            }
+        }
+
+        // Try shortest path
+        let path = db.shortest_path(from_id, to_id).unwrap();
+        match path {
+            Some(p) => {
+                println!("  PATH FOUND! {} hops", p.len());
+                for (node_id, edge_type) in &p {
+                    println!("    {} (edge: {:?})", node_id, edge_type);
+                }
+            }
+            None => {
+                println!("  NO PATH FOUND!");
+            }
+        }
+    }
+}
+
+/// Test path finding with realistic BloodHound-style data
+#[tokio::test]
+async fn test_graph_path_bloodhound_style() {
+    let app = TestApp::new();
+
+    // Create nodes that mirror real BloodHound data format
+    let nodes = vec![
+        DbNode {
+            id: "S-1-5-21-2697957641-2271029196-387917394-500".to_string(),
+            label: "ADMINISTRATOR@PHANTOM.CORP".to_string(),
+            node_type: "User".to_string(),
+            properties: json!({"enabled": true, "admincount": true}),
+        },
+        DbNode {
+            id: "S-1-5-21-2697957641-2271029196-387917394-512".to_string(),
+            label: "DOMAIN ADMINS@PHANTOM.CORP".to_string(),
+            node_type: "Group".to_string(),
+            properties: json!({"admincount": true}),
+        },
+    ];
+
+    // ADMINISTRATOR is MemberOf DOMAIN ADMINS
+    let edges = vec![DbEdge {
+        source: "S-1-5-21-2697957641-2271029196-387917394-500".to_string(),
+        target: "S-1-5-21-2697957641-2271029196-387917394-512".to_string(),
+        edge_type: "MemberOf".to_string(),
+        properties: json!({}),
+    }];
+
+    app.db().insert_nodes(&nodes).unwrap();
+    app.db().insert_edges(&edges).unwrap();
+
+    // Verify data was inserted correctly
+    let all_nodes = app.db().get_all_nodes().unwrap();
+    let all_edges = app.db().get_all_edges().unwrap();
+    assert_eq!(all_nodes.len(), 2, "Should have 2 nodes");
+    assert_eq!(all_edges.len(), 1, "Should have 1 edge");
+
+    // Verify edge direction
+    let edge = &all_edges[0];
+    assert_eq!(edge.source, "S-1-5-21-2697957641-2271029196-387917394-500");
+    assert_eq!(edge.target, "S-1-5-21-2697957641-2271029196-387917394-512");
+
+    // Verify identifier resolution works
+    let resolved_from = app
+        .db()
+        .resolve_node_identifier("ADMINISTRATOR@PHANTOM.CORP")
+        .unwrap();
+    assert_eq!(
+        resolved_from,
+        Some("S-1-5-21-2697957641-2271029196-387917394-500".to_string()),
+        "Should resolve ADMINISTRATOR label to SID"
+    );
+
+    let resolved_to = app
+        .db()
+        .resolve_node_identifier("DOMAIN ADMINS@PHANTOM.CORP")
+        .unwrap();
+    assert_eq!(
+        resolved_to,
+        Some("S-1-5-21-2697957641-2271029196-387917394-512".to_string()),
+        "Should resolve DOMAIN ADMINS label to SID"
+    );
+
+    // Verify shortest_path works directly
+    let path_direct = app
+        .db()
+        .shortest_path(
+            "S-1-5-21-2697957641-2271029196-387917394-500",
+            "S-1-5-21-2697957641-2271029196-387917394-512",
+        )
+        .unwrap();
+    assert!(path_direct.is_some(), "Direct shortest_path call should find path");
+
+    // Test 1: Find path using full labels (as frontend would send)
+    let (status, json) = get_json(
+        app.router(),
+        "/api/graph/path?from=ADMINISTRATOR%40PHANTOM.CORP&to=DOMAIN%20ADMINS%40PHANTOM.CORP",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "Expected 200 OK, got {}", status);
+    assert_eq!(json["found"], true, "Path should be found. Response: {:?}", json);
+
+    let path = json["path"].as_array().unwrap();
+    assert_eq!(path.len(), 2, "Path should have 2 nodes");
+    assert_eq!(path[0]["node"]["label"], "ADMINISTRATOR@PHANTOM.CORP");
+    assert_eq!(path[1]["node"]["label"], "DOMAIN ADMINS@PHANTOM.CORP");
+
+    // Test 2: Find path using object IDs
+    let (status, json) = get_json(
+        app.router(),
+        "/api/graph/path?from=S-1-5-21-2697957641-2271029196-387917394-500&to=S-1-5-21-2697957641-2271029196-387917394-512",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["found"], true);
+}
+
 #[tokio::test]
 async fn test_custom_query_on_graph_data() {
     let app = TestApp::new();

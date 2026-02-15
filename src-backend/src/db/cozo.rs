@@ -326,6 +326,7 @@ impl GraphDatabase {
     /// Resolve a node identifier (object ID or label) to an object ID.
     /// Returns the object ID if found, None otherwise.
     /// First checks for exact object ID match, then tries exact label match.
+    /// When multiple nodes have the same label, prefers SID-style IDs (S-1-5-...) over GUIDs.
     pub fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {
         let all_nodes = self.get_all_nodes()?;
 
@@ -337,14 +338,27 @@ impl GraphDatabase {
         }
 
         // Then, check for exact label match (case-insensitive)
+        // Collect all matches to handle duplicates
         let identifier_lower = identifier.to_lowercase();
-        for node in &all_nodes {
-            if node.label.to_lowercase() == identifier_lower {
-                return Ok(Some(node.id.clone()));
+        let matches: Vec<&DbNode> = all_nodes
+            .iter()
+            .filter(|node| node.label.to_lowercase() == identifier_lower)
+            .collect();
+
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(Some(matches[0].id.clone())),
+            _ => {
+                // Multiple matches - prefer SID-style IDs (S-1-5-...) over GUIDs
+                // SIDs are more reliable identifiers for Active Directory objects
+                let sid_match = matches.iter().find(|n| n.id.starts_with("S-1-5-"));
+                if let Some(node) = sid_match {
+                    return Ok(Some(node.id.clone()));
+                }
+                // Fall back to first match if no SID found
+                Ok(Some(matches[0].id.clone()))
             }
         }
-
-        Ok(None)
     }
 
     /// Search nodes by label (case-insensitive substring match).
