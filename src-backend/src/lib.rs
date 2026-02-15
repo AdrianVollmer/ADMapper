@@ -16,7 +16,7 @@ use axum::{
     Router,
 };
 use dashmap::DashMap;
-use db::{DbEdge, DbError, DbNode, GraphDatabase};
+use db::DbError;
 use import::{BloodHoundImporter, ImportProgress};
 use parking_lot::RwLock;
 use serde::Deserialize;
@@ -110,6 +110,11 @@ impl AppState {
             import_jobs: Arc::new(DashMap::new()),
         }
     }
+
+    /// Get a reference to the database (for testing).
+    pub fn db(&self) -> &GraphDatabase {
+        &self.db
+    }
 }
 
 /// Run as Tauri desktop application.
@@ -136,6 +141,35 @@ pub fn run_desktop() {
     eprintln!("Error: Desktop mode not available. Build with --features desktop");
     eprintln!("Or use --headless to run as web server.");
     std::process::exit(1);
+}
+
+// Re-export database types for tests
+pub use db::{DbEdge, DbNode, GraphDatabase};
+
+/// Create the API router with the given state.
+///
+/// This is useful for integration tests that want to test the actual
+/// application handlers without starting a full server.
+pub fn create_api_router(state: AppState) -> Router {
+    Router::new()
+        .route("/api/health", get(health_check))
+        .route("/api/import", post(import_bloodhound))
+        .route("/api/import/progress/:job_id", get(import_progress))
+        .route("/api/graph/stats", get(graph_stats))
+        .route("/api/graph/nodes", get(graph_nodes))
+        .route("/api/graph/edges", get(graph_edges))
+        .route("/api/graph/all", get(graph_all))
+        .route("/api/graph/search", get(graph_search))
+        .route("/api/graph/path", get(graph_path))
+        .route("/api/graph/query", post(graph_query))
+        .route("/api/query-history", get(get_query_history))
+        .route("/api/query-history", post(add_query_history))
+        .route(
+            "/api/query-history/:id",
+            axum::routing::delete(delete_query_history),
+        )
+        .route("/api/query-history/clear", post(clear_query_history))
+        .with_state(state)
 }
 
 /// Run as standalone web service.

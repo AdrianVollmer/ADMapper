@@ -42,6 +42,11 @@ tauri-plugin-shell = { version = "2", optional = true }
 default = ["desktop"]
 desktop = ["tauri", "tauri-plugin-shell", "tauri-build"]
 
+[dev-dependencies]
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"
+mime = "0.3"
+
 [profile.release]
 panic = "abort"
 codegen-units = 1
