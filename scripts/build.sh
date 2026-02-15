@@ -8,9 +8,13 @@
 # Targets:
 #   all (default) - Build everything (frontend + Tauri)
 #   frontend      - Build frontend only (Vite)
+#   backend       - Build backend only (no Tauri, --no-default-features)
 #   tauri         - Build Tauri desktop app
 #   tauri-debug   - Build Tauri desktop app (debug)
 #   clean         - Remove all build artifacts
+#
+# Environment variables:
+#   IN_CONTAINER  - If set to non-empty value, build inside the dev container
 #
 set -e
 
@@ -25,6 +29,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
+
+# Container image name
+CONTAINER_IMAGE="admapper-dev"
+
+# Detect container runtime (prefer podman, fall back to docker)
+if command -v podman >/dev/null 2>&1; then
+	RUNTIME="podman"
+elif command -v docker >/dev/null 2>&1; then
+	RUNTIME="docker"
+else
+	RUNTIME=""
+fi
+
+# If IN_CONTAINER is set, delegate to container
+if [ -n "$IN_CONTAINER" ]; then
+	if [ -z "$RUNTIME" ]; then
+		echo -e "${RED}[ERROR]${NC} Neither podman nor docker found. Cannot build in container."
+		exit 1
+	fi
+
+	# Ensure the dev container image is built
+	if ! $RUNTIME image inspect "$CONTAINER_IMAGE" >/dev/null 2>&1; then
+		echo -e "${GREEN}[INFO]${NC} Building dev container image with $RUNTIME..."
+		$RUNTIME build -t "$CONTAINER_IMAGE" -f dev/Dockerfile .
+	fi
+
+	# Run the build inside the container (without IN_CONTAINER to avoid recursion)
+	echo -e "${GREEN}[INFO]${NC} Running build inside container with $RUNTIME..."
+	exec $RUNTIME run --rm \
+		-v "$PROJECT_ROOT:/workspace" \
+		-w /workspace \
+		"$CONTAINER_IMAGE" \
+		scripts/build.sh "$@"
+fi
 
 log_info() {
 	echo -e "${GREEN}[INFO]${NC} $1"
@@ -51,6 +89,12 @@ build_frontend() {
 	check_npm
 	npm run build
 	log_info "Frontend built to build/"
+}
+
+build_backend() {
+	log_info "Building backend (no Tauri)..."
+	cargo build --manifest-path src-backend/Cargo.toml --no-default-features --release
+	log_info "Backend built to src-backend/target/release/"
 }
 
 generate_icons() {
@@ -100,6 +144,9 @@ all)
 frontend)
 	build_frontend
 	;;
+backend)
+	build_backend
+	;;
 tauri)
 	build_tauri
 	;;
@@ -115,6 +162,7 @@ clean)
 	echo "Available targets:"
 	echo "  all (default) - Build everything (frontend + Tauri)"
 	echo "  frontend      - Build frontend only"
+	echo "  backend       - Build backend only (no Tauri)"
 	echo "  tauri         - Build Tauri desktop app (release)"
 	echo "  tauri-debug   - Build Tauri desktop app (debug)"
 	echo "  clean         - Remove all build artifacts"
