@@ -266,6 +266,61 @@
 }
 
 /* ============================================
+   Query Tree
+   ============================================ */
+@layer components {
+  .query-tree {
+    @apply text-sm;
+  }
+
+  .query-category {
+    @apply select-none;
+  }
+
+  .query-category-header {
+    @apply flex items-center gap-1.5 py-1.5 pr-2 cursor-pointer
+           text-gray-300 hover:bg-gray-700 rounded transition-colors;
+  }
+
+  .query-expand-icon {
+    @apply w-4 h-4 text-gray-500 flex-none transition-transform duration-150;
+  }
+
+  .query-expand-icon.expanded {
+    @apply rotate-90;
+  }
+
+  .query-category-name {
+    @apply flex-1 truncate font-medium;
+  }
+
+  .query-count {
+    @apply text-xs text-gray-500 bg-gray-700 px-1.5 py-0.5 rounded-full;
+  }
+
+  .query-category-content {
+    @apply pb-1;
+  }
+
+  .query-item {
+    @apply flex items-center gap-2 py-1.5 pr-2 cursor-pointer
+           text-gray-400 hover:bg-gray-700 hover:text-gray-200 rounded transition-colors;
+  }
+
+  .query-icon {
+    @apply w-3.5 h-3.5 flex-none;
+  }
+
+  .query-name {
+    @apply truncate;
+  }
+
+  .query-highlight {
+    @apply bg-yellow-500/30 text-yellow-200 rounded px-0.5;
+  }
+}
+
+/* ============================================
    Node Type Filters
    ============================================ */
 @layer components {

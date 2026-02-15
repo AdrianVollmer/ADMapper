@@ -41,6 +41,8 @@ export default [
         CanvasRenderingContext2D: "readonly",
         performance: "readonly",
         navigator: "readonly",
+        localStorage: "readonly",
+        alert: "readonly",
       },
     },
     plugins: {

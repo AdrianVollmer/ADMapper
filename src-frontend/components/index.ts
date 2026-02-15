@@ -9,3 +9,4 @@ export { initKeyboardShortcuts } from "./keyboard";
 export { dispatchAction } from "./actions";
 export { initImport, triggerBloodHoundImport } from "./import";
 export { initSearch, setPathStart, setPathEnd } from "./search";
+export { initQueries, addCustomQuery, importQueries, exportQueries } from "./queries";

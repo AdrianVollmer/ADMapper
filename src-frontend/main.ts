@@ -10,6 +10,7 @@ import { initGraph } from "./components/graph-view";
 import { initKeyboardShortcuts } from "./components/keyboard";
 import { initImport } from "./components/import";
 import { initSearch } from "./components/search";
+import { initQueries } from "./components/queries";
 
 /** Application state */
 export interface AppState {
@@ -32,6 +33,7 @@ function init(): void {
   initKeyboardShortcuts();
   initImport();
   initSearch();
+  initQueries();
 
   console.log("ADMapper initialized");
 }
