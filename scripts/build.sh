@@ -6,14 +6,10 @@
 #   ./scripts/build.sh [target]
 #
 # Targets:
-#   all (default) - Build everything (frontend + rust)
-#   frontend      - Build all frontend assets (css + js + icons)
-#   css           - Build Tailwind CSS only
-#   js            - Build TypeScript only
-#   icons         - Generate PNG icons from SVG
-#   rust          - Build Rust application (debug)
-#   rust-release  - Build Rust application (release)
-#   docker        - Build Docker image
+#   all (default) - Build everything (frontend + Tauri)
+#   frontend      - Build frontend only (Vite)
+#   tauri         - Build Tauri desktop app
+#   tauri-debug   - Build Tauri desktop app (debug)
 #   clean         - Remove all build artifacts
 #
 set -e
@@ -27,8 +23,6 @@ NC='\033[0m' # No Color
 # Get script directory for consistent paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-
-DOCKER="${DOCKER:-docker}"
 
 cd "$PROJECT_ROOT"
 
@@ -52,80 +46,38 @@ check_npm() {
 	fi
 }
 
-copy_static() {
-	log_info "Copying static assets..."
-	check_npm
-	npm run build:static
-}
-
-build_css() {
-	log_info "Building Tailwind CSS..."
-	check_npm
-	npm run build:css
-}
-
-build_js() {
-	log_info "Building TypeScript..."
-	check_npm
-	npm run build:ts
-}
-
-build_icons() {
-	log_info "Generating PNG icons..."
-	check_npm
-	npm run generate:icons
-}
-
 build_frontend() {
-	log_info "Building all frontend assets..."
+	log_info "Building frontend..."
 	check_npm
-	copy_static
-	build_css
-	build_js
-	build_icons
+	npm run build
+	log_info "Frontend built to build/"
 }
 
-build_rust() {
-	log_info "Building Rust application (debug)..."
-	# Ensure frontend is built first (Rust needs manifest.json at compile time)
-	if [ ! -f "build/manifest.json" ]; then
-		log_warn "manifest.json not found, building frontend first..."
-		build_frontend
-	fi
-	cargo build
+build_tauri() {
+	log_info "Building Tauri desktop app (release)..."
+	check_npm
+	npm run tauri build
+	log_info "Tauri app built to src-backend/target/release/"
 }
 
-build_rust_release() {
-	log_info "Building Rust application (release)..."
-	# Ensure frontend is built first
-	if [ ! -f "build/manifest.json" ]; then
-		log_warn "manifest.json not found, building frontend first..."
-		build_frontend
-	fi
-	cargo build --release
-}
-
-build_docker() {
-	log_info "Building Docker image..."
-	$(DOCKER) build -t admapper:latest .
+build_tauri_debug() {
+	log_info "Building Tauri desktop app (debug)..."
+	check_npm
+	npm run tauri build -- --debug
+	log_info "Tauri app built to src-backend/target/debug/"
 }
 
 build_all() {
 	log_info "Building everything..."
 	build_frontend
-	build_rust
+	build_tauri
 	log_info "Build complete!"
 }
 
 clean() {
 	log_info "Cleaning build artifacts..."
-
-	# Frontend build output
 	rm -rf build
-
-	# Rust artifacts
-	cargo clean 2>/dev/null || true
-
+	rm -rf src-backend/target
 	log_info "Clean complete!"
 }
 
@@ -139,23 +91,11 @@ all)
 frontend)
 	build_frontend
 	;;
-css)
-	build_css
+tauri)
+	build_tauri
 	;;
-js)
-	build_js
-	;;
-icons)
-	build_icons
-	;;
-rust)
-	build_rust
-	;;
-rust-release)
-	build_rust_release
-	;;
-docker)
-	build_docker
+tauri-debug)
+	build_tauri_debug
 	;;
 clean)
 	clean
@@ -164,14 +104,10 @@ clean)
 	log_error "Unknown target: $TARGET"
 	echo ""
 	echo "Available targets:"
-	echo "  all (default) - Build everything (frontend + rust)"
-	echo "  frontend      - Build all frontend assets"
-	echo "  css           - Build Tailwind CSS only"
-	echo "  js            - Build TypeScript only"
-	echo "  icons         - Generate PNG icons"
-	echo "  rust          - Build Rust application (debug)"
-	echo "  rust-release  - Build Rust application (release)"
-	echo "  docker        - Build Docker image"
+	echo "  all (default) - Build everything (frontend + Tauri)"
+	echo "  frontend      - Build frontend only"
+	echo "  tauri         - Build Tauri desktop app (release)"
+	echo "  tauri-debug   - Build Tauri desktop app (debug)"
 	echo "  clean         - Remove all build artifacts"
 	exit 1
 	;;
