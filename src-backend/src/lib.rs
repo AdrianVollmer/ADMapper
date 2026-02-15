@@ -15,11 +15,11 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use serde::Deserialize;
 use dashmap::DashMap;
 use db::GraphDatabase;
 use import::{BloodHoundImporter, ImportProgress};
 use parking_lot::RwLock;
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 use std::convert::Infallible;
@@ -33,7 +33,7 @@ use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
 };
-use tracing::{debug, info, warn, error, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 #[cfg(feature = "desktop")]
 #[cfg(debug_assertions)]
@@ -132,6 +132,13 @@ pub async fn run_service(bind: &str, port: u16) {
         .route("/api/graph/search", get(graph_search))
         .route("/api/graph/path", get(graph_path))
         .route("/api/graph/query", post(graph_query))
+        .route("/api/query-history", get(get_query_history))
+        .route("/api/query-history", post(add_query_history))
+        .route(
+            "/api/query-history/:id",
+            axum::routing::delete(delete_query_history),
+        )
+        .route("/api/query-history/clear", post(clear_query_history))
         .with_state(state)
         .fallback_service(static_files)
         .layer(cors);
@@ -167,14 +174,10 @@ async fn import_bloodhound(
     // Collect uploaded files
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
 
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| {
-            error!(error = %e, "Multipart read error");
-            (StatusCode::BAD_REQUEST, format!("Multipart error: {e}"))
-        })?
-    {
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        error!(error = %e, "Multipart read error");
+        (StatusCode::BAD_REQUEST, format!("Multipart error: {e}"))
+    })? {
         let filename = field.file_name().unwrap_or("unknown").to_string();
         let data = field
             .bytes()
@@ -291,16 +294,19 @@ async fn import_progress(
 
 /// Get graph statistics.
 #[instrument(skip(state))]
-async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue>, (StatusCode, String)> {
-    let (node_count, edge_count) = state
-        .db
-        .get_stats()
-        .map_err(|e| {
-            error!(error = %e, "Failed to get graph stats");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+async fn graph_stats(
+    State(state): State<AppState>,
+) -> Result<Json<JsonValue>, (StatusCode, String)> {
+    let (node_count, edge_count) = state.db.get_stats().map_err(|e| {
+        error!(error = %e, "Failed to get graph stats");
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
 
-    debug!(nodes = node_count, edges = edge_count, "Graph stats retrieved");
+    debug!(
+        nodes = node_count,
+        edges = edge_count,
+        "Graph stats retrieved"
+    );
     Ok(Json(json!({
         "nodes": node_count,
         "edges": edge_count
@@ -327,7 +333,9 @@ struct GraphEdge {
 }
 
 /// Get all graph nodes.
-async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<GraphNode>>, (StatusCode, String)> {
+async fn graph_nodes(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<GraphNode>>, (StatusCode, String)> {
     let nodes = state
         .db
         .get_all_nodes()
@@ -347,7 +355,9 @@ async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<GraphNode
 }
 
 /// Get all graph edges.
-async fn graph_edges(State(state): State<AppState>) -> Result<Json<Vec<GraphEdge>>, (StatusCode, String)> {
+async fn graph_edges(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<GraphEdge>>, (StatusCode, String)> {
     let edges = state
         .db
         .get_all_edges()
@@ -514,17 +524,24 @@ async fn graph_path(
             let node_map: std::collections::HashMap<String, (String, String, String, JsonValue)> =
                 nodes
                     .into_iter()
-                    .map(|(id, label, node_type, props)| (id.clone(), (id, label, node_type, props)))
+                    .map(|(id, label, node_type, props)| {
+                        (id.clone(), (id, label, node_type, props))
+                    })
                     .collect();
 
             // Build path steps
             let path_steps: Vec<PathStep> = path
                 .iter()
                 .map(|(id, edge_type)| {
-                    let (node_id, label, node_type, properties) = node_map
-                        .get(id)
-                        .cloned()
-                        .unwrap_or_else(|| (id.clone(), id.clone(), "Unknown".to_string(), JsonValue::Null));
+                    let (node_id, label, node_type, properties) =
+                        node_map.get(id).cloned().unwrap_or_else(|| {
+                            (
+                                id.clone(),
+                                id.clone(),
+                                "Unknown".to_string(),
+                                JsonValue::Null,
+                            )
+                        });
                     PathStep {
                         node: GraphNode {
                             id: node_id,
@@ -598,13 +615,10 @@ async fn graph_query(
 ) -> Result<Json<QueryResponse>, (StatusCode, String)> {
     info!(query = %body.query, "Executing custom query");
 
-    let results = state
-        .db
-        .run_custom_query(&body.query)
-        .map_err(|e| {
-            error!(error = %e, "Query execution failed");
-            (StatusCode::BAD_REQUEST, format!("Query error: {e}"))
-        })?;
+    let results = state.db.run_custom_query(&body.query).map_err(|e| {
+        error!(error = %e, "Query execution failed");
+        (StatusCode::BAD_REQUEST, format!("Query error: {e}"))
+    })?;
 
     let graph = if body.extract_graph {
         // Try to extract node IDs from the first column of results
@@ -656,4 +670,153 @@ async fn graph_query(
     };
 
     Ok(Json(QueryResponse { results, graph }))
+}
+
+// ============================================================================
+// Query History Endpoints
+// ============================================================================
+
+/// Query history entry.
+#[derive(Serialize)]
+struct QueryHistoryEntry {
+    id: String,
+    name: String,
+    query: String,
+    timestamp: i64,
+    result_count: Option<i64>,
+}
+
+/// Query history response with pagination.
+#[derive(Serialize)]
+struct QueryHistoryResponse {
+    entries: Vec<QueryHistoryEntry>,
+    total: usize,
+    page: usize,
+    per_page: usize,
+}
+
+/// Query history pagination params.
+#[derive(Debug, Deserialize)]
+struct HistoryParams {
+    #[serde(default = "default_page")]
+    page: usize,
+    #[serde(default = "default_per_page")]
+    per_page: usize,
+}
+
+fn default_page() -> usize {
+    1
+}
+
+fn default_per_page() -> usize {
+    20
+}
+
+/// Get query history with pagination.
+#[instrument(skip(state))]
+async fn get_query_history(
+    State(state): State<AppState>,
+    Query(params): Query<HistoryParams>,
+) -> Result<Json<QueryHistoryResponse>, (StatusCode, String)> {
+    let page = params.page.max(1);
+    let per_page = params.per_page.clamp(1, 100);
+    let offset = (page - 1) * per_page;
+
+    let (history, total) = state.db.get_query_history(per_page, offset).map_err(|e| {
+        error!(error = %e, "Failed to get query history");
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+
+    let entries: Vec<QueryHistoryEntry> = history
+        .into_iter()
+        .map(
+            |(id, name, query, timestamp, result_count)| QueryHistoryEntry {
+                id,
+                name,
+                query,
+                timestamp,
+                result_count,
+            },
+        )
+        .collect();
+
+    debug!(
+        total = total,
+        page = page,
+        per_page = per_page,
+        "Query history retrieved"
+    );
+    Ok(Json(QueryHistoryResponse {
+        entries,
+        total,
+        page,
+        per_page,
+    }))
+}
+
+/// Add query history request.
+#[derive(Debug, Deserialize)]
+struct AddHistoryRequest {
+    name: String,
+    query: String,
+    result_count: Option<i64>,
+}
+
+/// Add a query to history.
+#[instrument(skip(state, body))]
+async fn add_query_history(
+    State(state): State<AppState>,
+    Json(body): Json<AddHistoryRequest>,
+) -> Result<Json<QueryHistoryEntry>, (StatusCode, String)> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    state
+        .db
+        .add_query_history(&id, &body.name, &body.query, timestamp, body.result_count)
+        .map_err(|e| {
+            error!(error = %e, "Failed to add query to history");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        })?;
+
+    info!(id = %id, name = %body.name, "Query added to history");
+    Ok(Json(QueryHistoryEntry {
+        id,
+        name: body.name,
+        query: body.query,
+        timestamp,
+        result_count: body.result_count,
+    }))
+}
+
+/// Delete a query from history.
+#[instrument(skip(state))]
+async fn delete_query_history(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state.db.delete_query_history(&id).map_err(|e| {
+        error!(error = %e, id = %id, "Failed to delete query from history");
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+
+    info!(id = %id, "Query deleted from history");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Clear all query history.
+#[instrument(skip(state))]
+async fn clear_query_history(
+    State(state): State<AppState>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state.db.clear_query_history().map_err(|e| {
+        error!(error = %e, "Failed to clear query history");
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+
+    info!("Query history cleared");
+    Ok(StatusCode::NO_CONTENT)
 }

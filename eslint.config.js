@@ -43,6 +43,8 @@ export default [
         navigator: "readonly",
         localStorage: "readonly",
         alert: "readonly",
+        confirm: "readonly",
+        HTMLTextAreaElement: "readonly",
       },
     },
     plugins: {

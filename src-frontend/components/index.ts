@@ -10,3 +10,4 @@ export { dispatchAction } from "./actions";
 export { initImport, triggerBloodHoundImport } from "./import";
 export { initSearch, setPathStart, setPathEnd } from "./search";
 export { initQueries, addCustomQuery, importQueries, exportQueries } from "./queries";
+export { initQueryHistory, openQueryHistory, addToHistory } from "./query-history";

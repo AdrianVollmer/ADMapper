@@ -8,6 +8,7 @@
 import { toggleNavSidebar, toggleDetailSidebar } from "./sidebars";
 import { getRenderer } from "./graph-view";
 import { triggerBloodHoundImport } from "./import";
+import { openQueryHistory } from "./query-history";
 
 /** Dispatch an action by name */
 export function dispatchAction(action: string): void {
@@ -123,6 +124,10 @@ export function dispatchAction(action: string): void {
     case "saved-queries":
       console.log("Action: saved-queries");
       // TODO: Show saved queries
+      break;
+
+    case "query-history":
+      openQueryHistory();
       break;
 
     case "find-path":

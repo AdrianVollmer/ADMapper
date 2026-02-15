@@ -80,14 +80,40 @@ impl GraphDatabase {
             }
         "#;
 
+        // Create query_history relation
+        let create_query_history = r#"
+            :create query_history {
+                id: String
+                =>
+                name: String,
+                query: String,
+                timestamp: Int,
+                result_count: Int?
+            }
+        "#;
+
         // Try to create relations, ignore if they already exist
-        match self.db.run_script(create_nodes, Default::default(), ScriptMutability::Mutable) {
+        match self
+            .db
+            .run_script(create_nodes, Default::default(), ScriptMutability::Mutable)
+        {
             Ok(_) => debug!("Created nodes relation"),
             Err(_) => trace!("Nodes relation already exists"),
         }
-        match self.db.run_script(create_edges, Default::default(), ScriptMutability::Mutable) {
+        match self
+            .db
+            .run_script(create_edges, Default::default(), ScriptMutability::Mutable)
+        {
             Ok(_) => debug!("Created edges relation"),
             Err(_) => trace!("Edges relation already exists"),
+        }
+        match self.db.run_script(
+            create_query_history,
+            Default::default(),
+            ScriptMutability::Mutable,
+        ) {
+            Ok(_) => debug!("Created query_history relation"),
+            Err(_) => trace!("Query_history relation already exists"),
         }
 
         Ok(())
@@ -404,7 +430,10 @@ impl GraphDatabase {
     }
 
     /// Get nodes by their IDs.
-    pub fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<(String, String, String, JsonValue)>> {
+    pub fn get_nodes_by_ids(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<(String, String, String, JsonValue)>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -419,7 +448,10 @@ impl GraphDatabase {
     }
 
     /// Get edges between a set of nodes.
-    pub fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<(String, String, String, JsonValue)>> {
+    pub fn get_edges_between(
+        &self,
+        node_ids: &[String],
+    ) -> Result<Vec<(String, String, String, JsonValue)>> {
         if node_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -440,10 +472,136 @@ impl GraphDatabase {
     pub fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
         debug!(query = %query, "Running custom query");
 
-        let result = self.db.run_script(query, Default::default(), ScriptMutability::Immutable)?;
+        let result = self
+            .db
+            .run_script(query, Default::default(), ScriptMutability::Immutable)?;
         let json = result.into_json();
 
         Ok(json)
+    }
+
+    /// Add a query to history.
+    pub fn add_query_history(
+        &self,
+        id: &str,
+        name: &str,
+        query: &str,
+        timestamp: i64,
+        result_count: Option<i64>,
+    ) -> Result<()> {
+        debug!(id = %id, name = %name, "Adding query to history");
+
+        let result_val = match result_count {
+            Some(c) => DataValue::from(c),
+            None => DataValue::Null,
+        };
+
+        let rows = vec![vec![
+            DataValue::Str(id.into()),
+            DataValue::Str(name.into()),
+            DataValue::Str(query.into()),
+            DataValue::from(timestamp),
+            result_val,
+        ]];
+
+        let params = NamedRows {
+            headers: vec![
+                "id".to_string(),
+                "name".to_string(),
+                "query".to_string(),
+                "timestamp".to_string(),
+                "result_count".to_string(),
+            ],
+            rows,
+            next: None,
+        };
+
+        let mut relations = BTreeMap::new();
+        relations.insert("query_history".to_string(), params);
+        self.db.import_relations(relations)?;
+
+        Ok(())
+    }
+
+    /// Get query history, ordered by timestamp descending.
+    #[allow(clippy::type_complexity)]
+    pub fn get_query_history(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
+        debug!(limit = limit, offset = offset, "Getting query history");
+
+        // Get total count
+        let count_result = self.db.run_script(
+            "?[count(id)] := *query_history{id}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )?;
+        let count_json = count_result.into_json();
+        let total = count_json["rows"]
+            .get(0)
+            .and_then(|r| r.get(0))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        // Get paginated results, ordered by timestamp desc
+        let query = format!(
+            "?[id, name, query, timestamp, result_count] := *query_history{{id, name, query, timestamp, result_count}} :order -timestamp :limit {} :offset {}",
+            limit, offset
+        );
+
+        let result = self
+            .db
+            .run_script(&query, Default::default(), ScriptMutability::Immutable)?;
+        let json = result.into_json();
+        let rows = json["rows"].as_array();
+
+        let mut history = Vec::new();
+        if let Some(rows) = rows {
+            for row in rows {
+                if let (Some(id), Some(name), Some(query), Some(timestamp)) = (
+                    row.get(0).and_then(|v| v.as_str()),
+                    row.get(1).and_then(|v| v.as_str()),
+                    row.get(2).and_then(|v| v.as_str()),
+                    row.get(3).and_then(|v| v.as_i64()),
+                ) {
+                    let result_count = row.get(4).and_then(|v| v.as_i64());
+                    history.push((
+                        id.to_string(),
+                        name.to_string(),
+                        query.to_string(),
+                        timestamp,
+                        result_count,
+                    ));
+                }
+            }
+        }
+
+        Ok((history, total))
+    }
+
+    /// Delete a query from history.
+    pub fn delete_query_history(&self, id: &str) -> Result<()> {
+        debug!(id = %id, "Deleting query from history");
+
+        let query = format!("?[id] <- [[\"{id}\"]] :delete query_history {{id}}");
+
+        self.db
+            .run_script(&query, Default::default(), ScriptMutability::Mutable)?;
+        Ok(())
+    }
+
+    /// Clear all query history.
+    pub fn clear_query_history(&self) -> Result<()> {
+        debug!("Clearing all query history");
+
+        self.db.run_script(
+            "?[id] := *query_history{id} :delete query_history {id}",
+            Default::default(),
+            ScriptMutability::Mutable,
+        )?;
+        Ok(())
     }
 }
 

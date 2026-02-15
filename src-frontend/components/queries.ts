@@ -5,6 +5,7 @@
  */
 
 import { getRenderer } from "./graph-view";
+import { addToHistory } from "./query-history";
 
 /** Query definition */
 export interface Query {
@@ -469,7 +470,7 @@ function findQuery(queryId: string, categories: QueryCategory[] = BUILTIN_QUERIE
 }
 
 /** Run a query */
-function runQuery(queryId: string): void {
+async function runQuery(queryId: string): Promise<void> {
   const query = findQuery(queryId);
   if (!query) {
     console.warn(`Query not found: ${queryId}`);
@@ -485,9 +486,37 @@ function runQuery(queryId: string): void {
     return;
   }
 
-  // TODO: Execute query against CozoDB and display results
-  // For now, just log the query
-  alert(`Query: ${query.name}\n\nThis would execute:\n${query.query}`);
+  try {
+    const response = await fetch("/api/graph/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: query.query, extract_graph: true }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      alert(`Query failed: ${text}`);
+      return;
+    }
+
+    const data = await response.json();
+    const resultCount = data.results?.rows?.length ?? 0;
+
+    // Add to history
+    await addToHistory(query.name, query.query, resultCount);
+
+    // Show results
+    if (data.graph && data.graph.nodes.length > 0) {
+      // TODO: Load graph into renderer
+      console.log("Query returned graph:", data.graph);
+      alert(`Query "${query.name}" returned ${data.graph.nodes.length} nodes and ${data.graph.edges.length} edges`);
+    } else {
+      alert(`Query "${query.name}" returned ${resultCount} rows`);
+    }
+  } catch (err) {
+    console.error("Query execution failed:", err);
+    alert(`Query failed: ${err}`);
+  }
 }
 
 /** Import queries from JSON file */

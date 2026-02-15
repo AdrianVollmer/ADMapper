@@ -11,6 +11,7 @@ import { initKeyboardShortcuts } from "./components/keyboard";
 import { initImport } from "./components/import";
 import { initSearch } from "./components/search";
 import { initQueries } from "./components/queries";
+import { initQueryHistory } from "./components/query-history";
 
 /** Application state */
 export interface AppState {
@@ -34,6 +35,7 @@ function init(): void {
   initImport();
   initSearch();
   initQueries();
+  initQueryHistory();
 
   console.log("ADMapper initialized");
 }

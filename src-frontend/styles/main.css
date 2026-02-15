@@ -589,8 +589,21 @@
            border border-gray-700;
   }
 
+  .modal-content.modal-lg {
+    @apply max-w-2xl;
+  }
+
   .modal-header {
-    @apply px-6 py-4 border-b border-gray-700;
+    @apply px-6 py-4 border-b border-gray-700 flex items-center justify-between;
+  }
+
+  .modal-close {
+    @apply p-1 rounded text-gray-400 hover:text-white hover:bg-gray-700
+           focus:outline-none transition-colors;
+  }
+
+  .modal-close svg {
+    @apply w-5 h-5;
   }
 
   .modal-title {
@@ -617,6 +630,124 @@
 
   .btn-secondary {
     @apply bg-gray-700 text-gray-200 hover:bg-gray-600 focus:ring-gray-500;
+  }
+
+  .btn-danger {
+    @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+
+  .btn[disabled] {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  .spinner {
+    @apply w-5 h-5 border-2 border-gray-600 border-t-blue-500 rounded-full animate-spin;
+  }
+}
+
+/* ============================================
+   Query History Modal
+   ============================================ */
+@layer components {
+  .query-history-list {
+    @apply space-y-2 max-h-80 overflow-y-auto;
+  }
+
+  .query-history-item {
+    @apply p-3 bg-gray-750 rounded-lg cursor-pointer
+           border border-transparent hover:border-gray-600
+           transition-colors;
+  }
+
+  .query-history-item:hover {
+    @apply bg-gray-700;
+  }
+
+  .query-history-item-header {
+    @apply flex items-center justify-between mb-1;
+  }
+
+  .query-history-name {
+    @apply font-medium text-gray-200;
+  }
+
+  .query-history-time {
+    @apply text-xs text-gray-500;
+  }
+
+  .query-history-query {
+    @apply text-sm text-gray-400 font-mono truncate;
+  }
+
+  .query-history-results {
+    @apply text-xs text-gray-500 mt-1;
+  }
+
+  .query-history-pagination {
+    @apply flex items-center justify-center gap-4 mt-4 pt-4 border-t border-gray-700;
+  }
+
+  .pagination-info {
+    @apply text-sm text-gray-400;
+  }
+
+  .query-history-detail {
+    @apply space-y-4;
+  }
+
+  .detail-name {
+    @apply text-lg font-semibold text-white;
+  }
+
+  .detail-time {
+    @apply text-sm text-gray-500;
+  }
+
+  .detail-label {
+    @apply block text-xs text-gray-500 uppercase tracking-wide mb-1;
+  }
+
+  .detail-query {
+    @apply p-3 bg-gray-900 rounded text-sm text-gray-300 font-mono
+           overflow-x-auto whitespace-pre-wrap break-all;
+  }
+
+  .detail-value {
+    @apply text-sm text-gray-300;
+  }
+
+  .query-history-edit {
+    @apply space-y-4;
+  }
+
+  .form-group {
+    @apply space-y-1;
+  }
+
+  .form-label {
+    @apply block text-sm font-medium text-gray-300;
+  }
+
+  .form-input {
+    @apply w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded
+           text-gray-100 placeholder-gray-500
+           focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500;
+  }
+
+  .form-textarea {
+    @apply w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded
+           text-gray-100 font-mono text-sm placeholder-gray-500
+           focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500
+           resize-y;
+  }
+
+  /* Dark variant of gray-800 for nested elements */
+  .bg-gray-750 {
+    background-color: #1f2937;
   }
 }
 
