@@ -126,21 +126,19 @@ const ACTIONS = [
 
 /** Initialize sidebars */
 export function initSidebars(): void {
-  // Set up toggle buttons - attach directly to buttons for reliability
-  const toggleButtons = document.querySelectorAll(
-    '[data-action="toggle-nav-sidebar"], [data-action="toggle-detail-sidebar"]'
-  );
-  for (const button of toggleButtons) {
-    button.addEventListener("click", (e) => {
-      e.stopPropagation(); // Prevent other handlers from interfering
-      const action = (e.currentTarget as HTMLElement).getAttribute("data-action");
-      if (action === "toggle-nav-sidebar") {
-        toggleNavSidebar();
-      } else if (action === "toggle-detail-sidebar") {
-        toggleDetailSidebar();
-      }
-    });
-  }
+  // Set up toggle buttons
+  document.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const button = target.closest("[data-action]") as HTMLElement;
+    if (!button) return;
+
+    const action = button.getAttribute("data-action");
+    if (action === "toggle-nav-sidebar") {
+      toggleNavSidebar();
+    } else if (action === "toggle-detail-sidebar") {
+      toggleDetailSidebar();
+    }
+  });
 
   // Set up click-to-copy for property values
   document.addEventListener("click", (e) => {
