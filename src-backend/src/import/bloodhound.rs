@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::io::{Read, Seek};
 use std::path::Path;
 use tokio::sync::broadcast;
-use tracing::{debug, info, warn, error, trace};
+use tracing::{debug, error, info, trace, warn};
 use zip::ZipArchive;
 
 /// Batch size for database inserts.
@@ -76,7 +76,8 @@ impl BloodHoundImporter {
         info!(file_count = json_files.len(), "Found JSON files in ZIP");
         debug!(files = ?json_files, "JSON files to process");
 
-        let mut progress = ImportProgress::new(job_id.to_string()).with_total_files(json_files.len());
+        let mut progress =
+            ImportProgress::new(job_id.to_string()).with_total_files(json_files.len());
         self.send_progress(&progress);
 
         // Clear existing data for fresh import
@@ -91,19 +92,16 @@ impl BloodHoundImporter {
             progress.set_current_file(file_name.clone());
             self.send_progress(&progress);
 
-            let mut file = archive
-                .by_name(file_name)
-                .map_err(|e| {
-                    error!(file = %file_name, error = %e, "Failed to open file in archive");
-                    format!("Failed to read {file_name}: {e}")
-                })?;
+            let mut file = archive.by_name(file_name).map_err(|e| {
+                error!(file = %file_name, error = %e, "Failed to open file in archive");
+                format!("Failed to read {file_name}: {e}")
+            })?;
 
             let mut contents = String::new();
-            file.read_to_string(&mut contents)
-                .map_err(|e| {
-                    error!(file = %file_name, error = %e, "Failed to read file contents");
-                    format!("Failed to read {file_name}: {e}")
-                })?;
+            file.read_to_string(&mut contents).map_err(|e| {
+                error!(file = %file_name, error = %e, "Failed to read file contents");
+                format!("Failed to read {file_name}: {e}")
+            })?;
 
             trace!(file = %file_name, size = contents.len(), "Read file contents");
 
@@ -136,8 +134,8 @@ impl BloodHoundImporter {
         path: P,
         job_id: &str,
     ) -> Result<ImportProgress, String> {
-        let contents = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read file: {e}"))?;
+        let contents =
+            std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))?;
 
         let mut progress = ImportProgress::new(job_id.to_string()).with_total_files(1);
         progress.set_current_file(path.as_ref().display().to_string());
@@ -171,7 +169,8 @@ impl BloodHoundImporter {
                 if let Some(first) = file.data.first() {
                     if first.get("Members").is_some() {
                         "groups".to_string()
-                    } else if first.get("Sessions").is_some() || first.get("LocalGroups").is_some() {
+                    } else if first.get("Sessions").is_some() || first.get("LocalGroups").is_some()
+                    {
                         "computers".to_string()
                     } else {
                         "users".to_string()
@@ -354,7 +353,9 @@ impl BloodHoundImporter {
 
         // ContainedBy -> Contains edge (reversed direction)
         if let Some(contained_by) = entity.get("ContainedBy") {
-            if let Some(container_id) = contained_by.get("ObjectIdentifier").and_then(|v| v.as_str())
+            if let Some(container_id) = contained_by
+                .get("ObjectIdentifier")
+                .and_then(|v| v.as_str())
             {
                 edges.push((
                     container_id.to_string(),
@@ -493,16 +494,17 @@ impl BloodHoundImporter {
         let batch_size = batch.len();
         trace!(batch_size = batch_size, "Flushing node batch");
 
-        let count = self
-            .db
-            .insert_nodes(batch)
-            .map_err(|e| {
-                error!(error = %e, batch_size = batch_size, "Failed to insert nodes");
-                format!("Failed to insert nodes: {e}")
-            })?;
+        let count = self.db.insert_nodes(batch).map_err(|e| {
+            error!(error = %e, batch_size = batch_size, "Failed to insert nodes");
+            format!("Failed to insert nodes: {e}")
+        })?;
 
         progress.nodes_imported += count;
-        debug!(inserted = count, total = progress.nodes_imported, "Nodes inserted");
+        debug!(
+            inserted = count,
+            total = progress.nodes_imported,
+            "Nodes inserted"
+        );
         self.send_progress(progress);
         batch.clear();
         Ok(())
@@ -520,16 +522,17 @@ impl BloodHoundImporter {
         let batch_size = batch.len();
         trace!(batch_size = batch_size, "Flushing edge batch");
 
-        let count = self
-            .db
-            .insert_edges(batch)
-            .map_err(|e| {
-                error!(error = %e, batch_size = batch_size, "Failed to insert edges");
-                format!("Failed to insert edges: {e}")
-            })?;
+        let count = self.db.insert_edges(batch).map_err(|e| {
+            error!(error = %e, batch_size = batch_size, "Failed to insert edges");
+            format!("Failed to insert edges: {e}")
+        })?;
 
         progress.edges_imported += count;
-        debug!(inserted = count, total = progress.edges_imported, "Edges inserted");
+        debug!(
+            inserted = count,
+            total = progress.edges_imported,
+            "Edges inserted"
+        );
         self.send_progress(progress);
         batch.clear();
         Ok(())
