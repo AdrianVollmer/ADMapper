@@ -137,6 +137,26 @@ impl GraphDatabase {
         Ok(())
     }
 
+    /// Run a query and parse results with a custom parser function.
+    /// This eliminates boilerplate for the common pattern of running a query
+    /// and mapping rows to domain objects.
+    fn query_rows<T, F>(&self, query: &str, parser: F) -> Result<Vec<T>>
+    where
+        F: Fn(&JsonValue) -> Option<T>,
+    {
+        let result = self
+            .db
+            .run_script(query, Default::default(), ScriptMutability::Immutable)?;
+        let json = result.into_json();
+
+        let items = json["rows"]
+            .as_array()
+            .map(|rows| rows.iter().filter_map(&parser).collect())
+            .unwrap_or_default();
+
+        Ok(items)
+    }
+
     /// Clear all data from the database.
     pub fn clear(&self) -> Result<()> {
         info!("Clearing all data from database");
@@ -257,118 +277,71 @@ impl GraphDatabase {
 
     /// Get all nodes (for graph rendering).
     pub fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
-        let result = self.db.run_script(
+        self.query_rows(
             "?[object_id, label, node_type, properties] := *nodes{object_id, label, node_type, properties}",
-            Default::default(),
-            ScriptMutability::Immutable,
-        )?;
+            Self::parse_node_row,
+        )
+    }
 
-        let json = result.into_json();
-        let rows = json["rows"].as_array();
+    /// Parse a database row into a DbNode.
+    fn parse_node_row(row: &JsonValue) -> Option<DbNode> {
+        let id = row.get(0).and_then(|v| v.as_str())?;
+        let label = row.get(1).and_then(|v| v.as_str())?;
+        let node_type = row.get(2).and_then(|v| v.as_str())?;
+        let props_str = row.get(3).and_then(|v| v.as_str())?;
+        let properties = serde_json::from_str(props_str).unwrap_or(JsonValue::Null);
 
-        let mut nodes = Vec::new();
-        if let Some(rows) = rows {
-            for row in rows {
-                if let (Some(id), Some(label), Some(node_type), Some(properties)) = (
-                    row.get(0).and_then(|v| v.as_str()),
-                    row.get(1).and_then(|v| v.as_str()),
-                    row.get(2).and_then(|v| v.as_str()),
-                    row.get(3).and_then(|v| v.as_str()),
-                ) {
-                    let properties: JsonValue =
-                        serde_json::from_str(properties).unwrap_or(JsonValue::Null);
-                    nodes.push(DbNode {
-                        id: id.to_string(),
-                        label: label.to_string(),
-                        node_type: node_type.to_string(),
-                        properties,
-                    });
-                }
-            }
-        }
-
-        Ok(nodes)
+        Some(DbNode {
+            id: id.to_string(),
+            label: label.to_string(),
+            node_type: node_type.to_string(),
+            properties,
+        })
     }
 
     /// Get all edges (for graph rendering).
     pub fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
-        let result = self.db.run_script(
+        self.query_rows(
             "?[source, target, edge_type, properties] := *edges{source, target, edge_type, properties}",
-            Default::default(),
-            ScriptMutability::Immutable,
-        )?;
+            Self::parse_edge_row,
+        )
+    }
 
-        let json = result.into_json();
-        let rows = json["rows"].as_array();
+    /// Parse a database row into a DbEdge.
+    fn parse_edge_row(row: &JsonValue) -> Option<DbEdge> {
+        let source = row.get(0).and_then(|v| v.as_str())?;
+        let target = row.get(1).and_then(|v| v.as_str())?;
+        let edge_type = row.get(2).and_then(|v| v.as_str())?;
+        let props_str = row.get(3).and_then(|v| v.as_str())?;
+        let properties = serde_json::from_str(props_str).unwrap_or(JsonValue::Null);
 
-        let mut edges = Vec::new();
-        if let Some(rows) = rows {
-            for row in rows {
-                if let (Some(source), Some(target), Some(edge_type), Some(properties)) = (
-                    row.get(0).and_then(|v| v.as_str()),
-                    row.get(1).and_then(|v| v.as_str()),
-                    row.get(2).and_then(|v| v.as_str()),
-                    row.get(3).and_then(|v| v.as_str()),
-                ) {
-                    let properties: JsonValue =
-                        serde_json::from_str(properties).unwrap_or(JsonValue::Null);
-                    edges.push(DbEdge {
-                        source: source.to_string(),
-                        target: target.to_string(),
-                        edge_type: edge_type.to_string(),
-                        properties,
-                    });
-                }
-            }
-        }
-
-        Ok(edges)
+        Some(DbEdge {
+            source: source.to_string(),
+            target: target.to_string(),
+            edge_type: edge_type.to_string(),
+            properties,
+        })
     }
 
     /// Search nodes by label (case-insensitive substring match).
-    pub fn search_nodes(&self, query: &str, limit: usize) -> Result<Vec<DbNode>> {
-        let query_lower = query.to_lowercase();
-        debug!(query = %query, limit = limit, "Searching nodes");
+    pub fn search_nodes(&self, search_query: &str, limit: usize) -> Result<Vec<DbNode>> {
+        let query_lower = search_query.to_lowercase();
+        debug!(query = %search_query, limit = limit, "Searching nodes");
 
         // CozoDB doesn't have LIKE/ILIKE, so we fetch all and filter
         // For large datasets, consider adding a full-text search index
-        let result = self.db.run_script(
-            "?[object_id, label, node_type, properties] := *nodes{object_id, label, node_type, properties}",
-            Default::default(),
-            ScriptMutability::Immutable,
-        )?;
-
-        let json = result.into_json();
-        let rows = json["rows"].as_array();
-
-        let mut nodes = Vec::new();
-        if let Some(rows) = rows {
-            for row in rows {
-                if let (Some(id), Some(label), Some(node_type), Some(properties)) = (
-                    row.get(0).and_then(|v| v.as_str()),
-                    row.get(1).and_then(|v| v.as_str()),
-                    row.get(2).and_then(|v| v.as_str()),
-                    row.get(3).and_then(|v| v.as_str()),
-                ) {
-                    // Case-insensitive search on label and id
-                    if label.to_lowercase().contains(&query_lower)
-                        || id.to_lowercase().contains(&query_lower)
-                    {
-                        let properties: JsonValue =
-                            serde_json::from_str(properties).unwrap_or(JsonValue::Null);
-                        nodes.push(DbNode {
-                            id: id.to_string(),
-                            label: label.to_string(),
-                            node_type: node_type.to_string(),
-                            properties,
-                        });
-                        if nodes.len() >= limit {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        let nodes: Vec<DbNode> = self
+            .query_rows(
+                "?[object_id, label, node_type, properties] := *nodes{object_id, label, node_type, properties}",
+                Self::parse_node_row,
+            )?
+            .into_iter()
+            .filter(|node| {
+                node.label.to_lowercase().contains(&query_lower)
+                    || node.id.to_lowercase().contains(&query_lower)
+            })
+            .take(limit)
+            .collect();
 
         debug!(found = nodes.len(), "Search complete");
         Ok(nodes)
