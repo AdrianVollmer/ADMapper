@@ -12,6 +12,7 @@ import {
   DIM_COLORS,
   HIGHLIGHT_SIZE_MULTIPLIER,
   BACKGROUND_COLOR,
+  LABEL_COLOR,
 } from "./theme";
 
 export interface RendererOptions {
@@ -81,6 +82,29 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   const selectedNodes = new Set<string>();
   let currentTheme = theme;
 
+  // Custom label renderer: draws label below node, centered
+  function drawLabel(
+    context: CanvasRenderingContext2D,
+    data: { label: string; x: number; y: number; size: number; color: string },
+    settings: { labelSize: number; labelWeight: string; labelColor: { color: string } }
+  ): void {
+    const label = data.label;
+    if (!label) return;
+
+    const size = settings.labelSize;
+    const font = `${settings.labelWeight} ${size}px sans-serif`;
+    const color = settings.labelColor.color;
+
+    context.font = font;
+    context.fillStyle = color;
+    context.textAlign = "center";
+    context.textBaseline = "top";
+
+    // Position below the node with a small gap
+    const yOffset = data.size + 4;
+    context.fillText(label, data.x, data.y + yOffset);
+  }
+
   // Create Sigma instance with custom reducers for dynamic styling
   const sigma = new Sigma(graph, containerEl, {
     allowInvalidContainer: false,
@@ -92,6 +116,8 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     zIndex: true,
     defaultNodeColor: "#adb5bd",
     defaultEdgeColor: "#6c757d",
+    labelColor: { color: LABEL_COLOR[theme] },
+    defaultDrawNodeLabel: drawLabel,
 
     // Node reducer: apply highlighting/dimming
     nodeReducer: (nodeId, data) => {
@@ -144,11 +170,12 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     },
   });
 
-  // Set initial background
-  updateBackground(currentTheme);
+  // Set initial background and label color
+  updateThemeStyles(currentTheme);
 
-  function updateBackground(t: "light" | "dark") {
+  function updateThemeStyles(t: "light" | "dark") {
     containerEl!.style.backgroundColor = BACKGROUND_COLOR[t];
+    sigma.setSetting("labelColor", { color: LABEL_COLOR[t] });
   }
 
   // Event handlers
@@ -249,7 +276,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
     setTheme(t: "light" | "dark") {
       currentTheme = t;
-      updateBackground(t);
+      updateThemeStyles(t);
       sigma.refresh();
     },
   };

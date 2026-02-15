@@ -116,6 +116,12 @@ export const BACKGROUND_COLOR = {
   dark: "#1a1a2e",
 };
 
+/** Label color for node labels */
+export const LABEL_COLOR = {
+  light: "#1a1a1a",
+  dark: "#e0e0e0",
+};
+
 /** Get node color, considering highlight state */
 export function getNodeColor(
   type: ADNodeType,
