@@ -53,7 +53,7 @@ export function loadGraphData(data: RawADGraph): void {
     theme: "dark",
     onNodeClick: (nodeId, attrs) => {
       updateDetailPanel(nodeId, attrs);
-      renderer?.selectNode(nodeId, true);
+      renderer?.selectNode(nodeId);
     },
     onBackgroundClick: () => {
       updateDetailPanel(null, null);

@@ -118,7 +118,7 @@ export function initDemo(containerId: string, nodeCount = 100): void {
     theme: "dark",
     onNodeClick: (nodeId, attrs) => {
       console.log("Node clicked:", nodeId, attrs);
-      renderer.selectNode(nodeId, true);
+      renderer.selectNode(nodeId);
       renderer.focusNode(nodeId);
     },
     onBackgroundClick: () => {

@@ -51,8 +51,8 @@ export interface ADGraphRenderer {
   focusNode: (nodeId: string, animate?: boolean) => void;
   /** Reset camera to show all nodes */
   resetCamera: (animate?: boolean) => void;
-  /** Select a node (and optionally its neighbors) */
-  selectNode: (nodeId: string, includeNeighbors?: boolean) => void;
+  /** Select a node */
+  selectNode: (nodeId: string) => void;
   /** Clear selection */
   clearSelection: () => void;
   /** Set theme */
@@ -83,9 +83,33 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
   // State
   let hoveredNode: string | null = null;
+  let hoveredReachableEdges: Set<string> = new Set();
   const selectedNodes = new Set<string>();
   let currentTheme = theme;
   let draggedNode: string | null = null;
+
+  /** Compute all edges reachable via outgoing edges (transitive) */
+  function computeReachableEdges(startNode: string): Set<string> {
+    const visitedNodes = new Set<string>();
+    const reachableEdges = new Set<string>();
+    const queue = [startNode];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visitedNodes.has(current)) continue;
+      visitedNodes.add(current);
+
+      // Follow outgoing edges
+      graph.forEachOutEdge(current, (edge, _attrs, _source, target) => {
+        reachableEdges.add(edge);
+        if (!visitedNodes.has(target)) {
+          queue.push(target);
+        }
+      });
+    }
+
+    return reachableEdges;
+  }
 
   // Custom label renderer: draws label below node, centered
   function drawLabel(
@@ -111,23 +135,46 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   }
 
   // Custom hover renderer: draws a glow effect behind the hovered node
+  // Selected nodes get a red, tighter, more intense glow
   function drawNodeHover(
     context: CanvasRenderingContext2D,
-    data: { x: number; y: number; size: number; color: string }
+    data: { x: number; y: number; size: number; color: string },
+    _settings: unknown,
+    nodeId?: string
   ): void {
-    const glowRadius = data.size * 2;
-    const gradient = context.createRadialGradient(
-      data.x, data.y, data.size * 0.5,
-      data.x, data.y, glowRadius
-    );
-    gradient.addColorStop(0, "rgba(255, 247, 0, 0.6)");
-    gradient.addColorStop(0.5, "rgba(255, 247, 0, 0.2)");
-    gradient.addColorStop(1, "rgba(255, 247, 0, 0)");
+    const isSelected = nodeId ? selectedNodes.has(nodeId) : false;
 
-    context.beginPath();
-    context.arc(data.x, data.y, glowRadius, 0, Math.PI * 2);
-    context.fillStyle = gradient;
-    context.fill();
+    if (isSelected) {
+      // Selected: red, tight, intense glow
+      const glowRadius = data.size * 1.8;
+      const gradient = context.createRadialGradient(
+        data.x, data.y, data.size * 0.8,
+        data.x, data.y, glowRadius
+      );
+      gradient.addColorStop(0, "rgba(255, 50, 50, 1)");
+      gradient.addColorStop(0.6, "rgba(255, 50, 50, 0.6)");
+      gradient.addColorStop(1, "rgba(255, 50, 50, 0)");
+
+      context.beginPath();
+      context.arc(data.x, data.y, glowRadius, 0, Math.PI * 2);
+      context.fillStyle = gradient;
+      context.fill();
+    } else {
+      // Hovered: yellow, softer glow
+      const glowRadius = data.size * 2;
+      const gradient = context.createRadialGradient(
+        data.x, data.y, data.size * 0.5,
+        data.x, data.y, glowRadius
+      );
+      gradient.addColorStop(0, "rgba(255, 247, 0, 0.6)");
+      gradient.addColorStop(0.5, "rgba(255, 247, 0, 0.2)");
+      gradient.addColorStop(1, "rgba(255, 247, 0, 0)");
+
+      context.beginPath();
+      context.arc(data.x, data.y, glowRadius, 0, Math.PI * 2);
+      context.fillStyle = gradient;
+      context.fill();
+    }
   }
 
   // Create node image program for rendering icons
@@ -172,48 +219,35 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       }) as any,
     },
 
-    // Node reducer: apply highlighting/dimming only for selection (not hover)
+    // Node reducer: bring hovered/selected nodes to front, keep others unchanged
     nodeReducer: (nodeId, data) => {
       const res: Record<string, unknown> = { ...data };
 
-      // Only dim nodes when there's a selection (not on hover)
-      if (selectedNodes.size > 0) {
-        const isSelected = selectedNodes.has(nodeId);
-        if (isSelected) {
-          res.zIndex = 1;
-        } else {
-          res.color = DIM_COLORS.node;
-          res.zIndex = 0;
-        }
+      // Selected nodes get higher z-index and will show stronger glow via drawNodeHover
+      if (selectedNodes.has(nodeId)) {
+        res.zIndex = 2;
+        res.highlighted = true;  // Mark for stronger glow
       }
 
       // Bring hovered node to front
       if (nodeId === hoveredNode) {
-        res.zIndex = 2;
+        res.zIndex = 3;
       }
 
       return res;
     },
 
-    // Edge reducer: apply highlighting/dimming only for selection (not hover)
+    // Edge reducer: highlight transitive outgoing edges on hover, keep others normal
     edgeReducer: (edge, data) => {
       const res: Record<string, unknown> = { ...data };
-      const source = graph.source(edge);
-      const target = graph.target(edge);
 
-      // Only dim edges when there's a selection (not on hover)
-      if (selectedNodes.size > 0) {
-        const isHighlighted = selectedNodes.has(source) || selectedNodes.has(target);
-        if (isHighlighted) {
-          res.color = HIGHLIGHT_COLORS.edge;
-          res.size = ((data.size as number | undefined) ?? 1.5) * HIGHLIGHT_SIZE_MULTIPLIER;
-          res.zIndex = 1;
-        } else {
-          res.color = DIM_COLORS.edge;
-          res.zIndex = 0;
-        }
+      // On hover: highlight edges reachable from hovered node, keep others normal
+      if (hoveredNode && hoveredReachableEdges.has(edge)) {
+        res.color = HIGHLIGHT_COLORS.edge;
+        res.size = ((data.size as number | undefined) ?? 3) * HIGHLIGHT_SIZE_MULTIPLIER;
+        res.zIndex = 1;
       } else {
-        // Ensure uniform color when no selection
+        // Default: uniform color (no dimming)
         res.color = DEFAULT_EDGE_COLOR;
       }
 
@@ -233,6 +267,8 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   if (enableHover) {
     sigma.on("enterNode", (event) => {
       hoveredNode = event.node;
+      // Compute transitive outgoing edges
+      hoveredReachableEdges = computeReachableEdges(event.node);
       sigma.refresh();
       if (onNodeHover) {
         const attrs = graph.getNodeAttributes(event.node) as ADNodeAttributes;
@@ -242,6 +278,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
     sigma.on("leaveNode", () => {
       hoveredNode = null;
+      hoveredReachableEdges = new Set();
       sigma.refresh();
       if (onNodeHover) {
         onNodeHover(null, null);
@@ -342,16 +379,9 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       }
     },
 
-    selectNode(nodeId: string, includeNeighbors = false) {
+    selectNode(nodeId: string) {
       selectedNodes.clear();
       selectedNodes.add(nodeId);
-
-      if (includeNeighbors && graph.hasNode(nodeId)) {
-        for (const neighbor of graph.neighbors(nodeId)) {
-          selectedNodes.add(neighbor);
-        }
-      }
-
       sigma.refresh();
     },
 
