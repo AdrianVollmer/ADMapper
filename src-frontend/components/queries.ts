@@ -5,9 +5,8 @@
  */
 
 import { getRenderer } from "./graph-view";
-import { addToHistory } from "./query-history";
 import { escapeHtml } from "../utils/html";
-import { executeQuery, getQueryErrorMessage } from "../utils/query";
+import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
 
 /** Query definition */
 export interface Query {
@@ -489,10 +488,7 @@ async function runQuery(queryId: string): Promise<void> {
   }
 
   try {
-    const result = await executeQuery(query.query, true);
-
-    // Add to history
-    await addToHistory(query.name, query.query, result.resultCount);
+    const result = await executeQueryWithHistory(query.name, query.query, true);
 
     // Show results
     if (result.graph && result.graph.nodes.length > 0) {

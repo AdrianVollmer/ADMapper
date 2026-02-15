@@ -12,6 +12,7 @@ import type { ADNodeType, ADEdgeType, RawADGraph } from "../graph/types";
 import { escapeHtml } from "../utils/html";
 import { api, ApiClientError } from "../api/client";
 import type { SearchResult, PathResponse } from "../api/types";
+import { addToHistory } from "./query-history";
 
 let nodeSearchInput: HTMLInputElement | null = null;
 let nodeSearchResults: HTMLElement | null = null;
@@ -294,11 +295,13 @@ function loadSingleNode(nodeId: string, label: string, nodeType: string): void {
 
 /** Find path between start and end nodes using the API */
 async function findPath(): Promise<void> {
-  if (!pathStartInput || !pathEndInput || !pathResultsEl) return;
+  if (!pathStartInput || !pathEndInput || !pathResultsEl || !findPathBtn) return;
 
   // Get node IDs from data attributes or fall back to input values
   const startId = pathStartInput.getAttribute("data-node-id") || pathStartInput.value.trim();
   const endId = pathEndInput.getAttribute("data-node-id") || pathEndInput.value.trim();
+  const startLabel = pathStartInput.value.trim();
+  const endLabel = pathEndInput.value.trim();
 
   if (!startId || !endId) {
     showPathError("Please enter both start and end nodes");
@@ -310,8 +313,9 @@ async function findPath(): Promise<void> {
     return;
   }
 
-  // Hide any previous results
+  // Hide any previous results and show loading state
   pathResultsEl.hidden = true;
+  setButtonLoading(true);
 
   try {
     const data = await api.get<PathResponse>(
@@ -320,6 +324,8 @@ async function findPath(): Promise<void> {
 
     if (!data.found) {
       showPathError("No path found between these nodes");
+      // Add to history even when no path found
+      addToHistory(`Path: ${startLabel} → ${endLabel}`, `find_path(${startId}, ${endId})`, 0);
       return;
     }
 
@@ -348,11 +354,31 @@ async function findPath(): Promise<void> {
           renderer.highlightPath(nodeIds);
         }
       });
+
+      // Add to query history
+      addToHistory(`Path: ${startLabel} → ${endLabel}`, `find_path(${startId}, ${endId})`, data.path.length);
     }
   } catch (err) {
     console.error("Path finding error:", err);
     const message = err instanceof ApiClientError ? err.message : String(err);
     showPathError(`Path finding failed: ${message}`);
+  } finally {
+    setButtonLoading(false);
+  }
+}
+
+/** Set the Find Path button loading state */
+function setButtonLoading(loading: boolean): void {
+  if (!findPathBtn) return;
+
+  if (loading) {
+    findPathBtn.setAttribute("disabled", "true");
+    findPathBtn.classList.add("flex", "items-center", "justify-center", "gap-2");
+    findPathBtn.innerHTML = '<span class="spinner-sm"></span>Finding...';
+  } else {
+    findPathBtn.removeAttribute("disabled");
+    findPathBtn.classList.remove("flex", "items-center", "justify-center", "gap-2");
+    findPathBtn.textContent = "Find Shortest Path";
   }
 }
 

@@ -6,6 +6,7 @@
 
 import { api, ApiClientError } from "../api/client";
 import type { QueryResponse, GraphData } from "../api/types";
+import { addToHistory } from "../components/query-history";
 
 /** Result of executing a query */
 export interface QueryExecutionResult {
@@ -38,6 +39,29 @@ export async function executeQuery(query: string, extractGraph: boolean = true):
   if (response.graph !== undefined) {
     result.graph = response.graph;
   }
+  return result;
+}
+
+/**
+ * Execute a query and automatically add it to history.
+ *
+ * This is the preferred way to run queries as it ensures all queries
+ * are tracked in the history for later reference.
+ *
+ * @param name Display name for the query in history
+ * @param query The CozoDB query string
+ * @param extractGraph Whether to extract graph data from results
+ * @returns Query execution result
+ * @throws ApiClientError on API errors
+ */
+export async function executeQueryWithHistory(
+  name: string,
+  query: string,
+  extractGraph: boolean = true
+): Promise<QueryExecutionResult> {
+  const result = await executeQuery(query, extractGraph);
+  // Add to history in background (don't await to avoid blocking)
+  addToHistory(name, query, result.resultCount);
   return result;
 }
 

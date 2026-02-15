@@ -8,7 +8,7 @@
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import type { QueryHistoryEntry, QueryHistoryResponse } from "../api/types";
-import { executeQuery, getQueryErrorMessage } from "../utils/query";
+import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
 
 // Re-export for backwards compatibility
 export type { QueryHistoryEntry } from "../api/types";
@@ -161,10 +161,7 @@ async function runQuery(query: string, name: string): Promise<void> {
   closeQueryHistory();
 
   try {
-    const result = await executeQuery(query, true);
-
-    // Add to history
-    await addToHistory(name, query, result.resultCount);
+    const result = await executeQueryWithHistory(name, query, true);
 
     // Show results
     if (result.graph && result.graph.nodes.length > 0) {
