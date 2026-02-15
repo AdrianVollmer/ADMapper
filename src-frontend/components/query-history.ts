@@ -5,6 +5,8 @@
  * History is stored in CozoDB via backend API.
  */
 
+import { escapeHtml } from "../utils/html";
+
 /** Query history entry from API */
 export interface QueryHistoryEntry {
   id: string;
@@ -490,11 +492,4 @@ function formatTimestamp(timestamp: number): string {
 function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength) + "...";
-}
-
-/** Escape HTML */
-function escapeHtml(str: string): string {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
 }

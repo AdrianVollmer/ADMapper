@@ -6,6 +6,7 @@
 
 import { getRenderer } from "./graph-view";
 import { addToHistory } from "./query-history";
+import { escapeHtml } from "../utils/html";
 
 /** Query definition */
 export interface Query {
@@ -536,11 +537,4 @@ export async function importQueries(file: File): Promise<void> {
 /** Export custom queries to JSON */
 export function exportQueries(): string {
   return JSON.stringify(customQueries, null, 2);
-}
-
-/** Escape HTML */
-function escapeHtml(str: string): string {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
 }

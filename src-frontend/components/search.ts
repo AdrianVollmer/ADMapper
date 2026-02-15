@@ -10,6 +10,7 @@ import { updateDetailPanel } from "./sidebars";
 import { NODE_COLORS } from "../graph/theme";
 import type { ADNodeType } from "../graph/types";
 import type { RawADGraph } from "../graph/types";
+import { escapeHtml } from "../utils/html";
 
 /** Search result from API */
 interface SearchResult {
@@ -372,13 +373,6 @@ function showPathError(message: string): void {
   if (!pathResultsEl) return;
   pathResultsEl.innerHTML = `<div class="path-error">${escapeHtml(message)}</div>`;
   pathResultsEl.hidden = false;
-}
-
-/** Escape HTML */
-function escapeHtml(str: string): string {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
 }
 
 /** Set path start node from external source */

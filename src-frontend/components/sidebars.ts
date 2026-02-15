@@ -7,6 +7,7 @@
 import { appState } from "../main";
 import type { ADNodeAttributes } from "../graph/types";
 import { NODE_COLORS } from "../graph/theme";
+import { escapeHtml } from "../utils/html";
 
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
@@ -352,11 +353,4 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
     `
     }
   `;
-}
-
-/** Escape HTML special characters */
-function escapeHtml(str: string): string {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
 }
