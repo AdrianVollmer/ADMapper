@@ -60,21 +60,10 @@ export interface ADGraphRenderer {
 
 /** Create an AD graph renderer */
 export function createRenderer(options: RendererOptions): ADGraphRenderer {
-  const {
-    container,
-    graph,
-    theme = "dark",
-    enableHover = true,
-    onNodeClick,
-    onBackgroundClick,
-    onNodeHover,
-  } = options;
+  const { container, graph, theme = "dark", enableHover = true, onNodeClick, onBackgroundClick, onNodeHover } = options;
 
   // Resolve container element
-  const containerEl =
-    typeof container === "string"
-      ? document.querySelector<HTMLElement>(container)
-      : container;
+  const containerEl = typeof container === "string" ? document.querySelector<HTMLElement>(container) : container;
 
   if (!containerEl) {
     throw new Error(`Container not found: ${container}`);
@@ -146,10 +135,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     if (isSelected) {
       // Selected: red, tight, intense glow
       const glowRadius = data.size * 1.8;
-      const gradient = context.createRadialGradient(
-        data.x, data.y, data.size * 0.8,
-        data.x, data.y, glowRadius
-      );
+      const gradient = context.createRadialGradient(data.x, data.y, data.size * 0.8, data.x, data.y, glowRadius);
       gradient.addColorStop(0, "rgba(255, 50, 50, 1)");
       gradient.addColorStop(0.6, "rgba(255, 50, 50, 0.6)");
       gradient.addColorStop(1, "rgba(255, 50, 50, 0)");
@@ -161,10 +147,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     } else {
       // Hovered: yellow, softer glow
       const glowRadius = data.size * 2;
-      const gradient = context.createRadialGradient(
-        data.x, data.y, data.size * 0.5,
-        data.x, data.y, glowRadius
-      );
+      const gradient = context.createRadialGradient(data.x, data.y, data.size * 0.5, data.x, data.y, glowRadius);
       gradient.addColorStop(0, "rgba(255, 247, 0, 0.6)");
       gradient.addColorStop(0.5, "rgba(255, 247, 0, 0.2)");
       gradient.addColorStop(1, "rgba(255, 247, 0, 0)");
@@ -214,7 +197,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
           lengthToThicknessRatio: 4,
           widenessToThicknessRatio: 4,
         },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any,
     },
 
@@ -225,7 +208,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       // Selected nodes get higher z-index and will show stronger glow via drawNodeHover
       if (selectedNodes.has(nodeId)) {
         res.zIndex = 2;
-        res.highlighted = true;  // Mark for stronger glow
+        res.highlighted = true; // Mark for stronger glow
       }
 
       // Bring hovered node to front
@@ -361,10 +344,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       if (!nodePosition) return;
 
       if (animate) {
-        sigma.getCamera().animate(
-          { x: nodePosition.x, y: nodePosition.y, ratio: 0.5 },
-          { duration: 300 }
-        );
+        sigma.getCamera().animate({ x: nodePosition.x, y: nodePosition.y, ratio: 0.5 }, { duration: 300 });
       } else {
         sigma.getCamera().setState({ x: nodePosition.x, y: nodePosition.y, ratio: 0.5 });
       }

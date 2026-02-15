@@ -184,10 +184,7 @@ function subscribeToProgress(jobId: string): void {
 
 /** Update the progress UI */
 function updateProgressUI(progress: ImportProgress): void {
-  const percent =
-    progress.total_files > 0
-      ? Math.round((progress.files_processed / progress.total_files) * 100)
-      : 0;
+  const percent = progress.total_files > 0 ? Math.round((progress.files_processed / progress.total_files) * 100) : 0;
 
   if (progressFill) {
     progressFill.style.width = `${percent}%`;

@@ -9,19 +9,19 @@ import type { ADNodeType, ADEdgeType } from "./types";
 
 /** Color palette for node types */
 export const NODE_COLORS: Record<ADNodeType, string> = {
-  User: "#17a2b8",        // Teal - users are common, neutral color
-  Group: "#ffc107",       // Amber - groups connect users to permissions
-  Computer: "#dc3545",    // Red - computers are attack targets
-  Domain: "#6f42c1",      // Purple - domains are high-value
-  GPO: "#fd7e14",         // Orange - GPOs control configuration
-  OU: "#20c997",          // Mint - organizational containers
-  Container: "#6c757d",   // Gray - generic containers
+  User: "#17a2b8", // Teal - users are common, neutral color
+  Group: "#ffc107", // Amber - groups connect users to permissions
+  Computer: "#dc3545", // Red - computers are attack targets
+  Domain: "#6f42c1", // Purple - domains are high-value
+  GPO: "#fd7e14", // Orange - GPOs control configuration
+  OU: "#20c997", // Mint - organizational containers
+  Container: "#6c757d", // Gray - generic containers
   CertTemplate: "#e83e8c", // Pink - certificate templates (PKI)
   EnterpriseCA: "#e83e8c", // Pink - enterprise CAs (PKI)
-  RootCA: "#e83e8c",       // Pink - root CAs (PKI)
-  AIACA: "#e83e8c",        // Pink - AIA CAs (PKI)
-  NTAuthStore: "#e83e8c",  // Pink - NTAuth store (PKI)
-  Unknown: "#adb5bd",     // Light gray - unknown types
+  RootCA: "#e83e8c", // Pink - root CAs (PKI)
+  AIACA: "#e83e8c", // Pink - AIA CAs (PKI)
+  NTAuthStore: "#e83e8c", // Pink - NTAuth store (PKI)
+  Unknown: "#adb5bd", // Light gray - unknown types
 };
 
 /** Color palette for edge types (grouped by category) */
@@ -126,22 +126,14 @@ export const LABEL_COLOR = {
 };
 
 /** Get node color, considering highlight state */
-export function getNodeColor(
-  type: ADNodeType,
-  highlighted?: boolean,
-  dimmed?: boolean
-): string {
+export function getNodeColor(type: ADNodeType, highlighted?: boolean, dimmed?: boolean): string {
   if (highlighted) return HIGHLIGHT_COLORS.node;
   if (dimmed) return DIM_COLORS.node;
   return NODE_COLORS[type];
 }
 
 /** Get edge color, considering highlight state */
-export function getEdgeColor(
-  type: ADEdgeType,
-  highlighted?: boolean,
-  dimmed?: boolean
-): string {
+export function getEdgeColor(type: ADEdgeType, highlighted?: boolean, dimmed?: boolean): string {
   if (highlighted) return HIGHLIGHT_COLORS.edge;
   if (dimmed) return DIM_COLORS.edge;
   return EDGE_COLORS[type];

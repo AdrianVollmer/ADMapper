@@ -5,14 +5,7 @@
  */
 
 import Graph from "graphology";
-import type {
-  ADNodeAttributes,
-  ADEdgeAttributes,
-  RawADGraph,
-  RawADNode,
-  RawADEdge,
-  ADNodeType,
-} from "./types";
+import type { ADNodeAttributes, ADEdgeAttributes, RawADGraph, RawADNode, RawADEdge, ADNodeType } from "./types";
 import { NODE_COLORS, DEFAULT_EDGE_SIZE, DEFAULT_EDGE_COLOR } from "./theme";
 import { getNodeIcon, getNodeTypeColor, NODE_SIZE } from "./icons";
 
@@ -22,7 +15,7 @@ export type ADGraphType = Graph<ADNodeAttributes, ADEdgeAttributes>;
 export function createGraph(): ADGraphType {
   return new Graph<ADNodeAttributes, ADEdgeAttributes>({
     type: "directed",
-    multi: true,  // Allow multiple edges between same nodes (e.g., MemberOf + GenericAll)
+    multi: true, // Allow multiple edges between same nodes (e.g., MemberOf + GenericAll)
     allowSelfLoops: true,
   });
 }
@@ -51,10 +44,10 @@ function rawNodeToAttributes(node: RawADNode): ADNodeAttributes {
 function rawEdgeToAttributes(edge: RawADEdge): ADEdgeAttributes {
   const attrs: ADEdgeAttributes = {
     edgeType: edge.type,
-    label: edge.label ?? edge.type,  // Use edge type as label if not provided
+    label: edge.label ?? edge.type, // Use edge type as label if not provided
     color: DEFAULT_EDGE_COLOR,
     size: DEFAULT_EDGE_SIZE,
-    type: "triangle",  // Default to triangle (tapered), will be updated for multi-edges
+    type: "triangle", // Default to triangle (tapered), will be updated for multi-edges
   };
   return attrs;
 }
@@ -126,7 +119,7 @@ function assignEdgeCurvatures(graph: ADGraphType): void {
         const curvature = ((i - (count - 1) / 2) / count) * 0.6;
         graph.setEdgeAttribute(edges[i], "type", "curvedArrow");
         graph.setEdgeAttribute(edges[i], "curvature", curvature);
-        graph.setEdgeAttribute(edges[i], "size", 3);  // Thinner than tapered edges but still visible
+        graph.setEdgeAttribute(edges[i], "size", 3); // Thinner than tapered edges but still visible
       }
     }
   }
@@ -150,11 +143,7 @@ export function getNeighbors(graph: ADGraphType, nodeId: string): string[] {
 }
 
 /** Get all nodes reachable from a starting node (BFS) */
-export function getReachableNodes(
-  graph: ADGraphType,
-  startId: string,
-  maxDepth = Infinity
-): Set<string> {
+export function getReachableNodes(graph: ADGraphType, startId: string, maxDepth = Infinity): Set<string> {
   const visited = new Set<string>();
   const queue: Array<{ id: string; depth: number }> = [{ id: startId, depth: 0 }];
 

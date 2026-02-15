@@ -1,435 +1,441 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" class="h-full">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ADMapper</title>
-  <link rel="stylesheet" href="./styles/main.css">
-</head>
-<body class="h-full overflow-hidden bg-gray-900 text-gray-100">
-  <div id="app" class="h-full flex flex-col">
-    <!-- Menu Bar -->
-    <header id="menubar" class="flex-none h-8 bg-gray-800 border-b border-gray-700 flex items-center select-none">
-      <nav class="flex h-full" role="menubar">
-        <div class="menu-item" data-menu="file">
-          <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">File</button>
-          <div class="menu-dropdown" role="menu" hidden>
-            <button class="menu-option" data-action="new-project" role="menuitem">
-              <span>New Project</span>
-              <kbd>Ctrl+N</kbd>
-            </button>
-            <button class="menu-option" data-action="open-file" role="menuitem">
-              <span>Open File...</span>
-              <kbd>Ctrl+O</kbd>
-            </button>
-            <button class="menu-option" data-action="open-recent" role="menuitem">
-              <span>Open Recent</span>
-              <span class="arrow">▸</span>
-            </button>
-            <div class="menu-separator" role="separator"></div>
-            <button class="menu-option" data-action="save" role="menuitem">
-              <span>Save</span>
-              <kbd>Ctrl+S</kbd>
-            </button>
-            <button class="menu-option" data-action="save-as" role="menuitem">
-              <span>Save As...</span>
-              <kbd>Ctrl+Shift+S</kbd>
-            </button>
-            <button class="menu-option" data-action="export" role="menuitem">
-              <span>Export...</span>
-              <kbd>Ctrl+E</kbd>
-            </button>
-            <div class="menu-separator" role="separator"></div>
-            <button class="menu-option" data-action="settings" role="menuitem">
-              <span>Settings</span>
-              <kbd>Ctrl+,</kbd>
-            </button>
-            <div class="menu-separator" role="separator"></div>
-            <button class="menu-option" data-action="quit" role="menuitem">
-              <span>Quit</span>
-              <kbd>Ctrl+Q</kbd>
-            </button>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ADMapper</title>
+    <link rel="stylesheet" href="./styles/main.css" />
+  </head>
+  <body class="h-full overflow-hidden bg-gray-900 text-gray-100">
+    <div id="app" class="h-full flex flex-col">
+      <!-- Menu Bar -->
+      <header id="menubar" class="flex-none h-8 bg-gray-800 border-b border-gray-700 flex items-center select-none">
+        <nav class="flex h-full" role="menubar">
+          <div class="menu-item" data-menu="file">
+            <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">File</button>
+            <div class="menu-dropdown" role="menu" hidden>
+              <button class="menu-option" data-action="new-project" role="menuitem">
+                <span>New Project</span>
+                <kbd>Ctrl+N</kbd>
+              </button>
+              <button class="menu-option" data-action="open-file" role="menuitem">
+                <span>Open File...</span>
+                <kbd>Ctrl+O</kbd>
+              </button>
+              <button class="menu-option" data-action="open-recent" role="menuitem">
+                <span>Open Recent</span>
+                <span class="arrow">▸</span>
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button class="menu-option" data-action="save" role="menuitem">
+                <span>Save</span>
+                <kbd>Ctrl+S</kbd>
+              </button>
+              <button class="menu-option" data-action="save-as" role="menuitem">
+                <span>Save As...</span>
+                <kbd>Ctrl+Shift+S</kbd>
+              </button>
+              <button class="menu-option" data-action="export" role="menuitem">
+                <span>Export...</span>
+                <kbd>Ctrl+E</kbd>
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button class="menu-option" data-action="settings" role="menuitem">
+                <span>Settings</span>
+                <kbd>Ctrl+,</kbd>
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button class="menu-option" data-action="quit" role="menuitem">
+                <span>Quit</span>
+                <kbd>Ctrl+Q</kbd>
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div class="menu-item" data-menu="edit">
-          <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">Edit</button>
-          <div class="menu-dropdown" role="menu" hidden>
-            <button class="menu-option" data-action="undo" role="menuitem">
-              <span>Undo</span>
-              <kbd>Ctrl+Z</kbd>
-            </button>
-            <button class="menu-option" data-action="redo" role="menuitem">
-              <span>Redo</span>
-              <kbd>Ctrl+Shift+Z</kbd>
-            </button>
-            <div class="menu-separator" role="separator"></div>
-            <button class="menu-option" data-action="cut" role="menuitem">
-              <span>Cut</span>
-              <kbd>Ctrl+X</kbd>
-            </button>
-            <button class="menu-option" data-action="copy" role="menuitem">
-              <span>Copy</span>
-              <kbd>Ctrl+C</kbd>
-            </button>
-            <button class="menu-option" data-action="paste" role="menuitem">
-              <span>Paste</span>
-              <kbd>Ctrl+V</kbd>
-            </button>
-            <div class="menu-separator" role="separator"></div>
-            <button class="menu-option" data-action="select-all" role="menuitem">
-              <span>Select All</span>
-              <kbd>Ctrl+A</kbd>
-            </button>
-            <button class="menu-option" data-action="find" role="menuitem">
-              <span>Find...</span>
-              <kbd>Ctrl+F</kbd>
-            </button>
+          <div class="menu-item" data-menu="edit">
+            <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">Edit</button>
+            <div class="menu-dropdown" role="menu" hidden>
+              <button class="menu-option" data-action="undo" role="menuitem">
+                <span>Undo</span>
+                <kbd>Ctrl+Z</kbd>
+              </button>
+              <button class="menu-option" data-action="redo" role="menuitem">
+                <span>Redo</span>
+                <kbd>Ctrl+Shift+Z</kbd>
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button class="menu-option" data-action="cut" role="menuitem">
+                <span>Cut</span>
+                <kbd>Ctrl+X</kbd>
+              </button>
+              <button class="menu-option" data-action="copy" role="menuitem">
+                <span>Copy</span>
+                <kbd>Ctrl+C</kbd>
+              </button>
+              <button class="menu-option" data-action="paste" role="menuitem">
+                <span>Paste</span>
+                <kbd>Ctrl+V</kbd>
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button class="menu-option" data-action="select-all" role="menuitem">
+                <span>Select All</span>
+                <kbd>Ctrl+A</kbd>
+              </button>
+              <button class="menu-option" data-action="find" role="menuitem">
+                <span>Find...</span>
+                <kbd>Ctrl+F</kbd>
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div class="menu-item" data-menu="view">
-          <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">View</button>
-          <div class="menu-dropdown" role="menu" hidden>
-            <button class="menu-option" data-action="toggle-nav-sidebar" role="menuitem">
-              <span>Toggle Navigation</span>
-              <kbd>Ctrl+B</kbd>
-            </button>
-            <button class="menu-option" data-action="toggle-detail-sidebar" role="menuitem">
-              <span>Toggle Details</span>
-              <kbd>Ctrl+D</kbd>
-            </button>
-            <div class="menu-separator" role="separator"></div>
-            <button class="menu-option" data-action="zoom-in" role="menuitem">
-              <span>Zoom In</span>
-              <kbd>Ctrl++</kbd>
-            </button>
-            <button class="menu-option" data-action="zoom-out" role="menuitem">
-              <span>Zoom Out</span>
-              <kbd>Ctrl+-</kbd>
-            </button>
-            <button class="menu-option" data-action="zoom-reset" role="menuitem">
-              <span>Reset Zoom</span>
-              <kbd>Ctrl+0</kbd>
-            </button>
-            <button class="menu-option" data-action="fit-graph" role="menuitem">
-              <span>Fit Graph to View</span>
-              <kbd>Ctrl+1</kbd>
-            </button>
-            <div class="menu-separator" role="separator"></div>
-            <button class="menu-option" data-action="fullscreen" role="menuitem">
-              <span>Toggle Fullscreen</span>
-              <kbd>F11</kbd>
-            </button>
+          <div class="menu-item" data-menu="view">
+            <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">View</button>
+            <div class="menu-dropdown" role="menu" hidden>
+              <button class="menu-option" data-action="toggle-nav-sidebar" role="menuitem">
+                <span>Toggle Navigation</span>
+                <kbd>Ctrl+B</kbd>
+              </button>
+              <button class="menu-option" data-action="toggle-detail-sidebar" role="menuitem">
+                <span>Toggle Details</span>
+                <kbd>Ctrl+D</kbd>
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button class="menu-option" data-action="zoom-in" role="menuitem">
+                <span>Zoom In</span>
+                <kbd>Ctrl++</kbd>
+              </button>
+              <button class="menu-option" data-action="zoom-out" role="menuitem">
+                <span>Zoom Out</span>
+                <kbd>Ctrl+-</kbd>
+              </button>
+              <button class="menu-option" data-action="zoom-reset" role="menuitem">
+                <span>Reset Zoom</span>
+                <kbd>Ctrl+0</kbd>
+              </button>
+              <button class="menu-option" data-action="fit-graph" role="menuitem">
+                <span>Fit Graph to View</span>
+                <kbd>Ctrl+1</kbd>
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button class="menu-option" data-action="fullscreen" role="menuitem">
+                <span>Toggle Fullscreen</span>
+                <kbd>F11</kbd>
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div class="menu-item" data-menu="tools">
-          <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">Tools</button>
-          <div class="menu-dropdown" role="menu" hidden>
-            <button class="menu-option" data-action="import-bloodhound" role="menuitem">
-              <span>Import BloodHound Data...</span>
-            </button>
-            <button class="menu-option" data-action="run-query" role="menuitem">
-              <span>Run Query</span>
-              <kbd>Ctrl+Enter</kbd>
-            </button>
-            <button class="menu-option" data-action="saved-queries" role="menuitem">
-              <span>Saved Queries</span>
-            </button>
-            <div class="menu-separator" role="separator"></div>
-            <button class="menu-option" data-action="find-path" role="menuitem">
-              <span>Find Shortest Path...</span>
-              <kbd>Ctrl+P</kbd>
-            </button>
-            <button class="menu-option" data-action="find-attack-path" role="menuitem">
-              <span>Find Attack Paths...</span>
-            </button>
-            <div class="menu-separator" role="separator"></div>
-            <button class="menu-option" data-action="layout-graph" role="menuitem">
-              <span>Re-layout Graph</span>
-              <kbd>Ctrl+L</kbd>
-            </button>
-            <div class="menu-submenu">
-              <div class="menu-submenu-trigger" role="menuitem" aria-haspopup="true">
-                <span>Layout Algorithm</span>
-              </div>
-              <div class="menu-submenu-dropdown" role="menu">
-                <button class="menu-radio" data-action="layout-force" data-checked="true" role="menuitemradio" aria-checked="true">
-                  Force-Directed
-                </button>
-                <button class="menu-radio" data-action="layout-hierarchical" data-checked="false" role="menuitemradio" aria-checked="false">
-                  Hierarchical (Left to Right)
-                </button>
+          <div class="menu-item" data-menu="tools">
+            <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">Tools</button>
+            <div class="menu-dropdown" role="menu" hidden>
+              <button class="menu-option" data-action="import-bloodhound" role="menuitem">
+                <span>Import BloodHound Data...</span>
+              </button>
+              <button class="menu-option" data-action="run-query" role="menuitem">
+                <span>Run Query</span>
+                <kbd>Ctrl+Enter</kbd>
+              </button>
+              <button class="menu-option" data-action="saved-queries" role="menuitem">
+                <span>Saved Queries</span>
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button class="menu-option" data-action="find-path" role="menuitem">
+                <span>Find Shortest Path...</span>
+                <kbd>Ctrl+P</kbd>
+              </button>
+              <button class="menu-option" data-action="find-attack-path" role="menuitem">
+                <span>Find Attack Paths...</span>
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button class="menu-option" data-action="layout-graph" role="menuitem">
+                <span>Re-layout Graph</span>
+                <kbd>Ctrl+L</kbd>
+              </button>
+              <div class="menu-submenu">
+                <div class="menu-submenu-trigger" role="menuitem" aria-haspopup="true">
+                  <span>Layout Algorithm</span>
+                </div>
+                <div class="menu-submenu-dropdown" role="menu">
+                  <button
+                    class="menu-radio"
+                    data-action="layout-force"
+                    data-checked="true"
+                    role="menuitemradio"
+                    aria-checked="true"
+                  >
+                    Force-Directed
+                  </button>
+                  <button
+                    class="menu-radio"
+                    data-action="layout-hierarchical"
+                    data-checked="false"
+                    role="menuitemradio"
+                    aria-checked="false"
+                  >
+                    Hierarchical (Left to Right)
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div class="menu-item" data-menu="help">
-          <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">Help</button>
-          <div class="menu-dropdown" role="menu" hidden>
-            <button class="menu-option" data-action="documentation" role="menuitem">
-              <span>Documentation</span>
-              <kbd>F1</kbd>
-            </button>
-            <button class="menu-option" data-action="keyboard-shortcuts" role="menuitem">
-              <span>Keyboard Shortcuts</span>
-              <kbd>Ctrl+?</kbd>
-            </button>
-            <div class="menu-separator" role="separator"></div>
-            <button class="menu-option" data-action="check-updates" role="menuitem">
-              <span>Check for Updates</span>
-            </button>
-            <button class="menu-option" data-action="about" role="menuitem">
-              <span>About ADMapper</span>
-            </button>
+          <div class="menu-item" data-menu="help">
+            <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">Help</button>
+            <div class="menu-dropdown" role="menu" hidden>
+              <button class="menu-option" data-action="documentation" role="menuitem">
+                <span>Documentation</span>
+                <kbd>F1</kbd>
+              </button>
+              <button class="menu-option" data-action="keyboard-shortcuts" role="menuitem">
+                <span>Keyboard Shortcuts</span>
+                <kbd>Ctrl+?</kbd>
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button class="menu-option" data-action="check-updates" role="menuitem">
+                <span>Check for Updates</span>
+              </button>
+              <button class="menu-option" data-action="about" role="menuitem">
+                <span>About ADMapper</span>
+              </button>
+            </div>
           </div>
-        </div>
-      </nav>
-    </header>
+        </nav>
+      </header>
 
-    <!-- Main Content Area -->
-    <div class="flex-1 flex min-h-0">
-      <!-- Navigation Sidebar (Left) -->
-      <aside
-        id="nav-sidebar"
-        class="flex-none bg-gray-850 border-r border-gray-700 flex flex-col transition-all duration-200"
-        data-collapsed="false"
-        style="width: 240px;"
-      >
-        <div class="sidebar-header">
-          <span class="sidebar-title">Navigation</span>
-          <button
-            class="sidebar-toggle"
-            data-action="toggle-nav-sidebar"
-            aria-label="Collapse navigation"
-            title="Collapse (Ctrl+B)"
-          >
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M15 18l-6-6 6-6"/>
-            </svg>
-          </button>
-        </div>
-        <div class="sidebar-content">
-          <!-- Search -->
-          <div class="sidebar-section">
-            <div class="search-box">
-              <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="11" cy="11" r="8"/>
-                <path d="M21 21l-4.35-4.35"/>
+      <!-- Main Content Area -->
+      <div class="flex-1 flex min-h-0">
+        <!-- Navigation Sidebar (Left) -->
+        <aside
+          id="nav-sidebar"
+          class="flex-none bg-gray-850 border-r border-gray-700 flex flex-col transition-all duration-200"
+          data-collapsed="false"
+          style="width: 240px"
+        >
+          <div class="sidebar-header">
+            <span class="sidebar-title">Navigation</span>
+            <button
+              class="sidebar-toggle"
+              data-action="toggle-nav-sidebar"
+              aria-label="Collapse navigation"
+              title="Collapse (Ctrl+B)"
+            >
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M15 18l-6-6 6-6" />
               </svg>
-              <input type="text" placeholder="Search nodes..." class="search-input" id="node-search">
+            </button>
+          </div>
+          <div class="sidebar-content">
+            <!-- Search -->
+            <div class="sidebar-section">
+              <div class="search-box">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="M21 21l-4.35-4.35" />
+                </svg>
+                <input type="text" placeholder="Search nodes..." class="search-input" id="node-search" />
+              </div>
+            </div>
+
+            <!-- Node Types Filter -->
+            <div class="sidebar-section">
+              <h3 class="section-title">Node Types</h3>
+              <div class="node-type-filters">
+                <label class="filter-item">
+                  <input type="checkbox" checked data-node-type="User" />
+                  <span class="node-badge user">User</span>
+                </label>
+                <label class="filter-item">
+                  <input type="checkbox" checked data-node-type="Group" />
+                  <span class="node-badge group">Group</span>
+                </label>
+                <label class="filter-item">
+                  <input type="checkbox" checked data-node-type="Computer" />
+                  <span class="node-badge computer">Computer</span>
+                </label>
+                <label class="filter-item">
+                  <input type="checkbox" checked data-node-type="Domain" />
+                  <span class="node-badge domain">Domain</span>
+                </label>
+                <label class="filter-item">
+                  <input type="checkbox" checked data-node-type="GPO" />
+                  <span class="node-badge gpo">GPO</span>
+                </label>
+                <label class="filter-item">
+                  <input type="checkbox" checked data-node-type="OU" />
+                  <span class="node-badge ou">OU</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Saved Queries -->
+            <div class="sidebar-section">
+              <h3 class="section-title">Saved Queries</h3>
+              <ul class="query-list">
+                <li class="query-item" data-query="domain-admins">
+                  <span>Domain Admins</span>
+                </li>
+                <li class="query-item" data-query="kerberoastable">
+                  <span>Kerberoastable Users</span>
+                </li>
+                <li class="query-item" data-query="unconstrained">
+                  <span>Unconstrained Delegation</span>
+                </li>
+                <li class="query-item" data-query="dcsync">
+                  <span>DCSync Rights</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </aside>
+
+        <!-- Collapsed Nav Sidebar Button -->
+        <button
+          id="nav-sidebar-expand"
+          class="sidebar-expand-btn left hidden"
+          data-action="toggle-nav-sidebar"
+          aria-label="Expand navigation"
+          title="Expand Navigation (Ctrl+B)"
+        >
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+
+        <!-- Graph Container (Center) -->
+        <main id="graph-container" class="flex-1 min-w-0 bg-gray-900 relative">
+          <div id="graph-canvas" class="absolute inset-0"></div>
+
+          <!-- Graph Toolbar -->
+          <div class="graph-toolbar">
+            <button class="toolbar-btn" data-action="zoom-in" title="Zoom In (Ctrl++)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <path d="M21 21l-4.35-4.35M11 8v6M8 11h6" />
+              </svg>
+            </button>
+            <button class="toolbar-btn" data-action="zoom-out" title="Zoom Out (Ctrl+-)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <path d="M21 21l-4.35-4.35M8 11h6" />
+              </svg>
+            </button>
+            <button class="toolbar-btn" data-action="fit-graph" title="Fit to View (Ctrl+1)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+              </svg>
+            </button>
+            <div class="toolbar-separator"></div>
+            <button class="toolbar-btn" data-action="layout-graph" title="Re-layout (Ctrl+L)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="5" cy="12" r="2" />
+                <circle cx="19" cy="12" r="2" />
+                <circle cx="12" cy="5" r="2" />
+                <circle cx="12" cy="19" r="2" />
+                <path d="M6.5 10.5L10.5 6.5M13.5 6.5l4 4M6.5 13.5l4 4M13.5 17.5l4-4" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Status Bar -->
+          <div class="graph-status">
+            <span id="graph-stats">No graph loaded</span>
+          </div>
+        </main>
+
+        <!-- Collapsed Detail Sidebar Button -->
+        <button
+          id="detail-sidebar-expand"
+          class="sidebar-expand-btn right hidden"
+          data-action="toggle-detail-sidebar"
+          aria-label="Expand details"
+          title="Expand Details (Ctrl+D)"
+        >
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+
+        <!-- Detail Sidebar (Right) -->
+        <aside
+          id="detail-sidebar"
+          class="flex-none bg-gray-850 border-l border-gray-700 flex flex-col transition-all duration-200"
+          data-collapsed="false"
+          style="width: 300px"
+        >
+          <div class="sidebar-header">
+            <span class="sidebar-title">Details</span>
+            <button
+              class="sidebar-toggle"
+              data-action="toggle-detail-sidebar"
+              aria-label="Collapse details"
+              title="Collapse (Ctrl+D)"
+            >
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          </div>
+          <div class="sidebar-content" id="detail-content">
+            <div class="empty-state">
+              <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4M12 8h.01" />
+              </svg>
+              <p>Select a node to view details</p>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- Hidden file input for BloodHound import -->
+    <input type="file" id="bloodhound-file-input" accept=".json,.zip" multiple hidden />
+
+    <!-- Import Modal -->
+    <div id="import-modal" class="modal-overlay" hidden>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Importing BloodHound Data</h2>
+        </div>
+        <div class="modal-body">
+          <!-- Progress bar -->
+          <div class="import-progress">
+            <div class="progress-bar">
+              <div class="progress-fill" id="import-progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="progress-text">
+              <span id="import-progress-percent">0%</span>
+              <span id="import-progress-files">0 / 0 files</span>
             </div>
           </div>
 
-          <!-- Node Types Filter -->
-          <div class="sidebar-section">
-            <h3 class="section-title">Node Types</h3>
-            <div class="node-type-filters">
-              <label class="filter-item">
-                <input type="checkbox" checked data-node-type="User">
-                <span class="node-badge user">User</span>
-              </label>
-              <label class="filter-item">
-                <input type="checkbox" checked data-node-type="Group">
-                <span class="node-badge group">Group</span>
-              </label>
-              <label class="filter-item">
-                <input type="checkbox" checked data-node-type="Computer">
-                <span class="node-badge computer">Computer</span>
-              </label>
-              <label class="filter-item">
-                <input type="checkbox" checked data-node-type="Domain">
-                <span class="node-badge domain">Domain</span>
-              </label>
-              <label class="filter-item">
-                <input type="checkbox" checked data-node-type="GPO">
-                <span class="node-badge gpo">GPO</span>
-              </label>
-              <label class="filter-item">
-                <input type="checkbox" checked data-node-type="OU">
-                <span class="node-badge ou">OU</span>
-              </label>
+          <!-- Current file -->
+          <div class="import-status">
+            <span class="status-label">Processing:</span>
+            <span id="import-current-file" class="status-value">-</span>
+          </div>
+
+          <!-- Stats -->
+          <div class="import-stats">
+            <div class="stat-item">
+              <span class="stat-value" id="import-nodes-count">0</span>
+              <span class="stat-label">Nodes</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value" id="import-edges-count">0</span>
+              <span class="stat-label">Edges</span>
             </div>
           </div>
 
-          <!-- Saved Queries -->
-          <div class="sidebar-section">
-            <h3 class="section-title">Saved Queries</h3>
-            <ul class="query-list">
-              <li class="query-item" data-query="domain-admins">
-                <span>Domain Admins</span>
-              </li>
-              <li class="query-item" data-query="kerberoastable">
-                <span>Kerberoastable Users</span>
-              </li>
-              <li class="query-item" data-query="unconstrained">
-                <span>Unconstrained Delegation</span>
-              </li>
-              <li class="query-item" data-query="dcsync">
-                <span>DCSync Rights</span>
-              </li>
-            </ul>
-          </div>
+          <!-- Error display -->
+          <div id="import-error" class="import-error" hidden></div>
         </div>
-      </aside>
-
-      <!-- Collapsed Nav Sidebar Button -->
-      <button
-        id="nav-sidebar-expand"
-        class="sidebar-expand-btn left hidden"
-        data-action="toggle-nav-sidebar"
-        aria-label="Expand navigation"
-        title="Expand Navigation (Ctrl+B)"
-      >
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M9 18l6-6-6-6"/>
-        </svg>
-      </button>
-
-      <!-- Graph Container (Center) -->
-      <main id="graph-container" class="flex-1 min-w-0 bg-gray-900 relative">
-        <div id="graph-canvas" class="absolute inset-0"></div>
-
-        <!-- Graph Toolbar -->
-        <div class="graph-toolbar">
-          <button class="toolbar-btn" data-action="zoom-in" title="Zoom In (Ctrl++)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"/>
-              <path d="M21 21l-4.35-4.35M11 8v6M8 11h6"/>
-            </svg>
-          </button>
-          <button class="toolbar-btn" data-action="zoom-out" title="Zoom Out (Ctrl+-)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"/>
-              <path d="M21 21l-4.35-4.35M8 11h6"/>
-            </svg>
-          </button>
-          <button class="toolbar-btn" data-action="fit-graph" title="Fit to View (Ctrl+1)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
-            </svg>
-          </button>
-          <div class="toolbar-separator"></div>
-          <button class="toolbar-btn" data-action="layout-graph" title="Re-layout (Ctrl+L)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="5" cy="12" r="2"/>
-              <circle cx="19" cy="12" r="2"/>
-              <circle cx="12" cy="5" r="2"/>
-              <circle cx="12" cy="19" r="2"/>
-              <path d="M6.5 10.5L10.5 6.5M13.5 6.5l4 4M6.5 13.5l4 4M13.5 17.5l4-4"/>
-            </svg>
-          </button>
+        <div class="modal-footer">
+          <button id="import-done-btn" class="btn btn-primary" hidden>Done</button>
+          <button id="import-cancel-btn" class="btn btn-secondary">Cancel</button>
         </div>
-
-        <!-- Status Bar -->
-        <div class="graph-status">
-          <span id="graph-stats">No graph loaded</span>
-        </div>
-      </main>
-
-      <!-- Collapsed Detail Sidebar Button -->
-      <button
-        id="detail-sidebar-expand"
-        class="sidebar-expand-btn right hidden"
-        data-action="toggle-detail-sidebar"
-        aria-label="Expand details"
-        title="Expand Details (Ctrl+D)"
-      >
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M15 18l-6-6 6-6"/>
-        </svg>
-      </button>
-
-      <!-- Detail Sidebar (Right) -->
-      <aside
-        id="detail-sidebar"
-        class="flex-none bg-gray-850 border-l border-gray-700 flex flex-col transition-all duration-200"
-        data-collapsed="false"
-        style="width: 300px;"
-      >
-        <div class="sidebar-header">
-          <span class="sidebar-title">Details</span>
-          <button
-            class="sidebar-toggle"
-            data-action="toggle-detail-sidebar"
-            aria-label="Collapse details"
-            title="Collapse (Ctrl+D)"
-          >
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 18l6-6-6-6"/>
-            </svg>
-          </button>
-        </div>
-        <div class="sidebar-content" id="detail-content">
-          <div class="empty-state">
-            <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M12 16v-4M12 8h.01"/>
-            </svg>
-            <p>Select a node to view details</p>
-          </div>
-        </div>
-      </aside>
-    </div>
-  </div>
-
-  <!-- Hidden file input for BloodHound import -->
-  <input
-    type="file"
-    id="bloodhound-file-input"
-    accept=".json,.zip"
-    multiple
-    hidden
-  >
-
-  <!-- Import Modal -->
-  <div id="import-modal" class="modal-overlay" hidden>
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2 class="modal-title">Importing BloodHound Data</h2>
-      </div>
-      <div class="modal-body">
-        <!-- Progress bar -->
-        <div class="import-progress">
-          <div class="progress-bar">
-            <div class="progress-fill" id="import-progress-fill" style="width: 0%"></div>
-          </div>
-          <div class="progress-text">
-            <span id="import-progress-percent">0%</span>
-            <span id="import-progress-files">0 / 0 files</span>
-          </div>
-        </div>
-
-        <!-- Current file -->
-        <div class="import-status">
-          <span class="status-label">Processing:</span>
-          <span id="import-current-file" class="status-value">-</span>
-        </div>
-
-        <!-- Stats -->
-        <div class="import-stats">
-          <div class="stat-item">
-            <span class="stat-value" id="import-nodes-count">0</span>
-            <span class="stat-label">Nodes</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-value" id="import-edges-count">0</span>
-            <span class="stat-label">Edges</span>
-          </div>
-        </div>
-
-        <!-- Error display -->
-        <div id="import-error" class="import-error" hidden></div>
-      </div>
-      <div class="modal-footer">
-        <button id="import-done-btn" class="btn btn-primary" hidden>Done</button>
-        <button id="import-cancel-btn" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
-  </div>
 
-  <script type="module" src="./main.ts"></script>
-</body>
+    <script type="module" src="./main.ts"></script>
+  </body>
 </html>

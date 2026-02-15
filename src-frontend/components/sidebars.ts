@@ -112,14 +112,18 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
       <h2 class="detail-node-name">${escapeHtml(attrs.label)}</h2>
     </div>
 
-    ${propsHtml ? `
+    ${
+      propsHtml
+        ? `
     <div class="detail-section">
       <h3 class="detail-section-title">Properties</h3>
       <div class="detail-props">
         ${propsHtml}
       </div>
     </div>
-    ` : ""}
+    `
+        : ""
+    }
 
     <div class="detail-section">
       <h3 class="detail-section-title">Actions</h3>

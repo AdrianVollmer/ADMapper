@@ -163,12 +163,13 @@ function handleMenuKeydown(e: KeyboardEvent): void {
       }
       break;
 
-    case "Escape":
+    case "Escape": {
       e.preventDefault();
       closeAllMenus();
       // Return focus to the menu trigger
       const trigger = activeMenu?.querySelector(".menu-trigger") as HTMLElement;
       trigger?.focus();
       break;
+    }
   }
 }

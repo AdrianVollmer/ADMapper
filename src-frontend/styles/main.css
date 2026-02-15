@@ -376,7 +376,7 @@
 @layer base {
   * {
     scrollbar-width: thin;
-    scrollbar-color: theme('colors.gray.600') transparent;
+    scrollbar-color: theme("colors.gray.600") transparent;
   }
 
   *::-webkit-scrollbar {
@@ -389,12 +389,12 @@
   }
 
   *::-webkit-scrollbar-thumb {
-    background-color: theme('colors.gray.600');
+    background-color: theme("colors.gray.600");
     border-radius: 4px;
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background-color: theme('colors.gray.500');
+    background-color: theme("colors.gray.500");
   }
 }
 

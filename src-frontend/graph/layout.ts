@@ -116,10 +116,7 @@ function applyForceLayout(graph: ADGraphType, options: LayoutOptions): void {
  * Computes layers based on longest path from source nodes (nodes with no incoming edges).
  * Handles cycles by using the first-visit layer assignment.
  */
-function applyHierarchicalLayout(
-  graph: ADGraphType,
-  options: HierarchicalSettings = {}
-): void {
+function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettings = {}): void {
   const settings = { ...DEFAULT_HIERARCHICAL_SETTINGS, ...options };
   const { layerSpacing, nodeSpacing, direction } = settings;
 
@@ -296,12 +293,7 @@ export async function applyLayoutAsync(
  *
  * Useful after layout to fit the graph in a specific viewport.
  */
-export function normalizePositions(
-  graph: ADGraphType,
-  width = 1000,
-  height = 1000,
-  padding = 50
-): void {
+export function normalizePositions(graph: ADGraphType, width = 1000, height = 1000, padding = 50): void {
   if (graph.order === 0) return;
 
   let minX = Infinity;
