@@ -381,7 +381,10 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
     clearSelection() {
       selectedNodes.clear();
+      highlightedPath.clear();
+      highlightedPathEdges.clear();
       hoveredNode = null;
+      hoveredReachableEdges = new Set();
       sigma.refresh();
     },
 
