@@ -70,6 +70,8 @@ export interface ADNodeAttributes {
   size: number;
   /** Node color */
   color: string;
+  /** Icon image URL for rendering */
+  image: string;
   /** Original AD object properties (objectid, distinguishedname, etc.) */
   properties?: Record<string, unknown>;
   /** Whether this node is currently highlighted */

@@ -5,6 +5,7 @@
  */
 
 import Sigma from "sigma";
+import { createNodeImageProgram } from "@sigma/node-image";
 import type { ADGraphType } from "./ADGraph";
 import type { ADNodeAttributes, ADEdgeAttributes } from "./types";
 import {
@@ -85,15 +86,15 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   // Custom label renderer: draws label below node, centered
   function drawLabel(
     context: CanvasRenderingContext2D,
-    data: { label: string; x: number; y: number; size: number; color: string },
-    settings: { labelSize: number; labelWeight: string; labelColor: { color: string } }
+    data: { label: string | null; x: number; y: number; size: number; color: string },
+    settings: { labelSize: number; labelWeight: string; labelColor: { color?: string } }
   ): void {
     const label = data.label;
     if (!label) return;
 
     const size = settings.labelSize;
     const font = `${settings.labelWeight} ${size}px sans-serif`;
-    const color = settings.labelColor.color;
+    const color = settings.labelColor.color ?? LABEL_COLOR[currentTheme];
 
     context.font = font;
     context.fillStyle = color;
@@ -104,6 +105,17 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     const yOffset = data.size + 4;
     context.fillText(label, data.x, data.y + yOffset);
   }
+
+  // Create node image program for rendering icons
+  // "background" mode draws the node color as a circle behind the icon
+  const NodeImageProgram = createNodeImageProgram({
+    size: { mode: "force", value: 256 },
+    drawingMode: "background",
+    colorAttribute: "color",
+    imageAttribute: "image",
+    padding: 0.15,
+    keepWithinCircle: true,
+  });
 
   // Create Sigma instance with custom reducers for dynamic styling
   const sigma = new Sigma(graph, containerEl, {
@@ -118,6 +130,10 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     defaultEdgeColor: "#6c757d",
     labelColor: { color: LABEL_COLOR[theme] },
     defaultDrawNodeLabel: drawLabel,
+    defaultNodeType: "image",
+    nodeProgramClasses: {
+      image: NodeImageProgram,
+    },
 
     // Node reducer: apply highlighting/dimming
     nodeReducer: (nodeId, data) => {
@@ -213,7 +229,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
   // Public API
   const renderer: ADGraphRenderer = {
-    sigma,
+    sigma: sigma as unknown as Sigma<ADNodeAttributes, ADEdgeAttributes>,
 
     get hoveredNode() {
       return hoveredNode;

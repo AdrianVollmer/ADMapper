@@ -13,7 +13,8 @@ import type {
   RawADEdge,
   ADNodeType,
 } from "./types";
-import { NODE_COLORS, NODE_SIZES, EDGE_COLORS, DEFAULT_EDGE_SIZE } from "./theme";
+import { NODE_COLORS, EDGE_COLORS, DEFAULT_EDGE_SIZE } from "./theme";
+import { getNodeIcon, getNodeTypeColor, NODE_SIZE } from "./icons";
 
 export type ADGraphType = Graph<ADNodeAttributes, ADEdgeAttributes>;
 
@@ -28,13 +29,17 @@ export function createGraph(): ADGraphType {
 
 /** Convert a raw node to graphology attributes */
 function rawNodeToAttributes(node: RawADNode): ADNodeAttributes {
+  // Use Unknown type for unrecognized node types
+  const nodeType = NODE_COLORS[node.type] ? node.type : "Unknown";
+
   const attrs: ADNodeAttributes = {
     label: node.label,
-    nodeType: node.type,
+    nodeType: nodeType,
     x: node.x ?? Math.random() * 1000,
     y: node.y ?? Math.random() * 1000,
-    size: NODE_SIZES[node.type] ?? NODE_SIZES.Unknown,
-    color: NODE_COLORS[node.type] ?? NODE_COLORS.Unknown,
+    size: NODE_SIZE,
+    color: getNodeTypeColor(nodeType),
+    image: getNodeIcon(nodeType),
   };
   if (node.properties) {
     attrs.properties = node.properties;
