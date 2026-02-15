@@ -6,7 +6,7 @@ mod db;
 mod import;
 
 use axum::{
-    extract::{Multipart, Path, State},
+    extract::{Multipart, Path, Query, State},
     http::StatusCode,
     response::{
         sse::{Event, Sse},
@@ -15,6 +15,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use serde::Deserialize;
 use dashmap::DashMap;
 use db::GraphDatabase;
 use import::{BloodHoundImporter, ImportProgress};
@@ -128,6 +129,9 @@ pub async fn run_service(bind: &str, port: u16) {
         .route("/api/graph/nodes", get(graph_nodes))
         .route("/api/graph/edges", get(graph_edges))
         .route("/api/graph/all", get(graph_all))
+        .route("/api/graph/search", get(graph_search))
+        .route("/api/graph/path", get(graph_path))
+        .route("/api/graph/query", post(graph_query))
         .with_state(state)
         .fallback_service(static_files)
         .layer(cors);
@@ -304,7 +308,7 @@ async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue>, (
 }
 
 /// Graph node response format.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct GraphNode {
     id: String,
     label: String,
@@ -401,4 +405,255 @@ async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>, (St
     };
 
     Ok(Json(result))
+}
+
+/// Search query parameters.
+#[derive(Debug, Deserialize)]
+struct SearchParams {
+    q: String,
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+
+fn default_limit() -> usize {
+    20
+}
+
+/// Search nodes by label (for autocomplete).
+#[instrument(skip(state))]
+async fn graph_search(
+    State(state): State<AppState>,
+    Query(params): Query<SearchParams>,
+) -> Result<Json<Vec<GraphNode>>, (StatusCode, String)> {
+    if params.q.len() < 2 {
+        return Ok(Json(Vec::new()));
+    }
+
+    let nodes = state
+        .db
+        .search_nodes(&params.q, params.limit)
+        .map_err(|e| {
+            error!(error = %e, "Search failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        })?;
+
+    let result: Vec<GraphNode> = nodes
+        .into_iter()
+        .map(|(id, label, node_type, properties)| GraphNode {
+            id,
+            label,
+            node_type,
+            properties,
+        })
+        .collect();
+
+    debug!(query = %params.q, results = result.len(), "Search complete");
+    Ok(Json(result))
+}
+
+/// Path query parameters.
+#[derive(Debug, Deserialize)]
+struct PathParams {
+    from: String,
+    to: String,
+}
+
+/// Path step in the response.
+#[derive(Serialize)]
+struct PathStep {
+    node: GraphNode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    edge_type: Option<String>,
+}
+
+/// Path response with full graph for rendering.
+#[derive(Serialize)]
+struct PathResponse {
+    found: bool,
+    path: Vec<PathStep>,
+    graph: FullGraph,
+}
+
+/// Find shortest path between two nodes.
+#[instrument(skip(state))]
+async fn graph_path(
+    State(state): State<AppState>,
+    Query(params): Query<PathParams>,
+) -> Result<Json<PathResponse>, (StatusCode, String)> {
+    let path_result = state
+        .db
+        .shortest_path(&params.from, &params.to)
+        .map_err(|e| {
+            error!(error = %e, "Path finding failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        })?;
+
+    match path_result {
+        None => {
+            debug!(from = %params.from, to = %params.to, "No path found");
+            Ok(Json(PathResponse {
+                found: false,
+                path: Vec::new(),
+                graph: FullGraph {
+                    nodes: Vec::new(),
+                    edges: Vec::new(),
+                },
+            }))
+        }
+        Some(path) => {
+            // Get node IDs from path
+            let node_ids: Vec<String> = path.iter().map(|(id, _)| id.clone()).collect();
+
+            // Get full node data
+            let nodes = state
+                .db
+                .get_nodes_by_ids(&node_ids)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            // Build node lookup
+            let node_map: std::collections::HashMap<String, (String, String, String, JsonValue)> =
+                nodes
+                    .into_iter()
+                    .map(|(id, label, node_type, props)| (id.clone(), (id, label, node_type, props)))
+                    .collect();
+
+            // Build path steps
+            let path_steps: Vec<PathStep> = path
+                .iter()
+                .map(|(id, edge_type)| {
+                    let (node_id, label, node_type, properties) = node_map
+                        .get(id)
+                        .cloned()
+                        .unwrap_or_else(|| (id.clone(), id.clone(), "Unknown".to_string(), JsonValue::Null));
+                    PathStep {
+                        node: GraphNode {
+                            id: node_id,
+                            label,
+                            node_type,
+                            properties,
+                        },
+                        edge_type: edge_type.clone(),
+                    }
+                })
+                .collect();
+
+            // Get edges between path nodes
+            let edges = state
+                .db
+                .get_edges_between(&node_ids)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            let graph = FullGraph {
+                nodes: path_steps.iter().map(|s| s.node.clone()).collect(),
+                edges: edges
+                    .into_iter()
+                    .map(|(source, target, edge_type, _)| GraphEdge {
+                        source,
+                        target,
+                        edge_type,
+                    })
+                    .collect(),
+            };
+
+            debug!(
+                from = %params.from,
+                to = %params.to,
+                path_len = path_steps.len(),
+                "Path found"
+            );
+
+            Ok(Json(PathResponse {
+                found: true,
+                path: path_steps,
+                graph,
+            }))
+        }
+    }
+}
+
+/// Custom query request body.
+#[derive(Deserialize)]
+struct QueryRequest {
+    query: String,
+    /// If true, try to extract a graph from the query results
+    #[serde(default)]
+    extract_graph: bool,
+}
+
+/// Query response.
+#[derive(Serialize)]
+struct QueryResponse {
+    /// Raw query results
+    results: JsonValue,
+    /// Extracted graph (if extract_graph was true)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    graph: Option<FullGraph>,
+}
+
+/// Execute a custom CozoDB query.
+#[instrument(skip(state, body))]
+async fn graph_query(
+    State(state): State<AppState>,
+    Json(body): Json<QueryRequest>,
+) -> Result<Json<QueryResponse>, (StatusCode, String)> {
+    info!(query = %body.query, "Executing custom query");
+
+    let results = state
+        .db
+        .run_custom_query(&body.query)
+        .map_err(|e| {
+            error!(error = %e, "Query execution failed");
+            (StatusCode::BAD_REQUEST, format!("Query error: {e}"))
+        })?;
+
+    let graph = if body.extract_graph {
+        // Try to extract node IDs from the first column of results
+        let mut node_ids: Vec<String> = Vec::new();
+
+        if let Some(rows) = results.get("rows").and_then(|r| r.as_array()) {
+            for row in rows {
+                if let Some(first) = row.get(0).and_then(|v| v.as_str()) {
+                    node_ids.push(first.to_string());
+                }
+            }
+        }
+
+        if !node_ids.is_empty() {
+            let nodes = state
+                .db
+                .get_nodes_by_ids(&node_ids)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            let edges = state
+                .db
+                .get_edges_between(&node_ids)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            Some(FullGraph {
+                nodes: nodes
+                    .into_iter()
+                    .map(|(id, label, node_type, properties)| GraphNode {
+                        id,
+                        label,
+                        node_type,
+                        properties,
+                    })
+                    .collect(),
+                edges: edges
+                    .into_iter()
+                    .map(|(source, target, edge_type, _)| GraphEdge {
+                        source,
+                        target,
+                        edge_type,
+                    })
+                    .collect(),
+            })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    Ok(Json(QueryResponse { results, graph }))
 }

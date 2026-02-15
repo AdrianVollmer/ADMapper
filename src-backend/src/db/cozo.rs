@@ -280,6 +280,171 @@ impl GraphDatabase {
 
         Ok(edges)
     }
+
+    /// Search nodes by label (case-insensitive substring match).
+    pub fn search_nodes(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, String, String, JsonValue)>> {
+        let query_lower = query.to_lowercase();
+        debug!(query = %query, limit = limit, "Searching nodes");
+
+        // CozoDB doesn't have LIKE/ILIKE, so we fetch all and filter
+        // For large datasets, consider adding a full-text search index
+        let result = self.db.run_script(
+            "?[object_id, label, node_type, properties] := *nodes{object_id, label, node_type, properties}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )?;
+
+        let json = result.into_json();
+        let rows = json["rows"].as_array();
+
+        let mut nodes = Vec::new();
+        if let Some(rows) = rows {
+            for row in rows {
+                if let (Some(object_id), Some(label), Some(node_type), Some(properties)) = (
+                    row.get(0).and_then(|v| v.as_str()),
+                    row.get(1).and_then(|v| v.as_str()),
+                    row.get(2).and_then(|v| v.as_str()),
+                    row.get(3).and_then(|v| v.as_str()),
+                ) {
+                    // Case-insensitive search on label and object_id
+                    if label.to_lowercase().contains(&query_lower)
+                        || object_id.to_lowercase().contains(&query_lower)
+                    {
+                        let props: JsonValue =
+                            serde_json::from_str(properties).unwrap_or(JsonValue::Null);
+                        nodes.push((
+                            object_id.to_string(),
+                            label.to_string(),
+                            node_type.to_string(),
+                            props,
+                        ));
+                        if nodes.len() >= limit {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        debug!(found = nodes.len(), "Search complete");
+        Ok(nodes)
+    }
+
+    /// Find shortest path between two nodes using BFS.
+    /// Returns the path as a list of (node_id, edge_type) pairs.
+    #[allow(clippy::type_complexity)]
+    pub fn shortest_path(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<Option<Vec<(String, Option<String>)>>> {
+        debug!(from = %from, to = %to, "Finding shortest path");
+
+        // Get all edges for BFS
+        let edges = self.get_all_edges()?;
+
+        // Build adjacency list
+        let mut adj: std::collections::HashMap<String, Vec<(String, String)>> =
+            std::collections::HashMap::new();
+        for (source, target, edge_type, _) in &edges {
+            adj.entry(source.clone())
+                .or_default()
+                .push((target.clone(), edge_type.clone()));
+        }
+
+        // BFS
+        let mut visited = std::collections::HashSet::new();
+        let mut parent: std::collections::HashMap<String, (String, String)> =
+            std::collections::HashMap::new();
+        let mut queue = std::collections::VecDeque::new();
+
+        queue.push_back(from.to_string());
+        visited.insert(from.to_string());
+
+        while let Some(current) = queue.pop_front() {
+            if current == to {
+                // Reconstruct path
+                let mut path = vec![(to.to_string(), None)];
+                let mut node = to.to_string();
+                while let Some((prev, edge_type)) = parent.get(&node) {
+                    path.push((prev.clone(), Some(edge_type.clone())));
+                    node = prev.clone();
+                }
+                path.reverse();
+                // Fix: edge types should be on the source node, not target
+                let mut fixed_path: Vec<(String, Option<String>)> = Vec::new();
+                for i in 0..path.len() {
+                    if i == path.len() - 1 {
+                        fixed_path.push((path[i].0.clone(), None));
+                    } else {
+                        fixed_path.push((path[i].0.clone(), path[i + 1].1.clone()));
+                    }
+                }
+                debug!(path_len = fixed_path.len(), "Path found");
+                return Ok(Some(fixed_path));
+            }
+
+            if let Some(neighbors) = adj.get(&current) {
+                for (neighbor, edge_type) in neighbors {
+                    if !visited.contains(neighbor) {
+                        visited.insert(neighbor.clone());
+                        parent.insert(neighbor.clone(), (current.clone(), edge_type.clone()));
+                        queue.push_back(neighbor.clone());
+                    }
+                }
+            }
+        }
+
+        debug!("No path found");
+        Ok(None)
+    }
+
+    /// Get nodes by their IDs.
+    pub fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<(String, String, String, JsonValue)>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let all_nodes = self.get_all_nodes()?;
+        let id_set: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
+
+        Ok(all_nodes
+            .into_iter()
+            .filter(|(id, _, _, _)| id_set.contains(id.as_str()))
+            .collect())
+    }
+
+    /// Get edges between a set of nodes.
+    pub fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<(String, String, String, JsonValue)>> {
+        if node_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let all_edges = self.get_all_edges()?;
+        let id_set: std::collections::HashSet<&str> = node_ids.iter().map(|s| s.as_str()).collect();
+
+        Ok(all_edges
+            .into_iter()
+            .filter(|(source, target, _, _)| {
+                id_set.contains(source.as_str()) && id_set.contains(target.as_str())
+            })
+            .collect())
+    }
+
+    /// Run a custom CozoDB query and extract nodes/edges from results.
+    /// The query should return rows with columns that can be matched to node IDs.
+    pub fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
+        debug!(query = %query, "Running custom query");
+
+        let result = self.db.run_script(query, Default::default(), ScriptMutability::Immutable)?;
+        let json = result.into_json();
+
+        Ok(json)
+    }
 }
 
 #[cfg(test)]
