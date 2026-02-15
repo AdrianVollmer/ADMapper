@@ -1,0 +1,9 @@
+Remove:
+
+- File->Save
+- File->Save As...
+- Tools->Find Shortest Paths...
+- Tools->Find Attack Paths...
+- Edit->Undo
+- Edit->Redo
+
