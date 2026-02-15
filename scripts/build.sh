@@ -9,6 +9,7 @@
 #   all (default) - Build everything (frontend + Tauri)
 #   frontend      - Build frontend only (Vite)
 #   backend       - Build backend only (no Tauri, --no-default-features)
+#   backend-debug - Build backend only (no Tauri, --no-default-features, debug)
 #   tauri         - Build Tauri desktop app
 #   tauri-debug   - Build Tauri desktop app (debug)
 #   clean         - Remove all build artifacts
@@ -97,6 +98,12 @@ build_backend() {
 	log_info "Backend built to src-backend/target/release/"
 }
 
+build_backend_debug() {
+	log_info "Building backend (no Tauri, debug)..."
+	cargo build --manifest-path src-backend/Cargo.toml --no-default-features
+	log_info "Backend built to src-backend/target/debug/"
+}
+
 generate_icons() {
 	if [ ! -f "src-backend/icons/32x32.png" ]; then
 		log_info "Generating icons..."
@@ -147,6 +154,9 @@ frontend)
 backend)
 	build_backend
 	;;
+backend-debug)
+	build_backend_debug
+	;;
 tauri)
 	build_tauri
 	;;
@@ -163,6 +173,7 @@ clean)
 	echo "  all (default) - Build everything (frontend + Tauri)"
 	echo "  frontend      - Build frontend only"
 	echo "  backend       - Build backend only (no Tauri)"
+	echo "  backend-debug - Build backend only (no Tauri, debug)"
 	echo "  tauri         - Build Tauri desktop app (release)"
 	echo "  tauri-debug   - Build Tauri desktop app (debug)"
 	echo "  clean         - Remove all build artifacts"
