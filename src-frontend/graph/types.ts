@@ -90,8 +90,8 @@ export interface ADEdgeAttributes {
   size?: number;
   /** Whether this edge is currently highlighted */
   highlighted?: boolean;
-  /** Sigma edge type: "arrow" for straight, "curvedArrow" for curved */
-  type?: "arrow" | "curvedArrow";
+  /** Sigma edge type: "triangle" for straight tapered, "curvedArrow" for curved */
+  type?: "triangle" | "curvedArrow";
   /** Curvature for curved edges (0 = straight, positive = curve one way, negative = other) */
   curvature?: number;
 }

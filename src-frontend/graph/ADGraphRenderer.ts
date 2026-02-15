@@ -5,9 +5,9 @@
  */
 
 import Sigma from "sigma";
-import { EdgeArrowProgram } from "sigma/rendering";
+import { EdgeTriangleProgram } from "sigma/rendering";
 import { createNodeImageProgram } from "@sigma/node-image";
-import { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
+import { createEdgeCurveProgram } from "@sigma/edge-curve";
 import type { ADGraphType } from "./ADGraph";
 import type { ADNodeAttributes, ADEdgeAttributes } from "./types";
 import {
@@ -159,10 +159,17 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     nodeProgramClasses: {
       image: NodeImageProgram,
     },
-    defaultEdgeType: "arrow",
+    defaultEdgeType: "triangle",
     edgeProgramClasses: {
-      arrow: EdgeArrowProgram,
-      curvedArrow: EdgeCurvedArrowProgram,
+      triangle: EdgeTriangleProgram,
+      curvedArrow: createEdgeCurveProgram({
+        arrowHead: {
+          extremity: "target",
+          lengthToThicknessRatio: 2.5,
+          widenessToThicknessRatio: 2,
+        },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }) as any,
     },
 
     // Node reducer: apply highlighting/dimming only for selection (not hover)

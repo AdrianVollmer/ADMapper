@@ -6,7 +6,7 @@
  */
 
 import { loadGraph, createRenderer, applyLayout, getGraphStats } from "./index";
-import type { RawADGraph, ADNodeType, ADEdgeType } from "./types";
+import type { RawADGraph } from "./types";
 
 /** Generate a mock AD graph for testing */
 function generateMockGraph(_nodeCount: number): RawADGraph {

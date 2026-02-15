@@ -53,7 +53,7 @@ function rawEdgeToAttributes(edge: RawADEdge): ADEdgeAttributes {
     edgeType: edge.type,
     color: DEFAULT_EDGE_COLOR,
     size: DEFAULT_EDGE_SIZE,
-    type: "arrow",  // Default to straight arrow, will be updated for multi-edges
+    type: "triangle",  // Default to triangle (tapered), will be updated for multi-edges
   };
   if (edge.label) {
     attrs.label = edge.label;
@@ -115,8 +115,8 @@ function assignEdgeCurvatures(graph: ADGraphType): void {
   // Assign curvature to edges in groups with multiple edges
   for (const edges of edgeGroups.values()) {
     if (edges.length === 1) {
-      // Single edge: straight arrow
-      graph.setEdgeAttribute(edges[0], "type", "arrow");
+      // Single edge: triangle (tapered)
+      graph.setEdgeAttribute(edges[0], "type", "triangle");
       graph.setEdgeAttribute(edges[0], "curvature", 0);
     } else {
       // Multiple edges: spread them with curvature
