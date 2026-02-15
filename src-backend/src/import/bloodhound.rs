@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::io::{Read, Seek};
 use std::path::Path;
 use tokio::sync::broadcast;
-use tracing::{info, warn};
+use tracing::{debug, info, warn, error, trace};
 use zip::ZipArchive;
 
 /// Batch size for database inserts.
@@ -54,7 +54,11 @@ impl BloodHoundImporter {
         reader: R,
         job_id: &str,
     ) -> Result<ImportProgress, String> {
-        let mut archive = ZipArchive::new(reader).map_err(|e| format!("Failed to open ZIP: {e}"))?;
+        info!(job_id = %job_id, "Opening ZIP archive");
+        let mut archive = ZipArchive::new(reader).map_err(|e| {
+            error!(error = %e, "Failed to open ZIP");
+            format!("Failed to open ZIP: {e}")
+        })?;
 
         // Collect JSON file names
         let json_files: Vec<String> = (0..archive.len())
@@ -69,32 +73,53 @@ impl BloodHoundImporter {
             })
             .collect();
 
+        info!(file_count = json_files.len(), "Found JSON files in ZIP");
+        debug!(files = ?json_files, "JSON files to process");
+
         let mut progress = ImportProgress::new(job_id.to_string()).with_total_files(json_files.len());
         self.send_progress(&progress);
 
         // Clear existing data for fresh import
-        self.db.clear().map_err(|e| format!("Failed to clear database: {e}"))?;
+        info!("Clearing existing database data");
+        self.db.clear().map_err(|e| {
+            error!(error = %e, "Failed to clear database");
+            format!("Failed to clear database: {e}")
+        })?;
 
         for file_name in &json_files {
+            debug!(file = %file_name, "Processing file");
             progress.set_current_file(file_name.clone());
             self.send_progress(&progress);
 
             let mut file = archive
                 .by_name(file_name)
-                .map_err(|e| format!("Failed to read {file_name}: {e}"))?;
+                .map_err(|e| {
+                    error!(file = %file_name, error = %e, "Failed to open file in archive");
+                    format!("Failed to read {file_name}: {e}")
+                })?;
 
             let mut contents = String::new();
             file.read_to_string(&mut contents)
-                .map_err(|e| format!("Failed to read {file_name}: {e}"))?;
+                .map_err(|e| {
+                    error!(file = %file_name, error = %e, "Failed to read file contents");
+                    format!("Failed to read {file_name}: {e}")
+                })?;
+
+            trace!(file = %file_name, size = contents.len(), "Read file contents");
 
             match self.import_json_str(&contents, &mut progress) {
                 Ok(_) => {
+                    info!(
+                        file = %file_name,
+                        nodes = progress.nodes_imported,
+                        edges = progress.edges_imported,
+                        "File processed"
+                    );
                     progress.files_processed += 1;
                     self.send_progress(&progress);
                 }
                 Err(e) => {
-                    warn!("Error importing {}: {}", file_name, e);
-                    // Continue with other files
+                    warn!(file = %file_name, error = %e, "Error importing file, continuing");
                     progress.files_processed += 1;
                 }
             }
@@ -132,8 +157,10 @@ impl BloodHoundImporter {
         contents: &str,
         progress: &mut ImportProgress,
     ) -> Result<(), String> {
-        let file: BloodHoundFile =
-            serde_json::from_str(contents).map_err(|e| format!("Invalid JSON: {e}"))?;
+        let file: BloodHoundFile = serde_json::from_str(contents).map_err(|e| {
+            error!(error = %e, "Failed to parse JSON");
+            format!("Invalid JSON: {e}")
+        })?;
 
         let data_type = file
             .meta
@@ -154,7 +181,11 @@ impl BloodHoundImporter {
                 }
             });
 
-        info!("Importing {} {} entities", file.data.len(), data_type);
+        info!(
+            entity_type = %data_type,
+            count = file.data.len(),
+            "Importing entities"
+        );
 
         let mut node_batch = Vec::with_capacity(BATCH_SIZE);
         let mut edge_batch = Vec::with_capacity(BATCH_SIZE);
@@ -459,12 +490,19 @@ impl BloodHoundImporter {
             return Ok(());
         }
 
+        let batch_size = batch.len();
+        trace!(batch_size = batch_size, "Flushing node batch");
+
         let count = self
             .db
             .insert_nodes(batch)
-            .map_err(|e| format!("Failed to insert nodes: {e}"))?;
+            .map_err(|e| {
+                error!(error = %e, batch_size = batch_size, "Failed to insert nodes");
+                format!("Failed to insert nodes: {e}")
+            })?;
 
         progress.nodes_imported += count;
+        debug!(inserted = count, total = progress.nodes_imported, "Nodes inserted");
         self.send_progress(progress);
         batch.clear();
         Ok(())
@@ -479,12 +517,19 @@ impl BloodHoundImporter {
             return Ok(());
         }
 
+        let batch_size = batch.len();
+        trace!(batch_size = batch_size, "Flushing edge batch");
+
         let count = self
             .db
             .insert_edges(batch)
-            .map_err(|e| format!("Failed to insert edges: {e}"))?;
+            .map_err(|e| {
+                error!(error = %e, batch_size = batch_size, "Failed to insert edges");
+                format!("Failed to insert edges: {e}")
+            })?;
 
         progress.edges_imported += count;
+        debug!(inserted = count, total = progress.edges_imported, "Edges inserted");
         self.send_progress(progress);
         batch.clear();
         Ok(())

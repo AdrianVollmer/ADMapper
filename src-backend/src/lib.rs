@@ -31,6 +31,7 @@ use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
 };
+use tracing::{debug, info, warn, error, instrument};
 
 #[cfg(feature = "desktop")]
 #[cfg(debug_assertions)]
@@ -82,13 +83,26 @@ pub fn run_desktop() {
 /// Run as standalone web service.
 #[tokio::main]
 pub async fn run_service(bind: &str, port: u16) {
+    // Initialize tracing with colors
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
+        .with_target(true)
+        .with_ansi(true)
+        .init();
+
     let addr: SocketAddr = format!("{}:{}", bind, port)
         .parse()
         .expect("Invalid bind address");
 
     // Initialize database
     let db_path = std::env::var("ADMAPPER_DB_PATH").unwrap_or_else(|_| "admapper.db".to_string());
+    info!(path = %db_path, "Opening database");
     let db = GraphDatabase::new(&db_path).expect("Failed to open database");
+    let (nodes, edges) = db.get_stats().unwrap_or((0, 0));
+    info!(nodes = nodes, edges = edges, "Database loaded");
     let state = AppState::new(db);
 
     // Serve static files from the build directory
@@ -123,11 +137,13 @@ async fn health_check() -> &'static str {
 }
 
 /// Handle BloodHound data import via multipart upload.
+#[instrument(skip(state, multipart))]
 async fn import_bloodhound(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Json<JsonValue>, (StatusCode, String)> {
     let job_id = uuid::Uuid::new_v4().to_string();
+    info!(job_id = %job_id, "Starting import job");
 
     // Create broadcast channel for progress updates
     let (tx, _) = broadcast::channel::<ImportProgress>(100);
@@ -139,20 +155,30 @@ async fn import_bloodhound(
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Multipart error: {e}")))?
+        .map_err(|e| {
+            error!(error = %e, "Multipart read error");
+            (StatusCode::BAD_REQUEST, format!("Multipart error: {e}"))
+        })?
     {
         let filename = field.file_name().unwrap_or("unknown").to_string();
         let data = field
             .bytes()
             .await
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Read error: {e}")))?
+            .map_err(|e| {
+                error!(error = %e, filename = %filename, "Failed to read file data");
+                (StatusCode::BAD_REQUEST, format!("Read error: {e}"))
+            })?
             .to_vec();
+        debug!(filename = %filename, size = data.len(), "Received file");
         files.push((filename, data));
     }
 
     if files.is_empty() {
+        warn!("Import request with no files");
         return Err((StatusCode::BAD_REQUEST, "No files uploaded".to_string()));
     }
+
+    info!(file_count = files.len(), "Processing uploaded files");
 
     let db = state.db.clone();
     let job_id_clone = job_id.clone();
@@ -163,6 +189,7 @@ async fn import_bloodhound(
         let mut importer = BloodHoundImporter::new(db, tx);
 
         for (filename, data) in files {
+            info!(filename = %filename, size = data.len(), "Importing file");
             let result = if filename.ends_with(".zip") {
                 let cursor = Cursor::new(data);
                 importer.import_zip(cursor, &job_id_clone)
@@ -173,14 +200,26 @@ async fn import_bloodhound(
                 std::fs::write(&temp_path, &data).expect("Failed to write temp file");
                 importer.import_json_file(&temp_path, &job_id_clone)
             } else {
+                warn!(filename = %filename, "Unsupported file type");
                 Err(format!("Unsupported file type: {filename}"))
             };
 
-            if let Err(e) = result {
-                tracing::error!("Import failed for {}: {}", filename, e);
+            match &result {
+                Ok(progress) => {
+                    info!(
+                        filename = %filename,
+                        nodes = progress.nodes_imported,
+                        edges = progress.edges_imported,
+                        "File imported successfully"
+                    );
+                }
+                Err(e) => {
+                    error!(filename = %filename, error = %e, "Import failed");
+                }
             }
         }
 
+        debug!(job_id = %job_id_clone, "Import job complete, cleanup scheduled");
         // Clean up job after a delay
         std::thread::sleep(std::time::Duration::from_secs(60));
         import_jobs.remove(&job_id_clone);
@@ -216,12 +255,17 @@ async fn import_progress(
 }
 
 /// Get graph statistics.
+#[instrument(skip(state))]
 async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue>, (StatusCode, String)> {
     let (node_count, edge_count) = state
         .db
         .get_stats()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| {
+            error!(error = %e, "Failed to get graph stats");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        })?;
 
+    debug!(nodes = node_count, edges = edge_count, "Graph stats retrieved");
     Ok(Json(json!({
         "nodes": node_count,
         "edges": edge_count

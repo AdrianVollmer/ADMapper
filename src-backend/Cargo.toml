@@ -30,6 +30,7 @@ uuid = { version = "1", features = ["v4"] }
 dashmap = "6"
 thiserror = "2"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Desktop mode (optional)
 tauri = { version = "2", features = [], optional = true }

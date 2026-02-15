@@ -1,12 +1,13 @@
 //! CozoDB-backed graph database for storing AD graph data.
 
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
-use std::borrow::Cow;
 use serde_json::Value as JsonValue;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
+use tracing::{debug, info, trace, warn};
 
 #[derive(Error, Debug)]
 pub enum DbError {
@@ -34,14 +35,17 @@ impl GraphDatabase {
     /// Create or open a database at the given path.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path_str: Cow<str> = path.as_ref().to_string_lossy();
+        info!(path = %path_str, "Opening CozoDB with SQLite backend");
         let db = DbInstance::new("sqlite", path_str.as_ref(), "")?;
         let instance = Self { db: Arc::new(db) };
         instance.init_schema()?;
+        info!("Database initialized successfully");
         Ok(instance)
     }
 
     /// Create an in-memory database (for testing).
     pub fn in_memory() -> Result<Self> {
+        debug!("Creating in-memory database");
         let db = DbInstance::new("mem", "", "")?;
         let instance = Self { db: Arc::new(db) };
         instance.init_schema()?;
@@ -50,6 +54,8 @@ impl GraphDatabase {
 
     /// Initialize the schema if relations don't exist.
     fn init_schema(&self) -> Result<()> {
+        debug!("Initializing database schema");
+
         // Create nodes relation
         // object_id is the primary key, stores label, type, and JSON properties
         let create_nodes = r#"
@@ -75,18 +81,21 @@ impl GraphDatabase {
         "#;
 
         // Try to create relations, ignore if they already exist
-        let _ = self
-            .db
-            .run_script(create_nodes, Default::default(), ScriptMutability::Mutable);
-        let _ = self
-            .db
-            .run_script(create_edges, Default::default(), ScriptMutability::Mutable);
+        match self.db.run_script(create_nodes, Default::default(), ScriptMutability::Mutable) {
+            Ok(_) => debug!("Created nodes relation"),
+            Err(_) => trace!("Nodes relation already exists"),
+        }
+        match self.db.run_script(create_edges, Default::default(), ScriptMutability::Mutable) {
+            Ok(_) => debug!("Created edges relation"),
+            Err(_) => trace!("Edges relation already exists"),
+        }
 
         Ok(())
     }
 
     /// Clear all data from the database.
     pub fn clear(&self) -> Result<()> {
+        info!("Clearing all data from database");
         // Delete all nodes and edges
         self.db.run_script(
             "?[object_id] := *nodes{object_id} :delete nodes {object_id}",
@@ -98,6 +107,7 @@ impl GraphDatabase {
             Default::default(),
             ScriptMutability::Mutable,
         )?;
+        debug!("Database cleared");
         Ok(())
     }
 
