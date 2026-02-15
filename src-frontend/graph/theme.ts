@@ -92,7 +92,10 @@ export const NODE_SIZES: Record<ADNodeType, number> = {
 };
 
 /** Default edge size */
-export const DEFAULT_EDGE_SIZE = 1;
+export const DEFAULT_EDGE_SIZE = 1.5;
+
+/** Default edge color (uniform for all edge types) */
+export const DEFAULT_EDGE_COLOR = "#6c757d";
 
 /** Highlighted edge size multiplier */
 export const HIGHLIGHT_SIZE_MULTIPLIER = 2;

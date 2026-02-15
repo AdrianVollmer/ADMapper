@@ -90,6 +90,10 @@ export interface ADEdgeAttributes {
   size?: number;
   /** Whether this edge is currently highlighted */
   highlighted?: boolean;
+  /** Sigma edge type: "arrow" for straight, "curvedArrow" for curved */
+  type?: "arrow" | "curvedArrow";
+  /** Curvature for curved edges (0 = straight, positive = curve one way, negative = other) */
+  curvature?: number;
 }
 
 /** Raw node data as received from server */

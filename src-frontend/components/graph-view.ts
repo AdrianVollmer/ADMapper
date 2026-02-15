@@ -6,7 +6,7 @@
 
 import { loadGraph, createRenderer, applyLayout, getGraphStats } from "../graph";
 import type { ADGraphRenderer } from "../graph";
-import type { RawADGraph, ADNodeType, ADEdgeType } from "../graph/types";
+import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel } from "./sidebars";
 
 let renderer: ADGraphRenderer | null = null;
@@ -110,30 +110,14 @@ export function getRenderer(): ADGraphRenderer | null {
   return renderer;
 }
 
-/** Generate a demo graph for testing */
-function generateDemoGraph(nodeCount: number): RawADGraph {
+/** Generate a demo graph for testing - curated to show multi-edge support */
+function generateDemoGraph(_nodeCount: number): RawADGraph {
   const nodes: RawADGraph["nodes"] = [];
   const edges: RawADGraph["edges"] = [];
 
-  const nodeTypes: ADNodeType[] = [
-    "User", "User", "User", "User",
-    "Group", "Group",
-    "Computer",
-    "Domain",
-    "OU",
-  ];
-
-  const edgeTypes: ADEdgeType[] = [
-    "MemberOf", "MemberOf", "MemberOf",
-    "HasSession",
-    "AdminTo",
-    "CanRDP",
-    "GenericAll",
-  ];
-
-  // Create domain node
+  // Domain
   nodes.push({
-    id: "domain-0",
+    id: "domain",
     label: "CORP.LOCAL",
     type: "Domain",
     properties: {
@@ -142,42 +126,68 @@ function generateDemoGraph(nodeCount: number): RawADGraph {
     },
   });
 
-  // Create other nodes
-  for (let i = 1; i < nodeCount; i++) {
-    const type = nodeTypes[i % nodeTypes.length] ?? "User";
-    const prefix = type.toLowerCase();
-    nodes.push({
-      id: `${prefix}-${i}`,
-      label: `${type} ${i}`,
-      type,
-      properties: {
-        objectid: `S-1-5-21-1234567890-1234567890-${i}`,
-      },
-    });
-  }
+  // OUs
+  nodes.push({ id: "ou-it", label: "IT Department", type: "OU" });
+  nodes.push({ id: "ou-hr", label: "HR Department", type: "OU" });
 
-  // Create edges
-  const edgeCount = Math.floor(nodeCount * 2);
-  const usedEdges = new Set<string>();
+  // Groups
+  nodes.push({ id: "grp-admins", label: "Domain Admins", type: "Group" });
+  nodes.push({ id: "grp-it", label: "IT Staff", type: "Group" });
+  nodes.push({ id: "grp-hr", label: "HR Staff", type: "Group" });
+  nodes.push({ id: "grp-rdp", label: "RDP Users", type: "Group" });
 
-  for (let i = 0; i < edgeCount; i++) {
-    const sourceIdx = Math.floor(Math.random() * nodeCount);
-    const targetIdx = Math.floor(Math.random() * nodeCount);
+  // Users
+  nodes.push({ id: "user-alice", label: "alice", type: "User" });
+  nodes.push({ id: "user-bob", label: "bob", type: "User" });
+  nodes.push({ id: "user-carol", label: "carol", type: "User" });
+  nodes.push({ id: "user-dave", label: "dave", type: "User" });
+  nodes.push({ id: "user-eve", label: "eve", type: "User" });
 
-    if (sourceIdx === targetIdx) continue;
+  // Computers
+  nodes.push({ id: "comp-dc01", label: "DC01", type: "Computer" });
+  nodes.push({ id: "comp-srv01", label: "SRV01", type: "Computer" });
+  nodes.push({ id: "comp-ws01", label: "WS01", type: "Computer" });
+  nodes.push({ id: "comp-ws02", label: "WS02", type: "Computer" });
 
-    const source = nodes[sourceIdx]?.id;
-    const target = nodes[targetIdx]?.id;
-    if (!source || !target) continue;
+  // Structure edges
+  edges.push({ source: "ou-it", target: "domain", type: "Contains" });
+  edges.push({ source: "ou-hr", target: "domain", type: "Contains" });
 
-    const type = edgeTypes[i % edgeTypes.length] ?? "MemberOf";
-    const edgeKey = `${source}-${type}-${target}`;
+  // Group memberships
+  edges.push({ source: "user-alice", target: "grp-admins", type: "MemberOf" });
+  edges.push({ source: "user-alice", target: "grp-it", type: "MemberOf" });
+  edges.push({ source: "user-bob", target: "grp-it", type: "MemberOf" });
+  edges.push({ source: "user-bob", target: "grp-rdp", type: "MemberOf" });
+  edges.push({ source: "user-carol", target: "grp-hr", type: "MemberOf" });
+  edges.push({ source: "user-dave", target: "grp-hr", type: "MemberOf" });
+  edges.push({ source: "user-eve", target: "grp-rdp", type: "MemberOf" });
+  edges.push({ source: "grp-it", target: "grp-rdp", type: "MemberOf" });
 
-    if (usedEdges.has(edgeKey)) continue;
-    usedEdges.add(edgeKey);
+  // Sessions
+  edges.push({ source: "user-alice", target: "comp-dc01", type: "HasSession" });
+  edges.push({ source: "user-bob", target: "comp-srv01", type: "HasSession" });
+  edges.push({ source: "user-carol", target: "comp-ws01", type: "HasSession" });
+  edges.push({ source: "user-dave", target: "comp-ws02", type: "HasSession" });
 
-    edges.push({ source, target, type });
-  }
+  // MULTI-EDGES: Multiple different relationships between same nodes
+  // alice has multiple permissions on DC01
+  edges.push({ source: "user-alice", target: "comp-dc01", type: "AdminTo" });
+  edges.push({ source: "user-alice", target: "comp-dc01", type: "CanRDP" });
+
+  // bob has multiple permissions on SRV01
+  edges.push({ source: "user-bob", target: "comp-srv01", type: "AdminTo" });
+  edges.push({ source: "user-bob", target: "comp-srv01", type: "CanRDP" });
+  edges.push({ source: "user-bob", target: "comp-srv01", type: "GenericAll" });
+
+  // grp-admins has multiple permissions on domain
+  edges.push({ source: "grp-admins", target: "domain", type: "GenericAll" });
+  edges.push({ source: "grp-admins", target: "domain", type: "WriteDacl" });
+  edges.push({ source: "grp-admins", target: "domain", type: "DCSync" });
+
+  // RDP access
+  edges.push({ source: "grp-rdp", target: "comp-ws01", type: "CanRDP" });
+  edges.push({ source: "grp-rdp", target: "comp-ws02", type: "CanRDP" });
+  edges.push({ source: "grp-rdp", target: "comp-srv01", type: "CanRDP" });
 
   return { nodes, edges };
 }

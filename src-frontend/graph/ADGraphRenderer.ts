@@ -5,7 +5,9 @@
  */
 
 import Sigma from "sigma";
+import { EdgeArrowProgram } from "sigma/rendering";
 import { createNodeImageProgram } from "@sigma/node-image";
+import { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
 import type { ADGraphType } from "./ADGraph";
 import type { ADNodeAttributes, ADEdgeAttributes } from "./types";
 import {
@@ -14,6 +16,7 @@ import {
   HIGHLIGHT_SIZE_MULTIPLIER,
   BACKGROUND_COLOR,
   LABEL_COLOR,
+  DEFAULT_EDGE_COLOR,
 } from "./theme";
 
 export interface RendererOptions {
@@ -156,6 +159,11 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     nodeProgramClasses: {
       image: NodeImageProgram,
     },
+    defaultEdgeType: "arrow",
+    edgeProgramClasses: {
+      arrow: EdgeArrowProgram,
+      curvedArrow: EdgeCurvedArrowProgram,
+    },
 
     // Node reducer: apply highlighting/dimming only for selection (not hover)
     nodeReducer: (nodeId, data) => {
@@ -191,12 +199,15 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
         const isHighlighted = selectedNodes.has(source) || selectedNodes.has(target);
         if (isHighlighted) {
           res.color = HIGHLIGHT_COLORS.edge;
-          res.size = ((data.size as number | undefined) ?? 1) * HIGHLIGHT_SIZE_MULTIPLIER;
+          res.size = ((data.size as number | undefined) ?? 1.5) * HIGHLIGHT_SIZE_MULTIPLIER;
           res.zIndex = 1;
         } else {
           res.color = DIM_COLORS.edge;
           res.zIndex = 0;
         }
+      } else {
+        // Ensure uniform color when no selection
+        res.color = DEFAULT_EDGE_COLOR;
       }
 
       return res;

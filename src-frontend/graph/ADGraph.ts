@@ -13,7 +13,7 @@ import type {
   RawADEdge,
   ADNodeType,
 } from "./types";
-import { NODE_COLORS, EDGE_COLORS, DEFAULT_EDGE_SIZE } from "./theme";
+import { NODE_COLORS, DEFAULT_EDGE_SIZE, DEFAULT_EDGE_COLOR } from "./theme";
 import { getNodeIcon, getNodeTypeColor, NODE_SIZE } from "./icons";
 
 export type ADGraphType = Graph<ADNodeAttributes, ADEdgeAttributes>;
@@ -51,8 +51,9 @@ function rawNodeToAttributes(node: RawADNode): ADNodeAttributes {
 function rawEdgeToAttributes(edge: RawADEdge): ADEdgeAttributes {
   const attrs: ADEdgeAttributes = {
     edgeType: edge.type,
-    color: EDGE_COLORS[edge.type] ?? EDGE_COLORS.Unknown,
+    color: DEFAULT_EDGE_COLOR,
     size: DEFAULT_EDGE_SIZE,
+    type: "arrow",  // Default to straight arrow, will be updated for multi-edges
   };
   if (edge.label) {
     attrs.label = edge.label;
@@ -92,7 +93,44 @@ export function loadGraph(data: RawADGraph): ADGraphType {
     }
   }
 
+  // Assign curvature to parallel edges (multiple edges between same node pair)
+  assignEdgeCurvatures(graph);
+
   return graph;
+}
+
+/** Assign curvature values to edges to spread out parallel edges */
+function assignEdgeCurvatures(graph: ADGraphType): void {
+  // Group edges by their node pair (ignoring direction for grouping)
+  const edgeGroups = new Map<string, string[]>();
+
+  graph.forEachEdge((edgeKey, _attrs, source, target) => {
+    // Create a canonical key for the node pair (smaller id first)
+    const pairKey = source < target ? `${source}|${target}` : `${target}|${source}`;
+    const group = edgeGroups.get(pairKey) ?? [];
+    group.push(edgeKey);
+    edgeGroups.set(pairKey, group);
+  });
+
+  // Assign curvature to edges in groups with multiple edges
+  for (const edges of edgeGroups.values()) {
+    if (edges.length === 1) {
+      // Single edge: straight arrow
+      graph.setEdgeAttribute(edges[0], "type", "arrow");
+      graph.setEdgeAttribute(edges[0], "curvature", 0);
+    } else {
+      // Multiple edges: spread them with curvature
+      const count = edges.length;
+      for (let i = 0; i < count; i++) {
+        // Spread curvatures symmetrically around 0
+        // e.g., for 2 edges: -0.3, 0.3
+        // e.g., for 3 edges: -0.3, 0, 0.3
+        const curvature = ((i - (count - 1) / 2) / count) * 0.6;
+        graph.setEdgeAttribute(edges[i], "type", "curvedArrow");
+        graph.setEdgeAttribute(edges[i], "curvature", curvature);
+      }
+    }
+  }
 }
 
 /** Get all nodes of a specific type */
