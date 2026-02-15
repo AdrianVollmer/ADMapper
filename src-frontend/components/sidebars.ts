@@ -126,6 +126,15 @@ const PROPERTY_LABELS: Record<string, string> = {
   serviceprincipalnames: "SPNs",
   owned: "Owned",
   notes: "Notes",
+
+  // Common timestamp variants
+  created_at: "Created",
+  createdat: "Created",
+  updated_at: "Updated",
+  updatedat: "Updated",
+  accountexpires: "Account Expires",
+  badpasswordtime: "Bad Password Time",
+  lockouttime: "Lockout Time",
 };
 
 /** Action definitions with icons */
@@ -281,8 +290,25 @@ function getPrettyLabel(key: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Field names that should be formatted as timestamps */
+const TIMESTAMP_FIELDS = new Set([
+  "created_at",
+  "createdat",
+  "updated_at",
+  "updatedat",
+  "whencreated",
+  "whenchanged",
+  "lastlogon",
+  "lastlogontimestamp",
+  "pwdlastset",
+  "lastpasswordset",
+  "accountexpires",
+  "badpasswordtime",
+  "lockouttime",
+]);
+
 /** Format a property value for display */
-function formatValue(value: unknown): string {
+function formatValue(key: string, value: unknown): string {
   if (value === null || value === undefined) {
     return "—";
   }
@@ -290,9 +316,21 @@ function formatValue(value: unknown): string {
     return value ? "Yes" : "No";
   }
   if (typeof value === "number") {
-    // Check if it's a timestamp (large number that looks like epoch)
-    if (value > 1000000000000 && value < 2000000000000) {
+    const keyLower = key.toLowerCase();
+
+    // Check if this is a known timestamp field
+    if (TIMESTAMP_FIELDS.has(keyLower)) {
+      return formatTimestamp(value);
+    }
+
+    // Check if it's a timestamp by value heuristics
+    // JS milliseconds timestamp (13 digits, 2001-2050 range)
+    if (value > 1000000000000 && value < 2500000000000) {
       return new Date(value).toLocaleString();
+    }
+    // Unix seconds timestamp (10 digits, 2001-2050 range)
+    if (value > 1000000000 && value < 2500000000) {
+      return new Date(value * 1000).toLocaleString();
     }
     // Windows FILETIME (100-nanosecond intervals since 1601)
     if (value > 100000000000000000) {
@@ -306,6 +344,37 @@ function formatValue(value: unknown): string {
   if (Array.isArray(value)) {
     return value.join(", ");
   }
+  return String(value);
+}
+
+/** Format a numeric timestamp to human-readable string */
+function formatTimestamp(value: number): string {
+  // Handle special "never" values (0 or max int64)
+  if (value === 0 || value > 9e18) {
+    return "Never";
+  }
+
+  // Windows FILETIME (very large numbers, 100-nanosecond intervals since 1601)
+  // Valid FILETIME range is roughly 1.3e17 to 2.5e17 for years 1970-2100
+  if (value > 1e17 && value < 3e17) {
+    const epoch = (value - 116444736000000000) / 10000;
+    if (epoch > 0) {
+      return new Date(epoch).toLocaleString();
+    }
+    return "Never";
+  }
+
+  // JS milliseconds timestamp (13 digits)
+  if (value > 1000000000000) {
+    return new Date(value).toLocaleString();
+  }
+
+  // Unix seconds timestamp (10 digits)
+  if (value > 1000000000) {
+    return new Date(value * 1000).toLocaleString();
+  }
+
+  // Small number - probably not a timestamp
   return String(value);
 }
 
@@ -360,7 +429,7 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
     });
 
     for (const [key, value] of entries) {
-      const formatted = formatValue(value);
+      const formatted = formatValue(key, value);
       const rawValue = value === null || value === undefined ? "" : String(value);
       propsHtml += `
         <div class="detail-prop">
