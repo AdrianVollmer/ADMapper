@@ -192,7 +192,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   const sigma = new Sigma(graph, containerEl, {
     allowInvalidContainer: false,
     renderLabels: true,
-    renderEdgeLabels: false,
+    renderEdgeLabels: true,
     labelDensity: 0.07,
     labelGridCellSize: 60,
     labelRenderedSizeThreshold: 6,

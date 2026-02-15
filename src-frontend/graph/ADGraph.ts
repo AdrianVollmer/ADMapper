@@ -51,13 +51,11 @@ function rawNodeToAttributes(node: RawADNode): ADNodeAttributes {
 function rawEdgeToAttributes(edge: RawADEdge): ADEdgeAttributes {
   const attrs: ADEdgeAttributes = {
     edgeType: edge.type,
+    label: edge.label ?? edge.type,  // Use edge type as label if not provided
     color: DEFAULT_EDGE_COLOR,
     size: DEFAULT_EDGE_SIZE,
     type: "triangle",  // Default to triangle (tapered), will be updated for multi-edges
   };
-  if (edge.label) {
-    attrs.label = edge.label;
-  }
   return attrs;
 }
 
