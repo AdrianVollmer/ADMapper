@@ -1,0 +1,22 @@
+_*
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Cache
+.mypy_cache/
+__pycache__/
+*.pyc
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

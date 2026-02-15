@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ADMapper - Graph Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 1rem;
+      background: #1a1a2e;
+      border-bottom: 1px solid #2a2a4a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+
+    .controls {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    .controls label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+    }
+
+    .controls input,
+    .controls select {
+      padding: 0.375rem 0.5rem;
+      border-radius: 4px;
+      border: 1px solid #3a3a5a;
+      background: #2a2a4a;
+      color: #e0e0e0;
+    }
+
+    .controls button {
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      border: none;
+      background: #4a4af0;
+      color: white;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+
+    .controls button:hover {
+      background: #5a5af0;
+    }
+
+    #graph-demo {
+      flex: 1;
+      min-height: 0;
+    }
+
+    .stats {
+      position: fixed;
+      bottom: 1rem;
+      left: 1rem;
+      background: rgba(26, 26, 46, 0.9);
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-family: monospace;
+      line-height: 1.5;
+      border: 1px solid #2a2a4a;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ADMapper Graph Demo</h1>
+    <div class="controls">
+      <label>
+        Nodes:
+        <input type="number" id="node-count" value="500" min="10" max="50000" step="100">
+      </label>
+      <button id="regenerate">Regenerate Graph</button>
+      <button id="reset-camera">Reset Camera</button>
+    </div>
+  </header>
+
+  <div id="graph-demo"></div>
+
+  <div class="stats" id="stats">
+    Loading...
+  </div>
+
+  <script type="module">
+    import { initDemo } from "./src/graph/demo.ts";
+
+    const params = new URLSearchParams(window.location.search);
+    const initialNodes = parseInt(params.get("nodes") ?? "500", 10);
+
+    document.getElementById("node-count").value = initialNodes;
+
+    // Initialize
+    initDemo("graph-demo", initialNodes);
+
+    // Update stats display
+    function updateStats() {
+      const stats = window.adGraph?.stats;
+      if (stats) {
+        const el = document.getElementById("stats");
+        el.innerHTML = `
+          Nodes: ${stats.nodeCount}<br>
+          Edges: ${stats.edgeCount}<br>
+          Types: ${Object.entries(stats.nodesByType).map(([k, v]) => `${k}: ${v}`).join(", ")}
+        `;
+      }
+    }
+    setTimeout(updateStats, 100);
+
+    // Regenerate button
+    document.getElementById("regenerate").addEventListener("click", () => {
+      const count = parseInt(document.getElementById("node-count").value, 10);
+      window.location.search = `?nodes=${count}`;
+    });
+
+    // Reset camera button
+    document.getElementById("reset-camera").addEventListener("click", () => {
+      window.adGraph?.renderer?.resetCamera();
+    });
+  </script>
+</body>
+</html>

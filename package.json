@@ -1,0 +1,25 @@
+{
+  "name": "admapper",
+  "version": "0.1.0",
+  "description": "BloodHound frontend for visualizing Active Directory permissions as graphs",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write src"
+  },
+  "dependencies": {
+    "graphology": "^0.25.4",
+    "graphology-layout-forceatlas2": "^0.10.1",
+    "graphology-types": "^0.24.7",
+    "sigma": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.12"
+  }
+}
