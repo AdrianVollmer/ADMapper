@@ -185,12 +185,6 @@ const BUILTIN_QUERIES: QueryCategory[] = [
         description: "All nodes marked as high value",
         query: `?[node, type] := *Node{id: node, type, highvalue: true}`,
       },
-      {
-        id: "paths-to-da",
-        name: "Paths to Domain Admins",
-        description: "Shortest paths to Domain Admins",
-        query: `?[path] := *ShortestPath{to: "Domain Admins", path}`,
-      },
     ],
   },
   {
