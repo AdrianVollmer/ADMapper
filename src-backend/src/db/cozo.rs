@@ -388,17 +388,8 @@ impl GraphDatabase {
                     node = prev.clone();
                 }
                 path.reverse();
-                // Fix: edge types should be on the source node, not target
-                let mut fixed_path: Vec<(String, Option<String>)> = Vec::new();
-                for i in 0..path.len() {
-                    if i == path.len() - 1 {
-                        fixed_path.push((path[i].0.clone(), None));
-                    } else {
-                        fixed_path.push((path[i].0.clone(), path[i + 1].1.clone()));
-                    }
-                }
-                debug!(path_len = fixed_path.len(), "Path found");
-                return Ok(Some(fixed_path));
+                debug!(path_len = path.len(), "Path found");
+                return Ok(Some(path));
             }
 
             if let Some(neighbors) = adj.get(&current) {
@@ -658,5 +649,433 @@ mod tests {
 
         let (node_count, _) = db.get_stats().unwrap();
         assert_eq!(node_count, 0);
+    }
+
+    /// Helper to create a test database with sample data.
+    fn setup_test_db() -> GraphDatabase {
+        let db = GraphDatabase::in_memory().unwrap();
+
+        let nodes = vec![
+            DbNode {
+                id: "S-1-5-21-USER1".to_string(),
+                label: "admin@corp.local".to_string(),
+                node_type: "User".to_string(),
+                properties: serde_json::json!({"enabled": true}),
+            },
+            DbNode {
+                id: "S-1-5-21-USER2".to_string(),
+                label: "jsmith@corp.local".to_string(),
+                node_type: "User".to_string(),
+                properties: serde_json::json!({"enabled": true}),
+            },
+            DbNode {
+                id: "S-1-5-21-GROUP1".to_string(),
+                label: "Domain Admins".to_string(),
+                node_type: "Group".to_string(),
+                properties: serde_json::json!({}),
+            },
+            DbNode {
+                id: "S-1-5-21-GROUP2".to_string(),
+                label: "IT Staff".to_string(),
+                node_type: "Group".to_string(),
+                properties: serde_json::json!({}),
+            },
+            DbNode {
+                id: "S-1-5-21-COMP1".to_string(),
+                label: "DC01.corp.local".to_string(),
+                node_type: "Computer".to_string(),
+                properties: serde_json::json!({}),
+            },
+        ];
+        db.insert_nodes(&nodes).unwrap();
+
+        let edges = vec![
+            DbEdge {
+                source: "S-1-5-21-USER1".to_string(),
+                target: "S-1-5-21-GROUP1".to_string(),
+                edge_type: "MemberOf".to_string(),
+                properties: serde_json::json!({}),
+            },
+            DbEdge {
+                source: "S-1-5-21-USER2".to_string(),
+                target: "S-1-5-21-GROUP2".to_string(),
+                edge_type: "MemberOf".to_string(),
+                properties: serde_json::json!({}),
+            },
+            DbEdge {
+                source: "S-1-5-21-GROUP2".to_string(),
+                target: "S-1-5-21-GROUP1".to_string(),
+                edge_type: "MemberOf".to_string(),
+                properties: serde_json::json!({}),
+            },
+            DbEdge {
+                source: "S-1-5-21-GROUP1".to_string(),
+                target: "S-1-5-21-COMP1".to_string(),
+                edge_type: "AdminTo".to_string(),
+                properties: serde_json::json!({}),
+            },
+        ];
+        db.insert_edges(&edges).unwrap();
+
+        db
+    }
+
+    // ========================================================================
+    // Search Tests
+    // ========================================================================
+
+    #[test]
+    fn test_search_nodes_case_insensitive() {
+        let db = setup_test_db();
+
+        // Search for "jsmith" - unique, tests case insensitivity
+        let results = db.search_nodes("jsmith", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].label, "jsmith@corp.local");
+
+        // Search with uppercase should find lowercase
+        let results = db.search_nodes("JSMITH", 10).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Mixed case should work
+        let results = db.search_nodes("JsMiTh", 10).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // "admin" matches both "admin@corp.local" AND "Domain Admins"
+        let results = db.search_nodes("admin", 10).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_search_nodes_limit() {
+        let db = setup_test_db();
+
+        // Search for ".local" which matches all 3 entities with that suffix
+        let results = db.search_nodes(".local", 100).unwrap();
+        assert!(results.len() >= 3); // admin@corp.local, jsmith@corp.local, DC01.corp.local
+
+        // Now limit to 1
+        let results = db.search_nodes(".local", 1).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Limit to 2
+        let results = db.search_nodes(".local", 2).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_search_nodes_partial_match() {
+        let db = setup_test_db();
+
+        // Partial match on label
+        let results = db.search_nodes("smith", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].label, "jsmith@corp.local");
+
+        // Partial match on ID
+        let results = db.search_nodes("USER1", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "S-1-5-21-USER1");
+
+        // Match that returns multiple results
+        let results = db.search_nodes("GROUP", 10).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_search_nodes_no_match() {
+        let db = setup_test_db();
+
+        let results = db.search_nodes("nonexistent", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    // ========================================================================
+    // Shortest Path Tests
+    // ========================================================================
+
+    #[test]
+    fn test_shortest_path_direct() {
+        let db = setup_test_db();
+
+        // Direct edge: USER1 -> GROUP1
+        let path = db
+            .shortest_path("S-1-5-21-USER1", "S-1-5-21-GROUP1")
+            .unwrap();
+
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(path.len(), 2);
+        assert_eq!(path[0].0, "S-1-5-21-USER1");
+        assert_eq!(path[0].1, Some("MemberOf".to_string()));
+        assert_eq!(path[1].0, "S-1-5-21-GROUP1");
+        assert_eq!(path[1].1, None);
+    }
+
+    #[test]
+    fn test_shortest_path_multi_hop() {
+        let db = setup_test_db();
+
+        // Multi-hop: USER2 -> GROUP2 -> GROUP1 -> COMP1
+        let path = db
+            .shortest_path("S-1-5-21-USER2", "S-1-5-21-COMP1")
+            .unwrap();
+
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(path.len(), 4);
+        assert_eq!(path[0].0, "S-1-5-21-USER2");
+        assert_eq!(path[1].0, "S-1-5-21-GROUP2");
+        assert_eq!(path[2].0, "S-1-5-21-GROUP1");
+        assert_eq!(path[3].0, "S-1-5-21-COMP1");
+    }
+
+    #[test]
+    fn test_shortest_path_no_path() {
+        let db = setup_test_db();
+
+        // No path from COMP1 to USER1 (edges are directional)
+        let path = db
+            .shortest_path("S-1-5-21-COMP1", "S-1-5-21-USER1")
+            .unwrap();
+
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn test_shortest_path_same_node() {
+        let db = setup_test_db();
+
+        // Path from node to itself should return single-node path
+        let path = db
+            .shortest_path("S-1-5-21-USER1", "S-1-5-21-USER1")
+            .unwrap();
+
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(path.len(), 1);
+        assert_eq!(path[0].0, "S-1-5-21-USER1");
+    }
+
+    #[test]
+    fn test_shortest_path_nonexistent_node() {
+        let db = setup_test_db();
+
+        // Path involving nonexistent node
+        let path = db.shortest_path("nonexistent", "S-1-5-21-USER1").unwrap();
+        assert!(path.is_none());
+
+        let path = db.shortest_path("S-1-5-21-USER1", "nonexistent").unwrap();
+        assert!(path.is_none());
+    }
+
+    // ========================================================================
+    // Query History Tests
+    // ========================================================================
+
+    #[test]
+    fn test_query_history_crud() {
+        let db = GraphDatabase::in_memory().unwrap();
+
+        // Add entries
+        db.add_query_history("id1", "Query 1", "?[x] := x = 1", 1000, Some(1))
+            .unwrap();
+        db.add_query_history("id2", "Query 2", "?[x] := x = 2", 2000, Some(2))
+            .unwrap();
+
+        // Read entries
+        let (history, total) = db.get_query_history(10, 0).unwrap();
+        assert_eq!(total, 2);
+        assert_eq!(history.len(), 2);
+
+        // Delete one entry
+        db.delete_query_history("id1").unwrap();
+        let (history, total) = db.get_query_history(10, 0).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(history[0].0, "id2");
+
+        // Clear all
+        db.clear_query_history().unwrap();
+        let (history, total) = db.get_query_history(10, 0).unwrap();
+        assert_eq!(total, 0);
+        assert!(history.is_empty());
+    }
+
+    #[test]
+    fn test_query_history_ordering() {
+        let db = GraphDatabase::in_memory().unwrap();
+
+        // Add entries with different timestamps
+        db.add_query_history("oldest", "Old", "q1", 1000, None)
+            .unwrap();
+        db.add_query_history("middle", "Mid", "q2", 2000, None)
+            .unwrap();
+        db.add_query_history("newest", "New", "q3", 3000, None)
+            .unwrap();
+
+        // Should be ordered by timestamp descending (newest first)
+        let (history, _) = db.get_query_history(10, 0).unwrap();
+        assert_eq!(history[0].0, "newest");
+        assert_eq!(history[1].0, "middle");
+        assert_eq!(history[2].0, "oldest");
+    }
+
+    #[test]
+    fn test_query_history_pagination() {
+        let db = GraphDatabase::in_memory().unwrap();
+
+        // Add 5 entries
+        for i in 0..5 {
+            db.add_query_history(
+                &format!("id{}", i),
+                &format!("Query {}", i),
+                "query",
+                i as i64 * 1000,
+                None,
+            )
+            .unwrap();
+        }
+
+        // Page 1 (limit 2)
+        let (page1, total) = db.get_query_history(2, 0).unwrap();
+        assert_eq!(total, 5);
+        assert_eq!(page1.len(), 2);
+        assert_eq!(page1[0].0, "id4"); // newest
+        assert_eq!(page1[1].0, "id3");
+
+        // Page 2 (limit 2, offset 2)
+        let (page2, total) = db.get_query_history(2, 2).unwrap();
+        assert_eq!(total, 5);
+        assert_eq!(page2.len(), 2);
+        assert_eq!(page2[0].0, "id2");
+        assert_eq!(page2[1].0, "id1");
+
+        // Page 3 (limit 2, offset 4)
+        let (page3, total) = db.get_query_history(2, 4).unwrap();
+        assert_eq!(total, 5);
+        assert_eq!(page3.len(), 1);
+        assert_eq!(page3[0].0, "id0"); // oldest
+    }
+
+    // ========================================================================
+    // Node/Edge Retrieval Tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_nodes_by_ids_all_exist() {
+        let db = setup_test_db();
+
+        let ids = vec![
+            "S-1-5-21-USER1".to_string(),
+            "S-1-5-21-GROUP1".to_string(),
+        ];
+        let nodes = db.get_nodes_by_ids(&ids).unwrap();
+
+        assert_eq!(nodes.len(), 2);
+        let node_ids: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+        assert!(node_ids.contains(&"S-1-5-21-USER1"));
+        assert!(node_ids.contains(&"S-1-5-21-GROUP1"));
+    }
+
+    #[test]
+    fn test_get_nodes_by_ids_partial() {
+        let db = setup_test_db();
+
+        // Mix of existing and nonexistent IDs
+        let ids = vec![
+            "S-1-5-21-USER1".to_string(),
+            "nonexistent".to_string(),
+            "S-1-5-21-GROUP1".to_string(),
+        ];
+        let nodes = db.get_nodes_by_ids(&ids).unwrap();
+
+        // Should only return the 2 that exist
+        assert_eq!(nodes.len(), 2);
+    }
+
+    #[test]
+    fn test_get_nodes_by_ids_empty() {
+        let db = setup_test_db();
+
+        let nodes = db.get_nodes_by_ids(&[]).unwrap();
+        assert!(nodes.is_empty());
+    }
+
+    #[test]
+    fn test_get_edges_between_subset() {
+        let db = setup_test_db();
+
+        // Get edges between USER1, GROUP1, GROUP2
+        let ids = vec![
+            "S-1-5-21-USER1".to_string(),
+            "S-1-5-21-GROUP1".to_string(),
+            "S-1-5-21-GROUP2".to_string(),
+        ];
+        let edges = db.get_edges_between(&ids).unwrap();
+
+        // Should include USER1->GROUP1 and GROUP2->GROUP1
+        // Should NOT include USER2->GROUP2 (USER2 not in subset)
+        // Should NOT include GROUP1->COMP1 (COMP1 not in subset)
+        assert_eq!(edges.len(), 2);
+
+        let edge_types: Vec<(&str, &str)> = edges
+            .iter()
+            .map(|e| (e.source.as_str(), e.target.as_str()))
+            .collect();
+        assert!(edge_types.contains(&("S-1-5-21-USER1", "S-1-5-21-GROUP1")));
+        assert!(edge_types.contains(&("S-1-5-21-GROUP2", "S-1-5-21-GROUP1")));
+    }
+
+    #[test]
+    fn test_get_edges_between_no_edges() {
+        let db = setup_test_db();
+
+        // These two nodes have no direct edges between them
+        let ids = vec![
+            "S-1-5-21-USER1".to_string(),
+            "S-1-5-21-USER2".to_string(),
+        ];
+        let edges = db.get_edges_between(&ids).unwrap();
+
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn test_get_edges_between_empty() {
+        let db = setup_test_db();
+
+        let edges = db.get_edges_between(&[]).unwrap();
+        assert!(edges.is_empty());
+    }
+
+    // ========================================================================
+    // Custom Query Tests
+    // ========================================================================
+
+    #[test]
+    fn test_run_custom_query_valid() {
+        let db = setup_test_db();
+
+        let result = db
+            .run_custom_query("?[object_id] := *nodes{object_id}")
+            .unwrap();
+
+        assert!(result.get("rows").is_some());
+        let rows = result["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 5); // 5 nodes in test data
+    }
+
+    #[test]
+    fn test_run_custom_query_with_filter() {
+        let db = setup_test_db();
+
+        let result = db
+            .run_custom_query(
+                "?[object_id, label] := *nodes{object_id, label, node_type}, node_type = 'User'",
+            )
+            .unwrap();
+
+        let rows = result["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 2); // 2 users in test data
     }
 }

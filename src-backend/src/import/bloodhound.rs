@@ -611,4 +611,429 @@ mod tests {
             "CanRDP"
         );
     }
+
+    /// Helper to create an importer for testing
+    fn test_importer() -> BloodHoundImporter {
+        let db = GraphDatabase::in_memory().unwrap();
+        let (tx, _) = broadcast::channel(100);
+        BloodHoundImporter::new(db, tx)
+    }
+
+    // ========================================================================
+    // Node Extraction Tests
+    // ========================================================================
+
+    #[test]
+    fn test_extract_node_user() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-USER",
+            "Properties": {
+                "name": "testuser@corp.local",
+                "enabled": true,
+                "pwdlastset": 12345678
+            }
+        });
+
+        let node = importer.extract_node("users", &entity);
+        assert!(node.is_some());
+
+        let node = node.unwrap();
+        assert_eq!(node.id, "S-1-5-21-1234-USER");
+        assert_eq!(node.label, "testuser@corp.local");
+        assert_eq!(node.node_type, "User");
+        assert_eq!(node.properties["enabled"], true);
+    }
+
+    #[test]
+    fn test_extract_node_computer() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-COMP",
+            "Properties": {
+                "name": "DC01.corp.local",
+                "operatingsystem": "Windows Server 2019"
+            }
+        });
+
+        let node = importer.extract_node("computers", &entity);
+        assert!(node.is_some());
+
+        let node = node.unwrap();
+        assert_eq!(node.id, "S-1-5-21-1234-COMP");
+        assert_eq!(node.label, "DC01.corp.local");
+        assert_eq!(node.node_type, "Computer");
+    }
+
+    #[test]
+    fn test_extract_node_group() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-GROUP",
+            "Properties": {
+                "name": "Domain Admins"
+            }
+        });
+
+        let node = importer.extract_node("groups", &entity);
+        assert!(node.is_some());
+
+        let node = node.unwrap();
+        assert_eq!(node.node_type, "Group");
+        assert_eq!(node.label, "Domain Admins");
+    }
+
+    #[test]
+    fn test_extract_node_missing_id() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "Properties": {
+                "name": "testuser@corp.local"
+            }
+        });
+
+        let node = importer.extract_node("users", &entity);
+        assert!(node.is_none());
+    }
+
+    #[test]
+    fn test_extract_node_missing_name() {
+        let importer = test_importer();
+
+        // If name is missing, should use ObjectIdentifier as label
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-USER",
+            "Properties": {}
+        });
+
+        let node = importer.extract_node("users", &entity);
+        assert!(node.is_some());
+
+        let node = node.unwrap();
+        assert_eq!(node.label, "S-1-5-21-1234-USER");
+    }
+
+    // ========================================================================
+    // Edge Extraction Tests
+    // ========================================================================
+
+    #[test]
+    fn test_extract_edges_memberof() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-GROUP1",
+            "Members": [
+                {"ObjectIdentifier": "S-1-5-21-USER1", "ObjectType": "User"},
+                {"ObjectIdentifier": "S-1-5-21-USER2", "ObjectType": "User"}
+            ]
+        });
+
+        let edges = importer.extract_edges("groups", &entity);
+
+        assert_eq!(edges.len(), 2);
+        // Members point TO the group (MemberOf)
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-USER1"
+            && e.target == "S-1-5-21-GROUP1"
+            && e.edge_type == "MemberOf"));
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-USER2"
+            && e.target == "S-1-5-21-GROUP1"
+            && e.edge_type == "MemberOf"));
+    }
+
+    #[test]
+    fn test_extract_edges_sessions() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-COMP1",
+            "Sessions": {
+                "Results": [
+                    {"UserSID": "S-1-5-21-USER1", "ComputerSID": "S-1-5-21-COMP1"}
+                ]
+            },
+            "PrivilegedSessions": {
+                "Results": [
+                    {"UserSID": "S-1-5-21-ADMIN1", "ComputerSID": "S-1-5-21-COMP1"}
+                ]
+            }
+        });
+
+        let edges = importer.extract_edges("computers", &entity);
+
+        assert_eq!(edges.len(), 2);
+        assert!(edges
+            .iter()
+            .all(|e| e.edge_type == "HasSession" && e.target == "S-1-5-21-COMP1"));
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-USER1"));
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-ADMIN1"));
+    }
+
+    #[test]
+    fn test_extract_edges_aces() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-TARGET",
+            "Aces": [
+                {
+                    "PrincipalSID": "S-1-5-21-ATTACKER",
+                    "RightName": "GenericAll",
+                    "IsInherited": false
+                },
+                {
+                    "PrincipalSID": "S-1-5-21-USER1",
+                    "RightName": "WriteDacl",
+                    "IsInherited": true
+                }
+            ]
+        });
+
+        let edges = importer.extract_edges("users", &entity);
+
+        assert_eq!(edges.len(), 2);
+
+        let generic_all = edges
+            .iter()
+            .find(|e| e.source == "S-1-5-21-ATTACKER")
+            .unwrap();
+        assert_eq!(generic_all.edge_type, "GenericAll");
+        assert_eq!(generic_all.properties["inherited"], false);
+
+        let write_dacl = edges
+            .iter()
+            .find(|e| e.source == "S-1-5-21-USER1")
+            .unwrap();
+        assert_eq!(write_dacl.edge_type, "WriteDacl");
+        assert_eq!(write_dacl.properties["inherited"], true);
+    }
+
+    #[test]
+    fn test_extract_edges_trusts() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN1",
+            "Trusts": [
+                {
+                    "TargetDomainSid": "S-1-5-21-DOMAIN2",
+                    "TrustDirection": 3  // Bidirectional
+                }
+            ]
+        });
+
+        let edges = importer.extract_edges("domains", &entity);
+
+        // Bidirectional trust creates 2 edges
+        assert_eq!(edges.len(), 2);
+        assert!(edges
+            .iter()
+            .any(|e| e.source == "S-1-5-21-DOMAIN2" && e.target == "S-1-5-21-DOMAIN1"));
+        assert!(edges
+            .iter()
+            .any(|e| e.source == "S-1-5-21-DOMAIN1" && e.target == "S-1-5-21-DOMAIN2"));
+    }
+
+    #[test]
+    fn test_extract_edges_containedby() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-USER1",
+            "ContainedBy": {
+                "ObjectIdentifier": "S-1-5-21-OU1",
+                "ObjectType": "OU"
+            }
+        });
+
+        let edges = importer.extract_edges("users", &entity);
+
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].source, "S-1-5-21-OU1");
+        assert_eq!(edges[0].target, "S-1-5-21-USER1");
+        assert_eq!(edges[0].edge_type, "Contains");
+    }
+
+    #[test]
+    fn test_extract_edges_delegation() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-USER1",
+            "AllowedToDelegate": [
+                {"ObjectIdentifier": "S-1-5-21-SERVICE1"}
+            ],
+            "AllowedToAct": [
+                {"ObjectIdentifier": "S-1-5-21-ACTOR1"}
+            ]
+        });
+
+        let edges = importer.extract_edges("users", &entity);
+
+        assert_eq!(edges.len(), 2);
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-USER1"
+            && e.target == "S-1-5-21-SERVICE1"
+            && e.edge_type == "AllowedToDelegate"));
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-ACTOR1"
+            && e.target == "S-1-5-21-USER1"
+            && e.edge_type == "AllowedToAct"));
+    }
+
+    #[test]
+    fn test_extract_edges_local_groups() {
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-COMP1",
+            "LocalGroups": [
+                {
+                    "Name": "Administrators",
+                    "Results": [
+                        {"ObjectIdentifier": "S-1-5-21-ADMIN1"}
+                    ]
+                },
+                {
+                    "Name": "Remote Desktop Users",
+                    "Results": [
+                        {"ObjectIdentifier": "S-1-5-21-USER1"}
+                    ]
+                }
+            ]
+        });
+
+        let edges = importer.extract_edges("computers", &entity);
+
+        assert_eq!(edges.len(), 2);
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-ADMIN1"
+            && e.target == "S-1-5-21-COMP1"
+            && e.edge_type == "AdminTo"));
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-USER1"
+            && e.target == "S-1-5-21-COMP1"
+            && e.edge_type == "CanRDP"));
+    }
+
+    // ========================================================================
+    // Import Tests
+    // ========================================================================
+
+    #[test]
+    fn test_import_json_str_users() {
+        let mut importer = test_importer();
+
+        let json_content = serde_json::json!({
+            "meta": {"type": "users", "version": 5},
+            "data": [
+                {
+                    "ObjectIdentifier": "S-1-5-21-USER1",
+                    "Properties": {"name": "user1@corp.local"}
+                },
+                {
+                    "ObjectIdentifier": "S-1-5-21-USER2",
+                    "Properties": {"name": "user2@corp.local"}
+                }
+            ]
+        });
+
+        let mut progress = ImportProgress::new("test".to_string());
+        let result = importer.import_json_str(&json_content.to_string(), &mut progress);
+
+        assert!(result.is_ok());
+        assert_eq!(progress.nodes_imported, 2);
+
+        // Verify nodes are in database
+        let (node_count, _) = importer.db.get_stats().unwrap();
+        assert_eq!(node_count, 2);
+    }
+
+    #[test]
+    fn test_import_json_str_groups_with_members() {
+        let mut importer = test_importer();
+
+        let json_content = serde_json::json!({
+            "meta": {"type": "groups", "version": 5},
+            "data": [
+                {
+                    "ObjectIdentifier": "S-1-5-21-GROUP1",
+                    "Properties": {"name": "Domain Admins"},
+                    "Members": [
+                        {"ObjectIdentifier": "S-1-5-21-USER1", "ObjectType": "User"},
+                        {"ObjectIdentifier": "S-1-5-21-USER2", "ObjectType": "User"}
+                    ]
+                }
+            ]
+        });
+
+        let mut progress = ImportProgress::new("test".to_string());
+        let result = importer.import_json_str(&json_content.to_string(), &mut progress);
+
+        assert!(result.is_ok());
+        assert_eq!(progress.nodes_imported, 1);
+        assert_eq!(progress.edges_imported, 2); // 2 MemberOf edges
+
+        // Verify edges are in database
+        let (_, edge_count) = importer.db.get_stats().unwrap();
+        assert_eq!(edge_count, 2);
+    }
+
+    #[test]
+    fn test_import_json_str_infers_type() {
+        let mut importer = test_importer();
+
+        // No meta.type - should infer from data structure
+        let json_content = serde_json::json!({
+            "data": [
+                {
+                    "ObjectIdentifier": "S-1-5-21-GROUP1",
+                    "Properties": {"name": "Test Group"},
+                    "Members": []
+                }
+            ]
+        });
+
+        let mut progress = ImportProgress::new("test".to_string());
+        let result = importer.import_json_str(&json_content.to_string(), &mut progress);
+
+        assert!(result.is_ok());
+        // Should infer as "groups" due to Members field
+        let nodes = importer.db.get_all_nodes().unwrap();
+        assert_eq!(nodes[0].node_type, "Group");
+    }
+
+    #[test]
+    fn test_import_json_str_invalid() {
+        let mut importer = test_importer();
+
+        let invalid_json = "not valid json {{{";
+        let mut progress = ImportProgress::new("test".to_string());
+
+        let result = importer.import_json_str(invalid_json, &mut progress);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_import_deduplicates_nodes() {
+        let mut importer = test_importer();
+
+        // Import same entity twice
+        let json_content = serde_json::json!({
+            "meta": {"type": "users"},
+            "data": [
+                {"ObjectIdentifier": "S-1-5-21-USER1", "Properties": {"name": "user1"}},
+                {"ObjectIdentifier": "S-1-5-21-USER1", "Properties": {"name": "user1"}}
+            ]
+        });
+
+        let mut progress = ImportProgress::new("test".to_string());
+        importer
+            .import_json_str(&json_content.to_string(), &mut progress)
+            .unwrap();
+
+        // Should only have 1 node due to deduplication
+        let (node_count, _) = importer.db.get_stats().unwrap();
+        assert_eq!(node_count, 1);
+    }
 }
