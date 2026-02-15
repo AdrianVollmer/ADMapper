@@ -8,8 +8,7 @@
 import { getRenderer, loadGraphData } from "./graph-view";
 import { updateDetailPanel } from "./sidebars";
 import { NODE_COLORS } from "../graph/theme";
-import type { ADNodeType } from "../graph/types";
-import type { RawADGraph } from "../graph/types";
+import type { ADNodeType, ADEdgeType, RawADGraph } from "../graph/types";
 import { escapeHtml } from "../utils/html";
 import { api, ApiClientError } from "../api/client";
 import type { SearchResult, PathStep, PathResponse } from "../api/types";
@@ -290,6 +289,24 @@ async function findPath(): Promise<void> {
 
     // Display the path from API response
     displayPathFromApi(data.path);
+
+    // Load the path graph data into the view
+    if (data.graph && data.graph.nodes.length > 0) {
+      const pathGraph: RawADGraph = {
+        nodes: data.graph.nodes.map((n) => ({
+          id: n.id,
+          label: n.label,
+          type: n.type as ADNodeType,
+          properties: n.properties ?? {},
+        })),
+        edges: data.graph.edges.map((e) => ({
+          source: e.source,
+          target: e.target,
+          type: e.type as ADEdgeType,
+        })),
+      };
+      loadGraphData(pathGraph);
+    }
 
     // Highlight the path on the graph
     const renderer = getRenderer();
