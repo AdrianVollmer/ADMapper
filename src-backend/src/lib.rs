@@ -18,6 +18,7 @@ use axum::{
 use dashmap::DashMap;
 use db::GraphDatabase;
 use import::{BloodHoundImporter, ImportProgress};
+use parking_lot::RwLock;
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 use std::convert::Infallible;
@@ -37,12 +38,18 @@ use tracing::{debug, info, warn, error, instrument};
 #[cfg(debug_assertions)]
 use tauri::Manager;
 
+/// Import job state: channel for live updates + optional final state for late subscribers.
+pub struct ImportJob {
+    pub channel: broadcast::Sender<ImportProgress>,
+    pub final_state: RwLock<Option<ImportProgress>>,
+}
+
 /// Application state shared across requests.
 #[derive(Clone)]
 pub struct AppState {
     db: GraphDatabase,
     /// Active import jobs and their progress channels.
-    import_jobs: Arc<DashMap<String, broadcast::Sender<ImportProgress>>>,
+    import_jobs: Arc<DashMap<String, Arc<ImportJob>>>,
 }
 
 impl AppState {
@@ -147,7 +154,11 @@ async fn import_bloodhound(
 
     // Create broadcast channel for progress updates
     let (tx, _) = broadcast::channel::<ImportProgress>(100);
-    state.import_jobs.insert(job_id.clone(), tx.clone());
+    let job = Arc::new(ImportJob {
+        channel: tx.clone(),
+        final_state: RwLock::new(None),
+    });
+    state.import_jobs.insert(job_id.clone(), job.clone());
 
     // Collect uploaded files
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
@@ -183,10 +194,12 @@ async fn import_bloodhound(
     let db = state.db.clone();
     let job_id_clone = job_id.clone();
     let import_jobs = state.import_jobs.clone();
+    let job_for_task = job.clone();
 
     // Spawn import task
     tokio::task::spawn_blocking(move || {
         let mut importer = BloodHoundImporter::new(db, tx);
+        let mut final_progress: Option<ImportProgress> = None;
 
         for (filename, data) in files {
             info!(filename = %filename, size = data.len(), "Importing file");
@@ -212,11 +225,17 @@ async fn import_bloodhound(
                         edges = progress.edges_imported,
                         "File imported successfully"
                     );
+                    final_progress = Some(progress.clone());
                 }
                 Err(e) => {
                     error!(filename = %filename, error = %e, "Import failed");
                 }
             }
+        }
+
+        // Store final state for late subscribers
+        if let Some(progress) = final_progress {
+            *job_for_task.final_state.write() = Some(progress);
         }
 
         debug!(job_id = %job_id_clone, "Import job complete, cleanup scheduled");
@@ -237,19 +256,31 @@ async fn import_progress(
     Path(job_id): Path<String>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
 {
-    let tx = state
+    use futures::future::Either;
+
+    let job = state
         .import_jobs
         .get(&job_id)
         .map(|r| r.value().clone())
         .ok_or((StatusCode::NOT_FOUND, "Job not found".to_string()))?;
 
-    let rx = tx.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(|result| {
+    // Check if import already completed (late subscriber)
+    let final_state = job.final_state.read().clone();
+    if let Some(progress) = final_state {
+        debug!(job_id = %job_id, "Sending cached final state to late subscriber");
+        let data = serde_json::to_string(&progress).unwrap_or_default();
+        let stream = Either::Left(tokio_stream::once(Ok(Event::default().data(data))));
+        return Ok(Sse::new(stream));
+    }
+
+    // Subscribe to live updates
+    let rx = job.channel.subscribe();
+    let stream = Either::Right(BroadcastStream::new(rx).filter_map(|result| {
         result.ok().map(|progress| {
             let data = serde_json::to_string(&progress).unwrap_or_default();
             Ok(Event::default().data(data))
         })
-    });
+    }));
 
     Ok(Sse::new(stream))
 }

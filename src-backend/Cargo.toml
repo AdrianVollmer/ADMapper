@@ -28,6 +28,8 @@ zip = "2"
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 dashmap = "6"
+parking_lot = "0.12"
+futures = "0.3"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
