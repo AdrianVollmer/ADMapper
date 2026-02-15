@@ -116,7 +116,7 @@ pub async fn run_service(bind: &str, port: u16) {
     let app = Router::new()
         .route("/api/health", get(health_check))
         .route("/api/import", post(import_bloodhound))
-        .route("/api/import/progress/{job_id}", get(import_progress))
+        .route("/api/import/progress/:job_id", get(import_progress))
         .route("/api/graph/stats", get(graph_stats))
         .route("/api/graph/nodes", get(graph_nodes))
         .route("/api/graph/edges", get(graph_edges))
