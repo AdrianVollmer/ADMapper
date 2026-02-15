@@ -418,6 +418,26 @@ struct FullGraph {
     edges: Vec<GraphEdge>,
 }
 
+impl FullGraph {
+    /// Build a subgraph containing only the specified nodes and edges between them.
+    fn from_node_ids(db: &GraphDatabase, node_ids: &[String]) -> Result<Self, ApiError> {
+        if node_ids.is_empty() {
+            return Ok(FullGraph {
+                nodes: Vec::new(),
+                edges: Vec::new(),
+            });
+        }
+
+        let nodes = db.get_nodes_by_ids(node_ids)?;
+        let edges = db.get_edges_between(node_ids)?;
+
+        Ok(FullGraph {
+            nodes: nodes.into_iter().map(GraphNode::from).collect(),
+            edges: edges.into_iter().map(GraphEdge::from).collect(),
+        })
+    }
+}
+
 /// Get full graph (nodes and edges).
 async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>, ApiError> {
     let nodes = state.db.get_all_nodes()?;
@@ -591,26 +611,20 @@ async fn graph_query(
 
     let graph = if body.extract_graph {
         // Try to extract node IDs from the first column of results
-        let mut node_ids: Vec<String> = Vec::new();
-
-        if let Some(rows) = results.get("rows").and_then(|r| r.as_array()) {
-            for row in rows {
-                if let Some(first) = row.get(0).and_then(|v| v.as_str()) {
-                    node_ids.push(first.to_string());
-                }
-            }
-        }
-
-        if !node_ids.is_empty() {
-            let nodes = state.db.get_nodes_by_ids(&node_ids)?;
-            let edges = state.db.get_edges_between(&node_ids)?;
-
-            Some(FullGraph {
-                nodes: nodes.into_iter().map(GraphNode::from).collect(),
-                edges: edges.into_iter().map(GraphEdge::from).collect(),
+        let node_ids: Vec<String> = results
+            .get("rows")
+            .and_then(|r| r.as_array())
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row.get(0).and_then(|v| v.as_str()).map(String::from))
+                    .collect()
             })
-        } else {
+            .unwrap_or_default();
+
+        if node_ids.is_empty() {
             None
+        } else {
+            Some(FullGraph::from_node_ids(&state.db, &node_ids)?)
         }
     } else {
         None
