@@ -53,9 +53,17 @@ build_frontend() {
 	log_info "Frontend built to build/"
 }
 
+generate_icons() {
+	if [ ! -f "src-backend/icons/32x32.png" ]; then
+		log_info "Generating icons..."
+		bash scripts/generate-icons.sh
+	fi
+}
+
 build_tauri() {
 	log_info "Building Tauri desktop app (release)..."
 	check_npm
+	generate_icons
 	npm run tauri build
 	log_info "Tauri app built to src-backend/target/release/"
 }
@@ -63,6 +71,7 @@ build_tauri() {
 build_tauri_debug() {
 	log_info "Building Tauri desktop app (debug)..."
 	check_npm
+	generate_icons
 	npm run tauri build -- --debug
 	log_info "Tauri app built to src-backend/target/debug/"
 }

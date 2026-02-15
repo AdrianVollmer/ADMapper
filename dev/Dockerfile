@@ -30,6 +30,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     libgtk-3-dev \
     libayatana-appindicator3-dev \
+    # Icon generation
+    librsvg2-bin \
+    imagemagick \
     # Clean up
     && rm -rf /var/lib/apt/lists/*
 
