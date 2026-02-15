@@ -157,14 +157,13 @@ async fn test_graph_search_no_results() {
 // ============================================================================
 
 #[tokio::test]
-async fn test_graph_path_not_found() {
+async fn test_graph_path_node_not_found() {
     let app = create_test_app();
 
-    let (status, json) = get_json(&app, "/api/graph/path?from=node1&to=node2").await;
+    // Nonexistent nodes should return 404
+    let (status, _json) = get_json(&app, "/api/graph/path?from=node1&to=node2").await;
 
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["found"], false);
-    assert!(json["path"].as_array().unwrap().is_empty());
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 // ============================================================================
@@ -611,6 +610,46 @@ async fn test_graph_path_no_path_exists() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["found"], false);
     assert!(json["path"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_graph_path_by_label() {
+    let app = TestApp::new();
+    app.db().insert_nodes(&test_nodes()).unwrap();
+    app.db().insert_edges(&test_edges()).unwrap();
+
+    // Find path using labels instead of object IDs
+    // admin@corp.local -> Domain Admins
+    let (status, json) = get_json(
+        app.router(),
+        "/api/graph/path?from=admin%40corp.local&to=Domain%20Admins",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["found"], true);
+
+    // Path should be resolved correctly
+    let path = json["path"].as_array().unwrap();
+    assert_eq!(path.len(), 2);
+    assert_eq!(path[0]["node"]["id"], "user-admin");
+    assert_eq!(path[1]["node"]["id"], "group-admins");
+}
+
+#[tokio::test]
+async fn test_graph_path_nonexistent_node() {
+    let app = TestApp::new();
+    app.db().insert_nodes(&test_nodes()).unwrap();
+    app.db().insert_edges(&test_edges()).unwrap();
+
+    // Try to find path with nonexistent node
+    let (status, _json) = get_json(
+        app.router(),
+        "/api/graph/path?from=nonexistent&to=group-admins",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

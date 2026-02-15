@@ -538,16 +538,28 @@ struct PathResponse {
 }
 
 /// Find shortest path between two nodes.
+/// Accepts either object IDs or labels as identifiers.
 #[instrument(skip(state))]
 async fn graph_path(
     State(state): State<AppState>,
     Query(params): Query<PathParams>,
 ) -> Result<Json<PathResponse>, ApiError> {
-    let path_result = state.db.shortest_path(&params.from, &params.to)?;
+    // Resolve identifiers to object IDs (supports both IDs and labels)
+    let from_id = state
+        .db
+        .resolve_node_identifier(&params.from)?
+        .ok_or_else(|| ApiError::NotFound(format!("Node not found: {}", params.from)))?;
+
+    let to_id = state
+        .db
+        .resolve_node_identifier(&params.to)?
+        .ok_or_else(|| ApiError::NotFound(format!("Node not found: {}", params.to)))?;
+
+    let path_result = state.db.shortest_path(&from_id, &to_id)?;
 
     match path_result {
         None => {
-            debug!(from = %params.from, to = %params.to, "No path found");
+            debug!(from = %from_id, to = %to_id, "No path found");
             Ok(Json(PathResponse {
                 found: false,
                 path: Vec::new(),

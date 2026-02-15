@@ -323,6 +323,30 @@ impl GraphDatabase {
         })
     }
 
+    /// Resolve a node identifier (object ID or label) to an object ID.
+    /// Returns the object ID if found, None otherwise.
+    /// First checks for exact object ID match, then tries exact label match.
+    pub fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {
+        let all_nodes = self.get_all_nodes()?;
+
+        // First, check for exact object ID match
+        for node in &all_nodes {
+            if node.id == identifier {
+                return Ok(Some(node.id.clone()));
+            }
+        }
+
+        // Then, check for exact label match (case-insensitive)
+        let identifier_lower = identifier.to_lowercase();
+        for node in &all_nodes {
+            if node.label.to_lowercase() == identifier_lower {
+                return Ok(Some(node.id.clone()));
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Search nodes by label (case-insensitive substring match).
     pub fn search_nodes(&self, search_query: &str, limit: usize) -> Result<Vec<DbNode>> {
         let query_lower = search_query.to_lowercase();
@@ -788,6 +812,44 @@ mod tests {
 
         let results = db.search_nodes("nonexistent", 10).unwrap();
         assert!(results.is_empty());
+    }
+
+    // ========================================================================
+    // Resolve Node Identifier Tests
+    // ========================================================================
+
+    #[test]
+    fn test_resolve_node_identifier_by_id() {
+        let db = setup_test_db();
+
+        // Resolve by exact object ID
+        let resolved = db.resolve_node_identifier("S-1-5-21-USER1").unwrap();
+        assert_eq!(resolved, Some("S-1-5-21-USER1".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_node_identifier_by_label() {
+        let db = setup_test_db();
+
+        // Resolve by exact label (case-insensitive)
+        let resolved = db.resolve_node_identifier("admin@corp.local").unwrap();
+        assert_eq!(resolved, Some("S-1-5-21-USER1".to_string()));
+
+        // Case insensitive
+        let resolved = db.resolve_node_identifier("ADMIN@CORP.LOCAL").unwrap();
+        assert_eq!(resolved, Some("S-1-5-21-USER1".to_string()));
+
+        // Group by label
+        let resolved = db.resolve_node_identifier("Domain Admins").unwrap();
+        assert_eq!(resolved, Some("S-1-5-21-GROUP1".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_node_identifier_not_found() {
+        let db = setup_test_db();
+
+        let resolved = db.resolve_node_identifier("nonexistent").unwrap();
+        assert!(resolved.is_none());
     }
 
     // ========================================================================
