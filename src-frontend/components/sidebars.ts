@@ -326,19 +326,20 @@ function formatValue(key: string, value: unknown): string {
     // Check if it's a timestamp by value heuristics
     // JS milliseconds timestamp (13 digits, 2001-2050 range)
     if (value > 1000000000000 && value < 2500000000000) {
-      return new Date(value).toLocaleString();
+      return formatDateISO(new Date(value));
     }
     // Unix seconds timestamp (10 digits, 2001-2050 range)
     if (value > 1000000000 && value < 2500000000) {
-      return new Date(value * 1000).toLocaleString();
+      return formatDateISO(new Date(value * 1000));
     }
     // Windows FILETIME (100-nanosecond intervals since 1601)
     if (value > 100000000000000000) {
       const epoch = (value - 116444736000000000) / 10000;
       if (epoch > 0) {
-        return new Date(epoch).toLocaleString();
+        return formatDateISO(new Date(epoch));
       }
     }
+    // Regular number - use locale formatting for thousands separators
     return value.toLocaleString();
   }
   if (Array.isArray(value)) {
@@ -347,7 +348,16 @@ function formatValue(key: string, value: unknown): string {
   return String(value);
 }
 
-/** Format a numeric timestamp to human-readable string */
+/** Format a Date to ISO format (YYYY-MM-DD HH:mm:ss) */
+function formatDateISO(date: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
+}
+
+/** Format a numeric timestamp to human-readable ISO string */
 function formatTimestamp(value: number): string {
   // Handle special "never" values (0 or max int64)
   if (value === 0 || value > 9e18) {
@@ -359,19 +369,19 @@ function formatTimestamp(value: number): string {
   if (value > 1e17 && value < 3e17) {
     const epoch = (value - 116444736000000000) / 10000;
     if (epoch > 0) {
-      return new Date(epoch).toLocaleString();
+      return formatDateISO(new Date(epoch));
     }
     return "Never";
   }
 
   // JS milliseconds timestamp (13 digits)
   if (value > 1000000000000) {
-    return new Date(value).toLocaleString();
+    return formatDateISO(new Date(value));
   }
 
   // Unix seconds timestamp (10 digits)
   if (value > 1000000000) {
-    return new Date(value * 1000).toLocaleString();
+    return formatDateISO(new Date(value * 1000));
   }
 
   // Small number - probably not a timestamp
