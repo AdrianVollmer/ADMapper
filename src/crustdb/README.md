@@ -84,7 +84,7 @@ Basic CRUD operations for nodes and edges.
 - [x] Property serialization (JSON)
 - [x] Database statistics
 
-### M2: Simple CREATE Queries [open]
+### M2: Simple CREATE Queries [done]
 
 Parse and execute basic node/edge creation.
 
@@ -105,7 +105,7 @@ CREATE (charlie:Person:Actor {name: 'Charlie Sheen'}),
 - [x] CREATE clause parser
 - [x] Node pattern parser (labels, properties)
 - [x] Relationship pattern parser
-- [ ] CREATE executor
+- [x] CREATE executor
 
 ### M3: Simple MATCH Queries [open]
 
