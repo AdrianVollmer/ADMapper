@@ -453,7 +453,16 @@ fn evaluate_binary_op(
         }
 
         BinaryOperator::RegexMatch => {
-            Err(Error::Cypher("Regex matching not yet supported".into()))
+            match (&left_val, &right_val) {
+                (PropertyValue::Null, _) | (_, PropertyValue::Null) => Ok(PropertyValue::Null),
+                (PropertyValue::String(text), PropertyValue::String(pattern)) => {
+                    match regex::Regex::new(pattern) {
+                        Ok(re) => Ok(PropertyValue::Bool(re.is_match(text))),
+                        Err(e) => Err(Error::Cypher(format!("Invalid regex pattern: {}", e))),
+                    }
+                }
+                _ => Ok(PropertyValue::Null), // Non-string types return NULL
+            }
         }
     }
 }
@@ -1464,5 +1473,46 @@ mod tests {
         let result = execute(&parse("MATCH (n:Person) WHERE (n.age > 25 AND n.age < 35) OR n.name = 'Charlie' RETURN n").unwrap(), &storage).unwrap();
 
         assert_eq!(result.rows.len(), 2); // Alice (30) and Charlie
+    }
+
+    #[test]
+    fn test_where_regex_match() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        execute(&parse("CREATE (n:Person {name: 'Alice'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (n:Person {name: 'Adam'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (n:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+
+        // Match names starting with 'A'
+        let result = execute(&parse("MATCH (n:Person) WHERE n.name =~ '^A.*' RETURN n").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 2); // Alice and Adam
+    }
+
+    #[test]
+    fn test_where_regex_match_case_insensitive() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        execute(&parse("CREATE (n:Person {name: 'Alice'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (n:Person {name: 'bob'})").unwrap(), &storage).unwrap();
+
+        // Case-insensitive match for 'alice'
+        let result = execute(&parse("MATCH (n:Person) WHERE n.name =~ '(?i)alice' RETURN n").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_where_regex_match_digit_pattern() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        execute(&parse("CREATE (n:Product {code: 'ABC123'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (n:Product {code: 'XYZ789'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (n:Product {code: 'NoDigits'})").unwrap(), &storage).unwrap();
+
+        // Match codes containing digits
+        let result = execute(&parse("MATCH (n:Product) WHERE n.code =~ '.*[0-9]+.*' RETURN n").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 2); // ABC123 and XYZ789
     }
 }

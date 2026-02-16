@@ -316,7 +316,7 @@ ListLiteral = {
 }
 
 PartialComparisonExpression = {
-    (EQ | NE | LE | GE | LT | GT) ~ SP? ~ AddOrSubtractExpression
+    (REGEX_MATCH | EQ | NE | LE | GE | LT | GT) ~ SP? ~ AddOrSubtractExpression
 }
 
 
@@ -729,6 +729,7 @@ LT = @{ "<" }
 GT = @{ ">" }
 LE = @{ "<=" }
 GE = @{ ">=" }
+REGEX_MATCH = @{ "=~" }
 // TRUE = @{ ^"TRUE" }
 // FALSE = @{ ^"FALSE" }
 COUNT = @{ ^"COUNT" }

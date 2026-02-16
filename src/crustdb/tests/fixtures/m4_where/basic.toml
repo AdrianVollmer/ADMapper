@@ -217,3 +217,18 @@ cypher = "MATCH (n:Person) WHERE n.age > 100 RETURN n"
 [test.expected]
 row_count = 0
 columns = ["n"]
+
+[[test]]
+name = "where_regex_match"
+description = "Filter with regex =~ operator"
+[test.setup]
+nodes = [
+    { id = "alice", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "adam", labels = ["Person"], properties = { name = "Adam" } },
+    { id = "bob", labels = ["Person"], properties = { name = "Bob" } },
+]
+[test.query]
+cypher = "MATCH (n:Person) WHERE n.name =~ '^A.*' RETURN n"
+[test.expected]
+row_count = 2
+columns = ["n"]

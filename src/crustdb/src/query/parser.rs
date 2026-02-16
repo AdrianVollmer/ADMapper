@@ -1076,6 +1076,7 @@ fn build_partial_comparison(pair: Pair<Rule>) -> Result<(BinaryOperator, Express
             Rule::GT => op = Some(BinaryOperator::Gt),
             Rule::LE => op = Some(BinaryOperator::Le),
             Rule::GE => op = Some(BinaryOperator::Ge),
+            Rule::REGEX_MATCH => op = Some(BinaryOperator::RegexMatch),
             Rule::AddOrSubtractExpression => {
                 right = Some(build_add_or_subtract_expression(inner)?);
             }
