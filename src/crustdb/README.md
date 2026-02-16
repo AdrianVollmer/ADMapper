@@ -101,10 +101,10 @@ CREATE (charlie:Person:Actor {name: 'Charlie Sheen'}),
 ```
 
 - [x] Cypher lexer/tokenizer (pest grammar)
-- [ ] AST builder (pest tree → clean AST)
-- [ ] CREATE clause parser
-- [ ] Node pattern parser (labels, properties)
-- [ ] Relationship pattern parser
+- [x] AST builder (pest tree → clean AST)
+- [x] CREATE clause parser
+- [x] Node pattern parser (labels, properties)
+- [x] Relationship pattern parser
 - [ ] CREATE executor
 
 ### M3: Simple MATCH Queries [open]
