@@ -9,6 +9,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, info, trace};
 
+use super::backend::{DatabaseBackend, QueryLanguage};
+
 /// A node stored in the database.
 #[derive(Clone, Debug)]
 pub struct DbNode {
@@ -497,7 +499,7 @@ impl GraphDatabase {
         let well_known_principals = [
             ("Everyone", "S-1-1-0"),
             ("Authenticated Users", "S-1-5-11"),
-            ("Domain Users", "-513"),   // SID suffix
+            ("Domain Users", "-513"),     // SID suffix
             ("Domain Computers", "-515"), // SID suffix
         ];
 
@@ -1010,6 +1012,130 @@ impl GraphDatabase {
             ScriptMutability::Mutable,
         )?;
         Ok(())
+    }
+}
+
+// ============================================================================
+// DatabaseBackend Trait Implementation
+// ============================================================================
+
+impl DatabaseBackend for GraphDatabase {
+    fn name(&self) -> &'static str {
+        "CozoDB"
+    }
+
+    fn supports_language(&self, lang: QueryLanguage) -> bool {
+        matches!(lang, QueryLanguage::Datalog)
+    }
+
+    fn default_language(&self) -> QueryLanguage {
+        QueryLanguage::Datalog
+    }
+
+    fn clear(&self) -> Result<()> {
+        GraphDatabase::clear(self)
+    }
+
+    fn insert_node(&self, node: DbNode) -> Result<()> {
+        GraphDatabase::insert_node(self, node)
+    }
+
+    fn insert_edge(&self, edge: DbEdge) -> Result<()> {
+        GraphDatabase::insert_edge(self, edge)
+    }
+
+    fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
+        GraphDatabase::insert_nodes(self, nodes)
+    }
+
+    fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
+        GraphDatabase::insert_edges(self, edges)
+    }
+
+    fn get_stats(&self) -> Result<(usize, usize)> {
+        GraphDatabase::get_stats(self)
+    }
+
+    fn get_detailed_stats(&self) -> Result<DetailedStats> {
+        GraphDatabase::get_detailed_stats(self)
+    }
+
+    fn get_security_insights(&self) -> Result<SecurityInsights> {
+        GraphDatabase::get_security_insights(self)
+    }
+
+    fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
+        GraphDatabase::get_all_nodes(self)
+    }
+
+    fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
+        GraphDatabase::get_all_edges(self)
+    }
+
+    fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>> {
+        GraphDatabase::get_nodes_by_ids(self, ids)
+    }
+
+    fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>> {
+        GraphDatabase::get_edges_between(self, node_ids)
+    }
+
+    fn get_edge_types(&self) -> Result<Vec<String>> {
+        GraphDatabase::get_edge_types(self)
+    }
+
+    fn get_node_types(&self) -> Result<Vec<String>> {
+        GraphDatabase::get_node_types(self)
+    }
+
+    fn search_nodes(&self, query: &str, limit: usize) -> Result<Vec<DbNode>> {
+        GraphDatabase::search_nodes(self, query, limit)
+    }
+
+    fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {
+        GraphDatabase::resolve_node_identifier(self, identifier)
+    }
+
+    fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
+        GraphDatabase::shortest_path(self, from, to)
+    }
+
+    fn find_paths_to_domain_admins(
+        &self,
+        exclude_edge_types: &[String],
+    ) -> Result<Vec<(String, String, String, usize)>> {
+        GraphDatabase::find_paths_to_domain_admins(self, exclude_edge_types)
+    }
+
+    fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
+        GraphDatabase::run_custom_query(self, query)
+    }
+
+    fn add_query_history(
+        &self,
+        id: &str,
+        name: &str,
+        query: &str,
+        timestamp: i64,
+        result_count: Option<i64>,
+    ) -> Result<()> {
+        GraphDatabase::add_query_history(self, id, name, query, timestamp, result_count)
+    }
+
+    fn get_query_history(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
+        GraphDatabase::get_query_history(self, limit, offset)
+    }
+
+    fn delete_query_history(&self, id: &str) -> Result<()> {
+        GraphDatabase::delete_query_history(self, id)
+    }
+
+    fn clear_query_history(&self) -> Result<()> {
+        GraphDatabase::clear_query_history(self)
     }
 }
 

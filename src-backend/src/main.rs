@@ -6,6 +6,17 @@ use clap::Parser;
 #[command(name = "admapper")]
 #[command(about = "BloodHound frontend for AD permissions visualization")]
 struct Args {
+    /// Database URL to connect to on startup
+    ///
+    /// Supported formats:
+    /// - kuzu:///path/to/directory (KuzuDB, file-based)
+    /// - cozodb:///path/to/file.db (CozoDB, file-based)
+    /// - neo4j://[user:pass@]host[:port] (Neo4j, network)
+    /// - bolt://[user:pass@]host[:port] (Neo4j, network)
+    /// - falkordb://[user:pass@]host[:port] (FalkorDB, network)
+    #[arg(index = 1)]
+    database_url: Option<String>,
+
     /// Run as a headless web server instead of desktop app
     #[arg(long)]
     headless: bool,
@@ -23,7 +34,7 @@ fn main() {
     let args = Args::parse();
 
     if args.headless {
-        admapper::run_service(&args.bind, args.port);
+        admapper::run_service(&args.bind, args.port, args.database_url.as_deref());
     } else {
         admapper::run_desktop();
     }

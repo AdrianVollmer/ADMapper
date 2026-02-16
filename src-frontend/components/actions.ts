@@ -14,19 +14,18 @@ import { openDbManager } from "./db-manager";
 import { exportPNG, exportSVG, exportJSON } from "./export";
 import { openInsights } from "./insights";
 import { openAddNode, openAddEdge } from "./add-node-edge";
+import { openDbConnect, disconnectDb } from "./db-connect";
 
 /** Dispatch an action by name */
 export function dispatchAction(action: string): void {
   switch (action) {
     // File menu
-    case "new-project":
-      console.log("Action: new-project");
-      // TODO: Implement
+    case "connect-db":
+      openDbConnect();
       break;
 
-    case "open-file":
-      console.log("Action: open-file");
-      // TODO: Open file dialog
+    case "disconnect-db":
+      disconnectDb();
       break;
 
     case "export-png":

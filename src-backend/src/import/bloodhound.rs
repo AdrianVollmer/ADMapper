@@ -1,12 +1,13 @@
 //! BloodHound JSON/ZIP importer.
 
-use crate::db::{DbEdge, DbNode, GraphDatabase};
+use crate::db::{DatabaseBackend, DbEdge, DbNode};
 use crate::import::types::ImportProgress;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
 use std::io::{Read, Seek};
 use std::path::Path;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, trace, warn};
 use zip::ZipArchive;
@@ -33,14 +34,17 @@ struct BloodHoundFile {
 
 /// BloodHound data importer.
 pub struct BloodHoundImporter {
-    db: GraphDatabase,
+    db: Arc<dyn DatabaseBackend>,
     progress_tx: broadcast::Sender<ImportProgress>,
     /// Track which object IDs we've seen to avoid duplicate nodes
     seen_nodes: HashSet<String>,
 }
 
 impl BloodHoundImporter {
-    pub fn new(db: GraphDatabase, progress_tx: broadcast::Sender<ImportProgress>) -> Self {
+    pub fn new(
+        db: Arc<dyn DatabaseBackend>,
+        progress_tx: broadcast::Sender<ImportProgress>,
+    ) -> Self {
         Self {
             db,
             progress_tx,

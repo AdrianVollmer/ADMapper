@@ -20,8 +20,7 @@ interface ShortcutDef {
 /** Keyboard shortcut definitions */
 const shortcuts: ShortcutDef[] = [
   // File menu
-  { key: "n", ctrl: true, action: "new-project", label: "New Project", category: "File" },
-  { key: "o", ctrl: true, action: "open-file", label: "Open File", category: "File" },
+  { key: "d", ctrl: true, shift: true, action: "connect-db", label: "Connect to Database", category: "File" },
   { key: "e", ctrl: true, action: "export-png", label: "Export PNG", category: "File" },
   { key: ",", ctrl: true, action: "settings", label: "Settings", category: "File" },
   { key: "q", ctrl: true, action: "quit", label: "Quit", category: "File" },

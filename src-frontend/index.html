@@ -14,17 +14,12 @@
           <div class="menu-item" data-menu="file">
             <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">File</button>
             <div class="menu-dropdown" role="menu" hidden>
-              <button class="menu-option" data-action="new-project" role="menuitem">
-                <span>New Project</span>
-                <kbd>Ctrl+N</kbd>
+              <button class="menu-option" data-action="connect-db" role="menuitem">
+                <span>Connect to Database...</span>
+                <kbd>Ctrl+Shift+D</kbd>
               </button>
-              <button class="menu-option" data-action="open-file" role="menuitem">
-                <span>Open File...</span>
-                <kbd>Ctrl+O</kbd>
-              </button>
-              <button class="menu-option" data-action="open-recent" role="menuitem">
-                <span>Open Recent</span>
-                <span class="arrow">▸</span>
+              <button class="menu-option" data-action="disconnect-db" role="menuitem">
+                <span>Disconnect</span>
               </button>
               <div class="menu-separator" role="separator"></div>
               <div class="menu-submenu">
@@ -208,6 +203,12 @@
             </div>
           </div>
         </nav>
+        <div class="ml-auto flex items-center px-3">
+          <div id="connection-status" class="connection-status">
+            <span class="status-dot"></span>
+            <span class="status-text">Not Connected</span>
+          </div>
+        </div>
       </header>
 
       <!-- Main Content Area -->

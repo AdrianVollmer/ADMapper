@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info, trace};
 
+use super::backend::{DatabaseBackend, QueryLanguage};
 use super::cozo::{DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, SecurityInsights};
 
 pub type Result<T> = std::result::Result<T, DbError>;
@@ -400,7 +401,8 @@ impl KuzuDatabase {
                     for line in result_str.lines().skip(1) {
                         let parts: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
                         if parts.len() >= 4 {
-                            let properties = serde_json::from_str(parts[3]).unwrap_or(JsonValue::Null);
+                            let properties =
+                                serde_json::from_str(parts[3]).unwrap_or(JsonValue::Null);
                             edges.push(DbEdge {
                                 source: parts[0].to_string(),
                                 target: parts[1].to_string(),
@@ -567,7 +569,7 @@ impl KuzuDatabase {
 
                 // Parse the path result
                 // This is a simplified parser - may need adjustment based on actual output format
-                let mut path = Vec::new();
+                let path = Vec::new();
 
                 for line in result_str.lines().skip(1) {
                     if line.trim().is_empty() {
@@ -660,7 +662,10 @@ impl KuzuDatabase {
                 .iter()
                 .map(|t| format!("e.edge_type <> '{}'", t.replace('\'', "''")))
                 .collect();
-            format!("AND ALL(e IN relationships(p) WHERE {})", conditions.join(" AND "))
+            format!(
+                "AND ALL(e IN relationships(p) WHERE {})",
+                conditions.join(" AND ")
+            )
         };
 
         // Find all users with paths to DA groups (SID ending in -512)
@@ -690,12 +695,7 @@ impl KuzuDatabase {
                 seen.insert(id.clone());
 
                 if let Ok(hops) = parts[2].parse::<usize>() {
-                    results.push((
-                        id,
-                        "User".to_string(),
-                        parts[1].to_string(),
-                        hops,
-                    ));
+                    results.push((id, "User".to_string(), parts[1].to_string(), hops));
                 }
             }
         }
@@ -777,7 +777,8 @@ impl KuzuDatabase {
                     for line in result_str.lines().skip(1) {
                         let parts: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
                         if parts.len() >= 4 {
-                            let properties = serde_json::from_str(parts[3]).unwrap_or(JsonValue::Null);
+                            let properties =
+                                serde_json::from_str(parts[3]).unwrap_or(JsonValue::Null);
                             edges.push(DbEdge {
                                 source: parts[0].to_string(),
                                 target: parts[1].to_string(),
@@ -809,10 +810,7 @@ impl KuzuDatabase {
         }
 
         // Parse header
-        let headers: Vec<String> = lines[0]
-            .split('|')
-            .map(|s| s.trim().to_string())
-            .collect();
+        let headers: Vec<String> = lines[0].split('|').map(|s| s.trim().to_string()).collect();
 
         // Parse rows
         let rows: Vec<Vec<JsonValue>> = lines[1..]
@@ -860,7 +858,8 @@ impl KuzuDatabase {
             RETURN DISTINCT u.object_id, u.label, min(length(p)) as hops
         ";
         let effective_result = conn.query(effective_da_query)?;
-        let effective_das: Vec<(String, String, usize)> = self.parse_effective_das(&effective_result);
+        let effective_das: Vec<(String, String, usize)> =
+            self.parse_effective_das(&effective_result);
         let effective_da_count = effective_das.len();
 
         // Compute ratio and percentage
@@ -1063,7 +1062,10 @@ impl KuzuDatabase {
     pub fn delete_query_history(&self, id: &str) -> Result<()> {
         let conn = self.conn()?;
         let id_escaped = id.replace('\'', "''");
-        conn.query(&format!("MATCH (h:QueryHistory {{id: '{}'}}) DELETE h", id_escaped))?;
+        conn.query(&format!(
+            "MATCH (h:QueryHistory {{id: '{}'}}) DELETE h",
+            id_escaped
+        ))?;
         Ok(())
     }
 
@@ -1074,3 +1076,126 @@ impl KuzuDatabase {
     }
 }
 
+// ============================================================================
+// DatabaseBackend Trait Implementation
+// ============================================================================
+
+impl DatabaseBackend for KuzuDatabase {
+    fn name(&self) -> &'static str {
+        "KuzuDB"
+    }
+
+    fn supports_language(&self, lang: QueryLanguage) -> bool {
+        matches!(lang, QueryLanguage::Cypher)
+    }
+
+    fn default_language(&self) -> QueryLanguage {
+        QueryLanguage::Cypher
+    }
+
+    fn clear(&self) -> Result<()> {
+        KuzuDatabase::clear(self)
+    }
+
+    fn insert_node(&self, node: DbNode) -> Result<()> {
+        KuzuDatabase::insert_node(self, node)
+    }
+
+    fn insert_edge(&self, edge: DbEdge) -> Result<()> {
+        KuzuDatabase::insert_edge(self, edge)
+    }
+
+    fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
+        KuzuDatabase::insert_nodes(self, nodes)
+    }
+
+    fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
+        KuzuDatabase::insert_edges(self, edges)
+    }
+
+    fn get_stats(&self) -> Result<(usize, usize)> {
+        KuzuDatabase::get_stats(self)
+    }
+
+    fn get_detailed_stats(&self) -> Result<DetailedStats> {
+        KuzuDatabase::get_detailed_stats(self)
+    }
+
+    fn get_security_insights(&self) -> Result<SecurityInsights> {
+        KuzuDatabase::get_security_insights(self)
+    }
+
+    fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
+        KuzuDatabase::get_all_nodes(self)
+    }
+
+    fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
+        KuzuDatabase::get_all_edges(self)
+    }
+
+    fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>> {
+        KuzuDatabase::get_nodes_by_ids(self, ids)
+    }
+
+    fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>> {
+        KuzuDatabase::get_edges_between(self, node_ids)
+    }
+
+    fn get_edge_types(&self) -> Result<Vec<String>> {
+        KuzuDatabase::get_edge_types(self)
+    }
+
+    fn get_node_types(&self) -> Result<Vec<String>> {
+        KuzuDatabase::get_node_types(self)
+    }
+
+    fn search_nodes(&self, query: &str, limit: usize) -> Result<Vec<DbNode>> {
+        KuzuDatabase::search_nodes(self, query, limit)
+    }
+
+    fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {
+        KuzuDatabase::resolve_node_identifier(self, identifier)
+    }
+
+    fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
+        KuzuDatabase::shortest_path(self, from, to)
+    }
+
+    fn find_paths_to_domain_admins(
+        &self,
+        exclude_edge_types: &[String],
+    ) -> Result<Vec<(String, String, String, usize)>> {
+        KuzuDatabase::find_paths_to_domain_admins(self, exclude_edge_types)
+    }
+
+    fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
+        KuzuDatabase::run_custom_query(self, query)
+    }
+
+    fn add_query_history(
+        &self,
+        id: &str,
+        name: &str,
+        query: &str,
+        timestamp: i64,
+        result_count: Option<i64>,
+    ) -> Result<()> {
+        KuzuDatabase::add_query_history(self, id, name, query, timestamp, result_count)
+    }
+
+    fn get_query_history(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
+        KuzuDatabase::get_query_history(self, limit, offset)
+    }
+
+    fn delete_query_history(&self, id: &str) -> Result<()> {
+        KuzuDatabase::delete_query_history(self, id)
+    }
+
+    fn clear_query_history(&self) -> Result<()> {
+        KuzuDatabase::clear_query_history(self)
+    }
+}

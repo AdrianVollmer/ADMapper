@@ -16,7 +16,10 @@ use axum::{
     Router,
 };
 use dashmap::DashMap;
-use db::DbError;
+use db::{
+    CozoDatabase, DatabaseBackend, DatabaseType, DatabaseUrl, DbError, FalkorDbDatabase,
+    KuzuDatabase, Neo4jDatabase, QueryLanguage,
+};
 use import::{BloodHoundImporter, ImportProgress};
 use parking_lot::RwLock;
 use serde::Deserialize;
@@ -52,6 +55,8 @@ pub enum ApiError {
     BadRequest(String),
     /// Requested resource not found
     NotFound(String),
+    /// Not connected to a database
+    NotConnected,
 }
 
 impl std::fmt::Display for ApiError {
@@ -60,6 +65,7 @@ impl std::fmt::Display for ApiError {
             ApiError::Database(e) => write!(f, "Database error: {e}"),
             ApiError::BadRequest(msg) => write!(f, "Bad request: {msg}"),
             ApiError::NotFound(msg) => write!(f, "Not found: {msg}"),
+            ApiError::NotConnected => write!(f, "Not connected to a database"),
         }
     }
 }
@@ -79,6 +85,10 @@ impl IntoResponse for ApiError {
             ApiError::Database(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+            ApiError::NotConnected => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Not connected to a database".to_string(),
+            ),
         };
 
         (status, message).into_response()
@@ -95,25 +105,105 @@ pub struct ImportJob {
     pub final_state: RwLock<Option<ImportProgress>>,
 }
 
+/// Database connection state.
+struct DatabaseConnection {
+    backend: Arc<dyn DatabaseBackend>,
+    db_type: DatabaseType,
+}
+
 /// Application state shared across requests.
 #[derive(Clone)]
 pub struct AppState {
-    db: GraphDatabase,
+    /// Current database connection (if any).
+    connection: Arc<RwLock<Option<DatabaseConnection>>>,
     /// Active import jobs and their progress channels.
     import_jobs: Arc<DashMap<String, Arc<ImportJob>>>,
 }
 
 impl AppState {
-    pub fn new(db: GraphDatabase) -> Self {
+    /// Create a new AppState without a database connection.
+    pub fn new_disconnected() -> Self {
         Self {
-            db,
+            connection: Arc::new(RwLock::new(None)),
             import_jobs: Arc::new(DashMap::new()),
         }
     }
 
-    /// Get a reference to the database (for testing).
-    pub fn db(&self) -> &GraphDatabase {
-        &self.db
+    /// Create a new AppState with an initial database connection.
+    pub fn new_connected(backend: Arc<dyn DatabaseBackend>, db_type: DatabaseType) -> Self {
+        Self {
+            connection: Arc::new(RwLock::new(Some(DatabaseConnection { backend, db_type }))),
+            import_jobs: Arc::new(DashMap::new()),
+        }
+    }
+
+    /// Check if connected to a database.
+    pub fn is_connected(&self) -> bool {
+        self.connection.read().is_some()
+    }
+
+    /// Get the current database type if connected.
+    pub fn database_type(&self) -> Option<DatabaseType> {
+        self.connection.read().as_ref().map(|c| c.db_type)
+    }
+
+    /// Get a reference to the database backend if connected.
+    pub fn db(&self) -> Option<Arc<dyn DatabaseBackend>> {
+        self.connection.read().as_ref().map(|c| c.backend.clone())
+    }
+
+    /// Connect to a database using a URL.
+    pub fn connect(&self, url: &str) -> Result<DatabaseType, String> {
+        let parsed = DatabaseUrl::parse(url).map_err(|e| e.to_string())?;
+
+        let backend: Arc<dyn DatabaseBackend> = match parsed.db_type {
+            DatabaseType::KuzuDB => {
+                let path = parsed.path.ok_or("Missing path for KuzuDB")?;
+                let db = KuzuDatabase::new(&path).map_err(|e| e.to_string())?;
+                Arc::new(db)
+            }
+            DatabaseType::CozoDB => {
+                let path = parsed.path.ok_or("Missing path for CozoDB")?;
+                let db = CozoDatabase::new(&path).map_err(|e| e.to_string())?;
+                Arc::new(db)
+            }
+            DatabaseType::Neo4j => {
+                let host = parsed.host.ok_or("Missing host for Neo4j")?;
+                let port = parsed.port.unwrap_or(7687);
+                let db = Neo4jDatabase::new(
+                    &host,
+                    port,
+                    parsed.username,
+                    parsed.password,
+                    parsed.database,
+                )
+                .map_err(|e| e.to_string())?;
+                Arc::new(db)
+            }
+            DatabaseType::FalkorDB => {
+                let host = parsed.host.ok_or("Missing host for FalkorDB")?;
+                let port = parsed.port.unwrap_or(6379);
+                let db = FalkorDbDatabase::new(&host, port, parsed.username, parsed.password)
+                    .map_err(|e| e.to_string())?;
+                Arc::new(db)
+            }
+        };
+
+        let db_type = parsed.db_type;
+        *self.connection.write() = Some(DatabaseConnection { backend, db_type });
+        info!(database_type = %db_type.name(), "Connected to database");
+        Ok(db_type)
+    }
+
+    /// Disconnect from the current database.
+    pub fn disconnect(&self) {
+        *self.connection.write() = None;
+        info!("Disconnected from database");
+    }
+
+    /// Get the database, returning an error if not connected.
+    fn require_db(&self) -> Result<Arc<dyn DatabaseBackend>, ApiError> {
+        self.db().ok_or_else(|| ApiError::NotConnected)
     }
 }
 
@@ -144,7 +234,7 @@ pub fn run_desktop() {
 }
 
 // Re-export database types for tests
-pub use db::{DbEdge, DbNode, GraphDatabase};
+pub use db::{DbEdge, DbNode};
 
 /// Create the API router with the given state.
 ///
@@ -153,8 +243,14 @@ pub use db::{DbEdge, DbNode, GraphDatabase};
 pub fn create_api_router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health_check))
+        // Database connection management
+        .route("/api/database/status", get(database_status))
+        .route("/api/database/connect", post(database_connect))
+        .route("/api/database/disconnect", post(database_disconnect))
+        // Import
         .route("/api/import", post(import_bloodhound))
         .route("/api/import/progress/:job_id", get(import_progress))
+        // Graph operations
         .route("/api/graph/stats", get(graph_stats))
         .route("/api/graph/detailed-stats", get(graph_detailed_stats))
         .route("/api/graph/clear", post(graph_clear))
@@ -170,6 +266,7 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/edge", post(add_edge))
         .route("/api/graph/insights", get(graph_insights))
         .route("/api/graph/query", post(graph_query))
+        // Query history
         .route("/api/query-history", get(get_query_history))
         .route("/api/query-history", post(add_query_history))
         .route(
@@ -182,7 +279,7 @@ pub fn create_api_router(state: AppState) -> Router {
 
 /// Run as standalone web service.
 #[tokio::main]
-pub async fn run_service(bind: &str, port: u16) {
+pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
     // Initialize tracing with colors
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -197,13 +294,41 @@ pub async fn run_service(bind: &str, port: u16) {
         .parse()
         .expect("Invalid bind address");
 
-    // Initialize database (KuzuDB uses a directory)
-    let db_path = std::env::var("ADMAPPER_DB_PATH").unwrap_or_else(|_| "admapper_kuzu".to_string());
-    info!(path = %db_path, "Opening KuzuDB database");
-    let db = GraphDatabase::new(&db_path).expect("Failed to open database");
-    let (nodes, edges) = db.get_stats().unwrap_or((0, 0));
-    info!(nodes = nodes, edges = edges, "Database loaded");
-    let state = AppState::new(db);
+    // Initialize state (possibly with initial database connection)
+    let state = if let Some(url) = database_url {
+        info!(url = %url, "Connecting to database from URL");
+        let state = AppState::new_disconnected();
+        match state.connect(url) {
+            Ok(db_type) => {
+                let db = state.db().unwrap();
+                let (nodes, edges) = db.get_stats().unwrap_or((0, 0));
+                info!(database = %db_type.name(), nodes = nodes, edges = edges, "Database connected");
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to connect to database");
+            }
+        }
+        state
+    } else if let Ok(db_path) = std::env::var("ADMAPPER_DB_PATH") {
+        // Legacy: support ADMAPPER_DB_PATH environment variable
+        let url = format!("kuzu://{}", db_path);
+        info!(path = %db_path, "Opening KuzuDB database from environment");
+        let state = AppState::new_disconnected();
+        match state.connect(&url) {
+            Ok(_) => {
+                let db = state.db().unwrap();
+                let (nodes, edges) = db.get_stats().unwrap_or((0, 0));
+                info!(nodes = nodes, edges = edges, "Database loaded");
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to open database");
+            }
+        }
+        state
+    } else {
+        info!("Starting without database connection");
+        AppState::new_disconnected()
+    };
 
     // Serve static files from the build directory
     let static_files = ServeDir::new("build").append_index_html_on_directories(true);
@@ -213,33 +338,7 @@ pub async fn run_service(bind: &str, port: u16) {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let app = Router::new()
-        .route("/api/health", get(health_check))
-        .route("/api/import", post(import_bloodhound))
-        .route("/api/import/progress/:job_id", get(import_progress))
-        .route("/api/graph/stats", get(graph_stats))
-        .route("/api/graph/detailed-stats", get(graph_detailed_stats))
-        .route("/api/graph/clear", post(graph_clear))
-        .route("/api/graph/nodes", get(graph_nodes))
-        .route("/api/graph/edges", get(graph_edges))
-        .route("/api/graph/all", get(graph_all))
-        .route("/api/graph/search", get(graph_search))
-        .route("/api/graph/path", get(graph_path))
-        .route("/api/graph/paths-to-da", get(paths_to_domain_admins))
-        .route("/api/graph/edge-types", get(graph_edge_types))
-        .route("/api/graph/node-types", get(graph_node_types))
-        .route("/api/graph/node", post(add_node))
-        .route("/api/graph/edge", post(add_edge))
-        .route("/api/graph/insights", get(graph_insights))
-        .route("/api/graph/query", post(graph_query))
-        .route("/api/query-history", get(get_query_history))
-        .route("/api/query-history", post(add_query_history))
-        .route(
-            "/api/query-history/:id",
-            axum::routing::delete(delete_query_history),
-        )
-        .route("/api/query-history/clear", post(clear_query_history))
-        .with_state(state)
+    let app = create_api_router(state)
         .fallback_service(static_files)
         .layer(cors);
 
@@ -253,6 +352,61 @@ pub async fn run_service(bind: &str, port: u16) {
 async fn health_check() -> &'static str {
     "ok"
 }
+
+// ============================================================================
+// Database Connection Endpoints
+// ============================================================================
+
+/// Database status response.
+#[derive(Serialize)]
+struct DatabaseStatus {
+    connected: bool,
+    database_type: Option<String>,
+}
+
+/// Get current database connection status.
+async fn database_status(State(state): State<AppState>) -> Json<DatabaseStatus> {
+    let connected = state.is_connected();
+    let database_type = state.database_type().map(|t| t.name().to_string());
+    Json(DatabaseStatus {
+        connected,
+        database_type,
+    })
+}
+
+/// Database connect request.
+#[derive(Deserialize)]
+struct ConnectRequest {
+    url: String,
+}
+
+/// Connect to a database.
+async fn database_connect(
+    State(state): State<AppState>,
+    Json(body): Json<ConnectRequest>,
+) -> Result<Json<DatabaseStatus>, ApiError> {
+    info!(url = %body.url, "Connecting to database");
+
+    state
+        .connect(&body.url)
+        .map_err(|e| ApiError::BadRequest(e))?;
+
+    let database_type = state.database_type().map(|t| t.name().to_string());
+    Ok(Json(DatabaseStatus {
+        connected: true,
+        database_type,
+    }))
+}
+
+/// Disconnect from the current database.
+async fn database_disconnect(State(state): State<AppState>) -> StatusCode {
+    state.disconnect();
+    StatusCode::NO_CONTENT
+}
+
+// ============================================================================
+// Import Endpoints
+// ============================================================================
 
 /// Handle BloodHound data import via multipart upload.
 #[instrument(skip(state, multipart))]
@@ -298,7 +452,7 @@ async fn import_bloodhound(
 
     info!(file_count = files.len(), "Processing uploaded files");
 
-    let db = state.db.clone();
+    let db = state.require_db()?;
     let job_id_clone = job_id.clone();
     let import_jobs = state.import_jobs.clone();
     let job_for_task = job.clone();
@@ -394,7 +548,8 @@ async fn import_progress(
 /// Get graph statistics.
 #[instrument(skip(state))]
 async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue>, ApiError> {
-    let (node_count, edge_count) = state.db.get_stats()?;
+    let db = state.require_db()?;
+    let (node_count, edge_count) = db.get_stats()?;
 
     debug!(
         nodes = node_count,
@@ -412,7 +567,8 @@ async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue>, A
 async fn graph_detailed_stats(
     State(state): State<AppState>,
 ) -> Result<Json<db::DetailedStats>, ApiError> {
-    let stats = state.db.get_detailed_stats()?;
+    let db = state.require_db()?;
+    let stats = db.get_detailed_stats()?;
     debug!(
         nodes = stats.total_nodes,
         edges = stats.total_edges,
@@ -426,7 +582,8 @@ async fn graph_detailed_stats(
 /// Clear all graph data from the database.
 #[instrument(skip(state))]
 async fn graph_clear(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
-    state.db.clear()?;
+    let db = state.require_db()?;
+    db.clear()?;
     info!("Database cleared");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -473,14 +630,16 @@ impl From<DbEdge> for GraphEdge {
 
 /// Get all graph nodes.
 async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<GraphNode>>, ApiError> {
-    let nodes = state.db.get_all_nodes()?;
+    let db = state.require_db()?;
+    let nodes = db.get_all_nodes()?;
     let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
     Ok(Json(result))
 }
 
 /// Get all graph edges.
 async fn graph_edges(State(state): State<AppState>) -> Result<Json<Vec<GraphEdge>>, ApiError> {
-    let edges = state.db.get_all_edges()?;
+    let db = state.require_db()?;
+    let edges = db.get_all_edges()?;
     let result: Vec<GraphEdge> = edges.into_iter().map(GraphEdge::from).collect();
     Ok(Json(result))
 }
@@ -494,7 +653,7 @@ struct FullGraph {
 
 impl FullGraph {
     /// Build a subgraph containing only the specified nodes and edges between them.
-    fn from_node_ids(db: &GraphDatabase, node_ids: &[String]) -> Result<Self, ApiError> {
+    fn from_node_ids(db: &Arc<dyn DatabaseBackend>, node_ids: &[String]) -> Result<Self, ApiError> {
         if node_ids.is_empty() {
             return Ok(FullGraph {
                 nodes: Vec::new(),
@@ -514,8 +673,9 @@ impl FullGraph {
 
 /// Get full graph (nodes and edges).
 async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>, ApiError> {
-    let nodes = state.db.get_all_nodes()?;
-    let edges = state.db.get_all_edges()?;
+    let db = state.require_db()?;
+    let nodes = db.get_all_nodes()?;
+    let edges = db.get_all_edges()?;
 
     let result = FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
@@ -547,7 +707,8 @@ async fn graph_search(
         return Ok(Json(Vec::new()));
     }
 
-    let nodes = state.db.search_nodes(&params.q, params.limit)?;
+    let db = state.require_db()?;
+    let nodes = db.search_nodes(&params.q, params.limit)?;
     let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
 
     debug!(query = %params.q, results = result.len(), "Search complete");
@@ -584,18 +745,18 @@ async fn graph_path(
     State(state): State<AppState>,
     Query(params): Query<PathParams>,
 ) -> Result<Json<PathResponse>, ApiError> {
+    let db = state.require_db()?;
+
     // Resolve identifiers to object IDs (supports both IDs and labels)
-    let from_id = state
-        .db
+    let from_id = db
         .resolve_node_identifier(&params.from)?
         .ok_or_else(|| ApiError::NotFound(format!("Node not found: {}", params.from)))?;
 
-    let to_id = state
-        .db
+    let to_id = db
         .resolve_node_identifier(&params.to)?
         .ok_or_else(|| ApiError::NotFound(format!("Node not found: {}", params.to)))?;
 
-    let path_result = state.db.shortest_path(&from_id, &to_id)?;
+    let path_result = db.shortest_path(&from_id, &to_id)?;
 
     match path_result {
         None => {
@@ -614,7 +775,7 @@ async fn graph_path(
             let node_ids: Vec<String> = path.iter().map(|(id, _)| id.clone()).collect();
 
             // Get full node data
-            let nodes = state.db.get_nodes_by_ids(&node_ids)?;
+            let nodes = db.get_nodes_by_ids(&node_ids)?;
 
             // Build node lookup
             let node_map: std::collections::HashMap<String, DbNode> = nodes
@@ -640,7 +801,7 @@ async fn graph_path(
                 .collect();
 
             // Get edges between path nodes
-            let edges = state.db.get_edges_between(&node_ids)?;
+            let edges = db.get_edges_between(&node_ids)?;
 
             let graph = FullGraph {
                 nodes: path_steps.iter().map(|s| s.node.clone()).collect(),
@@ -708,7 +869,8 @@ async fn paths_to_domain_admins(
 
     debug!(exclude = ?exclude_types, "Finding paths to Domain Admins");
 
-    let results = state.db.find_paths_to_domain_admins(&exclude_types)?;
+    let db = state.require_db()?;
+    let results = db.find_paths_to_domain_admins(&exclude_types)?;
 
     let entries: Vec<PathsToDaEntry> = results
         .into_iter()
@@ -731,7 +893,8 @@ async fn paths_to_domain_admins(
 async fn graph_insights(
     State(state): State<AppState>,
 ) -> Result<Json<db::SecurityInsights>, ApiError> {
-    let insights = state.db.get_security_insights()?;
+    let db = state.require_db()?;
+    let insights = db.get_security_insights()?;
     info!(
         effective_das = insights.effective_da_count,
         real_das = insights.real_da_count,
@@ -744,7 +907,8 @@ async fn graph_insights(
 /// Get all distinct edge types in the database.
 #[instrument(skip(state))]
 async fn graph_edge_types(State(state): State<AppState>) -> Result<Json<Vec<String>>, ApiError> {
-    let types = state.db.get_edge_types()?;
+    let db = state.require_db()?;
+    let types = db.get_edge_types()?;
     debug!(count = types.len(), "Edge types retrieved");
     Ok(Json(types))
 }
@@ -752,7 +916,8 @@ async fn graph_edge_types(State(state): State<AppState>) -> Result<Json<Vec<Stri
 /// Get all distinct node types in the database.
 #[instrument(skip(state))]
 async fn graph_node_types(State(state): State<AppState>) -> Result<Json<Vec<String>>, ApiError> {
-    let types = state.db.get_node_types()?;
+    let db = state.require_db()?;
+    let types = db.get_node_types()?;
     debug!(count = types.len(), "Node types retrieved");
     Ok(Json(types))
 }
@@ -795,7 +960,8 @@ async fn add_node(
         },
     };
 
-    state.db.insert_node(node)?;
+    let db = state.require_db()?;
+    db.insert_node(node)?;
 
     info!(id = %body.id, label = %body.label, node_type = %body.node_type, "Node added");
 
@@ -825,10 +991,14 @@ async fn add_edge(
 ) -> Result<Json<GraphEdge>, ApiError> {
     // Validate inputs
     if body.source.is_empty() {
-        return Err(ApiError::BadRequest("Source node ID is required".to_string()));
+        return Err(ApiError::BadRequest(
+            "Source node ID is required".to_string(),
+        ));
     }
     if body.target.is_empty() {
-        return Err(ApiError::BadRequest("Target node ID is required".to_string()));
+        return Err(ApiError::BadRequest(
+            "Target node ID is required".to_string(),
+        ));
     }
     if body.edge_type.is_empty() {
         return Err(ApiError::BadRequest("Edge type is required".to_string()));
@@ -845,7 +1015,8 @@ async fn add_edge(
         },
     };
 
-    state.db.insert_edge(edge)?;
+    let db = state.require_db()?;
+    db.insert_edge(edge)?;
 
     info!(
         source = %body.source,
@@ -868,6 +1039,9 @@ struct QueryRequest {
     /// If true, try to extract a graph from the query results
     #[serde(default)]
     extract_graph: bool,
+    /// Query language (optional, defaults to backend's default)
+    #[serde(default)]
+    language: Option<String>,
 }
 
 /// Query response.
@@ -880,18 +1054,25 @@ struct QueryResponse {
     graph: Option<FullGraph>,
 }
 
-/// Execute a custom CozoDB query.
+/// Execute a custom query.
 #[instrument(skip(state, body))]
 async fn graph_query(
     State(state): State<AppState>,
     Json(body): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, ApiError> {
+    let db = state.require_db()?;
     info!(query = %body.query, "Executing custom query");
 
-    let results = state
-        .db
-        .run_custom_query(&body.query)
-        .map_err(|e| ApiError::BadRequest(format!("Query error: {e}")))?;
+    // Parse language if specified
+    let results = if let Some(lang_str) = &body.language {
+        let lang = QueryLanguage::from_str(lang_str)
+            .ok_or_else(|| ApiError::BadRequest(format!("Unknown query language: {}", lang_str)))?;
+        db.run_query_with_language(&body.query, lang)
+            .map_err(|e| ApiError::BadRequest(format!("Query error: {e}")))?
+    } else {
+        db.run_custom_query(&body.query)
+            .map_err(|e| ApiError::BadRequest(format!("Query error: {e}")))?
+    };
 
     let graph = if body.extract_graph {
         // Try to extract node IDs from the first column of results
@@ -908,7 +1089,7 @@ async fn graph_query(
         if node_ids.is_empty() {
             None
         } else {
-            Some(FullGraph::from_node_ids(&state.db, &node_ids)?)
+            Some(FullGraph::from_node_ids(&db, &node_ids)?)
         }
     } else {
         None
@@ -963,11 +1144,12 @@ async fn get_query_history(
     State(state): State<AppState>,
     Query(params): Query<HistoryParams>,
 ) -> Result<Json<QueryHistoryResponse>, ApiError> {
+    let db = state.require_db()?;
     let page = params.page.max(1);
     let per_page = params.per_page.clamp(1, 100);
     let offset = (page - 1) * per_page;
 
-    let (history, total) = state.db.get_query_history(per_page, offset)?;
+    let (history, total) = db.get_query_history(per_page, offset)?;
 
     let entries: Vec<QueryHistoryEntry> = history
         .into_iter()
@@ -1010,15 +1192,14 @@ async fn add_query_history(
     State(state): State<AppState>,
     Json(body): Json<AddHistoryRequest>,
 ) -> Result<Json<QueryHistoryEntry>, ApiError> {
+    let db = state.require_db()?;
     let id = uuid::Uuid::new_v4().to_string();
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
 
-    state
-        .db
-        .add_query_history(&id, &body.name, &body.query, timestamp, body.result_count)?;
+    db.add_query_history(&id, &body.name, &body.query, timestamp, body.result_count)?;
 
     info!(id = %id, name = %body.name, "Query added to history");
     Ok(Json(QueryHistoryEntry {
@@ -1036,7 +1217,8 @@ async fn delete_query_history(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    state.db.delete_query_history(&id)?;
+    let db = state.require_db()?;
+    db.delete_query_history(&id)?;
     info!(id = %id, "Query deleted from history");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1044,7 +1226,8 @@ async fn delete_query_history(
 /// Clear all query history.
 #[instrument(skip(state))]
 async fn clear_query_history(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
-    state.db.clear_query_history()?;
+    let db = state.require_db()?;
+    db.clear_query_history()?;
     info!("Query history cleared");
     Ok(StatusCode::NO_CONTENT)
 }
