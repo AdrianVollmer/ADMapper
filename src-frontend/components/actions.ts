@@ -8,7 +8,7 @@
 import { toggleNavSidebar, toggleDetailSidebar, toggleSidebars } from "./sidebars";
 import { getRenderer } from "./graph-view";
 import { triggerBloodHoundImport } from "./import";
-import { openQueryHistory } from "./query-history";
+import { openQueryHistory, goBackInHistory } from "./query-history";
 import { showKeyboardShortcuts } from "./keyboard";
 
 /** Dispatch an action by name */
@@ -113,6 +113,10 @@ export function dispatchAction(action: string): void {
 
     case "query-history":
       openQueryHistory();
+      break;
+
+    case "history-back":
+      goBackInHistory();
       break;
 
     case "layout-graph": {

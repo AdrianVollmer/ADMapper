@@ -465,3 +465,29 @@ function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength) + "...";
 }
+
+/** Go back to the previous query in history (re-run the most recent one) */
+export async function goBackInHistory(): Promise<boolean> {
+  try {
+    const data = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=1");
+    if (data.entries.length === 0) {
+      return false;
+    }
+
+    const lastEntry = data.entries[0]!;
+    const result = await executeQueryWithHistory(`${lastEntry.name} (replay)`, lastEntry.query, true);
+
+    // Show results
+    if (result.graph && result.graph.nodes.length > 0) {
+      console.log("Query returned graph:", result.graph);
+      alert(`Query returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
+    } else {
+      alert(`Query returned ${result.resultCount} rows`);
+    }
+
+    return true;
+  } catch (err) {
+    console.error("Failed to go back in history:", err);
+    return false;
+  }
+}
