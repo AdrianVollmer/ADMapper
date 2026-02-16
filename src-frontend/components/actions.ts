@@ -9,6 +9,7 @@ import { toggleNavSidebar, toggleDetailSidebar, toggleSidebars } from "./sidebar
 import { getRenderer } from "./graph-view";
 import { triggerBloodHoundImport } from "./import";
 import { openQueryHistory } from "./query-history";
+import { showKeyboardShortcuts } from "./keyboard";
 
 /** Dispatch an action by name */
 export function dispatchAction(action: string): void {
@@ -127,8 +128,7 @@ export function dispatchAction(action: string): void {
       break;
 
     case "keyboard-shortcuts":
-      console.log("Action: keyboard-shortcuts");
-      // TODO: Show shortcuts dialog
+      showKeyboardShortcuts();
       break;
 
     case "check-updates":

@@ -921,3 +921,33 @@
     @apply text-gray-300 truncate text-sm;
   }
 }
+
+/* ============================================
+   Keyboard Shortcuts Modal
+   ============================================ */
+@layer components {
+  .shortcuts-grid {
+    @apply grid grid-cols-2 gap-6;
+  }
+
+  .shortcut-category {
+    @apply space-y-2;
+  }
+
+  .shortcut-category-title {
+    @apply text-sm font-semibold text-gray-300 border-b border-gray-700 pb-1 mb-2;
+  }
+
+  .shortcut-row {
+    @apply flex items-center justify-between gap-4 py-1;
+  }
+
+  .shortcut-label {
+    @apply text-sm text-gray-400;
+  }
+
+  .shortcut-key {
+    @apply px-2 py-0.5 text-xs font-mono bg-gray-700 text-gray-300
+           border border-gray-600 rounded;
+  }
+}
