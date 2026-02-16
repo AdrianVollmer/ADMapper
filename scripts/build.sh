@@ -94,18 +94,18 @@ build_frontend() {
 
 build_backend() {
 	log_info "Building backend (no Tauri)..."
-	cargo build --manifest-path src-backend/Cargo.toml --no-default-features --release
-	log_info "Backend built to src-backend/target/release/"
+	cargo build --manifest-path src/backend/Cargo.toml --no-default-features --release
+	log_info "Backend built to src/backend/target/release/"
 }
 
 build_backend_debug() {
 	log_info "Building backend (no Tauri, debug)..."
-	cargo build --manifest-path src-backend/Cargo.toml --no-default-features
-	log_info "Backend built to src-backend/target/debug/"
+	cargo build --manifest-path src/backend/Cargo.toml --no-default-features
+	log_info "Backend built to src/backend/target/debug/"
 }
 
 generate_icons() {
-	if [ ! -f "src-backend/icons/32x32.png" ]; then
+	if [ ! -f "src/backend/icons/32x32.png" ]; then
 		log_info "Generating icons..."
 		bash scripts/generate-icons.sh
 	fi
@@ -116,7 +116,7 @@ build_tauri() {
 	check_npm
 	generate_icons
 	npm run tauri build
-	log_info "Tauri app built to src-backend/target/release/"
+	log_info "Tauri app built to src/backend/target/release/"
 }
 
 build_tauri_debug() {
@@ -124,7 +124,7 @@ build_tauri_debug() {
 	check_npm
 	generate_icons
 	npm run tauri build -- --debug
-	log_info "Tauri app built to src-backend/target/debug/"
+	log_info "Tauri app built to src/backend/target/debug/"
 }
 
 build_all() {
@@ -137,7 +137,8 @@ build_all() {
 clean() {
 	log_info "Cleaning build artifacts..."
 	rm -rf build
-	rm -rf src-backend/target
+	rm -rf src/backend/target
+	rm -rf src/backend/icons
 	log_info "Clean complete!"
 }
 

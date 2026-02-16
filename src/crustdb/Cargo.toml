@@ -1,0 +1,26 @@
+[package]
+name = "crustdb"
+version = "0.1.0"
+edition = "2021"
+description = "Embedded graph database with SQLite backend and Cypher support"
+license = "MIT"
+
+[dependencies]
+# SQLite
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Cypher parsing
+# TODO: Add cypher parser crate or implement custom parser
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3.10"
