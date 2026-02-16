@@ -372,6 +372,43 @@ export function toggleDetailSidebar(): void {
   }
 }
 
+/** Toggle both sidebars at once */
+export function toggleSidebars(): void {
+  // If either is visible, collapse both; otherwise expand both
+  const shouldCollapse = !appState.navSidebarCollapsed || !appState.detailSidebarCollapsed;
+
+  const navSidebar = document.getElementById("nav-sidebar");
+  const navExpandBtn = document.getElementById("nav-sidebar-expand");
+  const detailSidebar = document.getElementById("detail-sidebar");
+  const detailExpandBtn = document.getElementById("detail-sidebar-expand");
+
+  if (navSidebar && navExpandBtn) {
+    appState.navSidebarCollapsed = shouldCollapse;
+    if (shouldCollapse) {
+      navSidebar.setAttribute("data-collapsed", "true");
+      navSidebar.style.width = "0";
+      navExpandBtn.classList.remove("hidden");
+    } else {
+      navSidebar.setAttribute("data-collapsed", "false");
+      navSidebar.style.width = NAV_SIDEBAR_WIDTH;
+      navExpandBtn.classList.add("hidden");
+    }
+  }
+
+  if (detailSidebar && detailExpandBtn) {
+    appState.detailSidebarCollapsed = shouldCollapse;
+    if (shouldCollapse) {
+      detailSidebar.setAttribute("data-collapsed", "true");
+      detailSidebar.style.width = "0";
+      detailExpandBtn.classList.remove("hidden");
+    } else {
+      detailSidebar.setAttribute("data-collapsed", "false");
+      detailSidebar.style.width = DETAIL_SIDEBAR_WIDTH;
+      detailExpandBtn.classList.add("hidden");
+    }
+  }
+}
+
 /** Get a pretty label for a property key */
 function getPrettyLabel(key: string): string {
   const lower = key.toLowerCase();

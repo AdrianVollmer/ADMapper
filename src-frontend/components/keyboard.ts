@@ -30,6 +30,7 @@ const shortcuts: Array<{
   { key: "f", ctrl: true, action: "find" },
 
   // View menu
+  { key: "\\", ctrl: true, action: "toggle-sidebars" },
   { key: "b", ctrl: true, action: "toggle-nav-sidebar" },
   { key: "d", ctrl: true, action: "toggle-detail-sidebar" },
   { key: "+", ctrl: true, action: "zoom-in" },

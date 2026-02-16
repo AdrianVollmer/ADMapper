@@ -445,6 +445,102 @@ impl GraphDatabase {
         Ok(None)
     }
 
+    /// Find all nodes that can reach Domain Admins groups (SID ending in -512).
+    /// Uses reverse BFS from all DA groups.
+    /// Returns list of (node_id, node_type, node_label, hop_count) for nodes that can reach DA.
+    pub fn find_paths_to_domain_admins(
+        &self,
+        exclude_edge_types: &[String],
+    ) -> Result<Vec<(String, String, String, usize)>> {
+        debug!(exclude = ?exclude_edge_types, "Finding paths to Domain Admins");
+
+        let nodes = self.get_all_nodes()?;
+        let edges = self.get_all_edges()?;
+
+        // Find all Domain Admins groups (SID ending in -512)
+        let da_nodes: Vec<&DbNode> = nodes
+            .iter()
+            .filter(|n| n.id.ends_with("-512"))
+            .collect();
+
+        if da_nodes.is_empty() {
+            debug!("No Domain Admins groups found");
+            return Ok(Vec::new());
+        }
+
+        debug!(da_count = da_nodes.len(), "Found Domain Admins groups");
+
+        // Build reverse adjacency list (target -> sources)
+        // This lets us do reverse BFS from DA to find all nodes that can reach it
+        let exclude_set: std::collections::HashSet<&str> =
+            exclude_edge_types.iter().map(|s| s.as_str()).collect();
+
+        let mut reverse_adj: std::collections::HashMap<String, Vec<(String, String)>> =
+            std::collections::HashMap::new();
+
+        for edge in &edges {
+            if !exclude_set.contains(edge.edge_type.as_str()) {
+                reverse_adj
+                    .entry(edge.target.clone())
+                    .or_default()
+                    .push((edge.source.clone(), edge.edge_type.clone()));
+            }
+        }
+
+        // BFS from all DA nodes simultaneously
+        let mut visited: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let mut queue = std::collections::VecDeque::new();
+
+        // Initialize with all DA nodes at distance 0
+        for da in &da_nodes {
+            visited.insert(da.id.clone(), 0);
+            queue.push_back((da.id.clone(), 0usize));
+        }
+
+        // Reverse BFS
+        while let Some((current, dist)) = queue.pop_front() {
+            if let Some(sources) = reverse_adj.get(&current) {
+                for (source, _edge_type) in sources {
+                    if !visited.contains_key(source) {
+                        visited.insert(source.clone(), dist + 1);
+                        queue.push_back((source.clone(), dist + 1));
+                    }
+                }
+            }
+        }
+
+        // Build result: filter to User nodes only, exclude DA nodes themselves
+        let node_map: std::collections::HashMap<&str, &DbNode> =
+            nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+
+        let mut results: Vec<(String, String, String, usize)> = visited
+            .into_iter()
+            .filter_map(|(id, hops)| {
+                if hops == 0 {
+                    return None; // Exclude DA nodes themselves
+                }
+                let node = node_map.get(id.as_str())?;
+                if node.node_type == "User" {
+                    Some((
+                        id,
+                        node.node_type.clone(),
+                        node.label.clone(),
+                        hops,
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Sort by hop count, then by label
+        results.sort_by(|a, b| a.3.cmp(&b.3).then_with(|| a.2.cmp(&b.2)));
+
+        debug!(result_count = results.len(), "Found users with paths to DA");
+        Ok(results)
+    }
+
     /// Get nodes by their IDs.
     pub fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>> {
         if ids.is_empty() {

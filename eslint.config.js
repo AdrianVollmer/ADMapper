@@ -45,6 +45,7 @@ export default [
         alert: "readonly",
         confirm: "readonly",
         HTMLTextAreaElement: "readonly",
+        HTMLButtonElement: "readonly",
         requestAnimationFrame: "readonly",
         RequestInit: "readonly",
       },

@@ -161,6 +161,7 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/all", get(graph_all))
         .route("/api/graph/search", get(graph_search))
         .route("/api/graph/path", get(graph_path))
+        .route("/api/graph/paths-to-da", get(paths_to_domain_admins))
         .route("/api/graph/query", post(graph_query))
         .route("/api/query-history", get(get_query_history))
         .route("/api/query-history", post(add_query_history))
@@ -215,6 +216,7 @@ pub async fn run_service(bind: &str, port: u16) {
         .route("/api/graph/all", get(graph_all))
         .route("/api/graph/search", get(graph_search))
         .route("/api/graph/path", get(graph_path))
+        .route("/api/graph/paths-to-da", get(paths_to_domain_admins))
         .route("/api/graph/query", post(graph_query))
         .route("/api/query-history", get(get_query_history))
         .route("/api/query-history", post(add_query_history))
@@ -621,6 +623,69 @@ async fn graph_path(
             }))
         }
     }
+}
+
+/// Query parameters for paths to Domain Admins.
+#[derive(Debug, Deserialize)]
+struct PathsToDaParams {
+    /// Comma-separated list of edge types to exclude
+    #[serde(default)]
+    exclude: String,
+}
+
+/// Response item for paths to Domain Admins query.
+#[derive(Serialize)]
+struct PathsToDaEntry {
+    id: String,
+    #[serde(rename = "type")]
+    node_type: String,
+    label: String,
+    hops: usize,
+}
+
+/// Response for paths to Domain Admins query.
+#[derive(Serialize)]
+struct PathsToDaResponse {
+    count: usize,
+    entries: Vec<PathsToDaEntry>,
+}
+
+/// Find all users with paths to Domain Admins.
+#[instrument(skip(state))]
+async fn paths_to_domain_admins(
+    State(state): State<AppState>,
+    Query(params): Query<PathsToDaParams>,
+) -> Result<Json<PathsToDaResponse>, ApiError> {
+    // Parse excluded edge types
+    let exclude_types: Vec<String> = if params.exclude.is_empty() {
+        Vec::new()
+    } else {
+        params
+            .exclude
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    debug!(exclude = ?exclude_types, "Finding paths to Domain Admins");
+
+    let results = state.db.find_paths_to_domain_admins(&exclude_types)?;
+
+    let entries: Vec<PathsToDaEntry> = results
+        .into_iter()
+        .map(|(id, node_type, label, hops)| PathsToDaEntry {
+            id,
+            node_type,
+            label,
+            hops,
+        })
+        .collect();
+
+    let count = entries.len();
+    info!(count = count, "Found users with paths to Domain Admins");
+
+    Ok(Json(PathsToDaResponse { count, entries }))
 }
 
 /// Custom query request body.

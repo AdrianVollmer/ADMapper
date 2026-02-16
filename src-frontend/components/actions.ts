@@ -5,7 +5,7 @@
  * keyboard shortcuts, or UI buttons.
  */
 
-import { toggleNavSidebar, toggleDetailSidebar } from "./sidebars";
+import { toggleNavSidebar, toggleDetailSidebar, toggleSidebars } from "./sidebars";
 import { getRenderer } from "./graph-view";
 import { triggerBloodHoundImport } from "./import";
 import { openQueryHistory } from "./query-history";
@@ -76,6 +76,10 @@ export function dispatchAction(action: string): void {
       break;
 
     // View menu
+    case "toggle-sidebars":
+      toggleSidebars();
+      break;
+
     case "toggle-nav-sidebar":
       toggleNavSidebar();
       break;
