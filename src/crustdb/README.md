@@ -179,23 +179,7 @@ MATCH (a)-[*]-(b) WHERE a <> b RETURN DISTINCT a, b
 - [ ] Path construction
 - [ ] Cycle detection
 
-### M7: Aggregation [open]
-
-GROUP BY and aggregate functions.
-
-```cypher
-MATCH (n:Person) RETURN count(n)
-
-MATCH (p:Person)-[:KNOWS]->(f) RETURN p.name, count(f) as friends
-
-MATCH (n:Person) RETURN avg(n.age), min(n.age), max(n.age)
-```
-
-- [ ] Aggregate function parser (count, sum, avg, min, max, collect)
-- [ ] GROUP BY detection
-- [ ] Aggregation operator
-
-### M8: Mutation Queries [open]
+### M7: Mutation Queries [open]
 
 UPDATE and DELETE operations.
 
@@ -213,6 +197,22 @@ MATCH (n:Person {name: 'Charlie'}) DETACH DELETE n
 - [ ] DELETE clause parser
 - [ ] Update operator
 - [ ] Delete operator (with DETACH)
+
+### M8: Aggregation [open]
+
+GROUP BY and aggregate functions.
+
+```cypher
+MATCH (n:Person) RETURN count(n)
+
+MATCH (p:Person)-[:KNOWS]->(f) RETURN p.name, count(f) as friends
+
+MATCH (n:Person) RETURN avg(n.age), min(n.age), max(n.age)
+```
+
+- [ ] Aggregate function parser (count, sum, avg, min, max, collect)
+- [ ] GROUP BY detection
+- [ ] Aggregation operator
 
 ### M9: Query Optimization [open]
 
