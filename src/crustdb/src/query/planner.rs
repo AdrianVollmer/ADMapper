@@ -3,8 +3,8 @@
 //! The planner takes a parsed Cypher AST and produces an optimized
 //! execution plan that can be run by the executor.
 
-use crate::error::Result;
 use super::parser::Statement;
+use crate::error::Result;
 
 /// A query execution plan.
 #[derive(Debug, Clone)]
@@ -93,18 +93,51 @@ pub enum ExpandDirection {
 /// Filter predicate.
 #[derive(Debug, Clone)]
 pub enum FilterPredicate {
-    Eq { left: PlanExpr, right: PlanExpr },
-    Ne { left: PlanExpr, right: PlanExpr },
-    Lt { left: PlanExpr, right: PlanExpr },
-    Le { left: PlanExpr, right: PlanExpr },
-    Gt { left: PlanExpr, right: PlanExpr },
-    Ge { left: PlanExpr, right: PlanExpr },
-    And { left: Box<FilterPredicate>, right: Box<FilterPredicate> },
-    Or { left: Box<FilterPredicate>, right: Box<FilterPredicate> },
-    Not { inner: Box<FilterPredicate> },
-    IsNull { expr: PlanExpr },
-    IsNotNull { expr: PlanExpr },
-    HasLabel { variable: String, label: String },
+    Eq {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    Ne {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    Lt {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    Le {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    Gt {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    Ge {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    And {
+        left: Box<FilterPredicate>,
+        right: Box<FilterPredicate>,
+    },
+    Or {
+        left: Box<FilterPredicate>,
+        right: Box<FilterPredicate>,
+    },
+    Not {
+        inner: Box<FilterPredicate>,
+    },
+    IsNull {
+        expr: PlanExpr,
+    },
+    IsNotNull {
+        expr: PlanExpr,
+    },
+    HasLabel {
+        variable: String,
+        label: String,
+    },
 }
 
 /// Plan expression.
@@ -161,9 +194,19 @@ pub struct CreateEdge {
 /// Set operation.
 #[derive(Debug, Clone)]
 pub enum SetOperation {
-    Property { variable: String, property: String, value: PlanExpr },
-    AddLabel { variable: String, label: String },
-    RemoveLabel { variable: String, label: String },
+    Property {
+        variable: String,
+        property: String,
+        value: PlanExpr,
+    },
+    AddLabel {
+        variable: String,
+        label: String,
+    },
+    RemoveLabel {
+        variable: String,
+        label: String,
+    },
 }
 
 /// Plan a parsed statement.

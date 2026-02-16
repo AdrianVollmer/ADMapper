@@ -90,8 +90,7 @@ struct Expected {
 fn load_fixture(path: &Path) -> FixtureFile {
     let content = fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
-    toml::from_str(&content)
-        .unwrap_or_else(|e| panic!("Failed to parse {}: {}", path.display(), e))
+    toml::from_str(&content).unwrap_or_else(|e| panic!("Failed to parse {}: {}", path.display(), e))
 }
 
 /// Run a single test case.
@@ -103,7 +102,10 @@ fn run_test_case(test: &TestCase) {
         // Run raw Cypher setup queries first (preferred for complex setups)
         for cypher_query in &setup.cypher {
             db.execute(cypher_query).unwrap_or_else(|e| {
-                panic!("Cypher setup failed for test '{}': {} (query: {})", test.name, e, cypher_query)
+                panic!(
+                    "Cypher setup failed for test '{}': {} (query: {})",
+                    test.name, e, cypher_query
+                )
             });
         }
 
@@ -119,9 +121,8 @@ fn run_test_case(test: &TestCase) {
             } else {
                 format!("CREATE (n:{} {{{}}})", label_str, props)
             };
-            db.execute(&query).unwrap_or_else(|e| {
-                panic!("Setup failed for test '{}': {}", test.name, e)
-            });
+            db.execute(&query)
+                .unwrap_or_else(|e| panic!("Setup failed for test '{}': {}", test.name, e));
         }
 
         // Note: Edge setup via `edges` array is not supported yet.
@@ -150,9 +151,7 @@ fn run_test_case(test: &TestCase) {
     }
 
     // Query should succeed
-    let result = result.unwrap_or_else(|e| {
-        panic!("Test '{}': Query failed: {}", test.name, e)
-    });
+    let result = result.unwrap_or_else(|e| panic!("Test '{}': Query failed: {}", test.name, e));
 
     // Check nodes_created
     if let Some(expected) = test.expected.nodes_created {
@@ -175,16 +174,20 @@ fn run_test_case(test: &TestCase) {
     // Check row_count (for MATCH queries)
     if let Some(expected) = test.expected.row_count {
         assert_eq!(
-            result.rows.len(), expected,
+            result.rows.len(),
+            expected,
             "Test '{}': row_count mismatch (expected {}, got {})",
-            test.name, expected, result.rows.len()
+            test.name,
+            expected,
+            result.rows.len()
         );
     }
 
     // Check columns (for MATCH queries)
     if let Some(ref expected_cols) = test.expected.columns {
         assert_eq!(
-            result.columns.len(), expected_cols.len(),
+            result.columns.len(),
+            expected_cols.len(),
             "Test '{}': column count mismatch",
             test.name
         );
@@ -192,7 +195,8 @@ fn run_test_case(test: &TestCase) {
             assert!(
                 result.columns.contains(col),
                 "Test '{}': missing expected column '{}'",
-                test.name, col
+                test.name,
+                col
             );
         }
     }
@@ -291,16 +295,18 @@ fn test_m2_create_fixtures() {
 #[test]
 fn test_m2_create_single_node() {
     let db = Database::in_memory().unwrap();
-    let result = db.execute("CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
+    let result = db
+        .execute("CREATE (n:Person {name: 'Alice', age: 30})")
+        .unwrap();
     assert_eq!(result.stats.nodes_created, 1);
 }
 
 #[test]
 fn test_m2_create_relationship() {
     let db = Database::in_memory().unwrap();
-    let result = db.execute(
-        "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})"
-    ).unwrap();
+    let result = db
+        .execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})")
+        .unwrap();
     assert_eq!(result.stats.nodes_created, 2);
     assert_eq!(result.stats.relationships_created, 1);
 }
@@ -424,10 +430,14 @@ fn test_m4_where_fixtures() {
 #[test]
 fn test_m4_where_greater_than() {
     let db = Database::in_memory().unwrap();
-    db.execute("CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
-    db.execute("CREATE (n:Person {name: 'Bob', age: 25})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice', age: 30})")
+        .unwrap();
+    db.execute("CREATE (n:Person {name: 'Bob', age: 25})")
+        .unwrap();
 
-    let result = db.execute("MATCH (n:Person) WHERE n.age > 28 RETURN n").unwrap();
+    let result = db
+        .execute("MATCH (n:Person) WHERE n.age > 28 RETURN n")
+        .unwrap();
     assert_eq!(result.rows.len(), 1);
 }
 
@@ -438,7 +448,9 @@ fn test_m4_where_starts_with() {
     db.execute("CREATE (n:Person {name: 'Adam'})").unwrap();
     db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
 
-    let result = db.execute("MATCH (n:Person) WHERE n.name STARTS WITH 'A' RETURN n").unwrap();
+    let result = db
+        .execute("MATCH (n:Person) WHERE n.name STARTS WITH 'A' RETURN n")
+        .unwrap();
     assert_eq!(result.rows.len(), 2);
 }
 
@@ -492,18 +504,24 @@ fn test_m5_single_hop_fixtures() {
 #[test]
 fn test_m5_single_hop_outgoing() {
     let db = Database::in_memory().unwrap();
-    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})")
+        .unwrap();
 
-    let result = db.execute("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name, b.name").unwrap();
+    let result = db
+        .execute("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name, b.name")
+        .unwrap();
     assert_eq!(result.rows.len(), 1);
 }
 
 #[test]
 fn test_m5_single_hop_incoming() {
     let db = Database::in_memory().unwrap();
-    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})")
+        .unwrap();
 
-    let result = db.execute("MATCH (b:Person {name: 'Bob'})<-[:KNOWS]-(a:Person) RETURN a.name").unwrap();
+    let result = db
+        .execute("MATCH (b:Person {name: 'Bob'})<-[:KNOWS]-(a:Person) RETURN a.name")
+        .unwrap();
     assert_eq!(result.rows.len(), 1);
 }
 
@@ -512,16 +530,24 @@ fn test_m5_single_hop_undirected() {
     let db = Database::in_memory().unwrap();
     db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})").unwrap();
 
-    let result = db.execute("MATCH (b:Person {name: 'Bob'})-[:KNOWS]-(other:Person) RETURN other.name").unwrap();
+    let result = db
+        .execute("MATCH (b:Person {name: 'Bob'})-[:KNOWS]-(other:Person) RETURN other.name")
+        .unwrap();
     assert_eq!(result.rows.len(), 2); // Alice and Charlie
 }
 
 #[test]
 fn test_m5_single_hop_with_where() {
     let db = Database::in_memory().unwrap();
-    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob', age: 25})").unwrap();
-    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(c:Person {name: 'Charlie', age: 35})").unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob', age: 25})")
+        .unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(c:Person {name: 'Charlie', age: 35})")
+        .unwrap();
 
-    let result = db.execute("MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person) WHERE b.age > 30 RETURN b.name").unwrap();
+    let result = db
+        .execute(
+            "MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person) WHERE b.age > 30 RETURN b.name",
+        )
+        .unwrap();
     assert_eq!(result.rows.len(), 1);
 }

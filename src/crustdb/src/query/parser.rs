@@ -67,8 +67,15 @@ pub struct SetClause {
 /// A single SET item.
 #[derive(Debug, Clone)]
 pub enum SetItem {
-    Property { variable: String, property: String, value: Expression },
-    Labels { variable: String, labels: Vec<String> },
+    Property {
+        variable: String,
+        property: String,
+        value: Expression,
+    },
+    Labels {
+        variable: String,
+        labels: Vec<String>,
+    },
 }
 
 /// WHERE clause AST.
@@ -135,9 +142,9 @@ pub struct RelationshipPattern {
 /// Relationship direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
-    Outgoing,  // ->
-    Incoming,  // <-
-    Both,      // --
+    Outgoing, // ->
+    Incoming, // <-
+    Both,     // --
 }
 
 /// Variable-length relationship specification.
@@ -147,6 +154,14 @@ pub struct LengthSpec {
     pub max: Option<u32>,
 }
 
+/// Details extracted from a relationship pattern: (variable, types, length, properties).
+type RelationshipDetail = (
+    Option<String>,
+    Vec<String>,
+    Option<LengthSpec>,
+    Option<Expression>,
+);
+
 /// An expression in the query.
 #[derive(Debug, Clone)]
 pub enum Expression {
@@ -155,19 +170,33 @@ pub enum Expression {
     /// Variable reference
     Variable(String),
     /// Property access: n.prop
-    Property { base: Box<Expression>, property: String },
+    Property {
+        base: Box<Expression>,
+        property: String,
+    },
     /// Function call: func(args)
     FunctionCall { name: String, args: Vec<Expression> },
     /// Binary operation: a + b
-    BinaryOp { left: Box<Expression>, op: BinaryOperator, right: Box<Expression> },
+    BinaryOp {
+        left: Box<Expression>,
+        op: BinaryOperator,
+        right: Box<Expression>,
+    },
     /// Unary operation: NOT a
-    UnaryOp { op: UnaryOperator, operand: Box<Expression> },
+    UnaryOp {
+        op: UnaryOperator,
+        operand: Box<Expression>,
+    },
     /// List: [a, b, c]
     List(Vec<Expression>),
     /// Map: {a: 1, b: 2}
     Map(Vec<(String, Expression)>),
     /// CASE expression
-    Case { operand: Option<Box<Expression>>, whens: Vec<(Expression, Expression)>, else_: Option<Box<Expression>> },
+    Case {
+        operand: Option<Box<Expression>>,
+        whens: Vec<(Expression, Expression)>,
+        else_: Option<Box<Expression>>,
+    },
     /// Parameter: $param
     Parameter(String),
 }
@@ -186,13 +215,27 @@ pub enum Literal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOperator {
     // Comparison
-    Eq, Ne, Lt, Le, Gt, Ge,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
     // Logical
-    And, Or, Xor,
+    And,
+    Or,
+    Xor,
     // Arithmetic
-    Add, Sub, Mul, Div, Mod, Pow,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Pow,
     // String
-    Contains, StartsWith, EndsWith,
+    Contains,
+    StartsWith,
+    EndsWith,
     // Collection
     In,
     // Regex
@@ -210,8 +253,8 @@ pub enum UnaryOperator {
 
 /// Parse a Cypher query string into a statement.
 pub fn parse(query: &str) -> Result<Statement> {
-    let pairs = CypherParser::parse(Rule::Cypher, query)
-        .map_err(|e| Error::Parse(e.to_string()))?;
+    let pairs =
+        CypherParser::parse(Rule::Cypher, query).map_err(|e| Error::Parse(e.to_string()))?;
 
     build_ast(pairs)
 }
@@ -316,7 +359,10 @@ fn build_create_statement(pair: Pair<Rule>) -> Result<Statement> {
 }
 
 /// Build a MATCH statement.
-fn build_match_statement(pair: Pair<Rule>, return_clause: Option<ReturnClause>) -> Result<Statement> {
+fn build_match_statement(
+    pair: Pair<Rule>,
+    return_clause: Option<ReturnClause>,
+) -> Result<Statement> {
     let mut pattern = None;
     let mut where_clause = None;
 
@@ -405,7 +451,10 @@ fn build_delete_statement(pair: Pair<Rule>) -> Result<Statement> {
         }
     }
 
-    Ok(Statement::Delete(DeleteClause { detach, expressions }))
+    Ok(Statement::Delete(DeleteClause {
+        detach,
+        expressions,
+    }))
 }
 
 /// Build a SET statement.
@@ -441,7 +490,11 @@ fn build_set_item(pair: Pair<Rule>) -> Result<SetItem> {
             for part in parts {
                 if part.as_rule() == Rule::Expression {
                     let value = build_expression(part)?;
-                    return Ok(SetItem::Property { variable, property, value });
+                    return Ok(SetItem::Property {
+                        variable,
+                        property,
+                        value,
+                    });
                 }
             }
         } else if first.as_rule() == Rule::Variable {
@@ -452,11 +505,17 @@ fn build_set_item(pair: Pair<Rule>) -> Result<SetItem> {
                 match part.as_rule() {
                     Rule::NodeLabels => {
                         let labels = build_node_labels(part)?;
-                        return Ok(SetItem::Labels { variable: var, labels });
+                        return Ok(SetItem::Labels {
+                            variable: var,
+                            labels,
+                        });
                     }
                     Rule::Expression => {
                         // This is actually setting a variable to a value, treat as error for now
-                        return Err(Error::Parse("Setting variable to expression not supported, use property access".into()));
+                        return Err(Error::Parse(
+                            "Setting variable to expression not supported, use property access"
+                                .into(),
+                        ));
                     }
                     _ => {}
                 }
@@ -493,8 +552,10 @@ fn build_property_expression_parts(pair: Pair<Rule>) -> Result<(String, String)>
         }
     }
 
-    let variable = variable.ok_or_else(|| Error::Parse("Property expression missing variable".into()))?;
-    let property = property.ok_or_else(|| Error::Parse("Property expression missing property".into()))?;
+    let variable =
+        variable.ok_or_else(|| Error::Parse("Property expression missing variable".into()))?;
+    let property =
+        property.ok_or_else(|| Error::Parse("Property expression missing property".into()))?;
     Ok((variable, property))
 }
 
@@ -595,7 +656,8 @@ fn build_projection_item(pair: Pair<Rule>) -> Result<ReturnItem> {
         }
     }
 
-    let expression = expression.ok_or_else(|| Error::Parse("Projection item requires expression".into()))?;
+    let expression =
+        expression.ok_or_else(|| Error::Parse("Projection item requires expression".into()))?;
     Ok(ReturnItem { expression, alias })
 }
 
@@ -628,8 +690,12 @@ fn build_sort_item(pair: Pair<Rule>) -> Result<OrderByItem> {
         }
     }
 
-    let expression = expression.ok_or_else(|| Error::Parse("Sort item requires expression".into()))?;
-    Ok(OrderByItem { expression, descending })
+    let expression =
+        expression.ok_or_else(|| Error::Parse("Sort item requires expression".into()))?;
+    Ok(OrderByItem {
+        expression,
+        descending,
+    })
 }
 
 /// Build SKIP or LIMIT value.
@@ -674,7 +740,9 @@ fn build_pattern_part(pair: Pair<Rule>) -> Result<Vec<PatternElement>> {
             _ => {}
         }
     }
-    Err(Error::Parse("PatternPart requires AnonymousPatternPart".into()))
+    Err(Error::Parse(
+        "PatternPart requires AnonymousPatternPart".into(),
+    ))
 }
 
 /// Build pattern elements from an AnonymousPatternPart.
@@ -684,7 +752,9 @@ fn build_anonymous_pattern_part(pair: Pair<Rule>) -> Result<Vec<PatternElement>>
             return build_pattern_element(inner);
         }
     }
-    Err(Error::Parse("AnonymousPatternPart requires PatternElement".into()))
+    Err(Error::Parse(
+        "AnonymousPatternPart requires PatternElement".into(),
+    ))
 }
 
 /// Build pattern elements from a PatternElement.
@@ -806,10 +876,10 @@ fn build_relationship_pattern(pair: Pair<Rule>) -> Result<RelationshipPattern> {
     }
 
     let direction = match (has_left_arrow, has_right_arrow) {
-        (false, true) => Direction::Outgoing,  // -->
-        (true, false) => Direction::Incoming,  // <--
-        (true, true) => Direction::Both,       // <-->
-        (false, false) => Direction::Both,     // --
+        (false, true) => Direction::Outgoing, // -->
+        (true, false) => Direction::Incoming, // <--
+        (true, true) => Direction::Both,      // <-->
+        (false, false) => Direction::Both,    // --
     };
 
     Ok(RelationshipPattern {
@@ -822,7 +892,7 @@ fn build_relationship_pattern(pair: Pair<Rule>) -> Result<RelationshipPattern> {
 }
 
 /// Build relationship detail (variable, types, range, properties).
-fn build_relationship_detail(pair: Pair<Rule>) -> Result<(Option<String>, Vec<String>, Option<LengthSpec>, Option<Expression>)> {
+fn build_relationship_detail(pair: Pair<Rule>) -> Result<RelationshipDetail> {
     let mut variable = None;
     let mut types = Vec::new();
     let mut length = None;
@@ -926,7 +996,10 @@ fn build_expression(pair: Pair<Rule>) -> Result<Expression> {
             Err(Error::Parse("Expression requires OrExpression".into()))
         }
         Rule::OrExpression => build_or_expression(pair),
-        _ => Err(Error::Parse(format!("Unexpected rule in expression: {:?}", pair.as_rule()))),
+        _ => Err(Error::Parse(format!(
+            "Unexpected rule in expression: {:?}",
+            pair.as_rule()
+        ))),
     }
 }
 
@@ -1023,7 +1096,8 @@ fn build_not_expression(pair: Pair<Rule>) -> Result<Expression> {
         }
     }
 
-    let mut expr = inner_expr.ok_or_else(|| Error::Parse("NOT expression requires operand".into()))?;
+    let mut expr =
+        inner_expr.ok_or_else(|| Error::Parse("NOT expression requires operand".into()))?;
 
     // Apply NOT operators (odd number means negate)
     for _ in 0..(not_count % 2) {
@@ -1210,7 +1284,8 @@ fn build_unary_add_subtract_expression(pair: Pair<Rule>) -> Result<Expression> {
         }
     }
 
-    let mut expr = inner_expr.ok_or_else(|| Error::Parse("Unary expression requires operand".into()))?;
+    let mut expr =
+        inner_expr.ok_or_else(|| Error::Parse("Unary expression requires operand".into()))?;
 
     if negate {
         expr = Expression::UnaryOp {
@@ -1232,14 +1307,17 @@ fn build_string_list_null_expression(pair: Pair<Rule>) -> Result<Expression> {
             Rule::PropertyOrLabelsExpression => {
                 base = Some(build_property_or_labels_expression(inner)?);
             }
-            Rule::StringOperatorExpression | Rule::ListOperatorExpression | Rule::NullOperatorExpression => {
+            Rule::StringOperatorExpression
+            | Rule::ListOperatorExpression
+            | Rule::NullOperatorExpression => {
                 operations.push(inner);
             }
             _ => {}
         }
     }
 
-    let mut result = base.ok_or_else(|| Error::Parse("String/list/null expression requires base".into()))?;
+    let mut result =
+        base.ok_or_else(|| Error::Parse("String/list/null expression requires base".into()))?;
 
     for op in operations {
         result = apply_string_list_null_operator(result, op)?;
@@ -1259,7 +1337,11 @@ fn apply_string_list_null_operator(base: Expression, pair: Pair<Rule>) -> Result
                 }
             }
             Ok(Expression::UnaryOp {
-                op: if is_not { UnaryOperator::IsNotNull } else { UnaryOperator::IsNull },
+                op: if is_not {
+                    UnaryOperator::IsNotNull
+                } else {
+                    UnaryOperator::IsNull
+                },
                 operand: Box::new(base),
             })
         }
@@ -1280,7 +1362,8 @@ fn apply_string_list_null_operator(base: Expression, pair: Pair<Rule>) -> Result
             }
 
             let op = op.ok_or_else(|| Error::Parse("String operator missing".into()))?;
-            let operand = operand.ok_or_else(|| Error::Parse("String operator requires operand".into()))?;
+            let operand =
+                operand.ok_or_else(|| Error::Parse("String operator requires operand".into()))?;
             Ok(Expression::BinaryOp {
                 left: Box::new(base),
                 op,
@@ -1340,7 +1423,8 @@ fn build_property_or_labels_expression(pair: Pair<Rule>) -> Result<Expression> {
         }
     }
 
-    let mut result = base.ok_or_else(|| Error::Parse("Property expression requires atom".into()))?;
+    let mut result =
+        base.ok_or_else(|| Error::Parse("Property expression requires atom".into()))?;
 
     // Apply property lookups
     for prop in property_lookups {
@@ -1390,7 +1474,9 @@ fn build_atom(pair: Pair<Rule>) -> Result<Expression> {
                 return Err(Error::Parse("List comprehension not yet supported".into()));
             }
             Rule::PatternComprehension => {
-                return Err(Error::Parse("Pattern comprehension not yet supported".into()));
+                return Err(Error::Parse(
+                    "Pattern comprehension not yet supported".into(),
+                ));
             }
             _ => {}
         }
@@ -1406,7 +1492,9 @@ fn build_literal(pair: Pair<Rule>) -> Result<Expression> {
                 return build_number_literal(inner);
             }
             Rule::StringLiteral => {
-                return Ok(Expression::Literal(Literal::String(parse_string_literal(inner)?)));
+                return Ok(Expression::Literal(Literal::String(parse_string_literal(
+                    inner,
+                )?)));
             }
             Rule::BooleanLiteral => {
                 for bool_inner in inner.into_inner() {
@@ -1438,7 +1526,9 @@ fn build_number_literal(pair: Pair<Rule>) -> Result<Expression> {
         match inner.as_rule() {
             Rule::DoubleLiteral => {
                 let s = inner.as_str();
-                let n: f64 = s.parse().map_err(|_| Error::Parse(format!("Invalid float: {}", s)))?;
+                let n: f64 = s
+                    .parse()
+                    .map_err(|_| Error::Parse(format!("Invalid float: {}", s)))?;
                 return Ok(Expression::Literal(Literal::Float(n)));
             }
             Rule::IntegerLiteral => {
@@ -1458,11 +1548,16 @@ fn parse_integer_literal(pair: Pair<Rule>) -> Result<i64> {
         match inner.as_rule() {
             Rule::DecimalInteger => {
                 let s = inner.as_str();
-                return s.parse().map_err(|_| Error::Parse(format!("Invalid integer: {}", s)));
+                return s
+                    .parse()
+                    .map_err(|_| Error::Parse(format!("Invalid integer: {}", s)));
             }
             Rule::HexInteger => {
                 let s = inner.as_str();
-                let hex_part = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+                let hex_part = s
+                    .strip_prefix("0x")
+                    .or_else(|| s.strip_prefix("0X"))
+                    .unwrap_or(s);
                 return i64::from_str_radix(hex_part, 16)
                     .map_err(|_| Error::Parse(format!("Invalid hex integer: {}", s)));
             }
@@ -1475,7 +1570,9 @@ fn parse_integer_literal(pair: Pair<Rule>) -> Result<i64> {
         }
     }
     // Fallback: try parsing the whole string
-    pair_str.parse().map_err(|_| Error::Parse(format!("Invalid integer: {}", pair_str)))
+    pair_str
+        .parse()
+        .map_err(|_| Error::Parse(format!("Invalid integer: {}", pair_str)))
 }
 
 /// Parse a string literal, handling escape sequences.
@@ -1698,8 +1795,10 @@ fn build_case_alternative(pair: Pair<Rule>) -> Result<(Expression, Expression)> 
         }
     }
 
-    let when_expr = when_expr.ok_or_else(|| Error::Parse("CASE requires WHEN expression".into()))?;
-    let then_expr = then_expr.ok_or_else(|| Error::Parse("CASE requires THEN expression".into()))?;
+    let when_expr =
+        when_expr.ok_or_else(|| Error::Parse("CASE requires WHEN expression".into()))?;
+    let then_expr =
+        then_expr.ok_or_else(|| Error::Parse("CASE requires THEN expression".into()))?;
     Ok((when_expr, then_expr))
 }
 
@@ -1750,11 +1849,9 @@ fn extract_symbolic_name(pair: Pair<Rule>) -> String {
     pair_str
 }
 
-
 /// Check if a Cypher query is syntactically valid without building an AST.
 pub fn validate(query: &str) -> Result<()> {
-    CypherParser::parse(Rule::Cypher, query)
-        .map_err(|e| Error::Parse(e.to_string()))?;
+    CypherParser::parse(Rule::Cypher, query).map_err(|e| Error::Parse(e.to_string()))?;
     Ok(())
 }
 
@@ -1816,21 +1913,20 @@ mod tests {
     fn test_parse_create_node_multiple_labels() {
         let stmt = parse("CREATE (n:Person:Actor {name: 'Charlie'})").unwrap();
         match stmt {
-            Statement::Create(create) => {
-                match &create.pattern.elements[0] {
-                    PatternElement::Node(node) => {
-                        assert_eq!(node.labels, vec!["Person".to_string(), "Actor".to_string()]);
-                    }
-                    _ => panic!("Expected node pattern"),
+            Statement::Create(create) => match &create.pattern.elements[0] {
+                PatternElement::Node(node) => {
+                    assert_eq!(node.labels, vec!["Person".to_string(), "Actor".to_string()]);
                 }
-            }
+                _ => panic!("Expected node pattern"),
+            },
             _ => panic!("Expected CREATE statement"),
         }
     }
 
     #[test]
     fn test_parse_create_relationship() {
-        let stmt = parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap();
+        let stmt =
+            parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap();
         match stmt {
             Statement::Create(create) => {
                 assert_eq!(create.pattern.elements.len(), 3);
@@ -1869,15 +1965,13 @@ mod tests {
     fn test_parse_create_relationship_with_properties() {
         let stmt = parse("CREATE (a:Person)-[:KNOWS {since: 2020}]->(b:Person)").unwrap();
         match stmt {
-            Statement::Create(create) => {
-                match &create.pattern.elements[1] {
-                    PatternElement::Relationship(rel) => {
-                        assert_eq!(rel.types, vec!["KNOWS".to_string()]);
-                        assert!(rel.properties.is_some());
-                    }
-                    _ => panic!("Expected relationship pattern"),
+            Statement::Create(create) => match &create.pattern.elements[1] {
+                PatternElement::Relationship(rel) => {
+                    assert_eq!(rel.types, vec!["KNOWS".to_string()]);
+                    assert!(rel.properties.is_some());
                 }
-            }
+                _ => panic!("Expected relationship pattern"),
+            },
             _ => panic!("Expected CREATE statement"),
         }
     }
@@ -1886,15 +1980,13 @@ mod tests {
     fn test_parse_create_anonymous_node() {
         let stmt = parse("CREATE (:Person {name: 'Alice'})").unwrap();
         match stmt {
-            Statement::Create(create) => {
-                match &create.pattern.elements[0] {
-                    PatternElement::Node(node) => {
-                        assert_eq!(node.variable, None);
-                        assert_eq!(node.labels, vec!["Person".to_string()]);
-                    }
-                    _ => panic!("Expected node pattern"),
+            Statement::Create(create) => match &create.pattern.elements[0] {
+                PatternElement::Node(node) => {
+                    assert_eq!(node.variable, None);
+                    assert_eq!(node.labels, vec!["Person".to_string()]);
                 }
-            }
+                _ => panic!("Expected node pattern"),
+            },
             _ => panic!("Expected CREATE statement"),
         }
     }
@@ -1903,47 +1995,53 @@ mod tests {
     fn test_parse_map_properties() {
         let stmt = parse("CREATE (n:Person {name: 'Alice', age: 30, active: true})").unwrap();
         match stmt {
-            Statement::Create(create) => {
-                match &create.pattern.elements[0] {
-                    PatternElement::Node(node) => {
-                        match node.properties.as_ref().unwrap() {
-                            Expression::Map(entries) => {
-                                assert_eq!(entries.len(), 3);
-                                assert_eq!(entries[0].0, "name");
-                                assert_eq!(entries[1].0, "age");
-                                assert_eq!(entries[2].0, "active");
-                            }
-                            _ => panic!("Expected map expression"),
-                        }
+            Statement::Create(create) => match &create.pattern.elements[0] {
+                PatternElement::Node(node) => match node.properties.as_ref().unwrap() {
+                    Expression::Map(entries) => {
+                        assert_eq!(entries.len(), 3);
+                        assert_eq!(entries[0].0, "name");
+                        assert_eq!(entries[1].0, "age");
+                        assert_eq!(entries[2].0, "active");
                     }
-                    _ => panic!("Expected node pattern"),
-                }
-            }
+                    _ => panic!("Expected map expression"),
+                },
+                _ => panic!("Expected node pattern"),
+            },
             _ => panic!("Expected CREATE statement"),
         }
     }
 
     #[test]
     fn test_parse_literal_values() {
-        let stmt = parse("CREATE (n {str: 'hello', int: 42, float: 3.14, bool: true, null_val: null})").unwrap();
+        let stmt =
+            parse("CREATE (n {str: 'hello', int: 42, float: 3.14, bool: true, null_val: null})")
+                .unwrap();
         match stmt {
-            Statement::Create(create) => {
-                match &create.pattern.elements[0] {
-                    PatternElement::Node(node) => {
-                        match node.properties.as_ref().unwrap() {
-                            Expression::Map(entries) => {
-                                assert!(matches!(entries[0].1, Expression::Literal(Literal::String(_))));
-                                assert!(matches!(entries[1].1, Expression::Literal(Literal::Integer(42))));
-                                assert!(matches!(entries[2].1, Expression::Literal(Literal::Float(_))));
-                                assert!(matches!(entries[3].1, Expression::Literal(Literal::Boolean(true))));
-                                assert!(matches!(entries[4].1, Expression::Literal(Literal::Null)));
-                            }
-                            _ => panic!("Expected map expression"),
-                        }
+            Statement::Create(create) => match &create.pattern.elements[0] {
+                PatternElement::Node(node) => match node.properties.as_ref().unwrap() {
+                    Expression::Map(entries) => {
+                        assert!(matches!(
+                            entries[0].1,
+                            Expression::Literal(Literal::String(_))
+                        ));
+                        assert!(matches!(
+                            entries[1].1,
+                            Expression::Literal(Literal::Integer(42))
+                        ));
+                        assert!(matches!(
+                            entries[2].1,
+                            Expression::Literal(Literal::Float(_))
+                        ));
+                        assert!(matches!(
+                            entries[3].1,
+                            Expression::Literal(Literal::Boolean(true))
+                        ));
+                        assert!(matches!(entries[4].1, Expression::Literal(Literal::Null)));
                     }
-                    _ => panic!("Expected node pattern"),
-                }
-            }
+                    _ => panic!("Expected map expression"),
+                },
+                _ => panic!("Expected node pattern"),
+            },
             _ => panic!("Expected CREATE statement"),
         }
     }
@@ -1987,16 +2085,14 @@ mod tests {
     fn test_parse_variable_length_path() {
         let stmt = parse("MATCH (a)-[:KNOWS*1..3]->(b) RETURN a, b").unwrap();
         match stmt {
-            Statement::Match(m) => {
-                match &m.pattern.elements[1] {
-                    PatternElement::Relationship(rel) => {
-                        let length = rel.length.as_ref().unwrap();
-                        assert_eq!(length.min, Some(1));
-                        assert_eq!(length.max, Some(3));
-                    }
-                    _ => panic!("Expected relationship pattern"),
+            Statement::Match(m) => match &m.pattern.elements[1] {
+                PatternElement::Relationship(rel) => {
+                    let length = rel.length.as_ref().unwrap();
+                    assert_eq!(length.min, Some(1));
+                    assert_eq!(length.max, Some(3));
                 }
-            }
+                _ => panic!("Expected relationship pattern"),
+            },
             _ => panic!("Expected MATCH statement"),
         }
     }

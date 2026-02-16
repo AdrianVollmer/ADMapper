@@ -81,7 +81,11 @@ impl Node {
     }
 
     /// Add a property to the node.
-    pub fn with_property(mut self, key: impl Into<String>, value: impl Into<PropertyValue>) -> Self {
+    pub fn with_property(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<PropertyValue>,
+    ) -> Self {
         self.properties.insert(key.into(), value.into());
         self
     }
@@ -125,7 +129,11 @@ impl Edge {
     }
 
     /// Add a property to the edge.
-    pub fn with_property(mut self, key: impl Into<String>, value: impl Into<PropertyValue>) -> Self {
+    pub fn with_property(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<PropertyValue>,
+    ) -> Self {
         self.properties.insert(key.into(), value.into());
         self
     }

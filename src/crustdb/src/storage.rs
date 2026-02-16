@@ -146,10 +146,8 @@ impl SqliteStorage {
         }
 
         // Create new
-        self.conn.execute(
-            "INSERT INTO node_labels (name) VALUES (?1)",
-            params![label],
-        )?;
+        self.conn
+            .execute("INSERT INTO node_labels (name) VALUES (?1)", params![label])?;
         Ok(self.conn.last_insert_rowid())
     }
 
@@ -367,7 +365,9 @@ impl SqliteStorage {
 
     /// Find outgoing edges from a node.
     pub fn find_outgoing_edges(&self, node_id: i64) -> Result<Vec<Edge>> {
-        let mut stmt = self.conn.prepare("SELECT id FROM edges WHERE source_id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM edges WHERE source_id = ?1")?;
 
         let edge_ids: Vec<i64> = stmt
             .query_map(params![node_id], |row| row.get(0))?
@@ -385,7 +385,9 @@ impl SqliteStorage {
 
     /// Find incoming edges to a node.
     pub fn find_incoming_edges(&self, node_id: i64) -> Result<Vec<Edge>> {
-        let mut stmt = self.conn.prepare("SELECT id FROM edges WHERE target_id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM edges WHERE target_id = ?1")?;
 
         let edge_ids: Vec<i64> = stmt
             .query_map(params![node_id], |row| row.get(0))?
@@ -411,13 +413,13 @@ impl SqliteStorage {
             .conn
             .query_row("SELECT COUNT(*) FROM edges", [], |row| row.get(0))?;
 
-        let label_count: usize = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM node_labels", [], |row| row.get(0))?;
+        let label_count: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM node_labels", [], |row| row.get(0))?;
 
-        let edge_type_count: usize = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM edge_types", [], |row| row.get(0))?;
+        let edge_type_count: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM edge_types", [], |row| row.get(0))?;
 
         Ok(DatabaseStats {
             node_count,
@@ -434,7 +436,9 @@ impl SqliteStorage {
 
     /// Get all node labels.
     pub fn get_all_labels(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT name FROM node_labels ORDER BY name")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name FROM node_labels ORDER BY name")?;
         let labels: Vec<String> = stmt
             .query_map([], |row| row.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -443,7 +447,9 @@ impl SqliteStorage {
 
     /// Get all edge types.
     pub fn get_all_edge_types(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT name FROM edge_types ORDER BY name")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name FROM edge_types ORDER BY name")?;
         let types: Vec<String> = stmt
             .query_map([], |row| row.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -492,14 +498,22 @@ mod tests {
         let storage = SqliteStorage::in_memory().unwrap();
 
         let alice_id = storage
-            .insert_node(&["Person".to_string()], &serde_json::json!({"name": "Alice"}))
+            .insert_node(
+                &["Person".to_string()],
+                &serde_json::json!({"name": "Alice"}),
+            )
             .unwrap();
         let bob_id = storage
             .insert_node(&["Person".to_string()], &serde_json::json!({"name": "Bob"}))
             .unwrap();
 
         let edge_id = storage
-            .insert_edge(alice_id, bob_id, "KNOWS", &serde_json::json!({"since": 2020}))
+            .insert_edge(
+                alice_id,
+                bob_id,
+                "KNOWS",
+                &serde_json::json!({"since": 2020}),
+            )
             .unwrap();
 
         let edge = storage.get_edge(edge_id).unwrap().unwrap();
@@ -513,13 +527,19 @@ mod tests {
         let storage = SqliteStorage::in_memory().unwrap();
 
         storage
-            .insert_node(&["Person".to_string()], &serde_json::json!({"name": "Alice"}))
+            .insert_node(
+                &["Person".to_string()],
+                &serde_json::json!({"name": "Alice"}),
+            )
             .unwrap();
         storage
             .insert_node(&["Person".to_string()], &serde_json::json!({"name": "Bob"}))
             .unwrap();
         storage
-            .insert_node(&["Company".to_string()], &serde_json::json!({"name": "Acme"}))
+            .insert_node(
+                &["Company".to_string()],
+                &serde_json::json!({"name": "Acme"}),
+            )
             .unwrap();
 
         let people = storage.find_nodes_by_label("Person").unwrap();

@@ -1,8 +1,8 @@
 //! Cypher query parsing and execution.
 
+pub mod executor;
 pub mod parser;
 pub mod planner;
-pub mod executor;
 
 use crate::graph::PropertyValue;
 use serde::{Deserialize, Serialize};
@@ -75,10 +75,7 @@ pub enum ResultValue {
         properties: HashMap<String, PropertyValue>,
     },
     /// A path (sequence of nodes and edges).
-    Path {
-        nodes: Vec<i64>,
-        edges: Vec<i64>,
-    },
+    Path { nodes: Vec<i64>, edges: Vec<i64> },
 }
 
 /// Query execution statistics.

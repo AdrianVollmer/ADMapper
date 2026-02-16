@@ -87,7 +87,9 @@ mod tests {
     fn test_database_create_single_node() {
         let db = Database::in_memory().unwrap();
 
-        let result = db.execute("CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
+        let result = db
+            .execute("CREATE (n:Person {name: 'Alice', age: 30})")
+            .unwrap();
 
         assert_eq!(result.stats.nodes_created, 1);
         assert_eq!(result.stats.properties_set, 2);
@@ -131,9 +133,9 @@ mod tests {
     fn test_database_complex_pattern() {
         let db = Database::in_memory().unwrap();
 
-        let result = db.execute(
-            "CREATE (a:Person)-[:KNOWS]->(b:Person)-[:WORKS_AT]->(c:Company)"
-        ).unwrap();
+        let result = db
+            .execute("CREATE (a:Person)-[:KNOWS]->(b:Person)-[:WORKS_AT]->(c:Company)")
+            .unwrap();
 
         assert_eq!(result.stats.nodes_created, 3);
         assert_eq!(result.stats.relationships_created, 2);
