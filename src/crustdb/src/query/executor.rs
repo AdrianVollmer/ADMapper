@@ -1,7 +1,7 @@
 //! Query executor - runs parsed statements against the storage backend.
 
 use crate::error::{Error, Result};
-use crate::graph::{Node, PropertyValue};
+use crate::graph::{Edge, Node, PropertyValue};
 use crate::storage::SqliteStorage;
 use super::{QueryResult, QueryStats, Row, ResultValue};
 use super::parser::{
@@ -136,51 +136,596 @@ fn execute_create(
 // MATCH Execution
 // =============================================================================
 
+/// A binding represents a matched graph element (node or edge) with its variable name.
+#[derive(Debug, Clone)]
+struct Binding {
+    nodes: HashMap<String, Node>,
+    edges: HashMap<String, Edge>,
+}
+
+impl Binding {
+    fn new() -> Self {
+        Binding {
+            nodes: HashMap::new(),
+            edges: HashMap::new(),
+        }
+    }
+
+    fn with_node(mut self, var: &str, node: Node) -> Self {
+        self.nodes.insert(var.to_string(), node);
+        self
+    }
+
+    fn with_edge(mut self, var: &str, edge: Edge) -> Self {
+        self.edges.insert(var.to_string(), edge);
+        self
+    }
+}
+
 /// Execute a MATCH statement.
 fn execute_match(
     match_clause: &MatchClause,
     storage: &SqliteStorage,
     stats: &mut QueryStats,
 ) -> Result<QueryResult> {
-    // For now, we only support simple single-node patterns: MATCH (n) or MATCH (n:Label)
-    // Get the first node pattern from the MATCH
-    let node_pattern = get_single_node_pattern(&match_clause.pattern)?;
+    let pattern = &match_clause.pattern;
 
-    // Scan nodes based on the pattern
-    let nodes = scan_nodes(node_pattern, storage)?;
-
-    // Filter by properties if specified in the pattern
-    let nodes = filter_by_properties(nodes, node_pattern)?;
+    // Determine pattern type and execute accordingly
+    let bindings = if is_single_node_pattern(pattern) {
+        // Simple single-node pattern: MATCH (n) or MATCH (n:Label)
+        execute_single_node_pattern(pattern, storage)?
+    } else if is_single_hop_pattern(pattern) {
+        // Single-hop relationship pattern: MATCH (a)-[r]->(b)
+        execute_single_hop_pattern(pattern, storage)?
+    } else {
+        return Err(Error::Cypher(
+            "Only single-node and single-hop patterns are supported".into()
+        ));
+    };
 
     // Filter by WHERE clause if present
-    let variable = node_pattern.variable.as_deref().unwrap_or("_");
-    let nodes = if let Some(ref where_clause) = match_clause.where_clause {
-        filter_by_where(nodes, variable, &where_clause.predicate)?
+    let bindings = if let Some(ref where_clause) = match_clause.where_clause {
+        filter_bindings_by_where(bindings, &where_clause.predicate)?
     } else {
-        nodes
+        bindings
     };
 
     // Build result based on RETURN clause
     let return_clause = match_clause.return_clause.as_ref()
         .ok_or_else(|| Error::Cypher("MATCH requires RETURN clause".into()))?;
 
-    build_match_result(nodes, variable, return_clause, stats)
+    build_match_result_from_bindings(bindings, return_clause, stats)
 }
 
-/// Extract a single node pattern from a MATCH pattern.
-/// For M3, we only support simple single-node patterns.
-fn get_single_node_pattern(pattern: &Pattern) -> Result<&NodePattern> {
-    if pattern.elements.len() != 1 {
-        return Err(Error::Cypher(
-            "Only single-node MATCH patterns are supported (M3)".into()
-        ));
+/// Check if pattern is a single node pattern.
+fn is_single_node_pattern(pattern: &Pattern) -> bool {
+    pattern.elements.len() == 1 && matches!(pattern.elements[0], PatternElement::Node(_))
+}
+
+/// Check if pattern is a single-hop relationship pattern (node-rel-node).
+fn is_single_hop_pattern(pattern: &Pattern) -> bool {
+    pattern.elements.len() == 3
+        && matches!(pattern.elements[0], PatternElement::Node(_))
+        && matches!(pattern.elements[1], PatternElement::Relationship(_))
+        && matches!(pattern.elements[2], PatternElement::Node(_))
+}
+
+/// Execute a single-node pattern match.
+fn execute_single_node_pattern(
+    pattern: &Pattern,
+    storage: &SqliteStorage,
+) -> Result<Vec<Binding>> {
+    let node_pattern = match &pattern.elements[0] {
+        PatternElement::Node(np) => np,
+        _ => return Err(Error::Cypher("Expected node pattern".into())),
+    };
+
+    let variable = node_pattern.variable.as_deref().unwrap_or("_");
+
+    // Scan and filter nodes
+    let nodes = scan_nodes(node_pattern, storage)?;
+    let nodes = filter_by_properties(nodes, node_pattern)?;
+
+    // Convert to bindings
+    let bindings = nodes
+        .into_iter()
+        .map(|node| Binding::new().with_node(variable, node))
+        .collect();
+
+    Ok(bindings)
+}
+
+/// Execute a single-hop relationship pattern match.
+fn execute_single_hop_pattern(
+    pattern: &Pattern,
+    storage: &SqliteStorage,
+) -> Result<Vec<Binding>> {
+    // Extract pattern components
+    let (source_pattern, rel_pattern, target_pattern) = match (&pattern.elements[0], &pattern.elements[1], &pattern.elements[2]) {
+        (PatternElement::Node(s), PatternElement::Relationship(r), PatternElement::Node(t)) => (s, r, t),
+        _ => return Err(Error::Cypher("Invalid single-hop pattern".into())),
+    };
+
+    let source_var = source_pattern.variable.as_deref().unwrap_or("_src");
+    let rel_var = rel_pattern.variable.as_deref();
+    let target_var = target_pattern.variable.as_deref().unwrap_or("_tgt");
+
+    // Scan source nodes
+    let source_nodes = scan_nodes(source_pattern, storage)?;
+    let source_nodes = filter_by_properties(source_nodes, source_pattern)?;
+
+    let mut bindings = Vec::new();
+
+    // For each source node, find matching relationships and targets
+    for source_node in source_nodes {
+        let edges = match rel_pattern.direction {
+            Direction::Outgoing => storage.find_outgoing_edges(source_node.id)?,
+            Direction::Incoming => storage.find_incoming_edges(source_node.id)?,
+            Direction::Both => {
+                let mut edges = storage.find_outgoing_edges(source_node.id)?;
+                edges.extend(storage.find_incoming_edges(source_node.id)?);
+                edges
+            }
+        };
+
+        // Filter edges by type if specified
+        let edges: Vec<Edge> = if rel_pattern.types.is_empty() {
+            edges
+        } else {
+            edges.into_iter()
+                .filter(|e| rel_pattern.types.contains(&e.edge_type))
+                .collect()
+        };
+
+        // Filter edges by properties if specified
+        let edges = filter_edges_by_properties(edges, rel_pattern)?;
+
+        // For each matching edge, get the target node and check if it matches
+        for edge in edges {
+            // Determine the actual target node based on direction
+            let target_id = match rel_pattern.direction {
+                Direction::Outgoing => edge.target,
+                Direction::Incoming => edge.source,
+                Direction::Both => {
+                    if edge.source == source_node.id {
+                        edge.target
+                    } else {
+                        edge.source
+                    }
+                }
+            };
+
+            // Get the target node
+            let target_node = match storage.get_node(target_id)? {
+                Some(n) => n,
+                None => continue,
+            };
+
+            // Check if target node matches the target pattern
+            if !node_matches_pattern(&target_node, target_pattern) {
+                continue;
+            }
+
+            // Create binding for this match
+            let mut binding = Binding::new()
+                .with_node(source_var, source_node.clone())
+                .with_node(target_var, target_node);
+
+            if let Some(rv) = rel_var {
+                binding = binding.with_edge(rv, edge);
+            }
+
+            bindings.push(binding);
+        }
     }
 
-    match &pattern.elements[0] {
-        PatternElement::Node(np) => Ok(np),
-        PatternElement::Relationship(_) => {
-            Err(Error::Cypher("MATCH pattern must start with a node".into()))
+    Ok(bindings)
+}
+
+/// Check if a node matches a node pattern (labels and properties).
+fn node_matches_pattern(node: &Node, pattern: &NodePattern) -> bool {
+    // Check labels
+    for label in &pattern.labels {
+        if !node.has_label(label) {
+            return false;
         }
+    }
+
+    // Check properties
+    if let Some(ref props_expr) = pattern.properties {
+        if let Expression::Map(entries) = props_expr {
+            for (key, value) in entries {
+                match node.get(key) {
+                    Some(node_value) => {
+                        if !property_matches(node_value, value) {
+                            return false;
+                        }
+                    }
+                    None => {
+                        if !matches!(value, Expression::Literal(Literal::Null)) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    true
+}
+
+/// Filter edges by properties specified in the relationship pattern.
+fn filter_edges_by_properties(edges: Vec<Edge>, pattern: &RelationshipPattern) -> Result<Vec<Edge>> {
+    let Some(ref props_expr) = pattern.properties else {
+        return Ok(edges);
+    };
+
+    let required_props = match props_expr {
+        Expression::Map(entries) => entries,
+        _ => return Err(Error::Cypher("Relationship properties must be a map".into())),
+    };
+
+    if required_props.is_empty() {
+        return Ok(edges);
+    }
+
+    let filtered: Vec<Edge> = edges
+        .into_iter()
+        .filter(|edge| {
+            required_props.iter().all(|(key, value)| {
+                match edge.properties.get(key) {
+                    Some(edge_value) => property_matches(edge_value, value),
+                    None => matches!(value, Expression::Literal(Literal::Null)),
+                }
+            })
+        })
+        .collect();
+
+    Ok(filtered)
+}
+
+/// Filter bindings by WHERE clause predicate.
+fn filter_bindings_by_where(
+    bindings: Vec<Binding>,
+    predicate: &Expression,
+) -> Result<Vec<Binding>> {
+    let mut filtered = Vec::new();
+
+    for binding in bindings {
+        let result = evaluate_expression_with_bindings(predicate, &binding)?;
+        if is_truthy(&result) {
+            filtered.push(binding);
+        }
+    }
+
+    Ok(filtered)
+}
+
+/// Evaluate an expression using bindings (supports multiple variables).
+fn evaluate_expression_with_bindings(
+    expr: &Expression,
+    binding: &Binding,
+) -> Result<PropertyValue> {
+    match expr {
+        Expression::Literal(lit) => Ok(literal_to_property_value(lit)),
+
+        Expression::Variable(name) => {
+            if let Some(node) = binding.nodes.get(name) {
+                Ok(PropertyValue::Map(node.properties.clone()))
+            } else if let Some(edge) = binding.edges.get(name) {
+                Ok(PropertyValue::Map(edge.properties.clone()))
+            } else {
+                Err(Error::Cypher(format!("Unknown variable: {}", name)))
+            }
+        }
+
+        Expression::Property { base, property } => {
+            if let Expression::Variable(base_name) = base.as_ref() {
+                if let Some(node) = binding.nodes.get(base_name) {
+                    return Ok(node.get(property).cloned().unwrap_or(PropertyValue::Null));
+                }
+                if let Some(edge) = binding.edges.get(base_name) {
+                    return Ok(edge.properties.get(property).cloned().unwrap_or(PropertyValue::Null));
+                }
+            }
+            Err(Error::Cypher("Property access on unknown variable".into()))
+        }
+
+        Expression::BinaryOp { left, op, right } => {
+            evaluate_binary_op_with_bindings(left, *op, right, binding)
+        }
+
+        Expression::UnaryOp { op, operand } => {
+            evaluate_unary_op_with_bindings(*op, operand, binding)
+        }
+
+        Expression::FunctionCall { name, args } => {
+            evaluate_function_call_with_bindings(name, args, binding)
+        }
+
+        Expression::List(items) => {
+            let values: Result<Vec<_>> = items.iter()
+                .map(|item| evaluate_expression_with_bindings(item, binding))
+                .collect();
+            Ok(PropertyValue::List(values?))
+        }
+
+        _ => Err(Error::Cypher("Expression type not supported".into())),
+    }
+}
+
+/// Evaluate binary operation with bindings.
+fn evaluate_binary_op_with_bindings(
+    left: &Expression,
+    op: BinaryOperator,
+    right: &Expression,
+    binding: &Binding,
+) -> Result<PropertyValue> {
+    // Short-circuit for logical operators
+    match op {
+        BinaryOperator::And => {
+            let left_val = evaluate_expression_with_bindings(left, binding)?;
+            if !is_truthy(&left_val) {
+                return Ok(PropertyValue::Bool(false));
+            }
+            let right_val = evaluate_expression_with_bindings(right, binding)?;
+            return Ok(PropertyValue::Bool(is_truthy(&right_val)));
+        }
+        BinaryOperator::Or => {
+            let left_val = evaluate_expression_with_bindings(left, binding)?;
+            if is_truthy(&left_val) {
+                return Ok(PropertyValue::Bool(true));
+            }
+            let right_val = evaluate_expression_with_bindings(right, binding)?;
+            return Ok(PropertyValue::Bool(is_truthy(&right_val)));
+        }
+        _ => {}
+    }
+
+    let left_val = evaluate_expression_with_bindings(left, binding)?;
+    let right_val = evaluate_expression_with_bindings(right, binding)?;
+
+    // Reuse existing comparison logic
+    match op {
+        BinaryOperator::Eq => Ok(PropertyValue::Bool(values_equal(&left_val, &right_val))),
+        BinaryOperator::Ne => Ok(PropertyValue::Bool(!values_equal(&left_val, &right_val))),
+        BinaryOperator::Lt => compare_values(&left_val, &right_val, |ord| ord == std::cmp::Ordering::Less),
+        BinaryOperator::Le => compare_values(&left_val, &right_val, |ord| ord != std::cmp::Ordering::Greater),
+        BinaryOperator::Gt => compare_values(&left_val, &right_val, |ord| ord == std::cmp::Ordering::Greater),
+        BinaryOperator::Ge => compare_values(&left_val, &right_val, |ord| ord != std::cmp::Ordering::Less),
+        BinaryOperator::StartsWith => string_predicate(&left_val, &right_val, |s, p| s.starts_with(p)),
+        BinaryOperator::EndsWith => string_predicate(&left_val, &right_val, |s, p| s.ends_with(p)),
+        BinaryOperator::Contains => string_predicate(&left_val, &right_val, |s, p| s.contains(p)),
+        BinaryOperator::RegexMatch => {
+            match (&left_val, &right_val) {
+                (PropertyValue::Null, _) | (_, PropertyValue::Null) => Ok(PropertyValue::Null),
+                (PropertyValue::String(text), PropertyValue::String(pattern)) => {
+                    match regex::Regex::new(pattern) {
+                        Ok(re) => Ok(PropertyValue::Bool(re.is_match(text))),
+                        Err(e) => Err(Error::Cypher(format!("Invalid regex: {}", e))),
+                    }
+                }
+                _ => Ok(PropertyValue::Null),
+            }
+        }
+        BinaryOperator::In => {
+            if let PropertyValue::List(list) = &right_val {
+                Ok(PropertyValue::Bool(list.iter().any(|v| values_equal(&left_val, v))))
+            } else {
+                Ok(PropertyValue::Null)
+            }
+        }
+        BinaryOperator::Add => arithmetic_op(&left_val, &right_val, |a, b| a + b, |a, b| a + b),
+        BinaryOperator::Sub => arithmetic_op(&left_val, &right_val, |a, b| a - b, |a, b| a - b),
+        BinaryOperator::Mul => arithmetic_op(&left_val, &right_val, |a, b| a * b, |a, b| a * b),
+        BinaryOperator::Div => arithmetic_op(&left_val, &right_val, |a, b| a / b, |a, b| a / b),
+        BinaryOperator::Mod => arithmetic_op(&left_val, &right_val, |a, b| a % b, |a, b| a % b),
+        BinaryOperator::Pow => {
+            match (&left_val, &right_val) {
+                (PropertyValue::Integer(a), PropertyValue::Integer(b)) => {
+                    Ok(PropertyValue::Float((*a as f64).powf(*b as f64)))
+                }
+                (PropertyValue::Float(a), PropertyValue::Float(b)) => {
+                    Ok(PropertyValue::Float(a.powf(*b)))
+                }
+                _ => Ok(PropertyValue::Null),
+            }
+        }
+        BinaryOperator::Xor => {
+            let l = is_truthy(&left_val);
+            let r = is_truthy(&right_val);
+            Ok(PropertyValue::Bool(l ^ r))
+        }
+        BinaryOperator::And | BinaryOperator::Or => unreachable!(),
+    }
+}
+
+/// Evaluate unary operation with bindings.
+fn evaluate_unary_op_with_bindings(
+    op: super::parser::UnaryOperator,
+    operand: &Expression,
+    binding: &Binding,
+) -> Result<PropertyValue> {
+    let val = evaluate_expression_with_bindings(operand, binding)?;
+
+    match op {
+        super::parser::UnaryOperator::Not => Ok(PropertyValue::Bool(!is_truthy(&val))),
+        super::parser::UnaryOperator::Neg => {
+            match val {
+                PropertyValue::Integer(n) => Ok(PropertyValue::Integer(-n)),
+                PropertyValue::Float(f) => Ok(PropertyValue::Float(-f)),
+                _ => Ok(PropertyValue::Null),
+            }
+        }
+        super::parser::UnaryOperator::IsNull => {
+            Ok(PropertyValue::Bool(matches!(val, PropertyValue::Null)))
+        }
+        super::parser::UnaryOperator::IsNotNull => {
+            Ok(PropertyValue::Bool(!matches!(val, PropertyValue::Null)))
+        }
+    }
+}
+
+/// Evaluate function call with bindings.
+fn evaluate_function_call_with_bindings(
+    name: &str,
+    args: &[Expression],
+    binding: &Binding,
+) -> Result<PropertyValue> {
+    let name_upper = name.to_uppercase();
+
+    // For now, support basic functions
+    match name_upper.as_str() {
+        "COALESCE" => {
+            for arg in args {
+                let val = evaluate_expression_with_bindings(arg, binding)?;
+                if !matches!(val, PropertyValue::Null) {
+                    return Ok(val);
+                }
+            }
+            Ok(PropertyValue::Null)
+        }
+        "SIZE" | "LENGTH" => {
+            if args.len() != 1 {
+                return Err(Error::Cypher("size() requires 1 argument".into()));
+            }
+            let val = evaluate_expression_with_bindings(&args[0], binding)?;
+            match val {
+                PropertyValue::String(s) => Ok(PropertyValue::Integer(s.len() as i64)),
+                PropertyValue::List(l) => Ok(PropertyValue::Integer(l.len() as i64)),
+                PropertyValue::Null => Ok(PropertyValue::Null),
+                _ => Ok(PropertyValue::Null),
+            }
+        }
+        "TOLOWER" | "LOWER" => {
+            if args.len() != 1 {
+                return Err(Error::Cypher("toLower() requires 1 argument".into()));
+            }
+            let val = evaluate_expression_with_bindings(&args[0], binding)?;
+            match val {
+                PropertyValue::String(s) => Ok(PropertyValue::String(s.to_lowercase())),
+                PropertyValue::Null => Ok(PropertyValue::Null),
+                _ => Ok(PropertyValue::Null),
+            }
+        }
+        "TOUPPER" | "UPPER" => {
+            if args.len() != 1 {
+                return Err(Error::Cypher("toUpper() requires 1 argument".into()));
+            }
+            let val = evaluate_expression_with_bindings(&args[0], binding)?;
+            match val {
+                PropertyValue::String(s) => Ok(PropertyValue::String(s.to_uppercase())),
+                PropertyValue::Null => Ok(PropertyValue::Null),
+                _ => Ok(PropertyValue::Null),
+            }
+        }
+        _ => Err(Error::Cypher(format!("Unknown function: {}", name))),
+    }
+}
+
+/// Build query result from bindings.
+fn build_match_result_from_bindings(
+    bindings: Vec<Binding>,
+    return_clause: &ReturnClause,
+    _stats: &mut QueryStats,
+) -> Result<QueryResult> {
+    // Build column names
+    let columns: Vec<String> = return_clause.items.iter().map(|item| {
+        if let Some(ref alias) = item.alias {
+            alias.clone()
+        } else {
+            expr_to_column_name_generic(&item.expression)
+        }
+    }).collect();
+
+    // Build rows
+    let mut rows = Vec::with_capacity(bindings.len());
+
+    for binding in bindings {
+        let mut values = HashMap::new();
+
+        for (i, item) in return_clause.items.iter().enumerate() {
+            let column_name = &columns[i];
+            let value = evaluate_return_item_with_bindings(&item.expression, &binding)?;
+            values.insert(column_name.clone(), value);
+        }
+
+        rows.push(Row { values });
+    }
+
+    Ok(QueryResult {
+        columns,
+        rows,
+        stats: QueryStats::default(),
+    })
+}
+
+/// Convert expression to column name (generic version).
+fn expr_to_column_name_generic(expr: &Expression) -> String {
+    match expr {
+        Expression::Variable(name) => name.clone(),
+        Expression::Property { base, property } => {
+            let base_name = expr_to_column_name_generic(base);
+            format!("{}.{}", base_name, property)
+        }
+        Expression::FunctionCall { name, args } => {
+            if args.is_empty() {
+                format!("{}()", name)
+            } else {
+                let arg_str = args.iter()
+                    .map(expr_to_column_name_generic)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({})", name, arg_str)
+            }
+        }
+        _ => "expr".to_string(),
+    }
+}
+
+/// Evaluate return item expression with bindings.
+fn evaluate_return_item_with_bindings(
+    expr: &Expression,
+    binding: &Binding,
+) -> Result<ResultValue> {
+    match expr {
+        Expression::Variable(name) => {
+            if let Some(node) = binding.nodes.get(name) {
+                Ok(ResultValue::Node {
+                    id: node.id,
+                    labels: node.labels.clone(),
+                    properties: node.properties.clone(),
+                })
+            } else if let Some(edge) = binding.edges.get(name) {
+                Ok(ResultValue::Edge {
+                    id: edge.id,
+                    source: edge.source,
+                    target: edge.target,
+                    edge_type: edge.edge_type.clone(),
+                    properties: edge.properties.clone(),
+                })
+            } else {
+                Err(Error::Cypher(format!("Unknown variable: {}", name)))
+            }
+        }
+        Expression::Property { base, property } => {
+            if let Expression::Variable(base_name) = base.as_ref() {
+                if let Some(node) = binding.nodes.get(base_name) {
+                    let value = node.get(property).cloned().unwrap_or(PropertyValue::Null);
+                    return Ok(ResultValue::Property(value));
+                }
+                if let Some(edge) = binding.edges.get(base_name) {
+                    let value = edge.properties.get(property).cloned().unwrap_or(PropertyValue::Null);
+                    return Ok(ResultValue::Property(value));
+                }
+            }
+            Err(Error::Cypher("Property access on unknown variable".into()))
+        }
+        Expression::Literal(lit) => {
+            let prop_value = literal_to_property_value(lit);
+            Ok(ResultValue::Property(prop_value))
+        }
+        _ => Err(Error::Cypher("Complex expressions in RETURN not yet supported".into())),
     }
 }
 
@@ -1514,5 +2059,146 @@ mod tests {
         let result = execute(&parse("MATCH (n:Product) WHERE n.code =~ '.*[0-9]+.*' RETURN n").unwrap(), &storage).unwrap();
 
         assert_eq!(result.rows.len(), 2); // ABC123 and XYZ789
+    }
+
+    // =========================================================================
+    // Single-Hop Traversal Tests (M5)
+    // =========================================================================
+
+    #[test]
+    fn test_single_hop_outgoing() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create: Alice -[:KNOWS]-> Bob
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+
+        let result = execute(&parse("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name, b.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        assert!(result.columns.contains(&"a.name".to_string()));
+        assert!(result.columns.contains(&"b.name".to_string()));
+    }
+
+    #[test]
+    fn test_single_hop_incoming() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create: Alice -[:KNOWS]-> Bob
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+
+        // Match incoming to Bob
+        let result = execute(&parse("MATCH (b:Person {name: 'Bob'})<-[:KNOWS]-(a:Person) RETURN a.name, b.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_single_hop_any_direction() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create: Alice -[:KNOWS]-> Bob -[:KNOWS]-> Charlie
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})").unwrap(), &storage).unwrap();
+
+        // Match any direction from Bob
+        let result = execute(&parse("MATCH (b:Person {name: 'Bob'})-[:KNOWS]-(other:Person) RETURN other.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 2); // Alice and Charlie
+    }
+
+    #[test]
+    fn test_single_hop_with_relationship_variable() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create relationship with properties
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2020}]->(b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+
+        let result = execute(&parse("MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN a.name, r, b.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        assert!(result.columns.contains(&"r".to_string()));
+    }
+
+    #[test]
+    fn test_single_hop_filter_by_relationship_type() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create: Alice -[:KNOWS]-> Bob, Alice -[:WORKS_WITH]-> Charlie
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})").unwrap(), &storage).unwrap();
+
+        // Only match KNOWS relationships
+        let result = execute(&parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person) RETURN b.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_single_hop_any_relationship_type() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create: Alice -[:KNOWS]-> Bob, Alice -[:WORKS_WITH]-> Charlie
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})").unwrap(), &storage).unwrap();
+
+        // Match any relationship type
+        let result = execute(&parse("MATCH (a:Person {name: 'Alice'})-[]->(b:Person) RETURN b.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_single_hop_with_where_clause() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create relationships
+        execute(&parse("CREATE (a:Person {name: 'Alice', age: 30})-[:KNOWS]->(b:Person {name: 'Bob', age: 25})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (a:Person {name: 'Alice', age: 30})-[:KNOWS]->(c:Person {name: 'Charlie', age: 35})").unwrap(), &storage).unwrap();
+
+        // Filter with WHERE
+        let result = execute(&parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person) WHERE b.age > 30 RETURN b.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1); // Only Charlie
+    }
+
+    #[test]
+    fn test_single_hop_return_nodes() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+
+        let result = execute(&parse("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+
+        // Check that we got nodes back
+        let row = &result.rows[0];
+        assert!(matches!(row.values.get("a"), Some(ResultValue::Node { .. })));
+        assert!(matches!(row.values.get("b"), Some(ResultValue::Node { .. })));
+    }
+
+    #[test]
+    fn test_single_hop_multiple_matches() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create: Alice knows Bob and Charlie
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(c:Person {name: 'Charlie'})").unwrap(), &storage).unwrap();
+
+        let result = execute(&parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person) RETURN b.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_single_hop_no_matches() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create nodes without the relationship
+        execute(&parse("CREATE (a:Person {name: 'Alice'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+
+        let result = execute(&parse("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 0);
     }
 }

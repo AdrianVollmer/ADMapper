@@ -146,7 +146,7 @@ MATCH (n:Person) WHERE n.age >= 18 AND n.age <= 65 RETURN n
 - [x] String predicates (STARTS WITH, ENDS WITH, CONTAINS)
 - [x] NULL checks (IS NULL, IS NOT NULL)
 
-### M5: Single-Hop Traversal [open]
+### M5: Single-Hop Traversal [done]
 
 Navigate one relationship step.
 
@@ -158,10 +158,10 @@ MATCH (a)-[r]->(b) RETURN a, r, b
 MATCH (m:Movie)<-[:ACTED_IN]-(a:Actor) RETURN m.title, a.name
 ```
 
-- [ ] Relationship pattern parser (direction, type, variable)
-- [ ] Expand operator (outgoing)
-- [ ] Expand operator (incoming)
-- [ ] Expand operator (undirected)
+- [x] Relationship pattern parser (direction, type, variable)
+- [x] Expand operator (outgoing)
+- [x] Expand operator (incoming)
+- [x] Expand operator (undirected)
 
 ### M6: Multi-Hop Traversal [open]
 

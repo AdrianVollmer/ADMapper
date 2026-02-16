@@ -114,8 +114,45 @@ fn run_test_case(test: &TestCase) {
             });
         }
 
-        // TODO: Create edges from setup when MATCH is implemented
-        // For now, skip edge setup
+        // Create edges using direct CREATE queries
+        // We need to use CREATE patterns since we don't have variable tracking
+        for edge in &setup.edges {
+            let edge_props = match &edge.properties {
+                Some(v) => format!(" {{{}}}", toml_to_cypher_props(v)),
+                None => String::new(),
+            };
+
+            // Find the source and target node info from setup
+            let source_node = setup.nodes.iter().find(|n| n.id == edge.from);
+            let target_node = setup.nodes.iter().find(|n| n.id == edge.to);
+
+            if let (Some(src), Some(tgt)) = (source_node, target_node) {
+                let src_labels = src.labels.join(":");
+                let tgt_labels = tgt.labels.join(":");
+                let src_props = match &src.properties {
+                    Some(v) => format!(" {{{}}}", toml_to_cypher_props(v)),
+                    None => String::new(),
+                };
+                let tgt_props = match &tgt.properties {
+                    Some(v) => format!(" {{{}}}", toml_to_cypher_props(v)),
+                    None => String::new(),
+                };
+
+                // Create pattern: MATCH source, target CREATE (source)-[rel]->(target)
+                // Since we can't MATCH yet in the same query, we'll use a workaround
+                // by creating the relationship pattern directly
+                let query = format!(
+                    "CREATE (:{}{})-[:{}{}]->(:{}{})",
+                    src_labels, src_props,
+                    edge.edge_type, edge_props,
+                    tgt_labels, tgt_props
+                );
+
+                db.execute(&query).unwrap_or_else(|e| {
+                    panic!("Edge setup failed for test '{}': {}", test.name, e)
+                });
+            }
+        }
     }
 
     // Execute the main query
@@ -422,4 +459,45 @@ fn test_m4_where_starts_with() {
 
     let result = db.execute("MATCH (n:Person) WHERE n.name STARTS WITH 'A' RETURN n").unwrap();
     assert_eq!(result.rows.len(), 2);
+}
+
+// =============================================================================
+// M5: Single-Hop Traversal Tests
+// =============================================================================
+
+#[test]
+fn test_m5_single_hop_outgoing() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap();
+
+    let result = db.execute("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name, b.name").unwrap();
+    assert_eq!(result.rows.len(), 1);
+}
+
+#[test]
+fn test_m5_single_hop_incoming() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap();
+
+    let result = db.execute("MATCH (b:Person {name: 'Bob'})<-[:KNOWS]-(a:Person) RETURN a.name").unwrap();
+    assert_eq!(result.rows.len(), 1);
+}
+
+#[test]
+fn test_m5_single_hop_undirected() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})").unwrap();
+
+    let result = db.execute("MATCH (b:Person {name: 'Bob'})-[:KNOWS]-(other:Person) RETURN other.name").unwrap();
+    assert_eq!(result.rows.len(), 2); // Alice and Charlie
+}
+
+#[test]
+fn test_m5_single_hop_with_where() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob', age: 25})").unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(c:Person {name: 'Charlie', age: 35})").unwrap();
+
+    let result = db.execute("MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person) WHERE b.age > 30 RETURN b.name").unwrap();
+    assert_eq!(result.rows.len(), 1);
 }
