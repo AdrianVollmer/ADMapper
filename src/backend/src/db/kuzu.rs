@@ -34,6 +34,7 @@ impl KuzuDatabase {
     }
 
     /// Create an in-memory database (for testing).
+    #[cfg(test)]
     pub fn in_memory() -> Result<Self> {
         debug!("Creating in-memory KuzuDB");
         // KuzuDB uses empty string for in-memory

@@ -112,6 +112,7 @@ impl GraphDatabase {
     }
 
     /// Create an in-memory database (for testing).
+    #[cfg(test)]
     pub fn in_memory() -> Result<Self> {
         debug!("Creating in-memory database");
         let db = DbInstance::new("mem", "", "")?;

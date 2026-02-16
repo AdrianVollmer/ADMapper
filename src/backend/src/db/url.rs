@@ -70,8 +70,6 @@ pub struct DatabaseUrl {
     pub path: Option<PathBuf>,
     /// Database name (for Neo4j).
     pub database: Option<String>,
-    /// Use SSL/TLS encryption (for network databases).
-    pub ssl: bool,
 }
 
 /// Error type for URL parsing.
@@ -105,7 +103,6 @@ impl DatabaseUrl {
             .ok_or_else(|| ParseError::InvalidFormat("Missing :// separator".to_string()))?;
 
         let scheme_lower = scheme.to_lowercase();
-        let ssl = scheme_lower.ends_with("+s") || scheme_lower.ends_with("+ssc");
 
         let db_type = match scheme_lower.as_str() {
             "neo4j" | "bolt" | "neo4j+s" | "bolt+s" | "neo4j+ssc" | "bolt+ssc" => {
@@ -140,20 +137,15 @@ impl DatabaseUrl {
                 password: None,
                 path: Some(path),
                 database: None,
-                ssl: false,
             })
         } else {
             // Network database: parse host, port, auth
-            Self::parse_network_url(db_type, rest, ssl)
+            Self::parse_network_url(db_type, rest)
         }
     }
 
     /// Parse network database URL components.
-    fn parse_network_url(
-        db_type: DatabaseType,
-        url_part: &str,
-        ssl: bool,
-    ) -> Result<Self, ParseError> {
+    fn parse_network_url(db_type: DatabaseType, url_part: &str) -> Result<Self, ParseError> {
         let mut username = None;
         let mut password = None;
         let host;
@@ -219,35 +211,7 @@ impl DatabaseUrl {
             password,
             path: None,
             database,
-            ssl,
         })
-    }
-
-    /// Build a connection string suitable for the database driver.
-    pub fn to_connection_string(&self) -> String {
-        match self.db_type {
-            DatabaseType::Neo4j => {
-                let scheme = if self.ssl { "bolt+s" } else { "bolt" };
-                let host = self.host.as_deref().unwrap_or("localhost");
-                let port = self.port.unwrap_or(7687);
-                format!("{}://{}:{}", scheme, host, port)
-            }
-            DatabaseType::FalkorDB => {
-                let host = self.host.as_deref().unwrap_or("localhost");
-                let port = self.port.unwrap_or(6379);
-                format!("redis://{}:{}", host, port)
-            }
-            DatabaseType::CozoDB | DatabaseType::KuzuDB => self
-                .path
-                .as_ref()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default(),
-        }
-    }
-
-    /// Check if SSL/TLS is enabled for this connection.
-    pub fn is_ssl(&self) -> bool {
-        self.ssl
     }
 }
 
@@ -351,30 +315,16 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_neo4j_ssl() {
+    fn test_parse_neo4j_ssl_scheme() {
+        // SSL schemes are accepted (for future use)
         let url = DatabaseUrl::parse("neo4j+s://localhost:7687").unwrap();
         assert_eq!(url.db_type, DatabaseType::Neo4j);
-        assert!(url.ssl);
         assert_eq!(url.host, Some("localhost".to_string()));
     }
 
     #[test]
-    fn test_parse_bolt_ssl() {
+    fn test_parse_bolt_ssl_scheme() {
         let url = DatabaseUrl::parse("bolt+s://localhost:7687").unwrap();
         assert_eq!(url.db_type, DatabaseType::Neo4j);
-        assert!(url.ssl);
-    }
-
-    #[test]
-    fn test_parse_neo4j_no_ssl() {
-        let url = DatabaseUrl::parse("neo4j://localhost:7687").unwrap();
-        assert_eq!(url.db_type, DatabaseType::Neo4j);
-        assert!(!url.ssl);
-    }
-
-    #[test]
-    fn test_ssl_connection_string() {
-        let url = DatabaseUrl::parse("neo4j+s://localhost:7687").unwrap();
-        assert_eq!(url.to_connection_string(), "bolt+s://localhost:7687");
     }
 }
