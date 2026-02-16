@@ -100,7 +100,8 @@ CREATE (charlie:Person:Actor {name: 'Charlie Sheen'}),
        (oliver)-[:DIRECTED]->(wallStreet)
 ```
 
-- [ ] Cypher lexer/tokenizer
+- [x] Cypher lexer/tokenizer (pest grammar)
+- [ ] AST builder (pest tree → clean AST)
 - [ ] CREATE clause parser
 - [ ] Node pattern parser (labels, properties)
 - [ ] Relationship pattern parser

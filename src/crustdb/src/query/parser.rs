@@ -1,8 +1,17 @@
 //! Cypher query parser.
 //!
 //! Parses Cypher query strings into an Abstract Syntax Tree (AST).
+//!
+//! Uses a pest grammar based on the openCypher specification.
 
 use crate::error::{Error, Result};
+use pest::Parser;
+use pest_derive::Parser;
+
+/// Pest parser for Cypher queries.
+#[derive(Parser)]
+#[grammar = "query/cypher.pest"]
+pub struct CypherParser;
 
 /// A parsed Cypher statement.
 #[derive(Debug, Clone)]
@@ -200,7 +209,100 @@ pub enum UnaryOperator {
 
 /// Parse a Cypher query string into a statement.
 pub fn parse(query: &str) -> Result<Statement> {
-    // TODO: Implement Cypher parser
-    let _ = query;
-    Err(Error::Parse("Cypher parser not yet implemented".to_string()))
+    let pairs = CypherParser::parse(Rule::Cypher, query)
+        .map_err(|e| Error::Parse(e.to_string()))?;
+
+    // TODO: Convert pest parse tree to AST
+    // For now, we just verify parsing succeeds
+    let _ = pairs;
+    Err(Error::Parse("AST conversion not yet implemented".to_string()))
+}
+
+/// Check if a Cypher query is syntactically valid without building an AST.
+pub fn validate(query: &str) -> Result<()> {
+    CypherParser::parse(Rule::Cypher, query)
+        .map_err(|e| Error::Parse(e.to_string()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_simple_match() {
+        assert!(validate("MATCH (n) RETURN n").is_ok());
+    }
+
+    #[test]
+    fn test_parse_match_with_label() {
+        assert!(validate("MATCH (n:Person) RETURN n").is_ok());
+    }
+
+    #[test]
+    fn test_parse_match_with_properties() {
+        assert!(validate("MATCH (n:Person {name: 'Alice'}) RETURN n").is_ok());
+    }
+
+    #[test]
+    fn test_parse_match_with_where() {
+        assert!(validate("MATCH (n:Person) WHERE n.age > 30 RETURN n").is_ok());
+    }
+
+    #[test]
+    fn test_parse_simple_create() {
+        assert!(validate("CREATE (n:Person {name: 'Alice'})").is_ok());
+    }
+
+    #[test]
+    fn test_parse_create_relationship() {
+        assert!(validate("CREATE (a:Person)-[:KNOWS]->(b:Person)").is_ok());
+    }
+
+    #[test]
+    fn test_parse_relationship_pattern() {
+        assert!(validate("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b").is_ok());
+    }
+
+    #[test]
+    fn test_parse_variable_length_path() {
+        assert!(validate("MATCH (a)-[:KNOWS*1..3]->(b) RETURN a, b").is_ok());
+    }
+
+    #[test]
+    fn test_parse_set_property() {
+        assert!(validate("MATCH (n:Person {name: 'Alice'}) SET n.age = 31").is_ok());
+    }
+
+    #[test]
+    fn test_parse_delete() {
+        assert!(validate("MATCH (n:Person {name: 'Bob'}) DELETE n").is_ok());
+    }
+
+    #[test]
+    fn test_parse_detach_delete() {
+        assert!(validate("MATCH (n:Person {name: 'Charlie'}) DETACH DELETE n").is_ok());
+    }
+
+    #[test]
+    fn test_parse_invalid_syntax() {
+        assert!(validate("MATCH n RETURN").is_err());
+    }
+
+    #[test]
+    fn test_parse_aggregate() {
+        assert!(validate("MATCH (n:Person) RETURN count(n)").is_ok());
+    }
+
+    #[test]
+    fn test_parse_complex_query() {
+        let query = r#"
+            MATCH (charlie:Person {name: 'Charlie Sheen'})-[:ACTED_IN]->(movie:Movie)
+            WHERE movie.year > 1980
+            RETURN movie.title, movie.year
+            ORDER BY movie.year DESC
+            LIMIT 10
+        "#;
+        assert!(validate(query).is_ok());
+    }
 }

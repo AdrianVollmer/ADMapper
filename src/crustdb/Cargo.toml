@@ -9,8 +9,9 @@ license = "MIT"
 # SQLite
 rusqlite = { version = "0.31", features = ["bundled"] }
 
-# Cypher parsing
-# TODO: Add cypher parser crate or implement custom parser
+# Cypher parsing (grammar based on open-cypher crate, MIT OR Apache-2.0)
+pest = "2.7"
+pest_derive = "2.7"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
