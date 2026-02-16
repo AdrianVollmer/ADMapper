@@ -888,55 +888,6 @@
   .edge-type-filter:has(input:not(:checked)) span {
     @apply text-gray-600 line-through;
   }
-
-  .paths-to-da-results {
-    @apply text-sm;
-  }
-
-  .paths-to-da-results[hidden] {
-    display: none;
-  }
-
-  .paths-to-da-summary {
-    @apply flex flex-col gap-0.5 mb-3 p-2 bg-gray-800 rounded;
-  }
-
-  .paths-to-da-list {
-    @apply space-y-2 max-h-64 overflow-y-auto;
-  }
-
-  .paths-hop-group {
-    @apply space-y-1;
-  }
-
-  .paths-hop-header {
-    @apply flex items-center justify-between py-1 text-xs;
-  }
-
-  .paths-hop-count {
-    @apply text-gray-400 font-medium;
-  }
-
-  .paths-hop-badge {
-    @apply bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded-full text-xs;
-  }
-
-  .paths-hop-entries {
-    @apply space-y-0.5;
-  }
-
-  .paths-to-da-entry {
-    @apply flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer
-           hover:bg-gray-700 transition-colors;
-  }
-
-  .paths-to-da-entry .node-badge {
-    @apply flex-none text-xs;
-  }
-
-  .paths-entry-label {
-    @apply text-gray-300 truncate text-sm;
-  }
 }
 
 /* ============================================

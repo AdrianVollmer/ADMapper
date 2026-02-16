@@ -12,7 +12,6 @@ import { initImport } from "./components/import";
 import { initSearch } from "./components/search";
 import { initQueries } from "./components/queries";
 import { initQueryHistory } from "./components/query-history";
-import { initPathsToDa } from "./components/paths-to-da";
 import { initDbManager } from "./components/db-manager";
 import { initDbConnect } from "./components/db-connect";
 
@@ -43,7 +42,6 @@ function init(): void {
   initSearch();
   initQueries();
   initQueryHistory();
-  initPathsToDa();
   initDbManager();
   initDbConnect();
 
