@@ -128,7 +128,7 @@ MATCH (n:Person {name: 'Alice'}) RETURN n
 - [x] Property filter operator
 - [x] Projection operator
 
-### M4: WHERE Clause [open]
+### M4: WHERE Clause [done]
 
 Add filtering with WHERE conditions.
 
@@ -140,11 +140,11 @@ MATCH (n) WHERE n.name STARTS WITH 'A' RETURN n
 MATCH (n:Person) WHERE n.age >= 18 AND n.age <= 65 RETURN n
 ```
 
-- [ ] WHERE clause parser
-- [ ] Comparison operators (=, <>, <, <=, >, >=)
-- [ ] Logical operators (AND, OR, NOT)
-- [ ] String predicates (STARTS WITH, ENDS WITH, CONTAINS)
-- [ ] NULL checks (IS NULL, IS NOT NULL)
+- [x] WHERE clause parser
+- [x] Comparison operators (=, <>, <, <=, >, >=)
+- [x] Logical operators (AND, OR, NOT)
+- [x] String predicates (STARTS WITH, ENDS WITH, CONTAINS)
+- [x] NULL checks (IS NULL, IS NOT NULL)
 
 ### M5: Single-Hop Traversal [open]
 

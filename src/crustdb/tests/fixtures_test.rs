@@ -354,3 +354,72 @@ fn test_m3_match_by_label() {
     let result = db.execute("MATCH (n:Person) RETURN n").unwrap();
     assert_eq!(result.rows.len(), 1);
 }
+
+// =============================================================================
+// M4: WHERE Tests
+// =============================================================================
+
+#[test]
+fn test_m4_where_fixtures() {
+    let fixtures = find_fixtures("m4_where");
+    assert!(!fixtures.is_empty(), "No M4 fixtures found");
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for fixture_path in &fixtures {
+        let fixture = load_fixture(fixture_path);
+
+        for test in &fixture.test {
+            let result = std::panic::catch_unwind(|| {
+                run_test_case(test);
+            });
+
+            match result {
+                Ok(()) => {
+                    passed += 1;
+                    println!("  ✓ {}", test.name);
+                }
+                Err(e) => {
+                    failed += 1;
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown error".to_string()
+                    };
+                    println!("  ✗ {}: {}", test.name, msg);
+                }
+            }
+        }
+    }
+
+    println!("\nM4 WHERE: {} passed, {} failed", passed, failed);
+
+    if failed > 0 {
+        panic!("{} test(s) failed", failed);
+    }
+}
+
+// Individual M4 tests for debugging
+#[test]
+fn test_m4_where_greater_than() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Bob', age: 25})").unwrap();
+
+    let result = db.execute("MATCH (n:Person) WHERE n.age > 28 RETURN n").unwrap();
+    assert_eq!(result.rows.len(), 1);
+}
+
+#[test]
+fn test_m4_where_starts_with() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Adam'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+
+    let result = db.execute("MATCH (n:Person) WHERE n.name STARTS WITH 'A' RETURN n").unwrap();
+    assert_eq!(result.rows.len(), 2);
+}

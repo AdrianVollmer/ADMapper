@@ -316,7 +316,7 @@ ListLiteral = {
 }
 
 PartialComparisonExpression = {
-    (EQ | NE | LT | GT | LE | GE) ~ SP? ~ AddOrSubtractExpression
+    (EQ | NE | LE | GE | LT | GT) ~ SP? ~ AddOrSubtractExpression
 }
 
 
