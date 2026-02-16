@@ -173,3 +173,33 @@ cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS|WORKS_WITH]-(other:Person) RE
 [test.expected]
 row_count = 2
 columns = ["other.name"]
+
+
+[[test]]
+name = "where_on_relationship"
+description = "Filter by relationship property in WHERE clause"
+[test.setup]
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2010}]->(b:Person {name: 'Bob'})",
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2000}]->(c:Person {name: 'Charlie'})",
+]
+[test.query]
+cypher = "MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person) WHERE r.since > 2005 RETURN b.name"
+[test.expected]
+row_count = 1
+columns = ["b.name"]
+
+
+[[test]]
+name = "where_on_relationship_multiple_conditions"
+description = "Filter by relationship and node properties"
+[test.setup]
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2010, close: true}]->(b:Person {name: 'Bob', age: 30})",
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2015, close: false}]->(c:Person {name: 'Charlie', age: 25})",
+]
+[test.query]
+cypher = "MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person) WHERE r.since > 2005 AND b.age > 28 RETURN b.name"
+[test.expected]
+row_count = 1
+columns = ["b.name"]

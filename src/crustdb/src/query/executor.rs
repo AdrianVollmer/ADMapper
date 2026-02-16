@@ -2412,6 +2412,33 @@ mod tests {
         assert_eq!(result.rows.len(), 2); // Bob and Charlie
     }
 
+    #[test]
+    fn test_single_hop_where_on_relationship() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create relationships with different 'since' properties
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2010}]->(b:Person {name: 'Bob'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2000}]->(c:Person {name: 'Charlie'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Filter by relationship property
+        let result = execute(
+            &parse("MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person) WHERE r.since > 2005 RETURN b.name").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Only Bob (since: 2010 > 2005), not Charlie (since: 2000 < 2005)
+        assert_eq!(result.rows.len(), 1);
+    }
+
     // M6: Variable-length pattern tests
     #[test]
     fn test_variable_length_basic() {
