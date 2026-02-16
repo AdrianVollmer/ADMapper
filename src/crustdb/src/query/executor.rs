@@ -60,13 +60,24 @@ fn execute_create(
     while i < elements.len() {
         match &elements[i] {
             PatternElement::Node(node_pattern) => {
-                // Create the node
-                let node_id = create_node(node_pattern, storage, stats)?;
+                // Check if this variable is already bound
+                let node_id = if let Some(ref var) = node_pattern.variable {
+                    if let Some(&existing_id) = bindings.get(var) {
+                        // Variable already bound - use existing node
+                        existing_id
+                    } else {
+                        // Create new node and bind it
+                        let id = create_node(node_pattern, storage, stats)?;
+                        bindings.insert(var.clone(), id);
+                        id
+                    }
+                } else {
+                    // Anonymous node - always create
+                    create_node(node_pattern, storage, stats)?
+                };
 
-                // Bind variable if present
-                if let Some(ref var) = node_pattern.variable {
-                    bindings.insert(var.clone(), node_id);
-                }
+                // Store for relationship lookup (even if we didn't create it)
+                let _ = node_id;
 
                 i += 1;
             }
@@ -83,20 +94,28 @@ fn execute_create(
                 }
 
                 // Get source node ID from previous node
-                let source_id = get_last_node_id(&elements[..i], &bindings)?;
+                let source_id = get_node_id(&elements[i - 1], &bindings)?;
 
-                // Create the target node
+                // Get or create the target node
                 let target_node = match &elements[i + 1] {
                     PatternElement::Node(np) => np,
                     _ => return Err(Error::Cypher("Relationship must be followed by a node".into())),
                 };
 
-                let target_id = create_node(target_node, storage, stats)?;
-
-                // Bind target variable if present
-                if let Some(ref var) = target_node.variable {
-                    bindings.insert(var.clone(), target_id);
-                }
+                let target_id = if let Some(ref var) = target_node.variable {
+                    if let Some(&existing_id) = bindings.get(var) {
+                        // Variable already bound - use existing node
+                        existing_id
+                    } else {
+                        // Create new node and bind it
+                        let id = create_node(target_node, storage, stats)?;
+                        bindings.insert(var.clone(), id);
+                        id
+                    }
+                } else {
+                    // Anonymous node - always create
+                    create_node(target_node, storage, stats)?
+                };
 
                 // Create the relationship
                 create_relationship(rel_pattern, source_id, target_id, storage, stats)?;
@@ -110,22 +129,22 @@ fn execute_create(
     Ok(())
 }
 
-/// Get the ID of the last node in a pattern slice.
-fn get_last_node_id(elements: &[PatternElement], bindings: &HashMap<String, i64>) -> Result<i64> {
-    // Find the last node in the slice
-    for elem in elements.iter().rev() {
-        if let PatternElement::Node(np) = elem {
+/// Get the ID of a node from a pattern element.
+fn get_node_id(element: &PatternElement, bindings: &HashMap<String, i64>) -> Result<i64> {
+    match element {
+        PatternElement::Node(np) => {
             if let Some(ref var) = np.variable {
                 if let Some(&id) = bindings.get(var) {
                     return Ok(id);
                 }
             }
-            // Anonymous node - this shouldn't happen in well-formed patterns
-            // but we need to handle it
-            return Err(Error::Cypher("Cannot reference anonymous node in relationship".into()));
+            // Anonymous node or unbound variable
+            Err(Error::Cypher("Cannot reference unbound node in relationship".into()))
+        }
+        PatternElement::Relationship(_) => {
+            Err(Error::Cypher("Expected node, found relationship".into()))
         }
     }
-    Err(Error::Cypher("No source node for relationship".into()))
 }
 
 /// Create a node from a node pattern.
