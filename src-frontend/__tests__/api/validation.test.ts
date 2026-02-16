@@ -261,7 +261,7 @@ describe("isQueryHistoryEntry", () => {
       isQueryHistoryEntry({
         id: "1",
         name: "Test Query",
-        query: "?[x] := x = 1",
+        query: "MATCH (n:Node) RETURN n",
         timestamp: 1234567890,
         result_count: 5,
       })
@@ -273,7 +273,7 @@ describe("isQueryHistoryEntry", () => {
       isQueryHistoryEntry({
         id: "1",
         name: "Test",
-        query: "?[x]",
+        query: "RETURN 1",
         timestamp: 123,
         result_count: null,
       })
@@ -285,7 +285,7 @@ describe("isQueryHistoryEntry", () => {
       isQueryHistoryEntry({
         id: "1",
         name: "Test",
-        query: "?[x]",
+        query: "RETURN 1",
         result_count: null,
       })
     ).toBe(false);
@@ -301,7 +301,7 @@ describe("isPaginatedResponse", () => {
     expect(
       isPaginatedResponse(
         {
-          entries: [{ id: "1", name: "Q", query: "?", timestamp: 1, result_count: null }],
+          entries: [{ id: "1", name: "Q", query: "RETURN 1", timestamp: 1, result_count: null }],
           total: 1,
           page: 1,
           per_page: 10,

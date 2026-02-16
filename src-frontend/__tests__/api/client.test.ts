@@ -276,7 +276,7 @@ describe("POST /api/graph/query", () => {
     );
 
     const result = await api.post<QueryResponse>("/api/graph/query", {
-      query: "?[x] := x = 1 + 1",
+      query: "MATCH (n:Node) RETURN n + 1",
       extract_graph: false,
     });
 
@@ -315,7 +315,7 @@ describe("POST /api/graph/query", () => {
     );
 
     const result = await api.post<QueryResponse>("/api/graph/query", {
-      query: "?[id] := *nodes[id, _, 'User', _]",
+      query: "MATCH (n:Node) WHERE n.node_type = 'User' RETURN n.object_id",
       extract_graph: true,
     });
 
@@ -337,7 +337,7 @@ describe("Query History API", () => {
             {
               id: "1",
               name: "Test Query",
-              query: "?[x] := x = 1",
+              query: "MATCH (n:Node) RETURN n",
               timestamp: Date.now(),
               result_count: 1,
             },
@@ -368,7 +368,7 @@ describe("Query History API", () => {
 
     const result = await api.post("/api/query-history", {
       name: "New Query",
-      query: "?[x] := x = 1",
+      query: "MATCH (n:Node) RETURN n",
       result_count: 1,
     });
 
