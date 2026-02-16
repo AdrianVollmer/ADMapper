@@ -253,6 +253,13 @@ for row in results.rows {
 }
 ```
 
+## Test cases
+
+We can vendor test cases from here: <https://github.com/aplbrain/grand-cypher>
+
+Make sure to respect the license. We should convert these to language agnostic
+test cases.
+
 ## License
 
 MIT
