@@ -107,7 +107,7 @@ CREATE (charlie:Person:Actor {name: 'Charlie Sheen'}),
 - [x] Relationship pattern parser
 - [x] CREATE executor
 
-### M3: Simple MATCH Queries [open]
+### M3: Simple MATCH Queries [done]
 
 Parse and execute basic read queries.
 
@@ -121,12 +121,12 @@ MATCH (n:Person) RETURN n.name, n.age
 MATCH (n:Person {name: 'Alice'}) RETURN n
 ```
 
-- [ ] MATCH clause parser
-- [ ] RETURN clause parser
-- [ ] Node scan operator
-- [ ] Label filter operator
-- [ ] Property filter operator
-- [ ] Projection operator
+- [x] MATCH clause parser
+- [x] RETURN clause parser
+- [x] Node scan operator
+- [x] Label filter operator
+- [x] Property filter operator
+- [x] Projection operator
 
 ### M4: WHERE Clause [open]
 

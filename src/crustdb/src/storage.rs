@@ -302,6 +302,24 @@ impl SqliteStorage {
         Ok(affected > 0)
     }
 
+    /// Scan all nodes in the database.
+    pub fn scan_all_nodes(&self) -> Result<Vec<Node>> {
+        let mut stmt = self.conn.prepare("SELECT id FROM nodes")?;
+
+        let node_ids: Vec<i64> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let mut nodes = Vec::with_capacity(node_ids.len());
+        for id in node_ids {
+            if let Some(node) = self.get_node(id)? {
+                nodes.push(node);
+            }
+        }
+
+        Ok(nodes)
+    }
+
     /// Find nodes by label.
     pub fn find_nodes_by_label(&self, label: &str) -> Result<Vec<Node>> {
         let mut stmt = self.conn.prepare(

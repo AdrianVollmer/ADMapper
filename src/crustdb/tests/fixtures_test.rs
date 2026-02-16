@@ -154,7 +154,30 @@ fn run_test_case(test: &TestCase) {
         );
     }
 
-    // TODO: Check row results when MATCH is implemented
+    // Check row_count (for MATCH queries)
+    if let Some(expected) = test.expected.row_count {
+        assert_eq!(
+            result.rows.len(), expected,
+            "Test '{}': row_count mismatch (expected {}, got {})",
+            test.name, expected, result.rows.len()
+        );
+    }
+
+    // Check columns (for MATCH queries)
+    if let Some(ref expected_cols) = test.expected.columns {
+        assert_eq!(
+            result.columns.len(), expected_cols.len(),
+            "Test '{}': column count mismatch",
+            test.name
+        );
+        for col in expected_cols {
+            assert!(
+                result.columns.contains(col),
+                "Test '{}': missing expected column '{}'",
+                test.name, col
+            );
+        }
+    }
 }
 
 /// Convert TOML value to Cypher property string.
@@ -262,4 +285,72 @@ fn test_m2_create_relationship() {
     ).unwrap();
     assert_eq!(result.stats.nodes_created, 2);
     assert_eq!(result.stats.relationships_created, 1);
+}
+
+// =============================================================================
+// M3: MATCH Tests
+// =============================================================================
+
+#[test]
+fn test_m3_match_fixtures() {
+    let fixtures = find_fixtures("m3_match");
+    assert!(!fixtures.is_empty(), "No M3 fixtures found");
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for fixture_path in &fixtures {
+        let fixture = load_fixture(fixture_path);
+
+        for test in &fixture.test {
+            let result = std::panic::catch_unwind(|| {
+                run_test_case(test);
+            });
+
+            match result {
+                Ok(()) => {
+                    passed += 1;
+                    println!("  ✓ {}", test.name);
+                }
+                Err(e) => {
+                    failed += 1;
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown error".to_string()
+                    };
+                    println!("  ✗ {}: {}", test.name, msg);
+                }
+            }
+        }
+    }
+
+    println!("\nM3 MATCH: {} passed, {} failed", passed, failed);
+
+    if failed > 0 {
+        panic!("{} test(s) failed", failed);
+    }
+}
+
+// Individual M3 tests for debugging
+#[test]
+fn test_m3_match_all_nodes() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+
+    let result = db.execute("MATCH (n) RETURN n").unwrap();
+    assert_eq!(result.rows.len(), 2);
+}
+
+#[test]
+fn test_m3_match_by_label() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+    db.execute("CREATE (n:Movie {title: 'Matrix'})").unwrap();
+
+    let result = db.execute("MATCH (n:Person) RETURN n").unwrap();
+    assert_eq!(result.rows.len(), 1);
 }
