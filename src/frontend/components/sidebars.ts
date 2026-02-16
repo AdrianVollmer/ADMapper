@@ -148,7 +148,7 @@ const MAIN_ACTIONS = [
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <circle cx="12" cy="12" r="4"/>
       <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
-      <path d="M12 6l-2-2m2 2l2-2M12 18l-2 2m2-2l2 2M6 12l-2-2m2 2l-2 2M18 12l2-2m-2 2l2 2"/>
+      <path d="M12 2l-2 2m2-2l2 2M12 22l-2-2m2 2l2-2M2 12l2-2m-2 2l2 2M22 12l-2-2m2 2l-2 2"/>
     </svg>`,
     tooltip: "Incoming",
     countKey: "incoming",
@@ -159,7 +159,7 @@ const MAIN_ACTIONS = [
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <circle cx="12" cy="12" r="4"/>
       <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
-      <path d="M12 2l-2 2m2-2l2 2M12 22l-2-2m2 2l2-2M2 12l2-2m-2 2l2 2M22 12l-2-2m2 2l-2 2"/>
+      <path d="M12 6l-2-2m2 2l2-2M12 18l-2 2m2-2l2 2M6 12l-2-2m2 2l-2 2M18 12l2-2m-2 2l2 2"/>
     </svg>`,
     tooltip: "Outgoing",
     countKey: "outgoing",
@@ -876,6 +876,52 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   // Async path check for users without obvious high-value indicators
   if (needsPathCheck && attrs.properties) {
     checkPathToHighValue(nodeId, attrs.properties);
+  }
+
+  // Fetch and display connection counts
+  fetchNodeCounts(nodeId);
+}
+
+/** Node counts response from API */
+interface NodeCountsResponse {
+  incoming: number;
+  outgoing: number;
+  adminTo: number;
+  memberOf: number;
+  members: number;
+}
+
+/** Fetch and display connection counts for a node */
+async function fetchNodeCounts(nodeId: string): Promise<void> {
+  try {
+    const counts = await api.get<NodeCountsResponse>(`/api/graph/node/${encodeURIComponent(nodeId)}/counts`);
+
+    // Check if we're still showing the same node
+    if (appState.selectedNodeId !== nodeId) return;
+
+    // Map API field names to countKey values
+    const countMap: Record<string, number> = {
+      incoming: counts.incoming,
+      outgoing: counts.outgoing,
+      adminTo: counts.adminTo,
+      memberOf: counts.memberOf,
+      members: counts.members,
+    };
+
+    // Update all count badges
+    for (const [key, count] of Object.entries(countMap)) {
+      const badge = document.querySelector<HTMLSpanElement>(`.action-count[data-count-key="${key}"]`);
+      if (badge) {
+        if (count > 0) {
+          badge.textContent = count > 99 ? "99+" : String(count);
+          badge.hidden = false;
+        } else {
+          badge.hidden = true;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Failed to fetch node counts:", err);
   }
 }
 
