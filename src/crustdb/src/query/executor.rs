@@ -142,11 +142,22 @@ fn execute_create(
 // MATCH Execution
 // =============================================================================
 
+/// A path through the graph (sequence of node IDs and edge IDs).
+#[derive(Debug, Clone)]
+struct Path {
+    node_ids: Vec<i64>,
+    edge_ids: Vec<i64>,
+}
+
 /// A binding represents a matched graph element (node or edge) with its variable name.
 #[derive(Debug, Clone)]
 struct Binding {
     nodes: HashMap<String, Node>,
     edges: HashMap<String, Edge>,
+    /// Paths bound to variables (for `p = (a)-[*]->(b)` syntax).
+    paths: HashMap<String, Path>,
+    /// Edge lists for variable-length relationship bindings.
+    edge_lists: HashMap<String, Vec<Edge>>,
 }
 
 impl Binding {
@@ -154,6 +165,8 @@ impl Binding {
         Binding {
             nodes: HashMap::new(),
             edges: HashMap::new(),
+            paths: HashMap::new(),
+            edge_lists: HashMap::new(),
         }
     }
 
@@ -164,6 +177,16 @@ impl Binding {
 
     fn with_edge(mut self, var: &str, edge: Edge) -> Self {
         self.edges.insert(var.to_string(), edge);
+        self
+    }
+
+    fn with_path(mut self, var: &str, path: Path) -> Self {
+        self.paths.insert(var.to_string(), path);
+        self
+    }
+
+    fn with_edge_list(mut self, var: &str, edges: Vec<Edge>) -> Self {
+        self.edge_lists.insert(var.to_string(), edges);
         self
     }
 }
@@ -360,6 +383,16 @@ fn execute_single_hop_pattern(pattern: &Pattern, storage: &SqliteStorage) -> Res
     Ok(bindings)
 }
 
+/// State for BFS traversal with path tracking.
+#[derive(Clone)]
+struct TraversalState {
+    node_id: i64,
+    /// Node IDs in the path (including current).
+    path_nodes: Vec<i64>,
+    /// Edges traversed to reach this state.
+    path_edges: Vec<Edge>,
+}
+
 /// Execute a variable-length relationship pattern match using BFS.
 fn execute_variable_length_pattern(
     pattern: &Pattern,
@@ -381,6 +414,8 @@ fn execute_variable_length_pattern(
 
     let source_var = source_pattern.variable.as_deref().unwrap_or("_src");
     let target_var = target_pattern.variable.as_deref().unwrap_or("_tgt");
+    let rel_var = rel_pattern.variable.as_deref();
+    let path_var = pattern.path_variable.as_deref();
 
     // Get length constraints
     let length_spec = rel_pattern
@@ -389,7 +424,7 @@ fn execute_variable_length_pattern(
         .ok_or_else(|| Error::Cypher("Variable-length pattern requires length spec".into()))?;
 
     let min_depth = length_spec.min.unwrap_or(1) as usize;
-    let max_depth = length_spec.max.unwrap_or(100) as usize; // Default max to prevent infinite traversal
+    let max_depth = length_spec.max.unwrap_or(100) as usize;
 
     // Scan source nodes
     let source_nodes = scan_nodes(source_pattern, storage)?;
@@ -399,28 +434,49 @@ fn execute_variable_length_pattern(
 
     // BFS from each source node
     for source_node in source_nodes {
-        // Track (node_id, depth) pairs to visit
-        let mut queue: VecDeque<(i64, usize)> = VecDeque::new();
-        // Track visited (node_id, depth) to allow visiting same node at different depths
-        // but prevent cycles at the same depth level
-        let mut visited_at_depth: HashSet<(i64, usize)> = HashSet::new();
-        // Track which target nodes we've already added for this source (to avoid duplicates)
+        let mut queue: VecDeque<TraversalState> = VecDeque::new();
+        // Track visited nodes per path to avoid cycles within a single path
         let mut found_targets: HashSet<i64> = HashSet::new();
 
-        queue.push_back((source_node.id, 0));
-        visited_at_depth.insert((source_node.id, 0));
+        queue.push_back(TraversalState {
+            node_id: source_node.id,
+            path_nodes: vec![source_node.id],
+            path_edges: vec![],
+        });
 
-        while let Some((current_id, depth)) = queue.pop_front() {
+        while let Some(state) = queue.pop_front() {
+            let depth = state.path_edges.len();
+
             // If we've reached a valid depth, check if current node matches target pattern
             if depth >= min_depth && depth <= max_depth {
-                if let Some(target_node) = storage.get_node(current_id)? {
+                if let Some(target_node) = storage.get_node(state.node_id)? {
                     if node_matches_pattern(&target_node, target_pattern) {
                         // Avoid duplicate results for same source-target pair
-                        if !found_targets.contains(&current_id) && current_id != source_node.id {
-                            found_targets.insert(current_id);
-                            let binding = Binding::new()
+                        if !found_targets.contains(&state.node_id)
+                            && state.node_id != source_node.id
+                        {
+                            found_targets.insert(state.node_id);
+
+                            let mut binding = Binding::new()
                                 .with_node(source_var, source_node.clone())
                                 .with_node(target_var, target_node);
+
+                            // Add path variable if requested
+                            if let Some(pv) = path_var {
+                                binding = binding.with_path(
+                                    pv,
+                                    Path {
+                                        node_ids: state.path_nodes.clone(),
+                                        edge_ids: state.path_edges.iter().map(|e| e.id).collect(),
+                                    },
+                                );
+                            }
+
+                            // Add edge list if relationship variable is specified
+                            if let Some(rv) = rel_var {
+                                binding = binding.with_edge_list(rv, state.path_edges.clone());
+                            }
+
                             bindings.push(binding);
                         }
                     }
@@ -434,11 +490,11 @@ fn execute_variable_length_pattern(
 
             // Get edges from current node
             let edges = match rel_pattern.direction {
-                Direction::Outgoing => storage.find_outgoing_edges(current_id)?,
-                Direction::Incoming => storage.find_incoming_edges(current_id)?,
+                Direction::Outgoing => storage.find_outgoing_edges(state.node_id)?,
+                Direction::Incoming => storage.find_incoming_edges(state.node_id)?,
                 Direction::Both => {
-                    let mut edges = storage.find_outgoing_edges(current_id)?;
-                    edges.extend(storage.find_incoming_edges(current_id)?);
+                    let mut edges = storage.find_outgoing_edges(state.node_id)?;
+                    edges.extend(storage.find_incoming_edges(state.node_id)?);
                     edges
                 }
             };
@@ -459,7 +515,7 @@ fn execute_variable_length_pattern(
                     Direction::Outgoing => edge.target,
                     Direction::Incoming => edge.source,
                     Direction::Both => {
-                        if edge.source == current_id {
+                        if edge.source == state.node_id {
                             edge.target
                         } else {
                             edge.source
@@ -467,13 +523,22 @@ fn execute_variable_length_pattern(
                     }
                 };
 
-                let next_depth = depth + 1;
-
-                // Visit if we haven't visited this node at this depth
-                if !visited_at_depth.contains(&(next_id, next_depth)) {
-                    visited_at_depth.insert((next_id, next_depth));
-                    queue.push_back((next_id, next_depth));
+                // Avoid cycles within the same path
+                if state.path_nodes.contains(&next_id) {
+                    continue;
                 }
+
+                let mut new_path_nodes = state.path_nodes.clone();
+                new_path_nodes.push(next_id);
+
+                let mut new_path_edges = state.path_edges.clone();
+                new_path_edges.push(edge);
+
+                queue.push_back(TraversalState {
+                    node_id: next_id,
+                    path_nodes: new_path_nodes,
+                    path_edges: new_path_edges,
+                });
             }
         }
     }
@@ -881,6 +946,18 @@ fn evaluate_return_item_with_bindings(expr: &Expression, binding: &Binding) -> R
                     edge_type: edge.edge_type.clone(),
                     properties: edge.properties.clone(),
                 })
+            } else if let Some(path) = binding.paths.get(name) {
+                Ok(ResultValue::Path {
+                    nodes: path.node_ids.clone(),
+                    edges: path.edge_ids.clone(),
+                })
+            } else if let Some(edge_list) = binding.edge_lists.get(name) {
+                // Return edge list as a list of edge property maps
+                let list: Vec<PropertyValue> = edge_list
+                    .iter()
+                    .map(|e| PropertyValue::Map(e.properties.clone()))
+                    .collect();
+                Ok(ResultValue::Property(PropertyValue::List(list)))
             } else {
                 Err(Error::Cypher(format!("Unknown variable: {}", name)))
             }
@@ -2479,5 +2556,68 @@ mod tests {
         // Bob (1 hop via KNOWS) and Dave (2 hops via KNOWS->KNOWS)
         // NOT Charlie (Bob-WORKS_WITH->Charlie doesn't match KNOWS)
         assert_eq!(result.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_variable_length_path_variable() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a chain: Alice -> Bob -> Charlie
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Match with path variable
+        let result = execute(
+            &parse("MATCH p = (a:Person {name: 'Alice'})-[:KNOWS*]->(c:Person) RETURN p").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 2); // Two paths: Alice->Bob and Alice->Bob->Charlie
+        assert!(result.columns.contains(&"p".to_string()));
+
+        // Verify path result type
+        for row in &result.rows {
+            match row.values.get("p") {
+                Some(ResultValue::Path { nodes, edges }) => {
+                    assert!(nodes.len() >= 2); // At least source and target
+                    assert_eq!(edges.len(), nodes.len() - 1);
+                }
+                _ => panic!("Expected Path result"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_variable_length_edge_list() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a chain with relationship properties
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2010}]->(b:Person {name: 'Bob'})-[:KNOWS {since: 2015}]->(c:Person {name: 'Charlie'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Match with relationship list variable
+        let result = execute(
+            &parse("MATCH (a:Person {name: 'Alice'})-[r:KNOWS*2]->(c:Person) RETURN r").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 1); // One path of exactly length 2
+        assert!(result.columns.contains(&"r".to_string()));
+
+        // Verify edge list result
+        match result.rows[0].values.get("r") {
+            Some(ResultValue::Property(PropertyValue::List(edges))) => {
+                assert_eq!(edges.len(), 2); // Two edges in the path
+            }
+            _ => panic!("Expected list of edges"),
+        }
     }
 }

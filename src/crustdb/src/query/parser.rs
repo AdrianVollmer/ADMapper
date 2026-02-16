@@ -112,6 +112,8 @@ pub struct OrderByItem {
 #[derive(Debug, Clone)]
 pub struct Pattern {
     pub elements: Vec<PatternElement>,
+    /// Path variable name for `p = (a)-[*]->(b)` syntax.
+    pub path_variable: Option<String>,
 }
 
 /// An element in a pattern.
@@ -395,8 +397,11 @@ fn build_merge_statement(pair: Pair<Rule>) -> Result<Statement> {
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::PatternPart => {
-                let elements = build_pattern_part(inner)?;
-                pattern = Some(Pattern { elements });
+                let (path_variable, elements) = build_pattern_part(inner)?;
+                pattern = Some(Pattern {
+                    elements,
+                    path_variable,
+                });
             }
             Rule::MergeAction => {
                 let (is_create, set_clause) = build_merge_action(inner)?;
@@ -715,27 +720,38 @@ fn build_skip_or_limit(pair: Pair<Rule>) -> Result<u64> {
 /// Build a pattern from a Pattern rule.
 fn build_pattern(pair: Pair<Rule>) -> Result<Pattern> {
     let mut elements = Vec::new();
+    let mut path_variable = None;
 
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::PatternPart {
-            let part_elements = build_pattern_part(inner)?;
+            let (path_var, part_elements) = build_pattern_part(inner)?;
+            if path_var.is_some() {
+                path_variable = path_var;
+            }
             elements.extend(part_elements);
         }
     }
 
-    Ok(Pattern { elements })
+    Ok(Pattern {
+        elements,
+        path_variable,
+    })
 }
 
 /// Build pattern elements from a PatternPart.
-fn build_pattern_part(pair: Pair<Rule>) -> Result<Vec<PatternElement>> {
+/// Returns (path_variable, elements).
+fn build_pattern_part(pair: Pair<Rule>) -> Result<(Option<String>, Vec<PatternElement>)> {
+    let mut path_variable = None;
+
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::AnonymousPatternPart => {
-                return build_anonymous_pattern_part(inner);
+                let elements = build_anonymous_pattern_part(inner)?;
+                return Ok((path_variable, elements));
             }
             Rule::Variable => {
-                // Named pattern (p = ...), ignore the name for now
-                continue;
+                // Named pattern (p = ...)
+                path_variable = Some(extract_variable(inner)?);
             }
             _ => {}
         }

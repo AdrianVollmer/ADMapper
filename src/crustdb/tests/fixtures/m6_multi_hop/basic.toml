@@ -95,3 +95,27 @@ cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS*..2]->(x:Person) RETURN x.nam
 [test.expected]
 columns = ["x.name"]
 row_count = 2
+
+
+[[test]]
+name = "path_variable"
+description = "Return path as variable"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})"]
+[test.query]
+cypher = "MATCH p = (a:Person {name: 'Alice'})-[:KNOWS*]->(c:Person) RETURN p"
+[test.expected]
+columns = ["p"]
+row_count = 2
+
+
+[[test]]
+name = "relationship_list_variable"
+description = "Return relationship list as variable"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2010}]->(b:Person {name: 'Bob'})-[:KNOWS {since: 2015}]->(c:Person {name: 'Charlie'})"]
+[test.query]
+cypher = "MATCH (a:Person {name: 'Alice'})-[r:KNOWS*2]->(c:Person) RETURN r"
+[test.expected]
+columns = ["r"]
+row_count = 1
