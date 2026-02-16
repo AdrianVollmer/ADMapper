@@ -9,4 +9,6 @@ path = "src/main.rs"
 
 [dependencies]
 crustdb = { path = ".." }
+clap = { version = "4", features = ["derive"] }
 rustyline = "15"
+serde_json = "1"

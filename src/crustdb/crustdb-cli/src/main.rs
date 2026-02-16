@@ -1,22 +1,32 @@
 //! CrustDB CLI - Interactive Cypher shell
 
+use clap::Parser;
 use crustdb::{Database, ResultValue};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
-use std::env;
+use std::fs;
 use std::process;
 
+#[derive(Parser)]
+#[command(name = "crustdb")]
+#[command(about = "CrustDB - Interactive Cypher Shell", long_about = None)]
+struct Args {
+    /// Path to the SQLite database file
+    database: String,
+
+    /// Execute query string (multiple queries separated by semicolon)
+    #[arg(short = 'q', long = "query", conflicts_with = "file")]
+    query: Option<String>,
+
+    /// Execute queries from file (queries separated by semicolon)
+    #[arg(short = 'f', long = "file", conflicts_with = "query")]
+    file: Option<String>,
+}
+
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let args = Args::parse();
 
-    if args.len() != 2 {
-        eprintln!("Usage: crustdb <database.db>");
-        process::exit(1);
-    }
-
-    let db_path = &args[1];
-
-    let db = match Database::open(db_path) {
+    let db = match Database::open(&args.database) {
         Ok(db) => db,
         Err(e) => {
             eprintln!("Error opening database: {}", e);
@@ -24,6 +34,151 @@ fn main() {
         }
     };
 
+    if let Some(query_string) = args.query {
+        run_batch(&db, &query_string);
+    } else if let Some(file_path) = args.file {
+        match fs::read_to_string(&file_path) {
+            Ok(content) => run_batch(&db, &content),
+            Err(e) => {
+                eprintln!("Error reading file '{}': {}", file_path, e);
+                process::exit(1);
+            }
+        }
+    } else {
+        run_interactive(&db, &args.database);
+    }
+}
+
+/// Run queries in batch mode, outputting JSON-lines.
+fn run_batch(db: &Database, queries: &str) {
+    for query in queries.split(';') {
+        let query = query.trim();
+        if query.is_empty() {
+            continue;
+        }
+
+        match db.execute(query) {
+            Ok(result) => {
+                // Output each row as a JSON line
+                if result.rows.is_empty() {
+                    // For mutations with no results, output stats
+                    let output = serde_json::json!({
+                        "query": query,
+                        "stats": {
+                            "nodes_created": result.stats.nodes_created,
+                            "nodes_deleted": result.stats.nodes_deleted,
+                            "relationships_created": result.stats.relationships_created,
+                            "relationships_deleted": result.stats.relationships_deleted,
+                            "properties_set": result.stats.properties_set,
+                            "labels_added": result.stats.labels_added,
+                        }
+                    });
+                    println!("{}", output);
+                } else {
+                    for row in &result.rows {
+                        let row_json = row_to_json(row, &result.columns);
+                        println!("{}", row_json);
+                    }
+                }
+            }
+            Err(e) => {
+                let output = serde_json::json!({
+                    "query": query,
+                    "error": e.to_string()
+                });
+                println!("{}", output);
+            }
+        }
+    }
+}
+
+/// Convert a row to JSON.
+fn row_to_json(row: &crustdb::Row, columns: &[String]) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+
+    for col in columns {
+        if let Some(val) = row.values.get(col) {
+            obj.insert(col.clone(), result_value_to_json(val));
+        } else {
+            obj.insert(col.clone(), serde_json::Value::Null);
+        }
+    }
+
+    serde_json::Value::Object(obj)
+}
+
+/// Convert a ResultValue to JSON.
+fn result_value_to_json(val: &ResultValue) -> serde_json::Value {
+    match val {
+        ResultValue::Property(prop) => property_to_json(prop),
+        ResultValue::Node {
+            id,
+            labels,
+            properties,
+        } => {
+            serde_json::json!({
+                "_type": "node",
+                "_id": id,
+                "_labels": labels,
+                "properties": properties_to_json(properties)
+            })
+        }
+        ResultValue::Edge {
+            id,
+            source,
+            target,
+            edge_type,
+            properties,
+        } => {
+            serde_json::json!({
+                "_type": "edge",
+                "_id": id,
+                "_source": source,
+                "_target": target,
+                "_edge_type": edge_type,
+                "properties": properties_to_json(properties)
+            })
+        }
+        ResultValue::Path { nodes, edges } => {
+            serde_json::json!({
+                "_type": "path",
+                "nodes": nodes,
+                "edges": edges
+            })
+        }
+    }
+}
+
+/// Convert PropertyValue to JSON.
+fn property_to_json(prop: &crustdb::PropertyValue) -> serde_json::Value {
+    match prop {
+        crustdb::PropertyValue::Null => serde_json::Value::Null,
+        crustdb::PropertyValue::Bool(b) => serde_json::Value::Bool(*b),
+        crustdb::PropertyValue::Integer(n) => serde_json::Value::Number((*n).into()),
+        crustdb::PropertyValue::Float(f) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        crustdb::PropertyValue::String(s) => serde_json::Value::String(s.clone()),
+        crustdb::PropertyValue::List(items) => {
+            serde_json::Value::Array(items.iter().map(property_to_json).collect())
+        }
+        crustdb::PropertyValue::Map(map) => properties_to_json(map),
+    }
+}
+
+/// Convert properties HashMap to JSON object.
+fn properties_to_json(
+    props: &std::collections::HashMap<String, crustdb::PropertyValue>,
+) -> serde_json::Value {
+    let obj: serde_json::Map<String, serde_json::Value> = props
+        .iter()
+        .map(|(k, v)| (k.clone(), property_to_json(v)))
+        .collect();
+    serde_json::Value::Object(obj)
+}
+
+/// Run interactive REPL mode.
+fn run_interactive(db: &Database, db_path: &str) {
     println!("CrustDB - Interactive Cypher Shell");
     println!("Connected to: {}", db_path);
     println!("Type 'exit' or Ctrl-D to quit.\n");
