@@ -181,7 +181,7 @@ MATCH (a)-[r:KNOWS*2]->(b) RETURN r
 - [x] Path construction (`p = ...` syntax)
 - [x] Relationship list binding (`[r:KNOWS*]` returning list)
 
-### M7: Mutation Queries [open]
+### M7: Mutation Queries [done]
 
 UPDATE and DELETE operations.
 
@@ -195,10 +195,10 @@ MATCH (n:Person {name: 'Bob'}) DELETE n
 MATCH (n:Person {name: 'Charlie'}) DETACH DELETE n
 ```
 
-- [ ] SET clause parser
-- [ ] DELETE clause parser
-- [ ] Update operator
-- [ ] Delete operator (with DETACH)
+- [x] SET clause parser
+- [x] DELETE clause parser
+- [x] Update operator
+- [x] Delete operator (with DETACH)
 
 ### M8: Aggregation [open]
 

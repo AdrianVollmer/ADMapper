@@ -1,8 +1,8 @@
 //! Query executor - runs parsed statements against the storage backend.
 
 use super::parser::{
-    CreateClause, Direction, Expression, Literal, MatchClause, NodePattern, Pattern,
-    PatternElement, RelationshipPattern, ReturnClause, Statement,
+    CreateClause, DeleteClause, Direction, Expression, Literal, MatchClause, NodePattern, Pattern,
+    PatternElement, RelationshipPattern, ReturnClause, SetClause, SetItem, Statement,
 };
 use super::{QueryResult, QueryStats, ResultValue, Row};
 use crate::error::{Error, Result};
@@ -220,13 +220,27 @@ fn execute_match(
         bindings
     };
 
-    // Build result based on RETURN clause
-    let return_clause = match_clause
-        .return_clause
-        .as_ref()
-        .ok_or_else(|| Error::Cypher("MATCH requires RETURN clause".into()))?;
+    // Execute SET clause if present
+    if let Some(ref set_clause) = match_clause.set_clause {
+        execute_set(&bindings, set_clause, storage, stats)?;
+    }
 
-    build_match_result_from_bindings(bindings, return_clause, stats)
+    // Execute DELETE clause if present
+    if let Some(ref delete_clause) = match_clause.delete_clause {
+        execute_delete(&bindings, delete_clause, storage, stats)?;
+    }
+
+    // Build result based on RETURN clause (if present)
+    if let Some(ref return_clause) = match_clause.return_clause {
+        build_match_result_from_bindings(bindings, return_clause, stats)
+    } else {
+        // No RETURN clause - return empty result (mutation only)
+        Ok(QueryResult {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            stats: stats.clone(),
+        })
+    }
 }
 
 /// Check if pattern is a single node pattern.
@@ -1327,6 +1341,109 @@ fn literal_to_json(lit: &Literal) -> Result<serde_json::Value> {
             .ok_or_else(|| Error::Cypher(format!("Invalid float value: {}", f)))?,
         Literal::String(s) => serde_json::Value::String(s.clone()),
     })
+}
+
+// =============================================================================
+// Mutation Execution (M7)
+// =============================================================================
+
+/// Execute a SET clause.
+fn execute_set(
+    bindings: &[Binding],
+    set_clause: &SetClause,
+    storage: &SqliteStorage,
+    stats: &mut QueryStats,
+) -> Result<()> {
+    for binding in bindings {
+        for item in &set_clause.items {
+            match item {
+                SetItem::Property {
+                    variable,
+                    property,
+                    value,
+                } => {
+                    // Evaluate the value expression
+                    let prop_value = evaluate_expression_with_bindings(value, binding)?;
+
+                    // Find the node to update
+                    if let Some(node) = binding.nodes.get(variable) {
+                        storage.update_node_property(node.id, property, &prop_value)?;
+                        stats.properties_set += 1;
+                    } else {
+                        return Err(Error::Cypher(format!(
+                            "Variable '{}' not found in binding",
+                            variable
+                        )));
+                    }
+                }
+                SetItem::Labels { variable, labels } => {
+                    // Find the node to add labels to
+                    if let Some(node) = binding.nodes.get(variable) {
+                        for label in labels {
+                            storage.add_node_label(node.id, label)?;
+                            stats.labels_added += 1;
+                        }
+                    } else {
+                        return Err(Error::Cypher(format!(
+                            "Variable '{}' not found in binding",
+                            variable
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Execute a DELETE clause.
+fn execute_delete(
+    bindings: &[Binding],
+    delete_clause: &DeleteClause,
+    storage: &SqliteStorage,
+    stats: &mut QueryStats,
+) -> Result<()> {
+    for binding in bindings {
+        for expr in &delete_clause.expressions {
+            match expr {
+                Expression::Variable(name) => {
+                    // Check if it's a node
+                    if let Some(node) = binding.nodes.get(name) {
+                        if delete_clause.detach {
+                            // DETACH DELETE - delete node and all its edges
+                            storage.delete_node(node.id)?;
+                            stats.nodes_deleted += 1;
+                        } else {
+                            // Regular DELETE - fail if node has edges
+                            if storage.has_edges(node.id)? {
+                                return Err(Error::Cypher(format!(
+                                    "Cannot delete node {} because it still has relationships. Use DETACH DELETE to delete it along with its relationships.",
+                                    node.id
+                                )));
+                            }
+                            storage.delete_node(node.id)?;
+                            stats.nodes_deleted += 1;
+                        }
+                    } else if let Some(edge) = binding.edges.get(name) {
+                        // Delete edge
+                        storage.delete_edge(edge.id)?;
+                        stats.relationships_deleted += 1;
+                    } else {
+                        return Err(Error::Cypher(format!(
+                            "Variable '{}' not found in binding",
+                            name
+                        )));
+                    }
+                }
+                _ => {
+                    return Err(Error::Cypher(
+                        "DELETE expressions must be simple variables".into(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -2646,5 +2763,227 @@ mod tests {
             }
             _ => panic!("Expected list of edges"),
         }
+    }
+
+    // ==========================================================================
+    // M7: SET and DELETE tests
+    // ==========================================================================
+
+    #[test]
+    fn test_set_property() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a node
+        execute(
+            &parse("CREATE (n:Person {name: 'Alice', age: 30})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Set property
+        execute(
+            &parse("MATCH (n:Person {name: 'Alice'}) SET n.age = 31").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Verify the property was updated
+        let result = execute(
+            &parse("MATCH (n:Person {name: 'Alice'}) RETURN n.age").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        match result.rows[0].values.get("n.age") {
+            Some(ResultValue::Property(PropertyValue::Integer(31))) => {}
+            other => panic!("Expected age 31, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_set_new_property() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a node
+        execute(
+            &parse("CREATE (n:Person {name: 'Alice'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Add a new property
+        execute(
+            &parse("MATCH (n:Person {name: 'Alice'}) SET n.email = 'alice@example.com'").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Verify the property was added
+        let result = execute(
+            &parse("MATCH (n:Person {name: 'Alice'}) RETURN n.email").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        match result.rows[0].values.get("n.email") {
+            Some(ResultValue::Property(PropertyValue::String(s))) => {
+                assert_eq!(s, "alice@example.com");
+            }
+            other => panic!("Expected email string, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_set_label() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a node
+        execute(
+            &parse("CREATE (n:Person {name: 'Alice'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Add a label
+        execute(
+            &parse("MATCH (n:Person {name: 'Alice'}) SET n:Employee").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Verify the label was added by matching on both labels
+        let result = execute(
+            &parse("MATCH (n:Person:Employee) RETURN n.name").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_delete_node_no_edges() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a node
+        execute(
+            &parse("CREATE (n:Person {name: 'Alice'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Delete the node
+        execute(
+            &parse("MATCH (n:Person {name: 'Alice'}) DELETE n").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Verify the node was deleted
+        let result = execute(
+            &parse("MATCH (n:Person {name: 'Alice'}) RETURN n").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 0);
+    }
+
+    #[test]
+    fn test_delete_node_with_edges_fails() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a node with relationships
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Try to delete node with relationships (should fail)
+        let result = execute(
+            &parse("MATCH (n:Person {name: 'Alice'}) DELETE n").unwrap(),
+            &storage,
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("still has relationships"));
+    }
+
+    #[test]
+    fn test_detach_delete_node() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a node with relationships
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Detach delete should succeed
+        execute(
+            &parse("MATCH (n:Person {name: 'Alice'}) DETACH DELETE n").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Verify Alice is gone
+        let result = execute(
+            &parse("MATCH (n:Person {name: 'Alice'}) RETURN n").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        assert_eq!(result.rows.len(), 0);
+
+        // Verify Bob still exists
+        let result = execute(
+            &parse("MATCH (n:Person {name: 'Bob'}) RETURN n").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        assert_eq!(result.rows.len(), 1);
+
+        // Verify relationship is gone
+        let result = execute(
+            &parse("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        assert_eq!(result.rows.len(), 0);
+    }
+
+    #[test]
+    fn test_delete_relationship() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a relationship
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Delete the relationship
+        execute(
+            &parse("MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person) DELETE r").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Verify relationship is gone
+        let result = execute(
+            &parse("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        assert_eq!(result.rows.len(), 0);
+
+        // Verify nodes still exist
+        let result = execute(&parse("MATCH (n:Person) RETURN n.name").unwrap(), &storage).unwrap();
+        assert_eq!(result.rows.len(), 2);
     }
 }

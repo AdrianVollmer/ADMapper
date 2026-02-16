@@ -300,6 +300,77 @@ impl SqliteStorage {
         Ok(affected > 0)
     }
 
+    /// Check if a node has any connected edges.
+    pub fn has_edges(&self, node_id: i64) -> Result<bool> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM edges WHERE source_id = ?1 OR target_id = ?1",
+            params![node_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Update a single property on a node.
+    pub fn update_node_property(
+        &self,
+        node_id: i64,
+        property: &str,
+        value: &PropertyValue,
+    ) -> Result<bool> {
+        // Get current properties
+        let current: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT properties FROM nodes WHERE id = ?1",
+                params![node_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let Some(current_json) = current else {
+            return Ok(false); // Node doesn't exist
+        };
+
+        // Parse, update, and serialize
+        let mut properties: std::collections::HashMap<String, PropertyValue> =
+            serde_json::from_str(&current_json)?;
+        properties.insert(property.to_string(), value.clone());
+        let new_json = serde_json::to_string(&properties)?;
+
+        let affected = self.conn.execute(
+            "UPDATE nodes SET properties = ?1 WHERE id = ?2",
+            params![new_json, node_id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Add a label to a node.
+    pub fn add_node_label(&self, node_id: i64, label: &str) -> Result<bool> {
+        // Check if node exists
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM nodes WHERE id = ?1",
+                params![node_id],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+
+        if !exists {
+            return Ok(false);
+        }
+
+        let label_id = self.get_or_create_label(label)?;
+
+        // Try to insert (ignore if already exists)
+        self.conn.execute(
+            "INSERT OR IGNORE INTO node_label_map (node_id, label_id) VALUES (?1, ?2)",
+            params![node_id, label_id],
+        )?;
+        Ok(true)
+    }
+
     /// Scan all nodes in the database.
     pub fn scan_all_nodes(&self) -> Result<Vec<Node>> {
         let mut stmt = self.conn.prepare("SELECT id FROM nodes")?;

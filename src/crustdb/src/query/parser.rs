@@ -35,6 +35,8 @@ pub struct MatchClause {
     pub pattern: Pattern,
     pub where_clause: Option<WhereClause>,
     pub return_clause: Option<ReturnClause>,
+    pub delete_clause: Option<DeleteClause>,
+    pub set_clause: Option<SetClause>,
 }
 
 /// CREATE clause AST.
@@ -314,36 +316,45 @@ fn build_single_part_query(pair: Pair<Rule>) -> Result<Statement> {
         }
     }
 
-    // Handle updating clauses (CREATE, MERGE, DELETE, SET)
-    if !updating_clauses.is_empty() {
-        let first_updating = updating_clauses.into_iter().next().unwrap();
-        for inner in first_updating.into_inner() {
+    // Extract DELETE and SET clauses from updating clauses
+    let mut delete_clause = None;
+    let mut set_clause = None;
+
+    for updating in &updating_clauses {
+        for inner in updating.clone().into_inner() {
             match inner.as_rule() {
                 Rule::Create => {
+                    // Standalone CREATE without MATCH
                     return build_create_statement(inner);
                 }
                 Rule::Merge => {
+                    // Standalone MERGE
                     return build_merge_statement(inner);
                 }
                 Rule::Delete => {
-                    return build_delete_statement(inner);
+                    delete_clause = Some(build_delete_clause(inner)?);
                 }
                 Rule::Set => {
-                    return build_set_statement(inner);
+                    set_clause = Some(build_set_clause(inner)?);
                 }
                 _ => {}
             }
         }
     }
 
-    // Handle reading clauses (MATCH)
+    // Handle reading clauses (MATCH) with optional DELETE/SET
     if !reading_clauses.is_empty() {
         let first_reading = reading_clauses.into_iter().next().unwrap();
         for inner in first_reading.into_inner() {
             if inner.as_rule() == Rule::Match {
-                return build_match_statement(inner, return_clause);
+                return build_match_statement(inner, return_clause, delete_clause, set_clause);
             }
         }
+    }
+
+    // Standalone DELETE or SET without MATCH is not supported
+    if delete_clause.is_some() || set_clause.is_some() {
+        return Err(Error::Parse("DELETE and SET require a MATCH clause".into()));
     }
 
     Err(Error::Parse("Unsupported query type".into()))
@@ -364,6 +375,8 @@ fn build_create_statement(pair: Pair<Rule>) -> Result<Statement> {
 fn build_match_statement(
     pair: Pair<Rule>,
     return_clause: Option<ReturnClause>,
+    delete_clause: Option<DeleteClause>,
+    set_clause: Option<SetClause>,
 ) -> Result<Statement> {
     let mut pattern = None;
     let mut where_clause = None;
@@ -385,6 +398,8 @@ fn build_match_statement(
         pattern,
         where_clause,
         return_clause,
+        delete_clause,
+        set_clause,
     }))
 }
 
@@ -441,8 +456,8 @@ fn build_merge_action(pair: Pair<Rule>) -> Result<(bool, SetClause)> {
     Ok((is_create, set_clause))
 }
 
-/// Build a DELETE statement.
-fn build_delete_statement(pair: Pair<Rule>) -> Result<Statement> {
+/// Build a DELETE clause.
+fn build_delete_clause(pair: Pair<Rule>) -> Result<DeleteClause> {
     let mut detach = false;
     let mut expressions = Vec::new();
 
@@ -456,16 +471,10 @@ fn build_delete_statement(pair: Pair<Rule>) -> Result<Statement> {
         }
     }
 
-    Ok(Statement::Delete(DeleteClause {
+    Ok(DeleteClause {
         detach,
         expressions,
-    }))
-}
-
-/// Build a SET statement.
-fn build_set_statement(pair: Pair<Rule>) -> Result<Statement> {
-    let set_clause = build_set_clause(pair)?;
-    Ok(Statement::Set(set_clause))
+    })
 }
 
 /// Build a SET clause.
@@ -2145,11 +2154,12 @@ mod tests {
     fn test_parse_delete() {
         let stmt = parse("MATCH (n:Person {name: 'Bob'}) DELETE n").unwrap();
         match stmt {
-            Statement::Delete(del) => {
+            Statement::Match(m) => {
+                let del = m.delete_clause.expect("Expected delete clause");
                 assert!(!del.detach);
                 assert_eq!(del.expressions.len(), 1);
             }
-            _ => panic!("Expected DELETE statement"),
+            _ => panic!("Expected MATCH statement with DELETE clause"),
         }
     }
 
@@ -2157,10 +2167,52 @@ mod tests {
     fn test_parse_detach_delete() {
         let stmt = parse("MATCH (n:Person) DETACH DELETE n").unwrap();
         match stmt {
-            Statement::Delete(del) => {
+            Statement::Match(m) => {
+                let del = m.delete_clause.expect("Expected delete clause");
                 assert!(del.detach);
             }
-            _ => panic!("Expected DELETE statement"),
+            _ => panic!("Expected MATCH statement with DELETE clause"),
+        }
+    }
+
+    // SET tests
+    #[test]
+    fn test_parse_set_property() {
+        let stmt = parse("MATCH (n:Person) SET n.age = 31").unwrap();
+        match stmt {
+            Statement::Match(m) => {
+                let set = m.set_clause.expect("Expected set clause");
+                assert_eq!(set.items.len(), 1);
+                match &set.items[0] {
+                    SetItem::Property {
+                        variable, property, ..
+                    } => {
+                        assert_eq!(variable, "n");
+                        assert_eq!(property, "age");
+                    }
+                    _ => panic!("Expected property set item"),
+                }
+            }
+            _ => panic!("Expected MATCH statement with SET clause"),
+        }
+    }
+
+    #[test]
+    fn test_parse_set_label() {
+        let stmt = parse("MATCH (n:Person) SET n:Employee").unwrap();
+        match stmt {
+            Statement::Match(m) => {
+                let set = m.set_clause.expect("Expected set clause");
+                assert_eq!(set.items.len(), 1);
+                match &set.items[0] {
+                    SetItem::Labels { variable, labels } => {
+                        assert_eq!(variable, "n");
+                        assert_eq!(labels, &["Employee"]);
+                    }
+                    _ => panic!("Expected label set item"),
+                }
+            }
+            _ => panic!("Expected MATCH statement with SET clause"),
         }
     }
 
