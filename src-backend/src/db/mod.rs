@@ -1,7 +1,13 @@
-//! Database module for graph storage using CozoDB.
+//! Database module for graph storage.
+//!
+//! Supports multiple backends:
+//! - CozoDB (Datalog-based)
+//! - KuzuDB (Cypher-based) - currently active
 
-mod cozo;
+pub mod cozo;
+pub mod kuzu;
 
-pub use cozo::{
-    DbEdge, DbError, DbNode, DetailedStats, GraphDatabase, ReachabilityInsight, SecurityInsights,
-};
+pub use cozo::{DbEdge, DbError, DbNode, DetailedStats, SecurityInsights};
+
+// Use KuzuDatabase as the active backend
+pub use kuzu::KuzuDatabase as GraphDatabase;

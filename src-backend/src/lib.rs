@@ -197,9 +197,9 @@ pub async fn run_service(bind: &str, port: u16) {
         .parse()
         .expect("Invalid bind address");
 
-    // Initialize database
-    let db_path = std::env::var("ADMAPPER_DB_PATH").unwrap_or_else(|_| "admapper.db".to_string());
-    info!(path = %db_path, "Opening database");
+    // Initialize database (KuzuDB uses a directory)
+    let db_path = std::env::var("ADMAPPER_DB_PATH").unwrap_or_else(|_| "admapper_kuzu".to_string());
+    info!(path = %db_path, "Opening KuzuDB database");
     let db = GraphDatabase::new(&db_path).expect("Failed to open database");
     let (nodes, edges) = db.get_stats().unwrap_or((0, 0));
     info!(nodes = nodes, edges = edges, "Database loaded");

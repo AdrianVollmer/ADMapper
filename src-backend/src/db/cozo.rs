@@ -83,6 +83,12 @@ impl From<cozo::Error> for DbError {
     }
 }
 
+impl From<kuzu::Error> for DbError {
+    fn from(e: kuzu::Error) -> Self {
+        DbError::Cozo(e.to_string())
+    }
+}
+
 pub type Result<T> = std::result::Result<T, DbError>;
 
 /// A graph database backed by CozoDB with SQLite storage.

@@ -251,11 +251,10 @@ function cleanup(): void {
 
 /** Query to find all members of Domain Admin groups (SID ends with -512) */
 const DOMAIN_ADMINS_QUERY = `
-?[member] :=
-  *nodes{object_id: dagroup, node_type: "Group"},
-  ends_with(dagroup, "-512"),
-  *edges{source: member, target: dagroup, edge_type: "MemberOf"},
-  *nodes{object_id: member}
+MATCH (m)-[e:Edge]->(g:Group)
+WHERE g.object_id ENDS WITH '-512'
+AND e.edge_type = 'MemberOf'
+RETURN m, e, g
 `;
 
 /** Load Domain Admin members after import */
