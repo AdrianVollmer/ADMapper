@@ -129,3 +129,47 @@ cypher = "MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b"
 [test.expected]
 row_count = 1
 columns = ["a", "b"]
+
+[[test]]
+name = "multiple_relationship_types"
+description = "Match multiple relationship types with |"
+[test.setup]
+cypher = [
+    "CREATE (m:Movie {title: 'Wall Street'})<-[:ACTED_IN]-(c:Person {name: 'Charlie Sheen'})",
+    "CREATE (m:Movie {title: 'Wall Street'})<-[:DIRECTED]-(o:Person {name: 'Oliver Stone'})",
+    "CREATE (m:Movie {title: 'Wall Street'})<-[:PRODUCED]-(p:Person {name: 'Ed Pressman'})",
+]
+[test.query]
+cypher = "MATCH (:Movie {title: 'Wall Street'})<-[:ACTED_IN|DIRECTED]-(person:Person) RETURN person.name"
+[test.expected]
+row_count = 2
+columns = ["person.name"]
+
+[[test]]
+name = "multiple_types_outgoing"
+description = "Match multiple outgoing relationship types"
+[test.setup]
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})",
+    "CREATE (a:Person {name: 'Alice'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})",
+    "CREATE (a:Person {name: 'Alice'})-[:LIVES_WITH]->(d:Person {name: 'Dave'})",
+]
+[test.query]
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS|WORKS_WITH]->(b:Person) RETURN b.name"
+[test.expected]
+row_count = 2
+columns = ["b.name"]
+
+[[test]]
+name = "multiple_types_undirected"
+description = "Match multiple relationship types in any direction"
+[test.setup]
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})",
+    "CREATE (c:Person {name: 'Charlie'})-[:WORKS_WITH]->(a:Person {name: 'Alice'})",
+]
+[test.query]
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS|WORKS_WITH]-(other:Person) RETURN other.name"
+[test.expected]
+row_count = 2
+columns = ["other.name"]

@@ -2201,4 +2201,63 @@ mod tests {
 
         assert_eq!(result.rows.len(), 0);
     }
+
+    #[test]
+    fn test_single_hop_multiple_relationship_types() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create movie with actor and director
+        execute(&parse("CREATE (m:Movie {title: 'Wall Street'})<-[:ACTED_IN]-(c:Person {name: 'Charlie Sheen'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (m:Movie {title: 'Wall Street'})<-[:DIRECTED]-(o:Person {name: 'Oliver Stone'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (m:Movie {title: 'Wall Street'})<-[:PRODUCED]-(p:Person {name: 'Ed Pressman'})").unwrap(), &storage).unwrap();
+
+        // Match either ACTED_IN or DIRECTED
+        let result = execute(&parse("MATCH (:Movie {title: 'Wall Street'})<-[:ACTED_IN|DIRECTED]-(person:Person) RETURN person.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 2); // Charlie and Oliver, not Ed
+    }
+
+    #[test]
+    fn test_single_hop_multiple_types_outgoing() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create person with different relationships
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:LIVES_WITH]->(d:Person {name: 'Dave'})").unwrap(), &storage).unwrap();
+
+        // Match KNOWS or WORKS_WITH
+        let result = execute(&parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS|WORKS_WITH]->(b:Person) RETURN b.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 2); // Bob and Charlie, not Dave
+    }
+
+    #[test]
+    fn test_single_hop_multiple_types_with_variable() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create relationships
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2010}]->(b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:WORKS_WITH {since: 2015}]->(c:Person {name: 'Charlie'})").unwrap(), &storage).unwrap();
+
+        // Match with relationship variable
+        let result = execute(&parse("MATCH (a:Person {name: 'Alice'})-[r:KNOWS|WORKS_WITH]->(b:Person) RETURN b.name, r").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 2);
+        assert!(result.columns.contains(&"r".to_string()));
+    }
+
+    #[test]
+    fn test_single_hop_multiple_types_undirected() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create bidirectional relationships
+        execute(&parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+        execute(&parse("CREATE (c:Person {name: 'Charlie'})-[:WORKS_WITH]->(a:Person {name: 'Alice'})").unwrap(), &storage).unwrap();
+
+        // Match undirected with multiple types
+        let result = execute(&parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS|WORKS_WITH]-(other:Person) RETURN other.name").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 2); // Bob and Charlie
+    }
 }
