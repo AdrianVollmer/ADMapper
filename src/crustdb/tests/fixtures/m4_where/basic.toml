@@ -1,0 +1,360 @@
+# M4: WHERE Clause
+# Test cases for filtering with WHERE conditions
+
+[[test]]
+name = "where_equality"
+description = "Filter with equality comparison"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.name = 'Alice'
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Alice"],
+]
+
+
+[[test]]
+name = "where_not_equal"
+description = "Filter with not-equal comparison"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.name <> 'Alice'
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Bob"],
+]
+
+
+[[test]]
+name = "where_greater_than"
+description = "Filter with greater-than comparison"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", age = 35 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.age > 30
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Charlie"],
+]
+
+
+[[test]]
+name = "where_less_than_or_equal"
+description = "Filter with less-than-or-equal comparison"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", age = 35 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.age <= 30
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Alice"],
+    ["Bob"],
+]
+
+
+[[test]]
+name = "where_and"
+description = "Filter with AND logical operator"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", age = 35 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.age >= 25 AND n.age <= 30
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Alice"],
+    ["Bob"],
+]
+
+
+[[test]]
+name = "where_or"
+description = "Filter with OR logical operator"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", age = 35 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.name = 'Alice' OR n.name = 'Charlie'
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Alice"],
+    ["Charlie"],
+]
+
+
+[[test]]
+name = "where_not"
+description = "Filter with NOT logical operator"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE NOT n.name = 'Alice'
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Bob"],
+]
+
+
+[[test]]
+name = "where_complex_boolean"
+description = "Filter with complex boolean expression"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30, active = true } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25, active = false } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", age = 35, active = true } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE (n.age > 25 AND n.active = true) OR n.name = 'Bob'
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Alice"],
+    ["Bob"],
+    ["Charlie"],
+]
+
+
+[[test]]
+name = "where_is_null"
+description = "Filter for null property values"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", nickname = "Ali" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.nickname IS NULL
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Bob"],
+    ["Charlie"],
+]
+
+
+[[test]]
+name = "where_is_not_null"
+description = "Filter for non-null property values"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", nickname = "Ali" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.nickname IS NOT NULL
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Alice"],
+]
+
+
+[[test]]
+name = "where_starts_with"
+description = "Filter with STARTS WITH string predicate"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Adam" } },
+    { id = "c", labels = ["Person"], properties = { name = "Bob" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.name STARTS WITH 'A'
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Alice"],
+    ["Adam"],
+]
+
+
+[[test]]
+name = "where_ends_with"
+description = "Filter with ENDS WITH string predicate"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Grace" } },
+    { id = "c", labels = ["Person"], properties = { name = "Bob" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.name ENDS WITH 'ce'
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Alice"],
+    ["Grace"],
+]
+
+
+[[test]]
+name = "where_contains"
+description = "Filter with CONTAINS string predicate"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Charlie" } },
+    { id = "c", labels = ["Person"], properties = { name = "Bob" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+WHERE n.name CONTAINS 'li'
+RETURN n.name
+"""
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Alice"],
+    ["Charlie"],
+]
+
+
+[[test]]
+name = "where_on_edge_property"
+description = "Filter on edge properties"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS", properties = { since = 2020 } },
+    { from = "a", to = "c", type = "KNOWS", properties = { since = 2015 } },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person)-[r:KNOWS]->(b:Person)
+WHERE r.since > 2018
+RETURN a.name, b.name
+"""
+
+[test.expected]
+columns = ["a.name", "b.name"]
+rows = [
+    ["Alice", "Bob"],
+]

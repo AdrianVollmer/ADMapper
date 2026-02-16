@@ -1,0 +1,307 @@
+# M5: Single-Hop Traversal
+# Test cases for navigating one relationship step
+
+[[test]]
+name = "outgoing_edge"
+description = "Match outgoing relationship"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person)-[:KNOWS]->(b:Person)
+RETURN a.name, b.name
+"""
+
+[test.expected]
+columns = ["a.name", "b.name"]
+rows = [
+    ["Alice", "Bob"],
+]
+
+
+[[test]]
+name = "incoming_edge"
+description = "Match incoming relationship"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (b:Person)<-[:KNOWS]-(a:Person)
+RETURN a.name, b.name
+"""
+
+[test.expected]
+columns = ["a.name", "b.name"]
+rows = [
+    ["Alice", "Bob"],
+]
+
+
+[[test]]
+name = "undirected_edge"
+description = "Match relationship in either direction"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person)-[:KNOWS]-(b:Person)
+RETURN a.name, b.name
+"""
+
+[test.expected]
+columns = ["a.name", "b.name"]
+rows = [
+    ["Alice", "Bob"],
+    ["Bob", "Alice"],
+]
+
+
+[[test]]
+name = "edge_with_variable"
+description = "Bind relationship to variable"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS", properties = { since = 2020 } },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person)-[r:KNOWS]->(b:Person)
+RETURN a.name, r.since, b.name
+"""
+
+[test.expected]
+columns = ["a.name", "r.since", "b.name"]
+rows = [
+    ["Alice", 2020, "Bob"],
+]
+
+
+[[test]]
+name = "any_edge_type"
+description = "Match any relationship type"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+    { from = "a", to = "c", type = "WORKS_WITH" },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person)-[r]->(b:Person)
+RETURN a.name, b.name
+"""
+
+[test.expected]
+columns = ["a.name", "b.name"]
+rows = [
+    ["Alice", "Bob"],
+    ["Alice", "Charlie"],
+]
+
+
+[[test]]
+name = "anonymous_edge"
+description = "Match with anonymous relationship"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person)-[]->(b:Person)
+RETURN a.name, b.name
+"""
+
+[test.expected]
+columns = ["a.name", "b.name"]
+rows = [
+    ["Alice", "Bob"],
+]
+
+
+[[test]]
+name = "multiple_edge_types"
+description = "Match specific relationship types with OR"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+    { id = "d", labels = ["Person"], properties = { name = "Diana" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+    { from = "a", to = "c", type = "WORKS_WITH" },
+    { from = "a", to = "d", type = "LIKES" },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person)-[:KNOWS|WORKS_WITH]->(b:Person)
+RETURN a.name, b.name
+"""
+
+[test.expected]
+columns = ["a.name", "b.name"]
+rows = [
+    ["Alice", "Bob"],
+    ["Alice", "Charlie"],
+]
+
+
+[[test]]
+name = "triangle_pattern"
+description = "Match triangle of relationships"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+    { from = "b", to = "c", type = "KNOWS" },
+    { from = "c", to = "a", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person)-[:KNOWS]->(a)
+RETURN a.name, b.name, c.name
+"""
+
+[test.expected]
+columns = ["a.name", "b.name", "c.name"]
+rows = [
+    ["Alice", "Bob", "Charlie"],
+    ["Bob", "Charlie", "Alice"],
+    ["Charlie", "Alice", "Bob"],
+]
+
+
+[[test]]
+name = "different_labels_on_endpoints"
+description = "Match relationship between different node types"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Actor"], properties = { name = "Charlie Sheen" } },
+    { id = "m", labels = ["Movie"], properties = { title = "Wall Street" } },
+]
+edges = [
+    { from = "a", to = "m", type = "ACTED_IN", properties = { role = "Bud Fox" } },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Actor)-[r:ACTED_IN]->(m:Movie)
+RETURN a.name, r.role, m.title
+"""
+
+[test.expected]
+columns = ["a.name", "r.role", "m.title"]
+rows = [
+    ["Charlie Sheen", "Bud Fox", "Wall Street"],
+]
+
+
+[[test]]
+name = "chained_traversal"
+description = "Match chain of relationships"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+    { from = "b", to = "c", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person)
+RETURN a.name, b.name, c.name
+"""
+
+[test.expected]
+columns = ["a.name", "b.name", "c.name"]
+rows = [
+    ["Alice", "Bob", "Charlie"],
+]
+
+
+[[test]]
+name = "backward_chained_traversal"
+description = "Match chain with backward edge"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+    { from = "c", to = "b", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person)-[:KNOWS]->(b:Person)<-[:KNOWS]-(c:Person)
+WHERE a <> c
+RETURN a.name, b.name, c.name
+"""
+
+[test.expected]
+columns = ["a.name", "b.name", "c.name"]
+rows = [
+    ["Alice", "Bob", "Charlie"],
+    ["Charlie", "Bob", "Alice"],
+]

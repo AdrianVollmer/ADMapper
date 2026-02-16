@@ -1,0 +1,196 @@
+# M3: Simple MATCH Queries
+# Test cases for basic node matching and property retrieval
+
+[[test]]
+name = "match_all_nodes"
+description = "Match all nodes in the graph"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Movie"], properties = { title = "Matrix" } },
+]
+
+[test.query]
+cypher = "MATCH (n) RETURN n"
+
+[test.expected]
+columns = ["n"]
+row_count = 3
+
+
+[[test]]
+name = "match_by_label"
+description = "Match nodes by label"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Movie"], properties = { title = "Matrix" } },
+]
+
+[test.query]
+cypher = "MATCH (n:Person) RETURN n"
+
+[test.expected]
+columns = ["n"]
+row_count = 2
+
+
+[[test]]
+name = "return_single_property"
+description = "Return a single property from matched nodes"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+]
+
+[test.query]
+cypher = "MATCH (n:Person) RETURN n.name"
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Alice"],
+    ["Bob"],
+]
+
+
+[[test]]
+name = "return_multiple_properties"
+description = "Return multiple properties from matched nodes"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+]
+
+[test.query]
+cypher = "MATCH (n:Person) RETURN n.name, n.age"
+
+[test.expected]
+columns = ["n.name", "n.age"]
+rows = [
+    ["Alice", 30],
+    ["Bob", 25],
+]
+
+
+[[test]]
+name = "match_by_property"
+description = "Match node by property value in pattern"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+]
+
+[test.query]
+cypher = "MATCH (n:Person {name: 'Alice'}) RETURN n"
+
+[test.expected]
+columns = ["n"]
+row_count = 1
+
+
+[[test]]
+name = "match_multiple_properties_in_pattern"
+description = "Match node by multiple properties in pattern"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 30 } },
+]
+
+[test.query]
+cypher = "MATCH (n:Person {name: 'Alice', age: 30}) RETURN n"
+
+[test.expected]
+columns = ["n"]
+row_count = 1
+
+
+[[test]]
+name = "match_no_results"
+description = "Match returns empty when no nodes match"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+]
+
+[test.query]
+cypher = "MATCH (n:Movie) RETURN n"
+
+[test.expected]
+columns = ["n"]
+rows = []
+
+
+[[test]]
+name = "match_anonymous_node"
+description = "Match with anonymous (unnamed) node"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+]
+
+[test.query]
+cypher = "MATCH ()-[]->(n) RETURN n.name"
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Bob"],
+]
+
+
+[[test]]
+name = "match_node_multiple_labels"
+description = "Match nodes with multiple labels"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person", "Actor"], properties = { name = "Charlie" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+
+[test.query]
+cypher = "MATCH (n:Person:Actor) RETURN n.name"
+
+[test.expected]
+columns = ["n.name"]
+rows = [
+    ["Charlie"],
+]
+
+
+[[test]]
+name = "return_alias"
+description = "Return property with alias"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+]
+
+[test.query]
+cypher = "MATCH (n:Person) RETURN n.name AS personName"
+
+[test.expected]
+columns = ["personName"]
+rows = [
+    ["Alice"],
+]

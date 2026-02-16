@@ -1,0 +1,120 @@
+# M2: Simple CREATE Queries
+# Test cases for basic node and edge creation
+
+[[test]]
+name = "create_single_node"
+description = "Create a single node with one label and properties"
+
+[test.query]
+cypher = "CREATE (n:Person {name: 'Alice', age: 30})"
+
+[test.expected]
+nodes_created = 1
+
+
+[[test]]
+name = "create_single_node_no_properties"
+description = "Create a node with only a label"
+
+[test.query]
+cypher = "CREATE (n:Person)"
+
+[test.expected]
+nodes_created = 1
+
+
+[[test]]
+name = "create_node_multiple_labels"
+description = "Create a node with multiple labels"
+
+[test.query]
+cypher = "CREATE (n:Person:Actor {name: 'Charlie Sheen'})"
+
+[test.expected]
+nodes_created = 1
+
+
+[[test]]
+name = "create_two_nodes_one_edge"
+description = "Create two nodes connected by a relationship"
+
+[test.query]
+cypher = "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})"
+
+[test.expected]
+nodes_created = 2
+edges_created = 1
+
+
+[[test]]
+name = "create_edge_with_properties"
+description = "Create a relationship with properties"
+
+[test.query]
+cypher = "CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2020}]->(b:Person {name: 'Bob'})"
+
+[test.expected]
+nodes_created = 2
+edges_created = 1
+
+
+[[test]]
+name = "create_complex_pattern"
+description = "Create multiple nodes and relationships in one statement"
+
+[test.query]
+cypher = """
+CREATE (charlie:Person:Actor {name: 'Charlie Sheen'}),
+       (oliver:Person:Director {name: 'Oliver Stone'}),
+       (wallStreet:Movie {title: 'Wall Street'}),
+       (charlie)-[:ACTED_IN {role: 'Bud Fox'}]->(wallStreet),
+       (oliver)-[:DIRECTED]->(wallStreet)
+"""
+
+[test.expected]
+nodes_created = 3
+edges_created = 2
+
+
+[[test]]
+name = "create_node_string_property"
+description = "Create node with string property containing special characters"
+
+[test.query]
+cypher = "CREATE (n:Note {text: 'Hello, World!'})"
+
+[test.expected]
+nodes_created = 1
+
+
+[[test]]
+name = "create_node_numeric_properties"
+description = "Create node with integer and float properties"
+
+[test.query]
+cypher = "CREATE (n:Measurement {count: 42, value: 3.14})"
+
+[test.expected]
+nodes_created = 1
+
+
+[[test]]
+name = "create_node_boolean_property"
+description = "Create node with boolean property"
+
+[test.query]
+cypher = "CREATE (n:Task {done: true})"
+
+[test.expected]
+nodes_created = 1
+
+
+[[test]]
+name = "create_node_null_property"
+description = "Create node with null property value"
+
+[test.query]
+cypher = "CREATE (n:Person {name: 'Alice', nickname: null})"
+
+[test.expected]
+nodes_created = 1

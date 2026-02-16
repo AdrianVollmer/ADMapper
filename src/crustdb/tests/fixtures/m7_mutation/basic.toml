@@ -1,0 +1,256 @@
+# M7: Mutation Queries
+# Test cases for SET and DELETE operations
+
+[[test]]
+name = "set_single_property"
+description = "Update a single property value"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person {name: 'Alice'})
+SET n.age = 31
+RETURN n.age
+"""
+
+[test.expected]
+columns = ["n.age"]
+rows = [
+    [31],
+]
+
+
+[[test]]
+name = "set_new_property"
+description = "Add a new property to existing node"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person {name: 'Alice'})
+SET n.email = 'alice@example.com'
+RETURN n.email
+"""
+
+[test.expected]
+columns = ["n.email"]
+rows = [
+    ["alice@example.com"],
+]
+
+
+[[test]]
+name = "set_multiple_properties"
+description = "Update multiple properties at once"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person {name: 'Alice'})
+SET n.age = 31, n.city = 'NYC'
+RETURN n.age, n.city
+"""
+
+[test.expected]
+columns = ["n.age", "n.city"]
+rows = [
+    [31, "NYC"],
+]
+
+
+[[test]]
+name = "set_property_to_null"
+description = "Remove property by setting to null"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", nickname = "Ali" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person {name: 'Alice'})
+SET n.nickname = null
+RETURN n.nickname
+"""
+
+[test.expected]
+columns = ["n.nickname"]
+rows = [
+    [null],
+]
+
+
+[[test]]
+name = "set_add_label"
+description = "Add a label to existing node"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person {name: 'Alice'})
+SET n:Employee
+RETURN labels(n)
+"""
+
+[test.expected]
+columns = ["labels(n)"]
+rows = [
+    [["Person", "Employee"]],
+]
+
+
+[[test]]
+name = "set_edge_property"
+description = "Update relationship property"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS", properties = { since = 2020 } },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person)
+SET r.strength = 'strong'
+RETURN r.strength
+"""
+
+[test.expected]
+columns = ["r.strength"]
+rows = [
+    ["strong"],
+]
+
+
+[[test]]
+name = "delete_node"
+description = "Delete a node without relationships"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person {name: 'Bob'})
+DELETE n
+"""
+
+[test.expected]
+nodes_deleted = 1
+
+
+[[test]]
+name = "delete_node_with_edges_fails"
+description = "Deleting node with relationships should fail"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person {name: 'Alice'})
+DELETE n
+"""
+
+[test.expected]
+error = "ConstraintError"
+
+
+[[test]]
+name = "detach_delete_node"
+description = "Delete node and all its relationships"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+    { from = "c", to = "a", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person {name: 'Alice'})
+DETACH DELETE n
+"""
+
+[test.expected]
+nodes_deleted = 1
+edges_deleted = 2
+
+
+[[test]]
+name = "delete_relationship"
+description = "Delete a specific relationship"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person)
+DELETE r
+"""
+
+[test.expected]
+edges_deleted = 1
+
+
+[[test]]
+name = "delete_multiple"
+description = "Delete multiple matched nodes"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Temp"], properties = { value = 1 } },
+    { id = "b", labels = ["Temp"], properties = { value = 2 } },
+    { id = "c", labels = ["Permanent"], properties = { value = 3 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Temp)
+DELETE n
+"""
+
+[test.expected]
+nodes_deleted = 2

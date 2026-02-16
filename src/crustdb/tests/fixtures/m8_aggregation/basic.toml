@@ -1,0 +1,269 @@
+# M8: Aggregation
+# Test cases for GROUP BY and aggregate functions
+
+[[test]]
+name = "count_all"
+description = "Count all matched nodes"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+RETURN count(n)
+"""
+
+[test.expected]
+columns = ["count(n)"]
+rows = [
+    [3],
+]
+
+
+[[test]]
+name = "count_star"
+description = "Count rows with count(*)"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+RETURN count(*)
+"""
+
+[test.expected]
+columns = ["count(*)"]
+rows = [
+    [2],
+]
+
+
+[[test]]
+name = "count_with_grouping"
+description = "Count with implicit grouping"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+edges = [
+    { from = "a", to = "b", type = "KNOWS" },
+    { from = "a", to = "c", type = "KNOWS" },
+    { from = "b", to = "c", type = "KNOWS" },
+]
+
+[test.query]
+cypher = """
+MATCH (p:Person)-[:KNOWS]->(friend:Person)
+RETURN p.name, count(friend) AS friends
+"""
+
+[test.expected]
+columns = ["p.name", "friends"]
+rows = [
+    ["Alice", 2],
+    ["Bob", 1],
+]
+
+
+[[test]]
+name = "sum_values"
+description = "Sum numeric property values"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Product"], properties = { name = "A", price = 10 } },
+    { id = "b", labels = ["Product"], properties = { name = "B", price = 20 } },
+    { id = "c", labels = ["Product"], properties = { name = "C", price = 30 } },
+]
+
+[test.query]
+cypher = """
+MATCH (p:Product)
+RETURN sum(p.price)
+"""
+
+[test.expected]
+columns = ["sum(p.price)"]
+rows = [
+    [60],
+]
+
+
+[[test]]
+name = "avg_values"
+description = "Calculate average of numeric values"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 20 } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", age = 40 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+RETURN avg(n.age)
+"""
+
+[test.expected]
+columns = ["avg(n.age)"]
+rows = [
+    [30.0],
+]
+
+
+[[test]]
+name = "min_max_values"
+description = "Find minimum and maximum values"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", age = 35 } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+RETURN min(n.age), max(n.age)
+"""
+
+[test.expected]
+columns = ["min(n.age)", "max(n.age)"]
+rows = [
+    [25, 35],
+]
+
+
+[[test]]
+name = "collect_values"
+description = "Collect values into a list"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+RETURN collect(n.name)
+"""
+
+[test.expected]
+columns = ["collect(n.name)"]
+rows = [
+    [["Alice", "Bob", "Charlie"]],
+]
+
+
+[[test]]
+name = "collect_with_grouping"
+description = "Collect with grouping key"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", city = "NYC" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", city = "LA" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", city = "NYC" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+RETURN n.city, collect(n.name) AS residents
+"""
+
+[test.expected]
+columns = ["n.city", "residents"]
+rows = [
+    ["NYC", ["Alice", "Charlie"]],
+    ["LA", ["Bob"]],
+]
+
+
+[[test]]
+name = "count_distinct"
+description = "Count distinct values"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", city = "NYC" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", city = "LA" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", city = "NYC" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Person)
+RETURN count(DISTINCT n.city)
+"""
+
+[test.expected]
+columns = ["count(DISTINCT n.city)"]
+rows = [
+    [2],
+]
+
+
+[[test]]
+name = "multiple_aggregations"
+description = "Multiple aggregate functions in one query"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Sale"], properties = { amount = 100, items = 2 } },
+    { id = "b", labels = ["Sale"], properties = { amount = 200, items = 3 } },
+    { id = "c", labels = ["Sale"], properties = { amount = 150, items = 1 } },
+]
+
+[test.query]
+cypher = """
+MATCH (s:Sale)
+RETURN count(s), sum(s.amount), avg(s.items)
+"""
+
+[test.expected]
+columns = ["count(s)", "sum(s.amount)", "avg(s.items)"]
+rows = [
+    [3, 450, 2.0],
+]
+
+
+[[test]]
+name = "aggregation_empty_result"
+description = "Aggregation on empty result set"
+
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+]
+
+[test.query]
+cypher = """
+MATCH (n:Movie)
+RETURN count(n), sum(n.rating)
+"""
+
+[test.expected]
+columns = ["count(n)", "sum(n.rating)"]
+rows = [
+    [0, null],
+]

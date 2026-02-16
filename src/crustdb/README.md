@@ -255,10 +255,18 @@ for row in results.rows {
 
 ## Test cases
 
-We can vendor test cases from here: <https://github.com/aplbrain/grand-cypher>
+Test fixtures derived from [GrandCypher](https://github.com/aplbrain/grand-cypher)
+are in `tests/fixtures/`, organized by milestone:
 
-Make sure to respect the license. We should convert these to language agnostic
-test cases.
+- `m2_create/` - CREATE clause tests
+- `m3_match/` - Basic MATCH and RETURN
+- `m4_where/` - WHERE clause filtering
+- `m5_single_hop/` - Single relationship traversal
+- `m6_multi_hop/` - Variable-length paths
+- `m7_mutation/` - SET and DELETE operations
+- `m8_aggregation/` - Aggregate functions
+
+See `tests/fixtures/README.md` for the TOML format specification.
 
 ## License
 

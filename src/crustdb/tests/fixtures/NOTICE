@@ -1,0 +1,11 @@
+Test fixtures in this directory are derived from GrandCypher
+(https://github.com/aplbrain/grand-cypher).
+
+GrandCypher is licensed under the Apache License, Version 2.0.
+Copyright 2020-2024 The Johns Hopkins University Applied Physics Laboratory
+
+You may obtain a copy of the License at:
+http://www.apache.org/licenses/LICENSE-2.0
+
+The original test cases have been converted to a language-agnostic TOML format
+for use with CrustDB.
