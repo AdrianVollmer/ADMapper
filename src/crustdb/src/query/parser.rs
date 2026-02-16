@@ -2469,4 +2469,62 @@ mod tests {
             _ => panic!("Expected MATCH statement"),
         }
     }
+
+    #[test]
+    fn test_parse_shortest_path() {
+        let stmt = parse("MATCH p = SHORTEST 1 (a:Station)-[:LINK]-+(b:Station) RETURN length(p)").unwrap();
+        match stmt {
+            Statement::Match(m) => {
+                assert_eq!(m.pattern.shortest_k, Some(1));
+                assert!(m.pattern.path_variable.is_some());
+                assert_eq!(m.pattern.path_variable.as_deref(), Some("p"));
+                match &m.pattern.elements[1] {
+                    PatternElement::Relationship(rel) => {
+                        assert_eq!(rel.quantifier, Some(RelQuantifier::OneOrMore));
+                    }
+                    _ => panic!("Expected relationship pattern"),
+                }
+            }
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_shortest_path_k() {
+        let stmt = parse("MATCH p = SHORTEST 5 (a)-[:KNOWS]-+(b) RETURN p").unwrap();
+        match stmt {
+            Statement::Match(m) => {
+                assert_eq!(m.pattern.shortest_k, Some(5));
+            }
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_quantifier_plus() {
+        let stmt = parse("MATCH (a)-[:LINK]-+(b) RETURN a, b").unwrap();
+        match stmt {
+            Statement::Match(m) => match &m.pattern.elements[1] {
+                PatternElement::Relationship(rel) => {
+                    assert_eq!(rel.quantifier, Some(RelQuantifier::OneOrMore));
+                }
+                _ => panic!("Expected relationship pattern"),
+            },
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_quantifier_star() {
+        let stmt = parse("MATCH (a)-[:LINK]-*(b) RETURN a, b").unwrap();
+        match stmt {
+            Statement::Match(m) => match &m.pattern.elements[1] {
+                PatternElement::Relationship(rel) => {
+                    assert_eq!(rel.quantifier, Some(RelQuantifier::ZeroOrMore));
+                }
+                _ => panic!("Expected relationship pattern"),
+            },
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
 }
