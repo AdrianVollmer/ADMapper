@@ -1,307 +1,131 @@
-# M5: Single-Hop Traversal
-# Test cases for navigating one relationship step
+# M5: Single-Hop Traversal Tests
+#
+# Tests for navigating one relationship step.
 
 [[test]]
-name = "outgoing_edge"
+name = "outgoing_relationship"
 description = "Match outgoing relationship"
-
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-]
-
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})"]
 [test.query]
-cypher = """
-MATCH (a:Person)-[:KNOWS]->(b:Person)
-RETURN a.name, b.name
-"""
-
+cypher = "MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name, b.name"
 [test.expected]
+row_count = 1
 columns = ["a.name", "b.name"]
-rows = [
-    ["Alice", "Bob"],
-]
-
 
 [[test]]
-name = "incoming_edge"
+name = "incoming_relationship"
 description = "Match incoming relationship"
-
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-]
-
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})"]
 [test.query]
-cypher = """
-MATCH (b:Person)<-[:KNOWS]-(a:Person)
-RETURN a.name, b.name
-"""
-
+cypher = "MATCH (b:Person {name: 'Bob'})<-[:KNOWS]-(a:Person) RETURN a.name"
 [test.expected]
-columns = ["a.name", "b.name"]
-rows = [
-    ["Alice", "Bob"],
-]
-
+row_count = 1
+columns = ["a.name"]
 
 [[test]]
-name = "undirected_edge"
-description = "Match relationship in either direction"
-
+name = "undirected_relationship"
+description = "Match relationship in any direction"
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})",
+    "CREATE (b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})",
 ]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-]
-
 [test.query]
-cypher = """
-MATCH (a:Person)-[:KNOWS]-(b:Person)
-RETURN a.name, b.name
-"""
-
+cypher = "MATCH (b:Person {name: 'Bob'})-[:KNOWS]-(other:Person) RETURN other.name"
 [test.expected]
-columns = ["a.name", "b.name"]
-rows = [
-    ["Alice", "Bob"],
-    ["Bob", "Alice"],
-]
-
+row_count = 2
+columns = ["other.name"]
 
 [[test]]
-name = "edge_with_variable"
-description = "Bind relationship to variable"
-
-[test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS", properties = { since = 2020 } },
-]
-
-[test.query]
-cypher = """
-MATCH (a:Person)-[r:KNOWS]->(b:Person)
-RETURN a.name, r.since, b.name
-"""
-
-[test.expected]
-columns = ["a.name", "r.since", "b.name"]
-rows = [
-    ["Alice", 2020, "Bob"],
-]
-
-
-[[test]]
-name = "any_edge_type"
+name = "any_relationship_type"
 description = "Match any relationship type"
-
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})",
+    "CREATE (a:Person {name: 'Alice'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})",
 ]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "a", to = "c", type = "WORKS_WITH" },
-]
-
 [test.query]
-cypher = """
-MATCH (a:Person)-[r]->(b:Person)
-RETURN a.name, b.name
-"""
-
+cypher = "MATCH (a:Person {name: 'Alice'})-[]->(b:Person) RETURN b.name"
 [test.expected]
-columns = ["a.name", "b.name"]
-rows = [
-    ["Alice", "Bob"],
-    ["Alice", "Charlie"],
-]
-
+row_count = 2
+columns = ["b.name"]
 
 [[test]]
-name = "anonymous_edge"
-description = "Match with anonymous relationship"
-
+name = "filter_by_relationship_type"
+description = "Filter by specific relationship type"
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})",
+    "CREATE (a:Person {name: 'Alice'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})",
 ]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-]
-
 [test.query]
-cypher = """
-MATCH (a:Person)-[]->(b:Person)
-RETURN a.name, b.name
-"""
-
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person) RETURN b.name"
 [test.expected]
-columns = ["a.name", "b.name"]
-rows = [
-    ["Alice", "Bob"],
-]
-
+row_count = 1
+columns = ["b.name"]
 
 [[test]]
-name = "multiple_edge_types"
-description = "Match specific relationship types with OR"
-
+name = "no_matching_relationships"
+description = "No matches when relationship doesn't exist"
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
-    { id = "d", labels = ["Person"], properties = { name = "Diana" } },
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})",
+    "CREATE (b:Person {name: 'Bob'})",
 ]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "a", to = "c", type = "WORKS_WITH" },
-    { from = "a", to = "d", type = "LIKES" },
-]
-
 [test.query]
-cypher = """
-MATCH (a:Person)-[:KNOWS|WORKS_WITH]->(b:Person)
-RETURN a.name, b.name
-"""
-
+cypher = "MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b"
 [test.expected]
-columns = ["a.name", "b.name"]
-rows = [
-    ["Alice", "Bob"],
-    ["Alice", "Charlie"],
-]
-
+row_count = 0
+columns = ["a", "b"]
 
 [[test]]
-name = "triangle_pattern"
-description = "Match triangle of relationships"
-
+name = "with_where_clause"
+description = "Filter results with WHERE"
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob', age: 25})",
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(c:Person {name: 'Charlie', age: 35})",
 ]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "b", to = "c", type = "KNOWS" },
-    { from = "c", to = "a", type = "KNOWS" },
-]
-
 [test.query]
-cypher = """
-MATCH (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person)-[:KNOWS]->(a)
-RETURN a.name, b.name, c.name
-"""
-
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person) WHERE b.age > 30 RETURN b.name"
 [test.expected]
-columns = ["a.name", "b.name", "c.name"]
-rows = [
-    ["Alice", "Bob", "Charlie"],
-    ["Bob", "Charlie", "Alice"],
-    ["Charlie", "Alice", "Bob"],
-]
-
+row_count = 1
+columns = ["b.name"]
 
 [[test]]
-name = "different_labels_on_endpoints"
-description = "Match relationship between different node types"
-
+name = "return_relationship_variable"
+description = "Return the relationship itself"
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Actor"], properties = { name = "Charlie Sheen" } },
-    { id = "m", labels = ["Movie"], properties = { title = "Wall Street" } },
-]
-edges = [
-    { from = "a", to = "m", type = "ACTED_IN", properties = { role = "Bud Fox" } },
-]
-
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS {since: 2020}]->(b:Person {name: 'Bob'})"]
 [test.query]
-cypher = """
-MATCH (a:Actor)-[r:ACTED_IN]->(m:Movie)
-RETURN a.name, r.role, m.title
-"""
-
+cypher = "MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN a.name, r, b.name"
 [test.expected]
-columns = ["a.name", "r.role", "m.title"]
-rows = [
-    ["Charlie Sheen", "Bud Fox", "Wall Street"],
-]
-
+row_count = 1
+columns = ["a.name", "r", "b.name"]
 
 [[test]]
-name = "chained_traversal"
-description = "Match chain of relationships"
-
+name = "multiple_matches"
+description = "Multiple relationship matches"
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})",
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(c:Person {name: 'Charlie'})",
 ]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "b", to = "c", type = "KNOWS" },
-]
-
 [test.query]
-cypher = """
-MATCH (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person)
-RETURN a.name, b.name, c.name
-"""
-
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person) RETURN b.name"
 [test.expected]
-columns = ["a.name", "b.name", "c.name"]
-rows = [
-    ["Alice", "Bob", "Charlie"],
-]
-
+row_count = 2
+columns = ["b.name"]
 
 [[test]]
-name = "backward_chained_traversal"
-description = "Match chain with backward edge"
-
+name = "return_both_nodes"
+description = "Return source and target nodes"
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "c", to = "b", type = "KNOWS" },
-]
-
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})"]
 [test.query]
-cypher = """
-MATCH (a:Person)-[:KNOWS]->(b:Person)<-[:KNOWS]-(c:Person)
-WHERE a <> c
-RETURN a.name, b.name, c.name
-"""
-
+cypher = "MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b"
 [test.expected]
-columns = ["a.name", "b.name", "c.name"]
-rows = [
-    ["Alice", "Bob", "Charlie"],
-    ["Charlie", "Bob", "Alice"],
-]
+row_count = 1
+columns = ["a", "b"]

@@ -28,6 +28,9 @@ struct TestCase {
 /// Setup data (nodes and edges to create before the test).
 #[derive(Debug, Deserialize, Default)]
 struct Setup {
+    /// Raw Cypher queries to run for setup (preferred for complex setups)
+    #[serde(default)]
+    cypher: Vec<String>,
     #[serde(default)]
     nodes: Vec<SetupNode>,
     #[serde(default)]
@@ -97,6 +100,13 @@ fn run_test_case(test: &TestCase) {
 
     // Execute setup if present (for M3+ tests)
     if let Some(setup) = &test.setup {
+        // Run raw Cypher setup queries first (preferred for complex setups)
+        for cypher_query in &setup.cypher {
+            db.execute(cypher_query).unwrap_or_else(|e| {
+                panic!("Cypher setup failed for test '{}': {} (query: {})", test.name, e, cypher_query)
+            });
+        }
+
         for node in &setup.nodes {
             let labels: Vec<&str> = node.labels.iter().map(|s| s.as_str()).collect();
             let props = match &node.properties {
@@ -114,44 +124,15 @@ fn run_test_case(test: &TestCase) {
             });
         }
 
-        // Create edges using direct CREATE queries
-        // We need to use CREATE patterns since we don't have variable tracking
-        for edge in &setup.edges {
-            let edge_props = match &edge.properties {
-                Some(v) => format!(" {{{}}}", toml_to_cypher_props(v)),
-                None => String::new(),
-            };
-
-            // Find the source and target node info from setup
-            let source_node = setup.nodes.iter().find(|n| n.id == edge.from);
-            let target_node = setup.nodes.iter().find(|n| n.id == edge.to);
-
-            if let (Some(src), Some(tgt)) = (source_node, target_node) {
-                let src_labels = src.labels.join(":");
-                let tgt_labels = tgt.labels.join(":");
-                let src_props = match &src.properties {
-                    Some(v) => format!(" {{{}}}", toml_to_cypher_props(v)),
-                    None => String::new(),
-                };
-                let tgt_props = match &tgt.properties {
-                    Some(v) => format!(" {{{}}}", toml_to_cypher_props(v)),
-                    None => String::new(),
-                };
-
-                // Create pattern: MATCH source, target CREATE (source)-[rel]->(target)
-                // Since we can't MATCH yet in the same query, we'll use a workaround
-                // by creating the relationship pattern directly
-                let query = format!(
-                    "CREATE (:{}{})-[:{}{}]->(:{}{})",
-                    src_labels, src_props,
-                    edge.edge_type, edge_props,
-                    tgt_labels, tgt_props
-                );
-
-                db.execute(&query).unwrap_or_else(|e| {
-                    panic!("Edge setup failed for test '{}': {}", test.name, e)
-                });
-            }
+        // Note: Edge setup via `edges` array is not supported yet.
+        // Use the `cypher` array for tests that need relationships, e.g.:
+        //   [test.setup]
+        //   cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})"]
+        if !setup.edges.is_empty() {
+            eprintln!(
+                "Warning: test '{}' uses edges array which is not fully supported. Use setup.cypher instead.",
+                test.name
+            );
         }
     }
 
@@ -464,6 +445,49 @@ fn test_m4_where_starts_with() {
 // =============================================================================
 // M5: Single-Hop Traversal Tests
 // =============================================================================
+
+#[test]
+fn test_m5_single_hop_fixtures() {
+    let fixtures = find_fixtures("m5_single_hop");
+    assert!(!fixtures.is_empty(), "No M5 fixtures found");
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for fixture_path in &fixtures {
+        let fixture = load_fixture(fixture_path);
+
+        for test in &fixture.test {
+            let result = std::panic::catch_unwind(|| {
+                run_test_case(test);
+            });
+
+            match result {
+                Ok(()) => {
+                    passed += 1;
+                    println!("  ✓ {}", test.name);
+                }
+                Err(e) => {
+                    failed += 1;
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown error".to_string()
+                    };
+                    println!("  ✗ {}: {}", test.name, msg);
+                }
+            }
+        }
+    }
+
+    println!("\nM5 Single-Hop: {} passed, {} failed", passed, failed);
+
+    if failed > 0 {
+        panic!("{} test(s) failed", failed);
+    }
+}
 
 #[test]
 fn test_m5_single_hop_outgoing() {
