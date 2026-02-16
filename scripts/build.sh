@@ -58,7 +58,7 @@ if [ -n "$IN_CONTAINER" ]; then
 
 	# Run the build inside the container (without IN_CONTAINER to avoid recursion)
 	echo -e "${GREEN}[INFO]${NC} Running build inside container with $RUNTIME..."
-	exec $RUNTIME run --rm \
+	exec $RUNTIME run --rm -it --init \
 		-v "$PROJECT_ROOT:/workspace" \
 		-w /workspace \
 		"$CONTAINER_IMAGE" \
