@@ -8,6 +8,7 @@
 import { getRenderer, loadGraphData } from "./graph-view";
 import { updateDetailPanel } from "./sidebars";
 import { NODE_COLORS } from "../graph/theme";
+import { getNodeIconPath } from "../graph/icons";
 import type { ADNodeType, ADEdgeType, RawADGraph } from "../graph/types";
 import { escapeHtml } from "../utils/html";
 import { api, ApiClientError } from "../api/client";
@@ -33,13 +34,13 @@ const inputToResults = new Map<HTMLInputElement, HTMLElement>();
 /** Initialize search functionality */
 export function initSearch(): void {
   nodeSearchInput = document.getElementById("node-search") as HTMLInputElement;
-  nodeSearchResults = document.getElementById("node-search-results");
   pathStartInput = document.getElementById("path-start") as HTMLInputElement;
   pathEndInput = document.getElementById("path-end") as HTMLInputElement;
   pathResultsEl = document.getElementById("path-results");
   findPathBtn = document.getElementById("find-path-btn");
 
-  // Create result containers for path inputs if they don't exist
+  // Create/move result containers to body (portal pattern)
+  nodeSearchResults = createResultsContainer(nodeSearchInput, "node-search-results");
   pathStartResults = createResultsContainer(pathStartInput, "path-start-results");
   pathEndResults = createResultsContainer(pathEndInput, "path-end-results");
 
@@ -83,7 +84,7 @@ export function initSearch(): void {
   document.addEventListener("click", handleResultClick);
 }
 
-/** Create a results container next to an input if it doesn't exist */
+/** Create a results container as a portal in document.body */
 function createResultsContainer(input: HTMLInputElement | null, id: string): HTMLElement | null {
   if (!input) return null;
 
@@ -93,7 +94,10 @@ function createResultsContainer(input: HTMLInputElement | null, id: string): HTM
     container.id = id;
     container.className = "search-results";
     container.hidden = true;
-    input.parentElement?.appendChild(container);
+    document.body.appendChild(container);
+  } else if (container.parentElement !== document.body) {
+    // Move existing container to body if it's not already there
+    document.body.appendChild(container);
   }
   return container;
 }
@@ -108,8 +112,9 @@ function hideResultsDelayed(resultsEl: HTMLElement): void {
 /** Position a results popover below its input */
 function positionPopover(input: HTMLInputElement, resultsEl: HTMLElement): void {
   const rect = input.getBoundingClientRect();
-  resultsEl.style.top = `${rect.bottom + 4}px`;
+  resultsEl.style.top = `${rect.bottom}px`;
   resultsEl.style.left = `${rect.left}px`;
+  resultsEl.style.minWidth = `${rect.width}px`;
 }
 
 /** Reposition all visible popovers */
@@ -155,10 +160,14 @@ async function performSearch(
     } else {
       resultsEl.innerHTML = results
         .map((r) => {
-          const color = NODE_COLORS[r.type as ADNodeType] || "#6c757d";
+          const nodeType = r.type as ADNodeType;
+          const color = NODE_COLORS[nodeType] || "#6c757d";
+          const iconPath = getNodeIconPath(nodeType);
           return `
-          <div class="search-result-item" data-node-id="${escapeHtml(r.id)}" data-node-label="${escapeHtml(r.label)}" data-context="${context}">
-            <span class="node-badge" style="background-color: ${color}">${escapeHtml(r.type)}</span>
+          <div class="search-result-item" data-node-id="${escapeHtml(r.id)}" data-node-label="${escapeHtml(r.label)}" data-node-type="${escapeHtml(r.type)}" data-context="${context}">
+            <span class="node-type-icon" style="background-color: ${color}" title="${escapeHtml(r.type)}">
+              <svg viewBox="0 0 24 24" fill="#fff">${iconPath}</svg>
+            </span>
             <span class="node-name">${escapeHtml(r.label)}</span>
           </div>
         `;
@@ -229,7 +238,7 @@ function handleResultClick(e: Event): void {
 function handleResultSelection(resultItem: HTMLElement, context: string): void {
   const nodeId = resultItem.getAttribute("data-node-id");
   const nodeLabel = resultItem.getAttribute("data-node-label") || nodeId;
-  const nodeType = resultItem.querySelector(".node-badge")?.textContent || "Unknown";
+  const nodeType = resultItem.getAttribute("data-node-type") || "Unknown";
 
   if (!nodeId) return;
 

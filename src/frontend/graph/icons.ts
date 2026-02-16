@@ -100,3 +100,8 @@ export function getNodeTypeColor(type: ADNodeType): string {
 
 /** Default node size (uniform for all types) */
 export const NODE_SIZE = 12;
+
+/** Get SVG path for a node type (for inline rendering) */
+export function getNodeIconPath(type: ADNodeType): string {
+  return ICON_PATHS[type] || ICON_PATHS.Unknown;
+}
