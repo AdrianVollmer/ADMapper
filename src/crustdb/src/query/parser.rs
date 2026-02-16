@@ -2221,4 +2221,89 @@ mod tests {
         assert!(parse("CREATE (n:Person)").is_ok());
         assert!(parse("CrEaTe (n:Person)").is_ok());
     }
+
+    // M6: Variable-length pattern tests
+    #[test]
+    fn test_parse_variable_length_range() {
+        let stmt = parse("MATCH (a)-[:KNOWS*1..3]->(b) RETURN a, b").unwrap();
+        match stmt {
+            Statement::Match(m) => {
+                assert_eq!(m.pattern.elements.len(), 3);
+                match &m.pattern.elements[1] {
+                    PatternElement::Relationship(rel) => {
+                        assert_eq!(rel.types, vec!["KNOWS".to_string()]);
+                        let len = rel.length.as_ref().unwrap();
+                        assert_eq!(len.min, Some(1));
+                        assert_eq!(len.max, Some(3));
+                    }
+                    _ => panic!("Expected relationship pattern"),
+                }
+            }
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_variable_length_unbounded() {
+        let stmt = parse("MATCH (a)-[:KNOWS*]->(b) RETURN a, b").unwrap();
+        match stmt {
+            Statement::Match(m) => match &m.pattern.elements[1] {
+                PatternElement::Relationship(rel) => {
+                    let len = rel.length.as_ref().unwrap();
+                    assert_eq!(len.min, None);
+                    assert_eq!(len.max, None);
+                }
+                _ => panic!("Expected relationship pattern"),
+            },
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_variable_length_exact() {
+        let stmt = parse("MATCH (a)-[:KNOWS*2]->(b) RETURN a, b").unwrap();
+        match stmt {
+            Statement::Match(m) => match &m.pattern.elements[1] {
+                PatternElement::Relationship(rel) => {
+                    let len = rel.length.as_ref().unwrap();
+                    assert_eq!(len.min, Some(2));
+                    assert_eq!(len.max, Some(2));
+                }
+                _ => panic!("Expected relationship pattern"),
+            },
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_variable_length_min_only() {
+        let stmt = parse("MATCH (a)-[:KNOWS*2..]->(b) RETURN a, b").unwrap();
+        match stmt {
+            Statement::Match(m) => match &m.pattern.elements[1] {
+                PatternElement::Relationship(rel) => {
+                    let len = rel.length.as_ref().unwrap();
+                    assert_eq!(len.min, Some(2));
+                    assert_eq!(len.max, None);
+                }
+                _ => panic!("Expected relationship pattern"),
+            },
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_variable_length_max_only() {
+        let stmt = parse("MATCH (a)-[*..3]->(b) RETURN a, b").unwrap();
+        match stmt {
+            Statement::Match(m) => match &m.pattern.elements[1] {
+                PatternElement::Relationship(rel) => {
+                    let len = rel.length.as_ref().unwrap();
+                    assert_eq!(len.min, None);
+                    assert_eq!(len.max, Some(3));
+                }
+                _ => panic!("Expected relationship pattern"),
+            },
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
 }

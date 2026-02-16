@@ -163,22 +163,23 @@ MATCH (m:Movie)<-[:ACTED_IN]-(a:Actor) RETURN m.title, a.name
 - [x] Expand operator (incoming)
 - [x] Expand operator (undirected)
 
-### M6: Multi-Hop Traversal [open]
+### M6: Multi-Hop Traversal [partial]
 
 Variable-length path queries.
 
 ```cypher
 MATCH (a)-[:KNOWS*1..3]->(b) RETURN a, b
 
-MATCH p = (a:Person)-[:KNOWS*]->(b:Person) RETURN p
+MATCH (a)-[:KNOWS*]->(b) RETURN a.name, b.name
 
-MATCH (a)-[*]-(b) WHERE a <> b RETURN DISTINCT a, b
+MATCH (a)-[*2..]->(b) RETURN a, b
 ```
 
-- [ ] Variable-length pattern parser
-- [ ] BFS/DFS traversal operator
-- [ ] Path construction
-- [ ] Cycle detection
+- [x] Variable-length pattern parser (`*`, `*n`, `*n..m`, `*n..`, `*..m`)
+- [x] BFS traversal operator
+- [x] Cycle avoidance (per depth level)
+- [ ] Path construction (`p = ...` syntax)
+- [ ] Relationship list binding (`[r:KNOWS*]` returning list)
 
 ### M7: Mutation Queries [open]
 

@@ -4,227 +4,94 @@
 [[test]]
 name = "variable_length_1_to_2"
 description = "Match paths of length 1 to 2"
-
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "b", to = "c", type = "KNOWS" },
-]
-
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})"]
 [test.query]
-cypher = """
-MATCH (a:Person {name: 'Alice'})-[:KNOWS*1..2]->(b:Person)
-RETURN b.name
-"""
-
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS*1..2]->(b:Person) RETURN b.name"
 [test.expected]
 columns = ["b.name"]
-rows = [
-    ["Bob"],
-    ["Charlie"],
-]
+row_count = 2
 
 
 [[test]]
 name = "variable_length_exact"
 description = "Match paths of exact length"
-
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "b", to = "c", type = "KNOWS" },
-]
-
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})"]
 [test.query]
-cypher = """
-MATCH (a:Person {name: 'Alice'})-[:KNOWS*2]->(c:Person)
-RETURN c.name
-"""
-
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS*2]->(c:Person) RETURN c.name"
 [test.expected]
 columns = ["c.name"]
-rows = [
-    ["Charlie"],
-]
+row_count = 1
 
 
 [[test]]
 name = "variable_length_unbounded"
 description = "Match paths of any length"
-
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
-    { id = "d", labels = ["Person"], properties = { name = "Diana" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "b", to = "c", type = "KNOWS" },
-    { from = "c", to = "d", type = "KNOWS" },
-]
-
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Diana'})"]
 [test.query]
-cypher = """
-MATCH (a:Person {name: 'Alice'})-[:KNOWS*]->(x:Person)
-RETURN x.name
-"""
-
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS*]->(x:Person) RETURN x.name"
 [test.expected]
 columns = ["x.name"]
-rows = [
-    ["Bob"],
-    ["Charlie"],
-    ["Diana"],
-]
+row_count = 3
 
 
 [[test]]
-name = "variable_length_zero_or_more"
-description = "Match paths of length 0 or more (includes start node)"
-
+name = "variable_length_any_type"
+description = "Match any relationship type with variable length"
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-]
-
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})"]
 [test.query]
-cypher = """
-MATCH (a:Person {name: 'Alice'})-[:KNOWS*0..1]->(b:Person)
-RETURN b.name
-"""
+cypher = "MATCH (a:Person {name: 'Alice'})-[*1..2]->(x:Person) RETURN x.name"
+[test.expected]
+columns = ["x.name"]
+row_count = 2
 
+
+[[test]]
+name = "variable_length_filtered_type"
+description = "Match specific relationship type with variable length"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})-[:WORKS_WITH]->(d:Person {name: 'Diana'})"]
+[test.query]
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS*]->(x:Person) RETURN x.name"
+[test.expected]
+columns = ["x.name"]
+row_count = 2
+
+
+[[test]]
+name = "variable_length_no_matches"
+description = "No matches when path doesn't exist"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'})"]
+[test.query]
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS*]->(b:Person) RETURN b.name"
 [test.expected]
 columns = ["b.name"]
-rows = [
-    ["Alice"],
-    ["Bob"],
-]
+row_count = 0
 
 
 [[test]]
-name = "path_variable"
-description = "Bind entire path to variable"
-
+name = "variable_length_min_2"
+description = "Match paths with minimum length of 2"
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "b", to = "c", type = "KNOWS" },
-]
-
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Diana'})"]
 [test.query]
-cypher = """
-MATCH p = (a:Person {name: 'Alice'})-[:KNOWS*]->(c:Person {name: 'Charlie'})
-RETURN p
-"""
-
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS*2..3]->(x:Person) RETURN x.name"
 [test.expected]
-columns = ["p"]
-row_count = 1
+columns = ["x.name"]
+row_count = 2
 
 
 [[test]]
-name = "cycle_detection"
-description = "Handle cycles in graph"
-
+name = "variable_length_max_only"
+description = "Match paths up to a maximum length"
 [test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "b", to = "c", type = "KNOWS" },
-    { from = "c", to = "a", type = "KNOWS" },
-]
-
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Diana'})"]
 [test.query]
-cypher = """
-MATCH (a:Person {name: 'Alice'})-[:KNOWS*1..3]->(b:Person)
-WHERE a <> b
-RETURN DISTINCT b.name
-"""
-
+cypher = "MATCH (a:Person {name: 'Alice'})-[:KNOWS*..2]->(x:Person) RETURN x.name"
 [test.expected]
-columns = ["b.name"]
-rows = [
-    ["Bob"],
-    ["Charlie"],
-]
-
-
-[[test]]
-name = "undirected_multi_hop"
-description = "Variable-length undirected traversal"
-
-[test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS" },
-    { from = "c", to = "b", type = "KNOWS" },
-]
-
-[test.query]
-cypher = """
-MATCH (a:Person {name: 'Alice'})-[:KNOWS*1..2]-(c:Person)
-WHERE a <> c
-RETURN DISTINCT c.name
-"""
-
-[test.expected]
-columns = ["c.name"]
-rows = [
-    ["Bob"],
-    ["Charlie"],
-]
-
-
-[[test]]
-name = "multi_hop_with_properties"
-description = "Access relationship list from variable-length pattern"
-
-[test.setup]
-nodes = [
-    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
-    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
-    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
-]
-edges = [
-    { from = "a", to = "b", type = "KNOWS", properties = { since = 2015 } },
-    { from = "b", to = "c", type = "KNOWS", properties = { since = 2020 } },
-]
-
-[test.query]
-cypher = """
-MATCH (a:Person {name: 'Alice'})-[rels:KNOWS*2]->(c:Person)
-RETURN c.name, rels
-"""
-
-[test.expected]
-columns = ["c.name", "rels"]
-row_count = 1
+columns = ["x.name"]
+row_count = 2

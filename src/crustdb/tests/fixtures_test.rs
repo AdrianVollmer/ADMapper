@@ -551,3 +551,86 @@ fn test_m5_single_hop_with_where() {
         .unwrap();
     assert_eq!(result.rows.len(), 1);
 }
+
+// =============================================================================
+// M6: Multi-Hop Traversal Tests
+// =============================================================================
+
+#[test]
+fn test_m6_multi_hop_fixtures() {
+    let fixtures = find_fixtures("m6_multi_hop");
+    assert!(!fixtures.is_empty(), "No M6 fixtures found");
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for fixture_path in &fixtures {
+        let fixture = load_fixture(fixture_path);
+
+        for test in &fixture.test {
+            let result = std::panic::catch_unwind(|| {
+                run_test_case(test);
+            });
+
+            match result {
+                Ok(()) => {
+                    passed += 1;
+                    println!("  ✓ {}", test.name);
+                }
+                Err(e) => {
+                    failed += 1;
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown error".to_string()
+                    };
+                    println!("  ✗ {}: {}", test.name, msg);
+                }
+            }
+        }
+    }
+
+    println!("\nM6 Multi-Hop: {} passed, {} failed", passed, failed);
+
+    if failed > 0 {
+        panic!("{} test(s) failed", failed);
+    }
+}
+
+#[test]
+fn test_m6_multi_hop_basic() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})")
+        .unwrap();
+
+    let result = db
+        .execute("MATCH (a:Person {name: 'Alice'})-[:KNOWS*1..2]->(x:Person) RETURN x.name")
+        .unwrap();
+    assert_eq!(result.rows.len(), 2); // Bob and Charlie
+}
+
+#[test]
+fn test_m6_multi_hop_unbounded() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Diana'})")
+        .unwrap();
+
+    let result = db
+        .execute("MATCH (a:Person {name: 'Alice'})-[:KNOWS*]->(x:Person) RETURN x.name")
+        .unwrap();
+    assert_eq!(result.rows.len(), 3); // Bob, Charlie, Diana
+}
+
+#[test]
+fn test_m6_multi_hop_exact_length() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Diana'})")
+        .unwrap();
+
+    let result = db
+        .execute("MATCH (a:Person {name: 'Alice'})-[:KNOWS*2]->(x:Person) RETURN x.name")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1); // Only Charlie (exactly 2 hops)
+}

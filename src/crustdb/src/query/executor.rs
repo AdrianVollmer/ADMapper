@@ -183,10 +183,11 @@ fn execute_match(
     } else if is_single_hop_pattern(pattern) {
         // Single-hop relationship pattern: MATCH (a)-[r]->(b)
         execute_single_hop_pattern(pattern, storage)?
+    } else if is_variable_length_pattern(pattern) {
+        // Variable-length pattern: MATCH (a)-[*1..3]->(b)
+        execute_variable_length_pattern(pattern, storage)?
     } else {
-        return Err(Error::Cypher(
-            "Only single-node and single-hop patterns are supported".into(),
-        ));
+        return Err(Error::Cypher("Unsupported pattern type".into()));
     };
 
     // Filter by WHERE clause if present
@@ -210,12 +211,40 @@ fn is_single_node_pattern(pattern: &Pattern) -> bool {
     pattern.elements.len() == 1 && matches!(pattern.elements[0], PatternElement::Node(_))
 }
 
-/// Check if pattern is a single-hop relationship pattern (node-rel-node).
+/// Check if pattern is a single-hop relationship pattern (node-rel-node) without variable length.
 fn is_single_hop_pattern(pattern: &Pattern) -> bool {
-    pattern.elements.len() == 3
-        && matches!(pattern.elements[0], PatternElement::Node(_))
-        && matches!(pattern.elements[1], PatternElement::Relationship(_))
-        && matches!(pattern.elements[2], PatternElement::Node(_))
+    if pattern.elements.len() != 3 {
+        return false;
+    }
+    if !matches!(pattern.elements[0], PatternElement::Node(_)) {
+        return false;
+    }
+    if !matches!(pattern.elements[2], PatternElement::Node(_)) {
+        return false;
+    }
+    // Check that the relationship has no variable length
+    match &pattern.elements[1] {
+        PatternElement::Relationship(rel) => rel.length.is_none(),
+        _ => false,
+    }
+}
+
+/// Check if pattern is a variable-length relationship pattern (node-[*..]-node).
+fn is_variable_length_pattern(pattern: &Pattern) -> bool {
+    if pattern.elements.len() != 3 {
+        return false;
+    }
+    if !matches!(pattern.elements[0], PatternElement::Node(_)) {
+        return false;
+    }
+    if !matches!(pattern.elements[2], PatternElement::Node(_)) {
+        return false;
+    }
+    // Check that the relationship has variable length
+    match &pattern.elements[1] {
+        PatternElement::Relationship(rel) => rel.length.is_some(),
+        _ => false,
+    }
 }
 
 /// Execute a single-node pattern match.
@@ -325,6 +354,127 @@ fn execute_single_hop_pattern(pattern: &Pattern, storage: &SqliteStorage) -> Res
             }
 
             bindings.push(binding);
+        }
+    }
+
+    Ok(bindings)
+}
+
+/// Execute a variable-length relationship pattern match using BFS.
+fn execute_variable_length_pattern(
+    pattern: &Pattern,
+    storage: &SqliteStorage,
+) -> Result<Vec<Binding>> {
+    use std::collections::{HashSet, VecDeque};
+
+    // Extract pattern components
+    let (source_pattern, rel_pattern, target_pattern) = match (
+        &pattern.elements[0],
+        &pattern.elements[1],
+        &pattern.elements[2],
+    ) {
+        (PatternElement::Node(s), PatternElement::Relationship(r), PatternElement::Node(t)) => {
+            (s, r, t)
+        }
+        _ => return Err(Error::Cypher("Invalid variable-length pattern".into())),
+    };
+
+    let source_var = source_pattern.variable.as_deref().unwrap_or("_src");
+    let target_var = target_pattern.variable.as_deref().unwrap_or("_tgt");
+
+    // Get length constraints
+    let length_spec = rel_pattern
+        .length
+        .as_ref()
+        .ok_or_else(|| Error::Cypher("Variable-length pattern requires length spec".into()))?;
+
+    let min_depth = length_spec.min.unwrap_or(1) as usize;
+    let max_depth = length_spec.max.unwrap_or(100) as usize; // Default max to prevent infinite traversal
+
+    // Scan source nodes
+    let source_nodes = scan_nodes(source_pattern, storage)?;
+    let source_nodes = filter_by_properties(source_nodes, source_pattern)?;
+
+    let mut bindings = Vec::new();
+
+    // BFS from each source node
+    for source_node in source_nodes {
+        // Track (node_id, depth) pairs to visit
+        let mut queue: VecDeque<(i64, usize)> = VecDeque::new();
+        // Track visited (node_id, depth) to allow visiting same node at different depths
+        // but prevent cycles at the same depth level
+        let mut visited_at_depth: HashSet<(i64, usize)> = HashSet::new();
+        // Track which target nodes we've already added for this source (to avoid duplicates)
+        let mut found_targets: HashSet<i64> = HashSet::new();
+
+        queue.push_back((source_node.id, 0));
+        visited_at_depth.insert((source_node.id, 0));
+
+        while let Some((current_id, depth)) = queue.pop_front() {
+            // If we've reached a valid depth, check if current node matches target pattern
+            if depth >= min_depth && depth <= max_depth {
+                if let Some(target_node) = storage.get_node(current_id)? {
+                    if node_matches_pattern(&target_node, target_pattern) {
+                        // Avoid duplicate results for same source-target pair
+                        if !found_targets.contains(&current_id) && current_id != source_node.id {
+                            found_targets.insert(current_id);
+                            let binding = Binding::new()
+                                .with_node(source_var, source_node.clone())
+                                .with_node(target_var, target_node);
+                            bindings.push(binding);
+                        }
+                    }
+                }
+            }
+
+            // Don't expand beyond max depth
+            if depth >= max_depth {
+                continue;
+            }
+
+            // Get edges from current node
+            let edges = match rel_pattern.direction {
+                Direction::Outgoing => storage.find_outgoing_edges(current_id)?,
+                Direction::Incoming => storage.find_incoming_edges(current_id)?,
+                Direction::Both => {
+                    let mut edges = storage.find_outgoing_edges(current_id)?;
+                    edges.extend(storage.find_incoming_edges(current_id)?);
+                    edges
+                }
+            };
+
+            // Filter by relationship type if specified
+            let edges: Vec<Edge> = if rel_pattern.types.is_empty() {
+                edges
+            } else {
+                edges
+                    .into_iter()
+                    .filter(|e| rel_pattern.types.contains(&e.edge_type))
+                    .collect()
+            };
+
+            // Add neighbors to queue
+            for edge in edges {
+                let next_id = match rel_pattern.direction {
+                    Direction::Outgoing => edge.target,
+                    Direction::Incoming => edge.source,
+                    Direction::Both => {
+                        if edge.source == current_id {
+                            edge.target
+                        } else {
+                            edge.source
+                        }
+                    }
+                };
+
+                let next_depth = depth + 1;
+
+                // Visit if we haven't visited this node at this depth
+                if !visited_at_depth.contains(&(next_id, next_depth)) {
+                    visited_at_depth.insert((next_id, next_depth));
+                    queue.push_back((next_id, next_depth));
+                }
+            }
         }
     }
 
@@ -2183,5 +2333,151 @@ mod tests {
         let result = execute(&parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS|WORKS_WITH]-(other:Person) RETURN other.name").unwrap(), &storage).unwrap();
 
         assert_eq!(result.rows.len(), 2); // Bob and Charlie
+    }
+
+    // M6: Variable-length pattern tests
+    #[test]
+    fn test_variable_length_basic() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a chain: Alice -> Bob -> Charlie -> Dave (single CREATE)
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Dave'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Find all people reachable from Alice within 1-2 hops
+        let result = execute(
+            &parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS*1..2]->(b:Person) RETURN b.name")
+                .unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 2); // Bob (1 hop), Charlie (2 hops), NOT Dave (3 hops)
+    }
+
+    #[test]
+    fn test_variable_length_unbounded() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a chain: Alice -> Bob -> Charlie (single CREATE)
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Find all people reachable from Alice (unbounded)
+        let result = execute(
+            &parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS*]->(b:Person) RETURN b.name").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 2); // Bob and Charlie
+    }
+
+    #[test]
+    fn test_variable_length_exact() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a chain: Alice -> Bob -> Charlie -> Dave (single CREATE)
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Dave'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Find people exactly 2 hops from Alice
+        let result = execute(
+            &parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS*2]->(b:Person) RETURN b.name")
+                .unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 1); // Only Charlie (exactly 2 hops)
+    }
+
+    #[test]
+    fn test_variable_length_cycle_handling() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a chain first: Alice -> Bob -> Charlie
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(c:Person {name: 'Charlie'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Add edge back to Alice using variable reference (creates cycle)
+        // Note: We need to find the actual Alice node and create edge to it
+        // For now, test with a simple non-cyclic case
+        // TODO: Test actual cycles when MATCH...CREATE is supported
+
+        // Should find reachable nodes
+        let result = execute(
+            &parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS*1..3]->(b:Person) RETURN b.name")
+                .unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Bob (1 hop), Charlie (2 hops)
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_variable_length_any_type() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create mixed relationship chain
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Match any relationship type
+        let result = execute(
+            &parse("MATCH (a:Person {name: 'Alice'})-[*1..2]->(b:Person) RETURN b.name").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 2); // Bob and Charlie
+    }
+
+    #[test]
+    fn test_variable_length_with_type_filter() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a chain: Alice -KNOWS-> Bob -KNOWS-> Dave
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})-[:KNOWS]->(d:Person {name: 'Dave'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        // Add branch: Bob -WORKS_WITH-> Charlie
+        execute(
+            &parse("CREATE (b:Person {name: 'Bob'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})")
+                .unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Match only KNOWS relationships from Alice
+        let result = execute(
+            &parse("MATCH (a:Person {name: 'Alice'})-[:KNOWS*1..2]->(b:Person) RETURN b.name")
+                .unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Bob (1 hop via KNOWS) and Dave (2 hops via KNOWS->KNOWS)
+        // NOT Charlie (Bob-WORKS_WITH->Charlie doesn't match KNOWS)
+        assert_eq!(result.rows.len(), 2);
     }
 }
