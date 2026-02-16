@@ -323,6 +323,7 @@ fn execute_single_hop_pattern(pattern: &Pattern, storage: &SqliteStorage) -> Res
     let source_var = source_pattern.variable.as_deref().unwrap_or("_src");
     let rel_var = rel_pattern.variable.as_deref();
     let target_var = target_pattern.variable.as_deref().unwrap_or("_tgt");
+    let path_var = pattern.path_variable.as_deref();
 
     // Scan source nodes
     let source_nodes = scan_nodes(source_pattern, storage)?;
@@ -384,10 +385,19 @@ fn execute_single_hop_pattern(pattern: &Pattern, storage: &SqliteStorage) -> Res
             // Create binding for this match
             let mut binding = Binding::new()
                 .with_node(source_var, source_node.clone())
-                .with_node(target_var, target_node);
+                .with_node(target_var, target_node.clone());
 
             if let Some(rv) = rel_var {
-                binding = binding.with_edge(rv, edge);
+                binding = binding.with_edge(rv, edge.clone());
+            }
+
+            // Add path variable if specified
+            if let Some(pv) = path_var {
+                let path = Path {
+                    node_ids: vec![source_node.id, target_node.id],
+                    edge_ids: vec![edge.id],
+                };
+                binding = binding.with_path(pv, path);
             }
 
             bindings.push(binding);
