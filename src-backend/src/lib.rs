@@ -164,6 +164,7 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/search", get(graph_search))
         .route("/api/graph/path", get(graph_path))
         .route("/api/graph/paths-to-da", get(paths_to_domain_admins))
+        .route("/api/graph/insights", get(graph_insights))
         .route("/api/graph/query", post(graph_query))
         .route("/api/query-history", get(get_query_history))
         .route("/api/query-history", post(add_query_history))
@@ -221,6 +222,7 @@ pub async fn run_service(bind: &str, port: u16) {
         .route("/api/graph/search", get(graph_search))
         .route("/api/graph/path", get(graph_path))
         .route("/api/graph/paths-to-da", get(paths_to_domain_admins))
+        .route("/api/graph/insights", get(graph_insights))
         .route("/api/graph/query", post(graph_query))
         .route("/api/query-history", get(get_query_history))
         .route("/api/query-history", post(add_query_history))
@@ -714,6 +716,21 @@ async fn paths_to_domain_admins(
     info!(count = count, "Found users with paths to Domain Admins");
 
     Ok(Json(PathsToDaResponse { count, entries }))
+}
+
+/// Get security insights from the graph.
+#[instrument(skip(state))]
+async fn graph_insights(
+    State(state): State<AppState>,
+) -> Result<Json<db::SecurityInsights>, ApiError> {
+    let insights = state.db.get_security_insights()?;
+    info!(
+        effective_das = insights.effective_da_count,
+        real_das = insights.real_da_count,
+        total_users = insights.total_users,
+        "Security insights computed"
+    );
+    Ok(Json(insights))
 }
 
 /// Custom query request body.

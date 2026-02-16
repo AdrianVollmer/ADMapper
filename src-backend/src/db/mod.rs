@@ -2,4 +2,6 @@
 
 mod cozo;
 
-pub use cozo::{DbEdge, DbError, DbNode, DetailedStats, GraphDatabase};
+pub use cozo::{
+    DbEdge, DbError, DbNode, DetailedStats, GraphDatabase, ReachabilityInsight, SecurityInsights,
+};

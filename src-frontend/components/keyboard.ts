@@ -43,6 +43,7 @@ const shortcuts: ShortcutDef[] = [
 
   // Tools menu
   { key: "Enter", ctrl: true, action: "run-query", label: "Run Query", category: "Tools" },
+  { key: "i", ctrl: true, action: "insights", label: "Security Insights", category: "Tools" },
   { key: "l", ctrl: true, action: "layout-graph", label: "Re-layout Graph", category: "Tools" },
 
   // Help menu

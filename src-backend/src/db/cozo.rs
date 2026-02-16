@@ -40,6 +40,35 @@ pub struct DetailedStats {
     pub gpos: usize,
 }
 
+/// Security insight for a well-known principal reachability.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ReachabilityInsight {
+    pub principal_name: String,
+    pub principal_id: Option<String>,
+    pub reachable_count: usize,
+}
+
+/// Security insights computed from the graph.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SecurityInsights {
+    /// Users who have a path to Domain Admins
+    pub effective_da_count: usize,
+    /// Users who are direct or transitive members of Domain Admins
+    pub real_da_count: usize,
+    /// Ratio of effective DAs to real DAs
+    pub da_ratio: f64,
+    /// Total users in the database
+    pub total_users: usize,
+    /// Percentage of users that are effective DAs
+    pub effective_da_percentage: f64,
+    /// Objects reachable from well-known principals
+    pub reachability: Vec<ReachabilityInsight>,
+    /// Users with paths to Domain Admins (for export)
+    pub effective_das: Vec<(String, String, usize)>,
+    /// Users who are members of Domain Admins (for export)
+    pub real_das: Vec<(String, String)>,
+}
+
 #[derive(Error, Debug)]
 pub enum DbError {
     #[error("Database error: {0}")]
@@ -321,6 +350,178 @@ impl GraphDatabase {
             domains: type_counts.get("Domain").copied().unwrap_or(0),
             ous: type_counts.get("OU").copied().unwrap_or(0),
             gpos: type_counts.get("GPO").copied().unwrap_or(0),
+        })
+    }
+
+    /// Compute security insights from the graph.
+    pub fn get_security_insights(&self) -> Result<SecurityInsights> {
+        debug!("Computing security insights");
+
+        let nodes = self.get_all_nodes()?;
+        let edges = self.get_all_edges()?;
+
+        // Count total users
+        let total_users = nodes.iter().filter(|n| n.node_type == "User").count();
+
+        // Find Domain Admins groups (SID ending in -512)
+        let da_nodes: Vec<&DbNode> = nodes.iter().filter(|n| n.id.ends_with("-512")).collect();
+
+        // Find "real" DAs - users who are direct or transitive members of DA
+        // Build adjacency for MemberOf edges only
+        let mut member_of_adj: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for edge in &edges {
+            if edge.edge_type == "MemberOf" {
+                member_of_adj
+                    .entry(edge.source.clone())
+                    .or_default()
+                    .push(edge.target.clone());
+            }
+        }
+
+        // BFS from each user to find if they can reach a DA group via MemberOf
+        let da_ids: std::collections::HashSet<&str> =
+            da_nodes.iter().map(|n| n.id.as_str()).collect();
+
+        let mut real_das: Vec<(String, String)> = Vec::new();
+        for node in &nodes {
+            if node.node_type != "User" {
+                continue;
+            }
+
+            // BFS to find if user can reach DA via MemberOf
+            let mut visited = std::collections::HashSet::new();
+            let mut queue = std::collections::VecDeque::new();
+            queue.push_back(node.id.clone());
+            visited.insert(node.id.clone());
+
+            while let Some(current) = queue.pop_front() {
+                if da_ids.contains(current.as_str()) {
+                    real_das.push((node.id.clone(), node.label.clone()));
+                    break;
+                }
+                if let Some(targets) = member_of_adj.get(&current) {
+                    for target in targets {
+                        if !visited.contains(target) {
+                            visited.insert(target.clone());
+                            queue.push_back(target.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        let real_da_count = real_das.len();
+
+        // Find "effective" DAs - users with any path to DA (already implemented)
+        let effective_results = self.find_paths_to_domain_admins(&[])?;
+        let effective_da_count = effective_results.len();
+        let effective_das: Vec<(String, String, usize)> = effective_results
+            .into_iter()
+            .map(|(id, _node_type, label, hops)| (id, label, hops))
+            .collect();
+
+        // Compute ratio and percentage
+        let da_ratio = if real_da_count > 0 {
+            effective_da_count as f64 / real_da_count as f64
+        } else {
+            0.0
+        };
+        let effective_da_percentage = if total_users > 0 {
+            (effective_da_count as f64 / total_users as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        // Compute reachability from well-known principals
+        let well_known_principals = [
+            ("Everyone", "S-1-1-0"),
+            ("Authenticated Users", "S-1-5-11"),
+            ("Domain Users", "-513"),   // SID suffix
+            ("Domain Computers", "-515"), // SID suffix
+        ];
+
+        // Build forward adjacency for reachability (all edge types)
+        let mut forward_adj: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for edge in &edges {
+            forward_adj
+                .entry(edge.source.clone())
+                .or_default()
+                .push(edge.target.clone());
+        }
+
+        let mut reachability = Vec::new();
+        for (name, id_pattern) in well_known_principals {
+            // Find the principal node(s)
+            let principal_ids: Vec<&str> = nodes
+                .iter()
+                .filter(|n| {
+                    if id_pattern.starts_with('-') {
+                        // Suffix match
+                        n.id.ends_with(id_pattern)
+                    } else {
+                        // Exact match
+                        n.id == id_pattern
+                    }
+                })
+                .map(|n| n.id.as_str())
+                .collect();
+
+            if principal_ids.is_empty() {
+                reachability.push(ReachabilityInsight {
+                    principal_name: name.to_string(),
+                    principal_id: None,
+                    reachable_count: 0,
+                });
+                continue;
+            }
+
+            // BFS from all principal nodes
+            let mut visited = std::collections::HashSet::new();
+            let mut queue = std::collections::VecDeque::new();
+            for id in &principal_ids {
+                visited.insert(id.to_string());
+                queue.push_back(id.to_string());
+            }
+
+            while let Some(current) = queue.pop_front() {
+                if let Some(targets) = forward_adj.get(&current) {
+                    for target in targets {
+                        if !visited.contains(target) {
+                            visited.insert(target.clone());
+                            queue.push_back(target.clone());
+                        }
+                    }
+                }
+            }
+
+            // Count reachable non-trivial objects (exclude the principal itself)
+            let reachable_count = visited.len().saturating_sub(principal_ids.len());
+
+            reachability.push(ReachabilityInsight {
+                principal_name: name.to_string(),
+                principal_id: principal_ids.first().map(|s| s.to_string()),
+                reachable_count,
+            });
+        }
+
+        debug!(
+            effective_das = effective_da_count,
+            real_das = real_da_count,
+            total_users = total_users,
+            "Security insights computed"
+        );
+
+        Ok(SecurityInsights {
+            effective_da_count,
+            real_da_count,
+            da_ratio,
+            total_users,
+            effective_da_percentage,
+            reachability,
+            effective_das,
+            real_das,
         })
     }
 

@@ -12,6 +12,7 @@ import { openQueryHistory, goBackInHistory } from "./query-history";
 import { showKeyboardShortcuts } from "./keyboard";
 import { openDbManager } from "./db-manager";
 import { exportPNG, exportSVG, exportJSON } from "./export";
+import { openInsights } from "./insights";
 
 /** Dispatch an action by name */
 export function dispatchAction(action: string): void {
@@ -130,6 +131,10 @@ export function dispatchAction(action: string): void {
 
     case "manage-db":
       openDbManager();
+      break;
+
+    case "insights":
+      openInsights();
       break;
 
     case "layout-graph": {
