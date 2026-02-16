@@ -27,6 +27,19 @@ pub struct DbEdge {
     pub properties: JsonValue,
 }
 
+/// Detailed statistics about the database.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DetailedStats {
+    pub total_nodes: usize,
+    pub total_edges: usize,
+    pub users: usize,
+    pub computers: usize,
+    pub groups: usize,
+    pub domains: usize,
+    pub ous: usize,
+    pub gpos: usize,
+}
+
 #[derive(Error, Debug)]
 pub enum DbError {
     #[error("Database error: {0}")]
@@ -273,6 +286,42 @@ impl GraphDatabase {
             .unwrap_or(0) as usize;
 
         Ok((node_count, edge_count))
+    }
+
+    /// Get detailed stats including counts by node type.
+    pub fn get_detailed_stats(&self) -> Result<DetailedStats> {
+        let (node_count, edge_count) = self.get_stats()?;
+
+        // Get counts by node type
+        let type_result = self.db.run_script(
+            "?[node_type, count(object_id)] := *nodes{object_id, node_type}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )?;
+        let type_json = type_result.into_json();
+
+        let mut type_counts = std::collections::HashMap::new();
+        if let Some(rows) = type_json["rows"].as_array() {
+            for row in rows {
+                if let (Some(node_type), Some(count)) = (
+                    row.get(0).and_then(|v| v.as_str()),
+                    row.get(1).and_then(|v| v.as_u64()),
+                ) {
+                    type_counts.insert(node_type.to_string(), count as usize);
+                }
+            }
+        }
+
+        Ok(DetailedStats {
+            total_nodes: node_count,
+            total_edges: edge_count,
+            users: type_counts.get("User").copied().unwrap_or(0),
+            computers: type_counts.get("Computer").copied().unwrap_or(0),
+            groups: type_counts.get("Group").copied().unwrap_or(0),
+            domains: type_counts.get("Domain").copied().unwrap_or(0),
+            ous: type_counts.get("OU").copied().unwrap_or(0),
+            gpos: type_counts.get("GPO").copied().unwrap_or(0),
+        })
     }
 
     /// Get all nodes (for graph rendering).

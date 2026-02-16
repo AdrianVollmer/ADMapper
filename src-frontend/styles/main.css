@@ -951,3 +951,64 @@
            border border-gray-600 rounded;
   }
 }
+
+/* ============================================
+   Database Manager Modal
+   ============================================ */
+@layer components {
+  .db-stats-grid {
+    @apply grid grid-cols-2 gap-4 mb-6;
+  }
+
+  .db-stat-card {
+    @apply p-4 rounded-lg text-center;
+  }
+
+  .db-stat-primary {
+    @apply bg-blue-900/30 border border-blue-700/50;
+  }
+
+  .db-stat-value {
+    @apply text-3xl font-bold text-white;
+  }
+
+  .db-stat-label {
+    @apply text-sm text-gray-400 mt-1;
+  }
+
+  .db-stats-breakdown {
+    @apply mb-6;
+  }
+
+  .db-stats-section-title {
+    @apply text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3;
+  }
+
+  .db-stats-grid-small {
+    @apply grid grid-cols-3 gap-3;
+  }
+
+  .db-stat-item {
+    @apply flex flex-col items-center p-3 bg-gray-800 rounded;
+  }
+
+  .db-stat-item-value {
+    @apply text-xl font-semibold text-gray-200;
+  }
+
+  .db-stat-item-label {
+    @apply text-xs text-gray-500 mt-1;
+  }
+
+  .db-danger-zone {
+    @apply p-4 border border-red-900/50 bg-red-900/20 rounded-lg mt-6;
+  }
+
+  .db-danger-title {
+    @apply text-sm font-semibold text-red-400 mb-2;
+  }
+
+  .db-danger-text {
+    @apply text-sm text-gray-400 mb-4;
+  }
+}

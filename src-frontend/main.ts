@@ -13,6 +13,7 @@ import { initSearch } from "./components/search";
 import { initQueries } from "./components/queries";
 import { initQueryHistory } from "./components/query-history";
 import { initPathsToDa } from "./components/paths-to-da";
+import { initDbManager } from "./components/db-manager";
 
 /** Application state */
 export interface AppState {
@@ -38,6 +39,7 @@ function init(): void {
   initQueries();
   initQueryHistory();
   initPathsToDa();
+  initDbManager();
 
   console.log("ADMapper initialized");
 }

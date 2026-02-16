@@ -10,6 +10,7 @@ import { getRenderer } from "./graph-view";
 import { triggerBloodHoundImport } from "./import";
 import { openQueryHistory, goBackInHistory } from "./query-history";
 import { showKeyboardShortcuts } from "./keyboard";
+import { openDbManager } from "./db-manager";
 
 /** Dispatch an action by name */
 export function dispatchAction(action: string): void {
@@ -117,6 +118,10 @@ export function dispatchAction(action: string): void {
 
     case "history-back":
       goBackInHistory();
+      break;
+
+    case "manage-db":
+      openDbManager();
       break;
 
     case "layout-graph": {

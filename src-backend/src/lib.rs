@@ -156,6 +156,8 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/import", post(import_bloodhound))
         .route("/api/import/progress/:job_id", get(import_progress))
         .route("/api/graph/stats", get(graph_stats))
+        .route("/api/graph/detailed-stats", get(graph_detailed_stats))
+        .route("/api/graph/clear", post(graph_clear))
         .route("/api/graph/nodes", get(graph_nodes))
         .route("/api/graph/edges", get(graph_edges))
         .route("/api/graph/all", get(graph_all))
@@ -211,6 +213,8 @@ pub async fn run_service(bind: &str, port: u16) {
         .route("/api/import", post(import_bloodhound))
         .route("/api/import/progress/:job_id", get(import_progress))
         .route("/api/graph/stats", get(graph_stats))
+        .route("/api/graph/detailed-stats", get(graph_detailed_stats))
+        .route("/api/graph/clear", post(graph_clear))
         .route("/api/graph/nodes", get(graph_nodes))
         .route("/api/graph/edges", get(graph_edges))
         .route("/api/graph/all", get(graph_all))
@@ -391,6 +395,30 @@ async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue>, A
         "nodes": node_count,
         "edges": edge_count
     })))
+}
+
+/// Get detailed graph statistics including counts by type.
+#[instrument(skip(state))]
+async fn graph_detailed_stats(
+    State(state): State<AppState>,
+) -> Result<Json<db::DetailedStats>, ApiError> {
+    let stats = state.db.get_detailed_stats()?;
+    debug!(
+        nodes = stats.total_nodes,
+        edges = stats.total_edges,
+        users = stats.users,
+        computers = stats.computers,
+        "Detailed stats retrieved"
+    );
+    Ok(Json(stats))
+}
+
+/// Clear all graph data from the database.
+#[instrument(skip(state))]
+async fn graph_clear(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
+    state.db.clear()?;
+    info!("Database cleared");
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Graph node response format.
