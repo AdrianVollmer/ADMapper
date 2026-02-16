@@ -456,68 +456,28 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
   }
 }
 
-/** Build Cypher query for loading connections */
-function buildConnectionQuery(nodeId: string, direction: string): string {
-  const escapedId = nodeId.replace(/'/g, "\\'");
-
-  switch (direction) {
-    case "incoming":
-      // All incoming edges
-      return `MATCH (n)-[r]->(target) WHERE target.objectid = '${escapedId}' RETURN n, r, target`;
-
-    case "outgoing":
-      // All outgoing edges
-      return `MATCH (source)-[r]->(n) WHERE source.objectid = '${escapedId}' RETURN source, r, n`;
-
-    case "admin":
-      // Admin permissions (AdminTo, GenericAll, GenericWrite, etc.)
-      return `MATCH (source)-[r]->(target)
-              WHERE source.objectid = '${escapedId}'
-                AND type(r) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights']
-              RETURN source, r, target`;
-
-    case "memberof":
-      // MemberOf relationships (groups this node belongs to)
-      return `MATCH (n)-[r:MemberOf]->(g) WHERE n.objectid = '${escapedId}' RETURN n, r, g`;
-
-    case "members":
-      // Members of this group
-      return `MATCH (m)-[r:MemberOf]->(g) WHERE g.objectid = '${escapedId}' RETURN m, r, g`;
-
-    default:
-      return `MATCH (n)-[r]-(m) WHERE n.objectid = '${escapedId}' RETURN n, r, m`;
-  }
-}
-
 /** Load connections for a node */
 async function loadConnections(nodeId: string, direction: string): Promise<void> {
   try {
-    const query = buildConnectionQuery(nodeId, direction);
-    const response = await api.post<{
-      graph?: {
-        nodes: Array<{ id: string; label: string; type: string; properties?: Record<string, unknown> }>;
-        edges: Array<{ source: string; target: string; type: string }>;
-      };
-    }>("/api/graph/query", {
-      query,
-      extract_graph: true,
-      language: "cypher",
-    });
+    const response = await api.get<{
+      nodes: Array<{ id: string; label: string; type: string; properties?: Record<string, unknown> }>;
+      edges: Array<{ source: string; target: string; type: string }>;
+    }>(`/api/graph/node/${encodeURIComponent(nodeId)}/connections/${direction}`);
 
-    if (!response.graph || response.graph.nodes.length === 0) {
+    if (!response.nodes || response.nodes.length === 0) {
       console.log(`No ${direction} connections found for node ${nodeId}`);
       return;
     }
 
     // Load the graph data
     loadGraphData({
-      nodes: response.graph.nodes.map((n) => ({
+      nodes: response.nodes.map((n) => ({
         id: n.id,
         label: n.label,
         type: n.type as ADNodeType,
         properties: n.properties || {},
       })),
-      edges: response.graph.edges.map((e) => ({
+      edges: response.edges.map((e) => ({
         source: e.source,
         target: e.target,
         type: e.type as import("../graph/types").ADEdgeType,

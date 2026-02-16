@@ -121,6 +121,14 @@ impl DatabaseBackend for FalkorDbDatabase {
         self.not_implemented()
     }
 
+    fn get_node_connections(
+        &self,
+        _node_id: &str,
+        _direction: &str,
+    ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
+        self.not_implemented()
+    }
+
     fn shortest_path(
         &self,
         _from: &str,

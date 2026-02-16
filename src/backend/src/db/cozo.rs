@@ -878,6 +878,59 @@ impl GraphDatabase {
             .collect())
     }
 
+    /// Get connections for a node in the specified direction.
+    pub fn get_node_connections(
+        &self,
+        node_id: &str,
+        direction: &str,
+    ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
+        debug!(node_id = %node_id, direction = %direction, "Getting node connections");
+
+        let all_edges = self.get_all_edges()?;
+
+        // Admin permission edge types
+        const ADMIN_EDGE_TYPES: &[&str] = &[
+            "AdminTo",
+            "GenericAll",
+            "GenericWrite",
+            "Owns",
+            "WriteDacl",
+            "WriteOwner",
+            "AllExtendedRights",
+            "ForceChangePassword",
+            "AddMember",
+        ];
+
+        // Filter edges based on direction
+        let filtered_edges: Vec<DbEdge> = all_edges
+            .into_iter()
+            .filter(|edge| match direction {
+                "incoming" => edge.target == node_id,
+                "outgoing" => edge.source == node_id,
+                "admin" => {
+                    edge.source == node_id && ADMIN_EDGE_TYPES.contains(&edge.edge_type.as_str())
+                }
+                "memberof" => edge.source == node_id && edge.edge_type == "MemberOf",
+                "members" => edge.target == node_id && edge.edge_type == "MemberOf",
+                _ => edge.source == node_id || edge.target == node_id,
+            })
+            .collect();
+
+        // Collect all node IDs involved (including the original node)
+        let mut node_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        node_ids.insert(node_id.to_string());
+        for edge in &filtered_edges {
+            node_ids.insert(edge.source.clone());
+            node_ids.insert(edge.target.clone());
+        }
+
+        // Fetch all involved nodes
+        let node_id_vec: Vec<String> = node_ids.into_iter().collect();
+        let nodes = self.get_nodes_by_ids(&node_id_vec)?;
+
+        Ok((nodes, filtered_edges))
+    }
+
     /// Run a custom CozoDB query and extract nodes/edges from results.
     /// The query should return rows with columns that can be matched to node IDs.
     pub fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
@@ -1095,6 +1148,14 @@ impl DatabaseBackend for GraphDatabase {
 
     fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {
         GraphDatabase::resolve_node_identifier(self, identifier)
+    }
+
+    fn get_node_connections(
+        &self,
+        node_id: &str,
+        direction: &str,
+    ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
+        GraphDatabase::get_node_connections(self, node_id, direction)
     }
 
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {

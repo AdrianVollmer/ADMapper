@@ -259,6 +259,10 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/all", get(graph_all))
         .route("/api/graph/search", get(graph_search))
         .route("/api/graph/node/:id/counts", get(node_counts))
+        .route(
+            "/api/graph/node/:id/connections/:direction",
+            get(node_connections),
+        )
         .route("/api/graph/path", get(graph_path))
         .route("/api/graph/paths-to-da", get(paths_to_domain_admins))
         .route("/api/graph/edge-types", get(graph_edge_types))
@@ -796,6 +800,24 @@ async fn node_counts(
         admin_to,
         member_of,
         members,
+    }))
+}
+
+/// Get connections for a node in a specific direction.
+/// Returns the full graph (nodes and edges) for rendering.
+#[instrument(skip(state))]
+async fn node_connections(
+    State(state): State<AppState>,
+    Path((node_id, direction)): Path<(String, String)>,
+) -> Result<Json<FullGraph>, ApiError> {
+    let db = state.require_db()?;
+    info!(node_id = %node_id, direction = %direction, "Loading node connections");
+
+    let (nodes, edges) = db.get_node_connections(&node_id, &direction)?;
+
+    Ok(Json(FullGraph {
+        nodes: nodes.into_iter().map(GraphNode::from).collect(),
+        edges: edges.into_iter().map(GraphEdge::from).collect(),
     }))
 }
 

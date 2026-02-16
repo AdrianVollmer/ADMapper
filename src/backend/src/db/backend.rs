@@ -107,6 +107,23 @@ pub trait DatabaseBackend: Send + Sync {
     fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>>;
 
     // ========================================================================
+    // Node Connections
+    // ========================================================================
+
+    /// Get connections for a node.
+    /// Returns (nodes, edges) for the connections in the specified direction.
+    /// - `incoming`: edges where node is target
+    /// - `outgoing`: edges where node is source
+    /// - `admin`: outgoing admin permission edges (AdminTo, GenericAll, etc.)
+    /// - `memberof`: outgoing MemberOf edges
+    /// - `members`: incoming MemberOf edges
+    fn get_node_connections(
+        &self,
+        node_id: &str,
+        direction: &str,
+    ) -> Result<(Vec<DbNode>, Vec<DbEdge>)>;
+
+    // ========================================================================
     // Path Finding
     // ========================================================================
 
