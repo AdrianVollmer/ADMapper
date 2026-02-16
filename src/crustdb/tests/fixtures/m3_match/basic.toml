@@ -136,3 +136,34 @@ cypher = "MATCH (n) RETURN n"
 [test.expected]
 row_count = 0
 columns = ["n"]
+
+[[test]]
+name = "match_label_or"
+description = "Match nodes with either label using | syntax"
+[test.setup]
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})",
+    "CREATE (b:Company {name: 'Acme'})",
+    "CREATE (c:Movie {title: 'The Matrix'})",
+]
+[test.query]
+cypher = "MATCH (n:Person|Company) RETURN n.name"
+[test.expected]
+row_count = 2
+columns = ["n.name"]
+
+[[test]]
+name = "match_label_or_three"
+description = "Match nodes with any of three labels"
+[test.setup]
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})",
+    "CREATE (b:Company {name: 'Acme'})",
+    "CREATE (c:Movie {title: 'The Matrix'})",
+    "CREATE (d:Book {title: 'Dune'})",
+]
+[test.query]
+cypher = "MATCH (n:Person|Company|Movie) RETURN n"
+[test.expected]
+row_count = 3
+columns = ["n"]

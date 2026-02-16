@@ -129,7 +129,9 @@ pub enum PatternElement {
 #[derive(Debug, Clone)]
 pub struct NodePattern {
     pub variable: Option<String>,
-    pub labels: Vec<String>,
+    /// Labels to match. Each inner Vec is OR'd (alternatives), outer Vec is AND'd.
+    /// Example: `:Person:Actor|Director` → `[["Person"], ["Actor", "Director"]]`
+    pub labels: Vec<Vec<String>>,
     pub properties: Option<Expression>,
 }
 
@@ -518,7 +520,9 @@ fn build_set_item(pair: Pair<Rule>) -> Result<SetItem> {
             for part in parts {
                 match part.as_rule() {
                     Rule::NodeLabels => {
-                        let labels = build_node_labels(part)?;
+                        // Flatten label groups for SET (all labels are added)
+                        let label_groups = build_node_labels(part)?;
+                        let labels: Vec<String> = label_groups.into_iter().flatten().collect();
                         return Ok(SetItem::Labels {
                             variable: var,
                             labels,
@@ -859,20 +863,25 @@ fn build_node_pattern(pair: Pair<Rule>) -> Result<NodePattern> {
 }
 
 /// Build node labels from a NodeLabels rule.
-fn build_node_labels(pair: Pair<Rule>) -> Result<Vec<String>> {
-    let mut labels = Vec::new();
+/// Returns Vec<Vec<String>> where each inner Vec is OR'd (alternatives), outer Vec is AND'd.
+fn build_node_labels(pair: Pair<Rule>) -> Result<Vec<Vec<String>>> {
+    let mut label_groups = Vec::new();
 
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::NodeLabel {
+            let mut alternatives = Vec::new();
             for label_inner in inner.into_inner() {
                 if label_inner.as_rule() == Rule::LabelName {
-                    labels.push(extract_schema_name(label_inner)?);
+                    alternatives.push(extract_schema_name(label_inner)?);
                 }
+            }
+            if !alternatives.is_empty() {
+                label_groups.push(alternatives);
             }
         }
     }
 
-    Ok(labels)
+    Ok(label_groups)
 }
 
 /// Build a RelationshipPattern from a RelationshipPattern rule.
@@ -1905,7 +1914,7 @@ mod tests {
                 match &create.pattern.elements[0] {
                     PatternElement::Node(node) => {
                         assert_eq!(node.variable, Some("n".to_string()));
-                        assert_eq!(node.labels, vec!["Person".to_string()]);
+                        assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
                         assert!(node.properties.is_some());
                     }
                     _ => panic!("Expected node pattern"),
@@ -1924,7 +1933,7 @@ mod tests {
                 match &create.pattern.elements[0] {
                     PatternElement::Node(node) => {
                         assert_eq!(node.variable, Some("n".to_string()));
-                        assert_eq!(node.labels, vec!["Person".to_string()]);
+                        assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
                         assert!(node.properties.is_none());
                     }
                     _ => panic!("Expected node pattern"),
@@ -1940,7 +1949,10 @@ mod tests {
         match stmt {
             Statement::Create(create) => match &create.pattern.elements[0] {
                 PatternElement::Node(node) => {
-                    assert_eq!(node.labels, vec!["Person".to_string(), "Actor".to_string()]);
+                    assert_eq!(
+                        node.labels,
+                        vec![vec!["Person".to_string()], vec!["Actor".to_string()]]
+                    );
                 }
                 _ => panic!("Expected node pattern"),
             },
@@ -1960,7 +1972,7 @@ mod tests {
                 match &create.pattern.elements[0] {
                     PatternElement::Node(node) => {
                         assert_eq!(node.variable, Some("a".to_string()));
-                        assert_eq!(node.labels, vec!["Person".to_string()]);
+                        assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
                     }
                     _ => panic!("Expected node pattern"),
                 }
@@ -2008,7 +2020,7 @@ mod tests {
             Statement::Create(create) => match &create.pattern.elements[0] {
                 PatternElement::Node(node) => {
                     assert_eq!(node.variable, None);
-                    assert_eq!(node.labels, vec!["Person".to_string()]);
+                    assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
                 }
                 _ => panic!("Expected node pattern"),
             },
@@ -2213,6 +2225,45 @@ mod tests {
                 }
             }
             _ => panic!("Expected MATCH statement with SET clause"),
+        }
+    }
+
+    #[test]
+    fn test_parse_label_or() {
+        let stmt = parse("MATCH (n:Person|Company) RETURN n").unwrap();
+        match stmt {
+            Statement::Match(m) => match &m.pattern.elements[0] {
+                PatternElement::Node(node) => {
+                    // Single label group with two alternatives
+                    assert_eq!(
+                        node.labels,
+                        vec![vec!["Person".to_string(), "Company".to_string()]]
+                    );
+                }
+                _ => panic!("Expected node pattern"),
+            },
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_label_or_with_and() {
+        let stmt = parse("MATCH (n:Person:Actor|Director) RETURN n").unwrap();
+        match stmt {
+            Statement::Match(m) => match &m.pattern.elements[0] {
+                PatternElement::Node(node) => {
+                    // First group: just Person; second group: Actor or Director
+                    assert_eq!(
+                        node.labels,
+                        vec![
+                            vec!["Person".to_string()],
+                            vec!["Actor".to_string(), "Director".to_string()]
+                        ]
+                    );
+                }
+                _ => panic!("Expected node pattern"),
+            },
+            _ => panic!("Expected MATCH statement"),
         }
     }
 

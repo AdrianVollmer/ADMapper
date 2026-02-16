@@ -201,7 +201,7 @@ NodeLabels = {
 }
 
 NodeLabel = {
-    ":" ~ SP? ~ LabelName
+    ":" ~ SP? ~ LabelName ~ (SP? ~ "|" ~ SP? ~ LabelName)*
 }
 
 RangeLiteral = {

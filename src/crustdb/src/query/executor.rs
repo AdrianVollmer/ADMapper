@@ -562,9 +562,11 @@ fn execute_variable_length_pattern(
 
 /// Check if a node matches a node pattern (labels and properties).
 fn node_matches_pattern(node: &Node, pattern: &NodePattern) -> bool {
-    // Check labels
-    for label in &pattern.labels {
-        if !node.has_label(label) {
+    // Check labels: each label group is AND'd, alternatives within a group are OR'd
+    for label_group in &pattern.labels {
+        // Node must have at least one label from this group
+        let has_any = label_group.iter().any(|label| node.has_label(label));
+        if !has_any {
             return false;
         }
     }
@@ -1010,16 +1012,37 @@ fn scan_nodes(pattern: &NodePattern, storage: &SqliteStorage) -> Result<Vec<Node
         // No label filter - scan all nodes
         storage.scan_all_nodes()
     } else {
-        // Filter by first label (we can AND multiple labels later)
-        let label = &pattern.labels[0];
-        let mut nodes = storage.find_nodes_by_label(label)?;
-
-        // If multiple labels, filter to only nodes that have ALL labels
-        if pattern.labels.len() > 1 {
-            nodes.retain(|node| pattern.labels.iter().all(|l| node.has_label(l)));
+        // For efficiency, use first label from first group for initial scan
+        // Then filter using full label expression
+        let first_group = &pattern.labels[0];
+        if first_group.is_empty() {
+            return storage.scan_all_nodes();
         }
 
-        Ok(nodes)
+        // If first group has alternatives (OR), we need to scan for each and merge
+        let mut all_nodes = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for label in first_group {
+            let nodes = storage.find_nodes_by_label(label)?;
+            for node in nodes {
+                if seen_ids.insert(node.id) {
+                    all_nodes.push(node);
+                }
+            }
+        }
+
+        // Filter to match full label expression (handles AND of multiple groups)
+        if pattern.labels.len() > 1 {
+            all_nodes.retain(|node| {
+                pattern
+                    .labels
+                    .iter()
+                    .all(|group| group.iter().any(|label| node.has_label(label)))
+            });
+        }
+
+        Ok(all_nodes)
     }
 }
 
@@ -1234,7 +1257,8 @@ fn create_node(
     storage: &SqliteStorage,
     stats: &mut QueryStats,
 ) -> Result<i64> {
-    let labels: Vec<String> = pattern.labels.clone();
+    // Flatten label groups for CREATE (all labels are added to the node)
+    let labels: Vec<String> = pattern.labels.iter().flatten().cloned().collect();
 
     let properties = match &pattern.properties {
         Some(expr) => expression_to_json(expr)?,
