@@ -498,7 +498,7 @@
   }
 
   .detail-action-btn {
-    @apply p-2 rounded text-gray-400 hover:text-white hover:bg-gray-700
+    @apply relative p-2 rounded text-gray-400 hover:text-white hover:bg-gray-700
            focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors;
   }
 
@@ -508,6 +508,47 @@
 
   .detail-action-btn:hover {
     @apply text-blue-400;
+  }
+
+  .detail-action-btn .action-count {
+    @apply absolute -top-1 -right-1 min-w-4 h-4 px-1
+           text-[10px] font-medium leading-4 text-center
+           bg-blue-600 text-white rounded-full;
+  }
+
+  .detail-action-btn .action-count[hidden] {
+    @apply hidden;
+  }
+
+  /* Overflow menu */
+  .detail-overflow-menu {
+    @apply relative ml-auto;
+  }
+
+  .overflow-trigger {
+    @apply text-gray-500;
+  }
+
+  .overflow-dropdown {
+    @apply absolute right-0 top-full mt-1 py-1 min-w-40
+           bg-gray-800 border border-gray-600 rounded-md shadow-xl z-50;
+  }
+
+  .overflow-dropdown[hidden] {
+    @apply hidden;
+  }
+
+  .overflow-item {
+    @apply flex items-center gap-2 w-full px-3 py-2 text-sm text-left
+           text-gray-300 hover:bg-gray-700 hover:text-white transition-colors;
+  }
+
+  .overflow-item svg {
+    @apply w-4 h-4 flex-shrink-0;
+  }
+
+  .overflow-item.danger {
+    @apply text-red-400 hover:text-red-300 hover:bg-red-900/30;
   }
 
   .detail-section {

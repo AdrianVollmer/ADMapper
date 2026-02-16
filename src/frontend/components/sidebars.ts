@@ -5,11 +5,13 @@
  */
 
 import { appState } from "../main";
-import type { ADNodeAttributes } from "../graph/types";
+import type { ADNodeAttributes, ADNodeType } from "../graph/types";
 import { NODE_COLORS } from "../graph/theme";
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import type { PathResponse } from "../api/types";
+import { setPathStart, setPathEnd } from "./search";
+import { getRenderer, loadGraphData } from "./graph-view";
 
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
@@ -139,50 +141,93 @@ const PROPERTY_LABELS: Record<string, string> = {
   lockouttime: "Lockout Time",
 };
 
-/** Action definitions with icons */
-const ACTIONS = [
+/** Main toolbar action definitions */
+const MAIN_ACTIONS = [
   {
-    id: "expand-node",
+    id: "show-incoming",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <circle cx="12" cy="12" r="3"/>
-      <path d="M12 5v2M12 17v2M5 12h2M17 12h2M7.05 7.05l1.41 1.41M15.54 15.54l1.41 1.41M7.05 16.95l1.41-1.41M15.54 8.46l1.41-1.41"/>
+      <circle cx="12" cy="12" r="4"/>
+      <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
+      <path d="M12 6l-2-2m2 2l2-2M12 18l-2 2m2-2l2 2M6 12l-2-2m2 2l-2 2M18 12l2-2m-2 2l2 2"/>
     </svg>`,
-    tooltip: "Expand Connections",
+    tooltip: "Incoming",
+    countKey: "incoming",
+    nodeTypes: null, // all types
   },
   {
-    id: "find-path-from",
+    id: "show-outgoing",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <circle cx="5" cy="12" r="2"/>
-      <circle cx="19" cy="12" r="2"/>
-      <path d="M7 12h10"/>
-      <path d="M14 8l4 4-4 4"/>
+      <circle cx="12" cy="12" r="4"/>
+      <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
+      <path d="M12 2l-2 2m2-2l2 2M12 22l-2-2m2 2l2-2M2 12l2-2m-2 2l2 2M22 12l-2-2m2 2l-2 2"/>
     </svg>`,
-    tooltip: "Find Path From Here",
+    tooltip: "Outgoing",
+    countKey: "outgoing",
+    nodeTypes: null,
   },
   {
-    id: "find-path-to",
+    id: "show-admin-to",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <circle cx="5" cy="12" r="2"/>
-      <circle cx="19" cy="12" r="2"/>
-      <path d="M7 12h10"/>
-      <path d="M10 8l-4 4 4 4"/>
+      <path d="M12 2L4 6v6c0 5.5 3.4 10 8 11 4.6-1 8-5.5 8-11V6l-8-4z"/>
+      <path d="M8 12h8M12 8v8"/>
     </svg>`,
-    tooltip: "Find Path To Here",
+    tooltip: "Admin Permissions",
+    countKey: "adminTo",
+    nodeTypes: ["User", "Computer", "Group"],
   },
+  {
+    id: "show-memberof",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="10" cy="8" r="4"/>
+      <path d="M2 20v-1c0-2.5 3.6-4.5 8-4.5"/>
+      <path d="M16 16l4 4m0-4l-4 4"/>
+      <circle cx="18" cy="18" r="4"/>
+    </svg>`,
+    tooltip: "Member Of",
+    countKey: "memberOf",
+    nodeTypes: ["User", "Computer", "Group"],
+  },
+  {
+    id: "show-members",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="9" cy="7" r="3"/>
+      <circle cx="17" cy="7" r="3"/>
+      <path d="M3 18c0-2.2 2.7-4 6-4s6 1.8 6 4"/>
+      <path d="M15 14c1.4-.6 2.8-1 4-1 2.2 0 4 1.3 4 3"/>
+    </svg>`,
+    tooltip: "Members",
+    countKey: "members",
+    nodeTypes: ["Group"],
+  },
+];
+
+/** Overflow menu actions (three-dot menu) */
+const OVERFLOW_ACTIONS = [
   {
     id: "set-start-node",
+    label: "Set as Start Node",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M3 12h4l3 9 4-18 3 9h4"/>
+      <circle cx="5" cy="12" r="3"/>
+      <path d="M8 12h13"/>
     </svg>`,
-    tooltip: "Set as Start Node",
   },
   {
     id: "set-end-node",
+    label: "Set as End Node",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
-      <line x1="4" y1="22" x2="4" y2="15"/>
+      <circle cx="19" cy="12" r="3"/>
+      <path d="M3 12h13"/>
+      <path d="M12 8l4 4-4 4"/>
     </svg>`,
-    tooltip: "Set as End Node",
+  },
+  {
+    id: "delete-node",
+    label: "Delete Node",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/>
+      <path d="M10 11v6M14 11v6"/>
+    </svg>`,
+    danger: true,
   },
 ];
 
@@ -304,6 +349,183 @@ export function initSidebars(): void {
     const text = valueEl.getAttribute("data-value") || valueEl.textContent || "";
     copyToClipboard(text, valueEl);
   });
+
+  // Set up overflow menu toggle
+  document.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const trigger = target.closest(".overflow-trigger") as HTMLElement;
+
+    // Close any open overflow menus when clicking elsewhere
+    const allDropdowns = document.querySelectorAll(".overflow-dropdown:not([hidden])");
+    for (const dropdown of allDropdowns) {
+      if (!trigger || !dropdown.previousElementSibling?.contains(trigger)) {
+        dropdown.setAttribute("hidden", "");
+        dropdown.previousElementSibling?.setAttribute("aria-expanded", "false");
+      }
+    }
+
+    if (trigger) {
+      const dropdown = trigger.nextElementSibling as HTMLElement;
+      if (dropdown?.classList.contains("overflow-dropdown")) {
+        const isHidden = dropdown.hasAttribute("hidden");
+        if (isHidden) {
+          dropdown.removeAttribute("hidden");
+          trigger.setAttribute("aria-expanded", "true");
+        } else {
+          dropdown.setAttribute("hidden", "");
+          trigger.setAttribute("aria-expanded", "false");
+        }
+      }
+    }
+  });
+
+  // Set up detail panel action handlers
+  document.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const button = target.closest(".detail-action-btn, .overflow-item") as HTMLElement;
+    if (!button || button.classList.contains("overflow-trigger")) return;
+
+    const action = button.getAttribute("data-action");
+    const nodeId = button.getAttribute("data-node-id");
+    if (!action || !nodeId) return;
+
+    // Close overflow menu if clicking an overflow item
+    const dropdown = button.closest(".overflow-dropdown");
+    if (dropdown) {
+      dropdown.setAttribute("hidden", "");
+    }
+
+    handleDetailAction(action, nodeId);
+  });
+}
+
+/** Handle detail panel actions */
+async function handleDetailAction(action: string, nodeId: string): Promise<void> {
+  const renderer = getRenderer();
+  const graph = renderer?.sigma.getGraph();
+  const nodeLabel = graph?.getNodeAttribute(nodeId, "label") || nodeId;
+
+  switch (action) {
+    case "show-incoming":
+      await loadConnections(nodeId, "incoming");
+      break;
+
+    case "show-outgoing":
+      await loadConnections(nodeId, "outgoing");
+      break;
+
+    case "show-admin-to":
+      await loadConnections(nodeId, "admin");
+      break;
+
+    case "show-memberof":
+      await loadConnections(nodeId, "memberof");
+      break;
+
+    case "show-members":
+      await loadConnections(nodeId, "members");
+      break;
+
+    case "set-start-node":
+      setPathStart(nodeId, nodeLabel);
+      break;
+
+    case "set-end-node":
+      setPathEnd(nodeId, nodeLabel);
+      break;
+
+    case "delete-node":
+      if (confirm(`Delete node "${nodeLabel}"?`)) {
+        try {
+          await api.delete(`/api/graph/nodes/${encodeURIComponent(nodeId)}`);
+          // Remove from graph view
+          if (graph?.hasNode(nodeId)) {
+            graph.dropNode(nodeId);
+          }
+          // Clear detail panel
+          updateDetailPanel(null, null);
+        } catch (err) {
+          console.error("Failed to delete node:", err);
+          alert("Failed to delete node");
+        }
+      }
+      break;
+
+    default:
+      console.log(`Unknown detail action: ${action}`);
+  }
+}
+
+/** Build Cypher query for loading connections */
+function buildConnectionQuery(nodeId: string, direction: string): string {
+  const escapedId = nodeId.replace(/'/g, "\\'");
+
+  switch (direction) {
+    case "incoming":
+      // All incoming edges
+      return `MATCH (n)-[r]->(target) WHERE target.objectid = '${escapedId}' RETURN n, r, target`;
+
+    case "outgoing":
+      // All outgoing edges
+      return `MATCH (source)-[r]->(n) WHERE source.objectid = '${escapedId}' RETURN source, r, n`;
+
+    case "admin":
+      // Admin permissions (AdminTo, GenericAll, GenericWrite, etc.)
+      return `MATCH (source)-[r]->(target)
+              WHERE source.objectid = '${escapedId}'
+                AND type(r) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights']
+              RETURN source, r, target`;
+
+    case "memberof":
+      // MemberOf relationships (groups this node belongs to)
+      return `MATCH (n)-[r:MemberOf]->(g) WHERE n.objectid = '${escapedId}' RETURN n, r, g`;
+
+    case "members":
+      // Members of this group
+      return `MATCH (m)-[r:MemberOf]->(g) WHERE g.objectid = '${escapedId}' RETURN m, r, g`;
+
+    default:
+      return `MATCH (n)-[r]-(m) WHERE n.objectid = '${escapedId}' RETURN n, r, m`;
+  }
+}
+
+/** Load connections for a node */
+async function loadConnections(nodeId: string, direction: string): Promise<void> {
+  try {
+    const query = buildConnectionQuery(nodeId, direction);
+    const response = await api.post<{
+      graph?: {
+        nodes: Array<{ id: string; label: string; type: string; properties?: Record<string, unknown> }>;
+        edges: Array<{ source: string; target: string; type: string }>;
+      };
+    }>("/api/graph/query", {
+      query,
+      extract_graph: true,
+      language: "cypher",
+    });
+
+    if (!response.graph || response.graph.nodes.length === 0) {
+      console.log(`No ${direction} connections found for node ${nodeId}`);
+      return;
+    }
+
+    // Load the graph data
+    loadGraphData({
+      nodes: response.graph.nodes.map((n) => ({
+        id: n.id,
+        label: n.label,
+        type: n.type as ADNodeType,
+        properties: n.properties || {},
+      })),
+      edges: response.graph.edges.map((e) => ({
+        source: e.source,
+        target: e.target,
+        type: e.type as import("../graph/types").ADEdgeType,
+      })),
+    });
+  } catch (err) {
+    console.error(`Failed to load ${direction} connections:`, err);
+  }
 }
 
 /** Copy text to clipboard and show feedback */
@@ -584,9 +806,12 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
     }
   }
 
-  // Build actions bar
-  const actionsHtml = ACTIONS.map(
-    (action) => `
+  // Build main actions bar (filter by node type)
+  const mainActionsHtml = MAIN_ACTIONS.filter(
+    (action) => !action.nodeTypes || action.nodeTypes.includes(attrs.nodeType)
+  )
+    .map(
+      (action) => `
     <button
       class="detail-action-btn"
       data-action="${action.id}"
@@ -595,9 +820,40 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
       aria-label="${action.tooltip}"
     >
       ${action.icon}
+      <span class="action-count" data-count-key="${action.countKey}" hidden></span>
     </button>
   `
-  ).join("");
+    )
+    .join("");
+
+  // Build overflow menu
+  const overflowMenuHtml = `
+    <div class="detail-overflow-menu">
+      <button class="detail-action-btn overflow-trigger" title="More actions" aria-label="More actions" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="5" r="1.5"/>
+          <circle cx="12" cy="12" r="1.5"/>
+          <circle cx="12" cy="19" r="1.5"/>
+        </svg>
+      </button>
+      <div class="overflow-dropdown" hidden>
+        ${OVERFLOW_ACTIONS.map(
+          (action) => `
+          <button
+            class="overflow-item${action.danger ? " danger" : ""}"
+            data-action="${action.id}"
+            data-node-id="${escapeHtml(nodeId)}"
+          >
+            ${action.icon}
+            <span>${action.label}</span>
+          </button>
+        `
+        ).join("")}
+      </div>
+    </div>
+  `;
+
+  const actionsHtml = mainActionsHtml + overflowMenuHtml;
 
   // Build properties list - show ALL properties
   let propsHtml = "";
