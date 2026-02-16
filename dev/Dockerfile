@@ -20,6 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     libgtk-3-dev \
     libayatana-appindicator3-dev \
+    # ryugraph
+    cmake \
     # Icon generation
     librsvg2-bin \
     imagemagick \
