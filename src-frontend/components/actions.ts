@@ -13,6 +13,7 @@ import { showKeyboardShortcuts } from "./keyboard";
 import { openDbManager } from "./db-manager";
 import { exportPNG, exportSVG, exportJSON } from "./export";
 import { openInsights } from "./insights";
+import { openAddNode, openAddEdge } from "./add-node-edge";
 
 /** Dispatch an action by name */
 export function dispatchAction(action: string): void {
@@ -64,6 +65,14 @@ export function dispatchAction(action: string): void {
       console.log("Action: find");
       // Focus the search input
       document.getElementById("node-search")?.focus();
+      break;
+
+    case "add-node":
+      openAddNode();
+      break;
+
+    case "add-edge":
+      openAddEdge();
       break;
 
     // View menu

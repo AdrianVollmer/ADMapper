@@ -217,6 +217,60 @@ impl GraphDatabase {
         Ok(())
     }
 
+    /// Get all distinct edge types in the database.
+    pub fn get_edge_types(&self) -> Result<Vec<String>> {
+        let result = self.db.run_script(
+            "?[edge_type] := *edges{edge_type}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )?;
+        let json = result.into_json();
+
+        let types = json["rows"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row.get(0).and_then(|v| v.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(types)
+    }
+
+    /// Get all distinct node types in the database.
+    pub fn get_node_types(&self) -> Result<Vec<String>> {
+        let result = self.db.run_script(
+            "?[node_type] := *nodes{node_type}",
+            Default::default(),
+            ScriptMutability::Immutable,
+        )?;
+        let json = result.into_json();
+
+        let types = json["rows"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row.get(0).and_then(|v| v.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(types)
+    }
+
+    /// Insert a single node.
+    pub fn insert_node(&self, node: DbNode) -> Result<()> {
+        self.insert_nodes(&[node])?;
+        Ok(())
+    }
+
+    /// Insert a single edge.
+    pub fn insert_edge(&self, edge: DbEdge) -> Result<()> {
+        self.insert_edges(&[edge])?;
+        Ok(())
+    }
+
     /// Insert a batch of nodes.
     pub fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
         if nodes.is_empty() {

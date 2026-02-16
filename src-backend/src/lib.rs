@@ -164,6 +164,10 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/search", get(graph_search))
         .route("/api/graph/path", get(graph_path))
         .route("/api/graph/paths-to-da", get(paths_to_domain_admins))
+        .route("/api/graph/edge-types", get(graph_edge_types))
+        .route("/api/graph/node-types", get(graph_node_types))
+        .route("/api/graph/node", post(add_node))
+        .route("/api/graph/edge", post(add_edge))
         .route("/api/graph/insights", get(graph_insights))
         .route("/api/graph/query", post(graph_query))
         .route("/api/query-history", get(get_query_history))
@@ -222,6 +226,10 @@ pub async fn run_service(bind: &str, port: u16) {
         .route("/api/graph/search", get(graph_search))
         .route("/api/graph/path", get(graph_path))
         .route("/api/graph/paths-to-da", get(paths_to_domain_admins))
+        .route("/api/graph/edge-types", get(graph_edge_types))
+        .route("/api/graph/node-types", get(graph_node_types))
+        .route("/api/graph/node", post(add_node))
+        .route("/api/graph/edge", post(add_edge))
         .route("/api/graph/insights", get(graph_insights))
         .route("/api/graph/query", post(graph_query))
         .route("/api/query-history", get(get_query_history))
@@ -731,6 +739,126 @@ async fn graph_insights(
         "Security insights computed"
     );
     Ok(Json(insights))
+}
+
+/// Get all distinct edge types in the database.
+#[instrument(skip(state))]
+async fn graph_edge_types(State(state): State<AppState>) -> Result<Json<Vec<String>>, ApiError> {
+    let types = state.db.get_edge_types()?;
+    debug!(count = types.len(), "Edge types retrieved");
+    Ok(Json(types))
+}
+
+/// Get all distinct node types in the database.
+#[instrument(skip(state))]
+async fn graph_node_types(State(state): State<AppState>) -> Result<Json<Vec<String>>, ApiError> {
+    let types = state.db.get_node_types()?;
+    debug!(count = types.len(), "Node types retrieved");
+    Ok(Json(types))
+}
+
+/// Request body for adding a node.
+#[derive(Deserialize)]
+struct AddNodeRequest {
+    id: String,
+    label: String,
+    node_type: String,
+    #[serde(default)]
+    properties: JsonValue,
+}
+
+/// Add a new node to the graph.
+#[instrument(skip(state, body))]
+async fn add_node(
+    State(state): State<AppState>,
+    Json(body): Json<AddNodeRequest>,
+) -> Result<Json<GraphNode>, ApiError> {
+    // Validate inputs
+    if body.id.is_empty() {
+        return Err(ApiError::BadRequest("Node ID is required".to_string()));
+    }
+    if body.label.is_empty() {
+        return Err(ApiError::BadRequest("Node label is required".to_string()));
+    }
+    if body.node_type.is_empty() {
+        return Err(ApiError::BadRequest("Node type is required".to_string()));
+    }
+
+    let node = DbNode {
+        id: body.id.clone(),
+        label: body.label.clone(),
+        node_type: body.node_type.clone(),
+        properties: if body.properties.is_null() {
+            serde_json::json!({})
+        } else {
+            body.properties
+        },
+    };
+
+    state.db.insert_node(node)?;
+
+    info!(id = %body.id, label = %body.label, node_type = %body.node_type, "Node added");
+
+    Ok(Json(GraphNode {
+        id: body.id,
+        label: body.label,
+        node_type: body.node_type,
+        properties: serde_json::json!({}),
+    }))
+}
+
+/// Request body for adding an edge.
+#[derive(Deserialize)]
+struct AddEdgeRequest {
+    source: String,
+    target: String,
+    edge_type: String,
+    #[serde(default)]
+    properties: JsonValue,
+}
+
+/// Add a new edge to the graph.
+#[instrument(skip(state, body))]
+async fn add_edge(
+    State(state): State<AppState>,
+    Json(body): Json<AddEdgeRequest>,
+) -> Result<Json<GraphEdge>, ApiError> {
+    // Validate inputs
+    if body.source.is_empty() {
+        return Err(ApiError::BadRequest("Source node ID is required".to_string()));
+    }
+    if body.target.is_empty() {
+        return Err(ApiError::BadRequest("Target node ID is required".to_string()));
+    }
+    if body.edge_type.is_empty() {
+        return Err(ApiError::BadRequest("Edge type is required".to_string()));
+    }
+
+    let edge = DbEdge {
+        source: body.source.clone(),
+        target: body.target.clone(),
+        edge_type: body.edge_type.clone(),
+        properties: if body.properties.is_null() {
+            serde_json::json!({})
+        } else {
+            body.properties
+        },
+    };
+
+    state.db.insert_edge(edge)?;
+
+    info!(
+        source = %body.source,
+        target = %body.target,
+        edge_type = %body.edge_type,
+        "Edge added"
+    );
+
+    Ok(Json(GraphEdge {
+        source: body.source,
+        target: body.target,
+        edge_type: body.edge_type,
+    }))
 }
 
 /// Custom query request body.
