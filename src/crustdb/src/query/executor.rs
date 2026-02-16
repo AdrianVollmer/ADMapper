@@ -209,6 +209,9 @@ fn execute_match(
     } else if is_variable_length_pattern(pattern) {
         // Variable-length pattern: MATCH (a)-[*1..3]->(b)
         execute_variable_length_pattern(pattern, storage)?
+    } else if is_multi_hop_pattern(pattern) {
+        // Multi-hop pattern: MATCH (a)-[r1]->(b)-[r2]->(c)
+        execute_multi_hop_pattern(pattern, storage)?
     } else {
         return Err(Error::Cypher("Unsupported pattern type".into()));
     };
@@ -282,6 +285,38 @@ fn is_variable_length_pattern(pattern: &Pattern) -> bool {
         PatternElement::Relationship(rel) => rel.length.is_some(),
         _ => false,
     }
+}
+
+/// Check if pattern is a multi-hop pattern (node-rel-node-rel-node...).
+fn is_multi_hop_pattern(pattern: &Pattern) -> bool {
+    // Must have at least 5 elements (node-rel-node-rel-node)
+    if pattern.elements.len() < 5 {
+        return false;
+    }
+    // Must have odd number of elements (alternating node-rel-node...)
+    if pattern.elements.len() % 2 == 0 {
+        return false;
+    }
+    // Check alternating pattern: node, rel, node, rel, node, ...
+    for (i, elem) in pattern.elements.iter().enumerate() {
+        if i % 2 == 0 {
+            // Even indices should be nodes
+            if !matches!(elem, PatternElement::Node(_)) {
+                return false;
+            }
+        } else {
+            // Odd indices should be relationships without variable length
+            match elem {
+                PatternElement::Relationship(rel) => {
+                    if rel.length.is_some() {
+                        return false; // Variable length not supported in multi-hop yet
+                    }
+                }
+                _ => return false,
+            }
+        }
+    }
+    true
 }
 
 /// Execute a single-node pattern match.
@@ -403,6 +438,150 @@ fn execute_single_hop_pattern(pattern: &Pattern, storage: &SqliteStorage) -> Res
             bindings.push(binding);
         }
     }
+
+    Ok(bindings)
+}
+
+/// Execute a multi-hop pattern match (e.g., (a)-[r1]->(b)-[r2]->(c)).
+fn execute_multi_hop_pattern(pattern: &Pattern, storage: &SqliteStorage) -> Result<Vec<Binding>> {
+    let path_var = pattern.path_variable.as_deref();
+
+    // Extract all nodes and relationships from the pattern
+    let mut node_patterns: Vec<&NodePattern> = Vec::new();
+    let mut rel_patterns: Vec<&RelationshipPattern> = Vec::new();
+
+    for (i, elem) in pattern.elements.iter().enumerate() {
+        if i % 2 == 0 {
+            match elem {
+                PatternElement::Node(np) => node_patterns.push(np),
+                _ => return Err(Error::Cypher("Invalid multi-hop pattern".into())),
+            }
+        } else {
+            match elem {
+                PatternElement::Relationship(rp) => rel_patterns.push(rp),
+                _ => return Err(Error::Cypher("Invalid multi-hop pattern".into())),
+            }
+        }
+    }
+
+    // Start with the first node pattern
+    let first_node_pattern = node_patterns[0];
+    let first_var = first_node_pattern.variable.as_deref().unwrap_or("_n0");
+
+    let initial_nodes = scan_nodes(first_node_pattern, storage)?;
+    let initial_nodes = filter_by_properties(initial_nodes, first_node_pattern)?;
+
+    // Initialize bindings with first node
+    let mut current_bindings: Vec<(Binding, Vec<i64>, Vec<i64>)> = initial_nodes
+        .into_iter()
+        .map(|node| {
+            let node_id = node.id;
+            let binding = Binding::new().with_node(first_var, node);
+            (binding, vec![node_id], vec![])
+        })
+        .collect();
+
+    // Process each hop
+    for hop_idx in 0..rel_patterns.len() {
+        let rel_pattern = rel_patterns[hop_idx];
+        let target_pattern = node_patterns[hop_idx + 1];
+
+        let rel_var = rel_pattern.variable.as_deref();
+        let default_target_var = format!("_n{}", hop_idx + 1);
+        let target_var = target_pattern
+            .variable
+            .as_deref()
+            .unwrap_or(&default_target_var);
+
+        let mut next_bindings: Vec<(Binding, Vec<i64>, Vec<i64>)> = Vec::new();
+
+        for (binding, path_nodes, path_edges) in current_bindings {
+            // Get the last node in the path
+            let last_node_id = *path_nodes.last().unwrap();
+
+            // Find edges from the last node
+            let edges = match rel_pattern.direction {
+                Direction::Outgoing => storage.find_outgoing_edges(last_node_id)?,
+                Direction::Incoming => storage.find_incoming_edges(last_node_id)?,
+                Direction::Both => {
+                    let mut edges = storage.find_outgoing_edges(last_node_id)?;
+                    edges.extend(storage.find_incoming_edges(last_node_id)?);
+                    edges
+                }
+            };
+
+            // Filter edges by type
+            let edges: Vec<Edge> = if rel_pattern.types.is_empty() {
+                edges
+            } else {
+                edges
+                    .into_iter()
+                    .filter(|e| rel_pattern.types.contains(&e.edge_type))
+                    .collect()
+            };
+
+            // Filter edges by properties
+            let edges = filter_edges_by_properties(edges, rel_pattern)?;
+
+            for edge in edges {
+                // Determine the target node
+                let target_id = match rel_pattern.direction {
+                    Direction::Outgoing => edge.target,
+                    Direction::Incoming => edge.source,
+                    Direction::Both => {
+                        if edge.source == last_node_id {
+                            edge.target
+                        } else {
+                            edge.source
+                        }
+                    }
+                };
+
+                // Get target node
+                let target_node = match storage.get_node(target_id)? {
+                    Some(n) => n,
+                    None => continue,
+                };
+
+                // Check if target matches pattern
+                if !node_matches_pattern(&target_node, target_pattern) {
+                    continue;
+                }
+
+                // Create new binding
+                let mut new_binding = binding.clone().with_node(target_var, target_node.clone());
+
+                if let Some(rv) = rel_var {
+                    new_binding = new_binding.with_edge(rv, edge.clone());
+                }
+
+                // Update path
+                let mut new_path_nodes = path_nodes.clone();
+                new_path_nodes.push(target_id);
+                let mut new_path_edges = path_edges.clone();
+                new_path_edges.push(edge.id);
+
+                next_bindings.push((new_binding, new_path_nodes, new_path_edges));
+            }
+        }
+
+        current_bindings = next_bindings;
+    }
+
+    // Convert to final bindings with optional path variable
+    let bindings = current_bindings
+        .into_iter()
+        .map(|(mut binding, path_nodes, path_edges)| {
+            if let Some(pv) = path_var {
+                let path = Path {
+                    node_ids: path_nodes,
+                    edge_ids: path_edges,
+                };
+                binding = binding.with_path(pv, path);
+            }
+            binding
+        })
+        .collect();
 
     Ok(bindings)
 }
