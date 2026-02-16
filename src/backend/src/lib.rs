@@ -263,6 +263,7 @@ pub fn create_api_router(state: AppState) -> Router {
             "/api/graph/node/:id/connections/:direction",
             get(node_connections),
         )
+        .route("/api/graph/node/:id/status", get(node_status))
         .route("/api/graph/path", get(graph_path))
         .route("/api/graph/paths-to-da", get(paths_to_domain_admins))
         .route("/api/graph/edge-types", get(graph_edge_types))
@@ -818,6 +819,112 @@ async fn node_connections(
     Ok(Json(FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
         edges: edges.into_iter().map(GraphEdge::from).collect(),
+    }))
+}
+
+/// Node security status response.
+#[derive(Serialize)]
+struct NodeStatus {
+    /// Is the node owned by the attacker
+    owned: bool,
+    /// Is the node a member of Enterprise Admins (SID -519)
+    #[serde(rename = "isEnterpriseAdmin")]
+    is_enterprise_admin: bool,
+    /// Is the node a member of Domain Admins (SID -512)
+    #[serde(rename = "isDomainAdmin")]
+    is_domain_admin: bool,
+    /// Is the node marked as high value or in a high-value group
+    #[serde(rename = "isHighValue")]
+    is_high_value: bool,
+    /// Does the node have a path to a high-value target (if not already high value)
+    #[serde(rename = "hasPathToHighValue")]
+    has_path_to_high_value: bool,
+    /// Number of hops to the nearest high-value target (if hasPathToHighValue)
+    #[serde(rename = "pathLength", skip_serializing_if = "Option::is_none")]
+    path_length: Option<usize>,
+}
+
+/// Get security status for a node.
+/// Checks group memberships and paths to high-value targets.
+#[instrument(skip(state))]
+async fn node_status(
+    State(state): State<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<NodeStatus>, ApiError> {
+    let db = state.require_db()?;
+    info!(node_id = %node_id, "Checking node security status");
+
+    // Get the node to check its properties
+    let nodes = db.get_nodes_by_ids(&[node_id.clone()])?;
+    let node = nodes.first();
+
+    // Check owned status from properties
+    let owned = node
+        .and_then(|n| {
+            let props = &n.properties;
+            props.get("owned").or(props.get("Owned")).and_then(|v| {
+                v.as_bool()
+                    .or_else(|| v.as_i64().map(|i| i == 1))
+                    .or_else(|| v.as_str().map(|s| s == "true"))
+            })
+        })
+        .unwrap_or(false);
+
+    // Check high value from properties
+    let high_value_prop = node
+        .and_then(|n| {
+            let props = &n.properties;
+            props
+                .get("highvalue")
+                .or(props.get("HighValue"))
+                .or(props.get("highValue"))
+                .and_then(|v| {
+                    v.as_bool()
+                        .or_else(|| v.as_i64().map(|i| i == 1))
+                        .or_else(|| v.as_str().map(|s| s == "true"))
+                })
+        })
+        .unwrap_or(false);
+
+    // Check group memberships using graph traversal
+    let is_enterprise_admin = db
+        .find_membership_by_sid_suffix(&node_id, "-519")?
+        .is_some();
+    let is_domain_admin = db
+        .find_membership_by_sid_suffix(&node_id, "-512")?
+        .is_some();
+
+    // High-value RIDs to check membership for
+    let high_value_rids = ["-512", "-519", "-518", "-516", "-498", "-544"];
+    let is_high_value_member = high_value_rids.iter().any(|rid| {
+        db.find_membership_by_sid_suffix(&node_id, rid)
+            .unwrap_or(None)
+            .is_some()
+    });
+
+    let is_high_value = high_value_prop || is_high_value_member;
+
+    // Check for paths to high-value targets (only if not already high value)
+    let (has_path_to_high_value, path_length) =
+        if is_enterprise_admin || is_domain_admin || is_high_value {
+            (false, None)
+        } else {
+            // Use the existing paths-to-DA logic to check for attack paths
+            let paths = db.find_paths_to_domain_admins(&[])?;
+            let path_info = paths.iter().find(|(id, _, _, _)| id == &node_id);
+            match path_info {
+                Some((_, _, _, hops)) => (true, Some(*hops)),
+                None => (false, None),
+            }
+        };
+
+    Ok(Json(NodeStatus {
+        owned,
+        is_enterprise_admin,
+        is_domain_admin,
+        is_high_value,
+        has_path_to_high_value,
+        path_length,
     }))
 }
 

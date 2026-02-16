@@ -123,6 +123,106 @@ pub trait DatabaseBackend: Send + Sync {
         direction: &str,
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)>;
 
+    /// Check if a node is a transitive member of a target group.
+    /// Uses MemberOf edges to traverse group membership.
+    fn is_member_of(&self, node_id: &str, target_id: &str) -> Result<bool> {
+        // Default implementation using BFS over MemberOf edges
+        let all_edges = self.get_all_edges()?;
+
+        // Build adjacency for MemberOf edges only
+        let mut member_of_adj: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for edge in &all_edges {
+            if edge.edge_type == "MemberOf" {
+                member_of_adj
+                    .entry(edge.source.clone())
+                    .or_default()
+                    .push(edge.target.clone());
+            }
+        }
+
+        // BFS from node_id to find if we can reach target_id
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(node_id.to_string());
+        visited.insert(node_id.to_string());
+
+        while let Some(current) = queue.pop_front() {
+            if current == target_id {
+                return Ok(true);
+            }
+            if let Some(targets) = member_of_adj.get(&current) {
+                for target in targets {
+                    if !visited.contains(target) {
+                        visited.insert(target.clone());
+                        queue.push_back(target.clone());
+                    }
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Find the first group matching a SID suffix that the node is a member of.
+    /// Returns the group's object_id if found.
+    fn find_membership_by_sid_suffix(
+        &self,
+        node_id: &str,
+        sid_suffix: &str,
+    ) -> Result<Option<String>> {
+        let all_nodes = self.get_all_nodes()?;
+        let all_edges = self.get_all_edges()?;
+
+        // Find all groups with matching SID suffix
+        let target_groups: Vec<&str> = all_nodes
+            .iter()
+            .filter(|n| n.id.ends_with(sid_suffix))
+            .map(|n| n.id.as_str())
+            .collect();
+
+        if target_groups.is_empty() {
+            return Ok(None);
+        }
+
+        // Build adjacency for MemberOf edges
+        let mut member_of_adj: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for edge in &all_edges {
+            if edge.edge_type == "MemberOf" {
+                member_of_adj
+                    .entry(edge.source.clone())
+                    .or_default()
+                    .push(edge.target.clone());
+            }
+        }
+
+        // BFS from node_id
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(node_id.to_string());
+        visited.insert(node_id.to_string());
+
+        while let Some(current) = queue.pop_front() {
+            // Check if current is one of the target groups
+            for &target in &target_groups {
+                if current == target {
+                    return Ok(Some(target.to_string()));
+                }
+            }
+            if let Some(targets) = member_of_adj.get(&current) {
+                for target in targets {
+                    if !visited.contains(target) {
+                        visited.insert(target.clone());
+                        queue.push_back(target.clone());
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     // ========================================================================
     // Path Finding
     // ========================================================================
