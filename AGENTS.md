@@ -96,3 +96,6 @@ If you are an LLM:
 - If you make changes to the UI, check with playwright for obvious
   visual problems, like elements running into each other. You can use
   `uv venv && uv pip install playwright` to install dependencies.
+- When building, use `scripts/build.sh [frontend|backend-debug]`.
+- For linting, use `scripts/check.sh`
+- For formatting, use `scripts/format.sh`
