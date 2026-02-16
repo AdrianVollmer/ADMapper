@@ -3,6 +3,8 @@ _*
 
 # Data
 *.db
+*_kuzu
+*_kuzu.wal
 
 # Dependencies
 node_modules/
