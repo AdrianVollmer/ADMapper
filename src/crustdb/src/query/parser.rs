@@ -772,7 +772,9 @@ fn build_pattern(pair: Pair<Rule>) -> Result<Pattern> {
 
 /// Build pattern elements from a PatternPart.
 /// Returns (path_variable, shortest_k, elements).
-fn build_pattern_part(pair: Pair<Rule>) -> Result<(Option<String>, Option<u32>, Vec<PatternElement>)> {
+fn build_pattern_part(
+    pair: Pair<Rule>,
+) -> Result<(Option<String>, Option<u32>, Vec<PatternElement>)> {
     let mut path_variable = None;
     let mut shortest_k = None;
 
@@ -2472,7 +2474,8 @@ mod tests {
 
     #[test]
     fn test_parse_shortest_path() {
-        let stmt = parse("MATCH p = SHORTEST 1 (a:Station)-[:LINK]-+(b:Station) RETURN length(p)").unwrap();
+        let stmt = parse("MATCH p = SHORTEST 1 (a:Station)-[:LINK]-+(b:Station) RETURN length(p)")
+            .unwrap();
         match stmt {
             Statement::Match(m) => {
                 assert_eq!(m.pattern.shortest_k, Some(1));

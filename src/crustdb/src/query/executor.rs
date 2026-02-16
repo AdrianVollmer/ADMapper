@@ -2,7 +2,8 @@
 
 use super::parser::{
     CreateClause, DeleteClause, Direction, Expression, Literal, MatchClause, NodePattern, Pattern,
-    PatternElement, RelQuantifier, RelationshipPattern, ReturnClause, SetClause, SetItem, Statement,
+    PatternElement, RelQuantifier, RelationshipPattern, ReturnClause, SetClause, SetItem,
+    Statement,
 };
 use super::{QueryResult, QueryStats, ResultValue, Row};
 use crate::error::{Error, Result};
@@ -376,18 +377,20 @@ fn execute_shortest_path_pattern(
     let path_var = pattern.path_variable.as_deref();
 
     // Determine min/max hops based on quantifier
+    // Use a high default max to allow traversing large graphs
+    const DEFAULT_MAX_HOPS: usize = 10000;
     let (min_hops, max_hops) = match &rel_pattern.quantifier {
-        Some(RelQuantifier::OneOrMore) => (1usize, 100usize),
-        Some(RelQuantifier::ZeroOrMore) => (0usize, 100usize),
+        Some(RelQuantifier::OneOrMore) => (1usize, DEFAULT_MAX_HOPS),
+        Some(RelQuantifier::ZeroOrMore) => (0usize, DEFAULT_MAX_HOPS),
         None => {
             // Check if there's a length spec
             if let Some(ref len) = rel_pattern.length {
                 (
                     len.min.unwrap_or(1) as usize,
-                    len.max.unwrap_or(100) as usize,
+                    len.max.unwrap_or(DEFAULT_MAX_HOPS as u32) as usize,
                 )
             } else {
-                (1, 100) // Default: one or more
+                (1, DEFAULT_MAX_HOPS) // Default: one or more
             }
         }
     };
@@ -423,15 +426,12 @@ fn execute_shortest_path_pattern(
 
     let mut all_results: Vec<PathResult> = Vec::new();
 
-    // BFS from each source node to find k shortest paths
+    // BFS from each source node to find shortest paths
+    // Uses level-by-level BFS with early termination once we find paths
     for source_node in source_nodes {
-        // Skip if source is same as target and min_hops > 0
-        if min_hops > 0 && target_ids.contains(&source_node.id) {
-            // We need at least one hop
-        }
-
         let mut found_paths: Vec<PathResult> = Vec::new();
         let mut queue: VecDeque<PathState> = VecDeque::new();
+        let mut shortest_found: Option<usize> = None; // Track shortest path length found
 
         queue.push_back(PathState {
             node_id: source_node.id,
@@ -442,6 +442,14 @@ fn execute_shortest_path_pattern(
         // BFS level by level to ensure shortest paths first
         while let Some(state) = queue.pop_front() {
             let current_depth = state.path_edges.len();
+
+            // Early termination: if we've found paths at a shorter depth, skip deeper paths
+            if let Some(shortest) = shortest_found {
+                if current_depth > shortest {
+                    // All remaining states are at same or deeper levels, stop BFS
+                    break;
+                }
+            }
 
             // Check if current depth exceeds max
             if current_depth > max_hops {
@@ -460,6 +468,10 @@ fn execute_shortest_path_pattern(
                             source_node: source_node.clone(),
                             target_node: target_node.clone(),
                         });
+                        // Record shortest path length found
+                        if shortest_found.is_none() {
+                            shortest_found = Some(current_depth);
+                        }
                     }
                 }
             }
@@ -467,6 +479,14 @@ fn execute_shortest_path_pattern(
             // Don't expand if we've reached max depth
             if current_depth >= max_hops {
                 continue;
+            }
+
+            // Don't expand states that are at the shortest path depth
+            // (further expansion would only find longer paths)
+            if let Some(shortest) = shortest_found {
+                if current_depth >= shortest {
+                    continue;
+                }
             }
 
             // Expand to neighbors
@@ -1442,12 +1462,12 @@ fn evaluate_return_item_with_bindings(expr: &Expression, binding: &Binding) -> R
                     }
                     let val = evaluate_expression_with_bindings(&args[0], binding)?;
                     match val {
-                        PropertyValue::String(s) => {
-                            Ok(ResultValue::Property(PropertyValue::Integer(s.len() as i64)))
-                        }
-                        PropertyValue::List(l) => {
-                            Ok(ResultValue::Property(PropertyValue::Integer(l.len() as i64)))
-                        }
+                        PropertyValue::String(s) => Ok(ResultValue::Property(
+                            PropertyValue::Integer(s.len() as i64),
+                        )),
+                        PropertyValue::List(l) => Ok(ResultValue::Property(
+                            PropertyValue::Integer(l.len() as i64),
+                        )),
                         PropertyValue::Null => Ok(ResultValue::Property(PropertyValue::Null)),
                         _ => Ok(ResultValue::Property(PropertyValue::Null)),
                     }
@@ -1482,7 +1502,9 @@ fn evaluate_return_item_with_bindings(expr: &Expression, binding: &Binding) -> R
                             return Ok(ResultValue::Property(PropertyValue::List(list)));
                         }
                     }
-                    Err(Error::Cypher("relationships() requires a path argument".into()))
+                    Err(Error::Cypher(
+                        "relationships() requires a path argument".into(),
+                    ))
                 }
                 _ => {
                     // Fall back to evaluating as a property value
