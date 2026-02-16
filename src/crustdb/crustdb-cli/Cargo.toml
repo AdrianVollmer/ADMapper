@@ -1,0 +1,12 @@
+[package]
+name = "crustdb-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "crustdb"
+path = "src/main.rs"
+
+[dependencies]
+crustdb = { path = ".." }
+rustyline = "15"

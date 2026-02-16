@@ -31,7 +31,7 @@ mod storage;
 
 pub use error::{Error, Result};
 pub use graph::{Edge, Node, PropertyValue};
-pub use query::QueryResult;
+pub use query::{QueryResult, QueryStats, ResultValue, Row};
 
 use std::path::Path;
 use storage::SqliteStorage;
