@@ -27,10 +27,22 @@
                 <span class="arrow">▸</span>
               </button>
               <div class="menu-separator" role="separator"></div>
-              <button class="menu-option" data-action="export" role="menuitem">
-                <span>Export...</span>
-                <kbd>Ctrl+E</kbd>
-              </button>
+              <div class="menu-submenu">
+                <div class="menu-submenu-trigger" role="menuitem" aria-haspopup="true">
+                  <span>Export</span>
+                </div>
+                <div class="menu-submenu-dropdown" role="menu">
+                  <button class="menu-option" data-action="export-png" role="menuitem">
+                    <span>PNG Image</span>
+                  </button>
+                  <button class="menu-option" data-action="export-svg" role="menuitem">
+                    <span>SVG Image</span>
+                  </button>
+                  <button class="menu-option" data-action="export-json" role="menuitem">
+                    <span>JSON Data</span>
+                  </button>
+                </div>
+              </div>
               <div class="menu-separator" role="separator"></div>
               <button class="menu-option" data-action="settings" role="menuitem">
                 <span>Settings</span>

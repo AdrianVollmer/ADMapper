@@ -11,6 +11,7 @@ import { triggerBloodHoundImport } from "./import";
 import { openQueryHistory, goBackInHistory } from "./query-history";
 import { showKeyboardShortcuts } from "./keyboard";
 import { openDbManager } from "./db-manager";
+import { exportPNG, exportSVG, exportJSON } from "./export";
 
 /** Dispatch an action by name */
 export function dispatchAction(action: string): void {
@@ -26,9 +27,16 @@ export function dispatchAction(action: string): void {
       // TODO: Open file dialog
       break;
 
-    case "export":
-      console.log("Action: export");
-      // TODO: Export dialog
+    case "export-png":
+      exportPNG();
+      break;
+
+    case "export-svg":
+      exportSVG();
+      break;
+
+    case "export-json":
+      exportJSON();
       break;
 
     case "settings":
