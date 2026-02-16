@@ -24,16 +24,6 @@ export function dispatchAction(action: string): void {
       // TODO: Open file dialog
       break;
 
-    case "save":
-      console.log("Action: save");
-      // TODO: Save current state
-      break;
-
-    case "save-as":
-      console.log("Action: save-as");
-      // TODO: Save as dialog
-      break;
-
     case "export":
       console.log("Action: export");
       // TODO: Export dialog
@@ -54,16 +44,6 @@ export function dispatchAction(action: string): void {
       break;
 
     // Edit menu
-    case "undo":
-      console.log("Action: undo");
-      // TODO: Implement undo
-      break;
-
-    case "redo":
-      console.log("Action: redo");
-      // TODO: Implement redo
-      break;
-
     case "select-all":
       console.log("Action: select-all");
       // TODO: Select all nodes
@@ -132,16 +112,6 @@ export function dispatchAction(action: string): void {
 
     case "query-history":
       openQueryHistory();
-      break;
-
-    case "find-path":
-      console.log("Action: find-path");
-      // TODO: Path finder dialog
-      break;
-
-    case "find-attack-path":
-      console.log("Action: find-attack-path");
-      // TODO: Attack path finder
       break;
 
     case "layout-graph": {

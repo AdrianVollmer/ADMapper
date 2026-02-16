@@ -17,15 +17,11 @@ const shortcuts: Array<{
   // File menu
   { key: "n", ctrl: true, action: "new-project" },
   { key: "o", ctrl: true, action: "open-file" },
-  { key: "s", ctrl: true, action: "save" },
-  { key: "s", ctrl: true, shift: true, action: "save-as" },
   { key: "e", ctrl: true, action: "export" },
   { key: ",", ctrl: true, action: "settings" },
   { key: "q", ctrl: true, action: "quit" },
 
   // Edit menu
-  { key: "z", ctrl: true, action: "undo" },
-  { key: "z", ctrl: true, shift: true, action: "redo" },
   { key: "a", ctrl: true, action: "select-all" },
   { key: "f", ctrl: true, action: "find" },
 
@@ -42,7 +38,6 @@ const shortcuts: Array<{
 
   // Tools menu
   { key: "Enter", ctrl: true, action: "run-query" },
-  { key: "p", ctrl: true, action: "find-path" },
   { key: "l", ctrl: true, action: "layout-graph" },
 
   // Help menu

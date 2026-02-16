@@ -458,10 +458,7 @@ impl GraphDatabase {
         let edges = self.get_all_edges()?;
 
         // Find all Domain Admins groups (SID ending in -512)
-        let da_nodes: Vec<&DbNode> = nodes
-            .iter()
-            .filter(|n| n.id.ends_with("-512"))
-            .collect();
+        let da_nodes: Vec<&DbNode> = nodes.iter().filter(|n| n.id.ends_with("-512")).collect();
 
         if da_nodes.is_empty() {
             debug!("No Domain Admins groups found");
@@ -522,12 +519,7 @@ impl GraphDatabase {
                 }
                 let node = node_map.get(id.as_str())?;
                 if node.node_type == "User" {
-                    Some((
-                        id,
-                        node.node_type.clone(),
-                        node.label.clone(),
-                        hops,
-                    ))
+                    Some((id, node.node_type.clone(), node.label.clone(), hops))
                 } else {
                     None
                 }
