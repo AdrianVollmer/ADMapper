@@ -116,6 +116,8 @@ pub struct Pattern {
     pub elements: Vec<PatternElement>,
     /// Path variable name for `p = (a)-[*]->(b)` syntax.
     pub path_variable: Option<String>,
+    /// SHORTEST k modifier: find k shortest paths.
+    pub shortest_k: Option<u32>,
 }
 
 /// An element in a pattern.
@@ -135,6 +137,15 @@ pub struct NodePattern {
     pub properties: Option<Expression>,
 }
 
+/// Quantifier for relationship patterns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelQuantifier {
+    /// One or more (+)
+    OneOrMore,
+    /// Zero or more (*)
+    ZeroOrMore,
+}
+
 /// A relationship pattern like -[r:TYPE]->
 #[derive(Debug, Clone)]
 pub struct RelationshipPattern {
@@ -143,6 +154,8 @@ pub struct RelationshipPattern {
     pub properties: Option<Expression>,
     pub direction: Direction,
     pub length: Option<LengthSpec>,
+    /// Quantifier suffix (+ or *) for shortest path patterns.
+    pub quantifier: Option<RelQuantifier>,
 }
 
 /// Relationship direction.
@@ -414,10 +427,11 @@ fn build_merge_statement(pair: Pair<Rule>) -> Result<Statement> {
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::PatternPart => {
-                let (path_variable, elements) = build_pattern_part(inner)?;
+                let (path_variable, shortest_k, elements) = build_pattern_part(inner)?;
                 pattern = Some(Pattern {
                     elements,
                     path_variable,
+                    shortest_k,
                 });
             }
             Rule::MergeAction => {
@@ -734,12 +748,16 @@ fn build_skip_or_limit(pair: Pair<Rule>) -> Result<u64> {
 fn build_pattern(pair: Pair<Rule>) -> Result<Pattern> {
     let mut elements = Vec::new();
     let mut path_variable = None;
+    let mut shortest_k = None;
 
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::PatternPart {
-            let (path_var, part_elements) = build_pattern_part(inner)?;
+            let (path_var, short_k, part_elements) = build_pattern_part(inner)?;
             if path_var.is_some() {
                 path_variable = path_var;
+            }
+            if short_k.is_some() {
+                shortest_k = short_k;
             }
             elements.extend(part_elements);
         }
@@ -748,23 +766,28 @@ fn build_pattern(pair: Pair<Rule>) -> Result<Pattern> {
     Ok(Pattern {
         elements,
         path_variable,
+        shortest_k,
     })
 }
 
 /// Build pattern elements from a PatternPart.
-/// Returns (path_variable, elements).
-fn build_pattern_part(pair: Pair<Rule>) -> Result<(Option<String>, Vec<PatternElement>)> {
+/// Returns (path_variable, shortest_k, elements).
+fn build_pattern_part(pair: Pair<Rule>) -> Result<(Option<String>, Option<u32>, Vec<PatternElement>)> {
     let mut path_variable = None;
+    let mut shortest_k = None;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::AnonymousPatternPart => {
                 let elements = build_anonymous_pattern_part(inner)?;
-                return Ok((path_variable, elements));
+                return Ok((path_variable, shortest_k, elements));
             }
             Rule::Variable => {
                 // Named pattern (p = ...)
                 path_variable = Some(extract_variable(inner)?);
+            }
+            Rule::ShortestPathModifier => {
+                shortest_k = Some(build_shortest_path_modifier(inner)?);
             }
             _ => {}
         }
@@ -772,6 +795,17 @@ fn build_pattern_part(pair: Pair<Rule>) -> Result<(Option<String>, Vec<PatternEl
     Err(Error::Parse(
         "PatternPart requires AnonymousPatternPart".into(),
     ))
+}
+
+/// Build the SHORTEST k modifier.
+fn build_shortest_path_modifier(pair: Pair<Rule>) -> Result<u32> {
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::IntegerLiteral {
+            let n = parse_integer_literal(inner)?;
+            return Ok(n as u32);
+        }
+    }
+    Err(Error::Parse("SHORTEST requires integer".into()))
 }
 
 /// Build pattern elements from an AnonymousPatternPart.
@@ -892,6 +926,7 @@ fn build_relationship_pattern(pair: Pair<Rule>) -> Result<RelationshipPattern> {
     let mut length = None;
     let mut has_left_arrow = false;
     let mut has_right_arrow = false;
+    let mut quantifier = None;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
@@ -903,6 +938,14 @@ fn build_relationship_pattern(pair: Pair<Rule>) -> Result<RelationshipPattern> {
                 types = detail.1;
                 length = detail.2;
                 properties = detail.3;
+            }
+            Rule::QuantifierSuffix => {
+                let q = inner.as_str();
+                quantifier = Some(if q == "+" {
+                    RelQuantifier::OneOrMore
+                } else {
+                    RelQuantifier::ZeroOrMore
+                });
             }
             Rule::Dash => {}
             _ => {}
@@ -922,6 +965,7 @@ fn build_relationship_pattern(pair: Pair<Rule>) -> Result<RelationshipPattern> {
         properties,
         direction,
         length,
+        quantifier,
     })
 }
 

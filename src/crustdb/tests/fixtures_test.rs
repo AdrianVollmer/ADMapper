@@ -634,3 +634,80 @@ fn test_m6_multi_hop_exact_length() {
         .unwrap();
     assert_eq!(result.rows.len(), 1); // Only Charlie (exactly 2 hops)
 }
+
+// =============================================================================
+// M8: Shortest Path Tests
+// =============================================================================
+
+#[test]
+fn test_m8_shortest_path_fixtures() {
+    let fixtures = find_fixtures("m8_shortest_path");
+    if fixtures.is_empty() {
+        println!("No M8 fixtures found, skipping");
+        return;
+    }
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for fixture_path in &fixtures {
+        let fixture = load_fixture(fixture_path);
+
+        for test in &fixture.test {
+            let result = std::panic::catch_unwind(|| {
+                run_test_case(test);
+            });
+
+            match result {
+                Ok(()) => {
+                    passed += 1;
+                    println!("  ✓ {}", test.name);
+                }
+                Err(e) => {
+                    failed += 1;
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown error".to_string()
+                    };
+                    println!("  ✗ {}: {}", test.name, msg);
+                }
+            }
+        }
+    }
+
+    println!("\nM8 Shortest Path: {} passed, {} failed", passed, failed);
+
+    if failed > 0 {
+        panic!("{} test(s) failed", failed);
+    }
+}
+
+#[test]
+fn test_m8_shortest_path_basic() {
+    let db = Database::in_memory().unwrap();
+    // Create a simple path: A -> B
+    db.execute("CREATE (a:Station {name: 'A'})-[:LINK]->(b:Station {name: 'B'})")
+        .unwrap();
+
+    // Find shortest path
+    let result = db
+        .execute("MATCH p = SHORTEST 1 (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+}
+
+#[test]
+fn test_m8_quantifier_plus() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Station {name: 'A'})-[:LINK]->(b:Station {name: 'B'})")
+        .unwrap();
+
+    // Quantifier + means one or more hops
+    let result = db
+        .execute("MATCH p = (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+}

@@ -2,7 +2,7 @@
 
 use super::parser::{
     CreateClause, DeleteClause, Direction, Expression, Literal, MatchClause, NodePattern, Pattern,
-    PatternElement, RelationshipPattern, ReturnClause, SetClause, SetItem, Statement,
+    PatternElement, RelQuantifier, RelationshipPattern, ReturnClause, SetClause, SetItem, Statement,
 };
 use super::{QueryResult, QueryStats, ResultValue, Row};
 use crate::error::{Error, Result};
@@ -200,7 +200,10 @@ fn execute_match(
     let pattern = &match_clause.pattern;
 
     // Determine pattern type and execute accordingly
-    let bindings = if is_single_node_pattern(pattern) {
+    let bindings = if is_shortest_path_pattern(pattern) {
+        // Shortest path pattern: MATCH p = SHORTEST k (a)-[:TYPE]-+(b)
+        execute_shortest_path_pattern(pattern, storage)?
+    } else if is_single_node_pattern(pattern) {
         // Simple single-node pattern: MATCH (n) or MATCH (n:Label)
         execute_single_node_pattern(pattern, storage)?
     } else if is_single_hop_pattern(pattern) {
@@ -217,11 +220,16 @@ fn execute_match(
     };
 
     // Filter by WHERE clause if present
-    let bindings = if let Some(ref where_clause) = match_clause.where_clause {
+    let mut bindings = if let Some(ref where_clause) = match_clause.where_clause {
         filter_bindings_by_where(bindings, &where_clause.predicate)?
     } else {
         bindings
     };
+
+    // Apply SHORTEST k limit after WHERE clause filtering
+    if let Some(k) = pattern.shortest_k {
+        bindings.truncate(k as usize);
+    }
 
     // Execute SET clause if present
     if let Some(ref set_clause) = match_clause.set_clause {
@@ -317,6 +325,233 @@ fn is_multi_hop_pattern(pattern: &Pattern) -> bool {
         }
     }
     true
+}
+
+/// Check if pattern is a shortest path pattern (has shortest_k or quantifier).
+fn is_shortest_path_pattern(pattern: &Pattern) -> bool {
+    // Check if SHORTEST k is specified
+    if pattern.shortest_k.is_some() {
+        return true;
+    }
+
+    // Check if any relationship has a quantifier (+, *)
+    for elem in &pattern.elements {
+        if let PatternElement::Relationship(rel) = elem {
+            if rel.quantifier.is_some() {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Execute a shortest path pattern using BFS.
+fn execute_shortest_path_pattern(
+    pattern: &Pattern,
+    storage: &SqliteStorage,
+) -> Result<Vec<Binding>> {
+    use std::collections::{HashSet, VecDeque};
+
+    // Extract pattern components (must be node-rel-node for now)
+    if pattern.elements.len() != 3 {
+        return Err(Error::Cypher(
+            "SHORTEST path requires a simple (a)-[r]->(b) pattern".into(),
+        ));
+    }
+
+    let (source_pattern, rel_pattern, target_pattern) = match (
+        &pattern.elements[0],
+        &pattern.elements[1],
+        &pattern.elements[2],
+    ) {
+        (PatternElement::Node(s), PatternElement::Relationship(r), PatternElement::Node(t)) => {
+            (s, r, t)
+        }
+        _ => return Err(Error::Cypher("Invalid shortest path pattern".into())),
+    };
+
+    let source_var = source_pattern.variable.as_deref().unwrap_or("_src");
+    let target_var = target_pattern.variable.as_deref().unwrap_or("_tgt");
+    let path_var = pattern.path_variable.as_deref();
+
+    // Determine min/max hops based on quantifier
+    let (min_hops, max_hops) = match &rel_pattern.quantifier {
+        Some(RelQuantifier::OneOrMore) => (1usize, 100usize),
+        Some(RelQuantifier::ZeroOrMore) => (0usize, 100usize),
+        None => {
+            // Check if there's a length spec
+            if let Some(ref len) = rel_pattern.length {
+                (
+                    len.min.unwrap_or(1) as usize,
+                    len.max.unwrap_or(100) as usize,
+                )
+            } else {
+                (1, 100) // Default: one or more
+            }
+        }
+    };
+
+    // BFS state for Yen's k-shortest paths algorithm (simplified)
+    #[derive(Clone, Debug)]
+    struct PathState {
+        node_id: i64,
+        path_nodes: Vec<i64>,
+        path_edges: Vec<i64>,
+    }
+
+    // For collecting k shortest paths
+    #[derive(Debug)]
+    struct PathResult {
+        length: usize,
+        path_nodes: Vec<i64>,
+        path_edges: Vec<i64>,
+        source_node: Node,
+        target_node: Node,
+    }
+
+    // Scan source nodes
+    let source_nodes = scan_nodes(source_pattern, storage)?;
+    let source_nodes = filter_by_properties(source_nodes, source_pattern)?;
+
+    // Scan target nodes to get their IDs for quick lookup
+    let target_nodes = scan_nodes(target_pattern, storage)?;
+    let target_nodes = filter_by_properties(target_nodes, target_pattern)?;
+    let target_ids: HashSet<i64> = target_nodes.iter().map(|n| n.id).collect();
+    let target_map: std::collections::HashMap<i64, Node> =
+        target_nodes.into_iter().map(|n| (n.id, n)).collect();
+
+    let mut all_results: Vec<PathResult> = Vec::new();
+
+    // BFS from each source node to find k shortest paths
+    for source_node in source_nodes {
+        // Skip if source is same as target and min_hops > 0
+        if min_hops > 0 && target_ids.contains(&source_node.id) {
+            // We need at least one hop
+        }
+
+        let mut found_paths: Vec<PathResult> = Vec::new();
+        let mut queue: VecDeque<PathState> = VecDeque::new();
+
+        queue.push_back(PathState {
+            node_id: source_node.id,
+            path_nodes: vec![source_node.id],
+            path_edges: vec![],
+        });
+
+        // BFS level by level to ensure shortest paths first
+        while let Some(state) = queue.pop_front() {
+            let current_depth = state.path_edges.len();
+
+            // Check if current depth exceeds max
+            if current_depth > max_hops {
+                continue;
+            }
+
+            // Check if we reached a target node at valid depth
+            if current_depth >= min_hops && target_ids.contains(&state.node_id) {
+                if state.node_id != source_node.id || current_depth > 0 {
+                    // Valid path found
+                    if let Some(target_node) = target_map.get(&state.node_id) {
+                        found_paths.push(PathResult {
+                            length: current_depth,
+                            path_nodes: state.path_nodes.clone(),
+                            path_edges: state.path_edges.clone(),
+                            source_node: source_node.clone(),
+                            target_node: target_node.clone(),
+                        });
+                    }
+                }
+            }
+
+            // Don't expand if we've reached max depth
+            if current_depth >= max_hops {
+                continue;
+            }
+
+            // Expand to neighbors
+            let edges = match rel_pattern.direction {
+                Direction::Outgoing => storage.find_outgoing_edges(state.node_id)?,
+                Direction::Incoming => storage.find_incoming_edges(state.node_id)?,
+                Direction::Both => {
+                    let mut edges = storage.find_outgoing_edges(state.node_id)?;
+                    edges.extend(storage.find_incoming_edges(state.node_id)?);
+                    edges
+                }
+            };
+
+            // Filter edges by type if specified
+            let edges: Vec<Edge> = if rel_pattern.types.is_empty() {
+                edges
+            } else {
+                edges
+                    .into_iter()
+                    .filter(|e| rel_pattern.types.contains(&e.edge_type))
+                    .collect()
+            };
+
+            for edge in edges {
+                // Determine the next node
+                let next_node_id = match rel_pattern.direction {
+                    Direction::Outgoing => edge.target,
+                    Direction::Incoming => edge.source,
+                    Direction::Both => {
+                        if edge.source == state.node_id {
+                            edge.target
+                        } else {
+                            edge.source
+                        }
+                    }
+                };
+
+                // Avoid cycles within the same path
+                if state.path_nodes.contains(&next_node_id) {
+                    continue;
+                }
+
+                let mut new_path_nodes = state.path_nodes.clone();
+                new_path_nodes.push(next_node_id);
+
+                let mut new_path_edges = state.path_edges.clone();
+                new_path_edges.push(edge.id);
+
+                queue.push_back(PathState {
+                    node_id: next_node_id,
+                    path_nodes: new_path_nodes,
+                    path_edges: new_path_edges,
+                });
+            }
+        }
+
+        all_results.extend(found_paths);
+    }
+
+    // Sort results by path length (shortest first)
+    all_results.sort_by_key(|r| r.length);
+
+    // Convert to bindings
+    let bindings: Vec<Binding> = all_results
+        .into_iter()
+        .map(|result| {
+            let mut binding = Binding::new()
+                .with_node(source_var, result.source_node)
+                .with_node(target_var, result.target_node);
+
+            if let Some(pv) = path_var {
+                binding = binding.with_path(
+                    pv,
+                    Path {
+                        node_ids: result.path_nodes,
+                        edge_ids: result.path_edges,
+                    },
+                );
+            }
+
+            binding
+        })
+        .collect();
+
+    Ok(bindings)
 }
 
 /// Execute a single-node pattern match.
@@ -1187,6 +1422,74 @@ fn evaluate_return_item_with_bindings(expr: &Expression, binding: &Binding) -> R
         Expression::Literal(lit) => {
             let prop_value = literal_to_property_value(lit);
             Ok(ResultValue::Property(prop_value))
+        }
+        Expression::FunctionCall { name, args } => {
+            let name_upper = name.to_uppercase();
+            match name_upper.as_str() {
+                "LENGTH" => {
+                    if args.len() != 1 {
+                        return Err(Error::Cypher("length() requires 1 argument".into()));
+                    }
+                    // Check if argument is a path variable
+                    if let Expression::Variable(var_name) = &args[0] {
+                        if let Some(path) = binding.paths.get(var_name) {
+                            // Return path length (number of edges)
+                            return Ok(ResultValue::Property(PropertyValue::Integer(
+                                path.edge_ids.len() as i64,
+                            )));
+                        }
+                        // Fall through to evaluate as property value
+                    }
+                    let val = evaluate_expression_with_bindings(&args[0], binding)?;
+                    match val {
+                        PropertyValue::String(s) => {
+                            Ok(ResultValue::Property(PropertyValue::Integer(s.len() as i64)))
+                        }
+                        PropertyValue::List(l) => {
+                            Ok(ResultValue::Property(PropertyValue::Integer(l.len() as i64)))
+                        }
+                        PropertyValue::Null => Ok(ResultValue::Property(PropertyValue::Null)),
+                        _ => Ok(ResultValue::Property(PropertyValue::Null)),
+                    }
+                }
+                "NODES" => {
+                    if args.len() != 1 {
+                        return Err(Error::Cypher("nodes() requires 1 argument".into()));
+                    }
+                    if let Expression::Variable(var_name) = &args[0] {
+                        if let Some(path) = binding.paths.get(var_name) {
+                            let list: Vec<PropertyValue> = path
+                                .node_ids
+                                .iter()
+                                .map(|&id| PropertyValue::Integer(id))
+                                .collect();
+                            return Ok(ResultValue::Property(PropertyValue::List(list)));
+                        }
+                    }
+                    Err(Error::Cypher("nodes() requires a path argument".into()))
+                }
+                "RELATIONSHIPS" | "RELS" => {
+                    if args.len() != 1 {
+                        return Err(Error::Cypher("relationships() requires 1 argument".into()));
+                    }
+                    if let Expression::Variable(var_name) = &args[0] {
+                        if let Some(path) = binding.paths.get(var_name) {
+                            let list: Vec<PropertyValue> = path
+                                .edge_ids
+                                .iter()
+                                .map(|&id| PropertyValue::Integer(id))
+                                .collect();
+                            return Ok(ResultValue::Property(PropertyValue::List(list)));
+                        }
+                    }
+                    Err(Error::Cypher("relationships() requires a path argument".into()))
+                }
+                _ => {
+                    // Fall back to evaluating as a property value
+                    let val = evaluate_function_call_with_bindings(name, args, binding)?;
+                    Ok(ResultValue::Property(val))
+                }
+            }
         }
         _ => Err(Error::Cypher(
             "Complex expressions in RETURN not yet supported".into(),

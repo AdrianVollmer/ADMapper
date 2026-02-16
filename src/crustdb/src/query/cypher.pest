@@ -158,7 +158,11 @@ Pattern = {
 }
 
 PatternPart = {
-    (Variable ~ SP? ~ "=" ~ SP?)? ~ AnonymousPatternPart
+    (Variable ~ SP? ~ "=" ~ SP?)? ~ ShortestPathModifier? ~ AnonymousPatternPart
+}
+
+ShortestPathModifier = {
+    SHORTEST ~ SP ~ IntegerLiteral ~ SP?
 }
 
 AnonymousPatternPart = { PatternElement }
@@ -177,10 +181,10 @@ PatternElementChain = {
 }
 
 RelationshipPattern = {
-    (LeftArrowHead ~ SP? ~ Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ SP? ~ RightArrowHead)
-    | (LeftArrowHead ~ SP? ~ Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash)
-    | (Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ SP? ~ RightArrowHead)
-    | (Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash) 
+    (LeftArrowHead ~ SP? ~ Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ SP? ~ RightArrowHead ~ QuantifierSuffix?)
+    | (LeftArrowHead ~ SP? ~ Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ QuantifierSuffix?)
+    | (Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ SP? ~ RightArrowHead ~ QuantifierSuffix?)
+    | (Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ QuantifierSuffix?)
 }
 
 RelationshipDetail = {
@@ -206,6 +210,11 @@ NodeLabel = {
 
 RangeLiteral = {
     "*" ~ SP? ~ (IntegerLiteral ~ SP?)? ~ (DOT_DOT ~ SP? ~ (IntegerLiteral ~ SP?)?)?
+}
+
+// QuantifierSuffix for -[:TYPE]-+ (one or more) patterns
+QuantifierSuffix = {
+    "+" | "*"
 }
 
 LabelName = { SchemaName }
@@ -551,6 +560,7 @@ ReservedWord = {
     | REMOVE
     | RETURN
     | SET
+    | SHORTEST
     | SKIP
     | WHERE
     | WITH
@@ -716,6 +726,7 @@ SCALAR = @{ ^"SCALAR" }
 OF = @{ ^"OF" }
 ADD = @{ ^"ADD" }
 DROP_ = @{ ^"DROP" }
+SHORTEST = @{ ^"SHORTEST" }
 
 // CASE = @{ ^"CASE" }
 // ELSE = @{ ^"ELSE" }

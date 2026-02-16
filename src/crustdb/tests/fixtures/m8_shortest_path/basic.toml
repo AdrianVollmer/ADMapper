@@ -1,0 +1,59 @@
+# M8: Shortest Path Queries
+#
+# Tests for SHORTEST k path finding with quantifiers (+, *).
+
+[[test]]
+name = "shortest_path_basic"
+description = "Find shortest path between two nodes"
+[test.setup]
+cypher = [
+    # Create a simple linear path: A -> B
+    "CREATE (a:Station {name: 'A'})-[:LINK]->(b:Station {name: 'B'})",
+]
+[test.query]
+cypher = "MATCH p = SHORTEST 1 (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result"
+[test.expected]
+row_count = 1
+columns = ["result"]
+
+[[test]]
+name = "shortest_path_multi_hop"
+description = "Find shortest path over multiple hops"
+[test.setup]
+cypher = [
+    # Create a path: A -> B -> C (2 hops)
+    "CREATE (a:Station {name: 'A'})-[:LINK]->(b:Station {name: 'B'})-[:LINK]->(c:Station {name: 'C'})",
+]
+[test.query]
+cypher = "MATCH p = SHORTEST 1 (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'C' RETURN length(p) AS result"
+[test.expected]
+row_count = 1
+columns = ["result"]
+
+[[test]]
+name = "shortest_path_no_path"
+description = "No path exists between nodes"
+[test.setup]
+cypher = [
+    "CREATE (a:Station {name: 'A'})",
+    "CREATE (b:Station {name: 'B'})",
+    # No edges between them
+]
+[test.query]
+cypher = "MATCH p = SHORTEST 1 (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result"
+[test.expected]
+row_count = 0
+columns = ["result"]
+
+[[test]]
+name = "quantifier_one_or_more"
+description = "Quantifier + matches one or more"
+[test.setup]
+cypher = [
+    "CREATE (a:Station {name: 'A'})-[:LINK]->(b:Station {name: 'B'})",
+]
+[test.query]
+cypher = "MATCH p = (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result"
+[test.expected]
+row_count = 1
+columns = ["result"]
