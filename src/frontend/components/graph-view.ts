@@ -8,6 +8,7 @@ import { loadGraph, createRenderer, applyLayout, getGraphStats } from "../graph"
 import type { ADGraphRenderer, LayoutType } from "../graph";
 import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel } from "./sidebars";
+import { autoCollapseGraph, clearCollapseState } from "../graph/collapse";
 
 let renderer: ADGraphRenderer | null = null;
 let currentLayout: LayoutType = "force";
@@ -94,9 +95,15 @@ export function loadGraphData(data: RawADGraph): void {
   // Clear any placeholder content
   container.innerHTML = "";
 
+  // Clear previous collapse state
+  clearCollapseState();
+
   // Load and layout the graph
   const graph = loadGraph(data);
   applyLayout(graph);
+
+  // Auto-collapse nodes with many children for large graphs
+  autoCollapseGraph(graph);
 
   // Create renderer
   renderer = createRenderer({

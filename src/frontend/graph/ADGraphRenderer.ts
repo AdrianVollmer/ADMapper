@@ -17,6 +17,14 @@ import {
   LABEL_COLOR,
   DEFAULT_EDGE_COLOR,
 } from "./theme";
+import {
+  isNodeCollapsed,
+  getHiddenChildCount,
+  getHiddenNodeIds,
+  toggleNodeCollapse,
+  isEdgeHidden,
+  getCollapsedEdgeInfo,
+} from "./collapse";
 
 export interface RendererOptions {
   /** Container element or selector */
@@ -33,6 +41,8 @@ export interface RendererOptions {
   onBackgroundClick?: () => void;
   /** Callback when a node is hovered */
   onNodeHover?: (nodeId: string | null, attrs: ADNodeAttributes | null) => void;
+  /** Callback when a node is double-clicked */
+  onNodeDoubleClick?: (nodeId: string, attrs: ADNodeAttributes) => void;
 }
 
 export interface ADGraphRenderer {
@@ -62,7 +72,16 @@ export interface ADGraphRenderer {
 
 /** Create an AD graph renderer */
 export function createRenderer(options: RendererOptions): ADGraphRenderer {
-  const { container, graph, theme = "dark", enableHover = true, onNodeClick, onBackgroundClick, onNodeHover } = options;
+  const {
+    container,
+    graph,
+    theme = "dark",
+    enableHover = true,
+    onNodeClick,
+    onBackgroundClick,
+    onNodeHover,
+    onNodeDoubleClick,
+  } = options;
 
   // Resolve container element
   const containerEl = typeof container === "string" ? document.querySelector<HTMLElement>(container) : container;
@@ -104,10 +123,12 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   }
 
   // Custom label renderer: draws label below node, centered
+  // Also draws collapse badge for collapsed nodes
   function drawLabel(
     context: CanvasRenderingContext2D,
     data: { label: string | null; x: number; y: number; size: number; color: string },
-    settings: { labelSize: number; labelWeight: string; labelColor: { color?: string } }
+    settings: { labelSize: number; labelWeight: string; labelColor: { color?: string } },
+    nodeId?: string
   ): void {
     const label = data.label;
     if (!label) return;
@@ -124,6 +145,32 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     // Position below the node with a small gap
     const yOffset = data.size + 4;
     context.fillText(label, data.x, data.y + yOffset);
+
+    // Draw collapse badge if node is collapsed
+    if (nodeId && isNodeCollapsed(nodeId)) {
+      const hiddenCount = getHiddenChildCount(nodeId);
+      if (hiddenCount > 0) {
+        const badgeText = hiddenCount > 99 ? "99+" : String(hiddenCount);
+        const badgeSize = Math.max(12, data.size * 0.6);
+
+        // Position badge at top-right of node
+        const badgeX = data.x + data.size * 0.7;
+        const badgeY = data.y - data.size * 0.7;
+
+        // Draw badge background (red circle)
+        context.beginPath();
+        context.arc(badgeX, badgeY, badgeSize / 2, 0, Math.PI * 2);
+        context.fillStyle = "#ef4444";
+        context.fill();
+
+        // Draw badge text
+        context.font = `bold ${badgeSize * 0.7}px sans-serif`;
+        context.fillStyle = "#ffffff";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText(badgeText, badgeX, badgeY);
+      }
+    }
   }
 
   // Custom hover renderer: draws a glow effect behind the hovered node
@@ -216,9 +263,16 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     // Smooth camera transitions
     stagePadding: 30,
 
-    // Node reducer: bring hovered/selected/path nodes to front
+    // Node reducer: bring hovered/selected/path nodes to front, hide collapsed children
     nodeReducer: (nodeId, data) => {
       const res: Record<string, unknown> = { ...data };
+
+      // Hide nodes that are children of collapsed parents
+      const hiddenNodes = getHiddenNodeIds();
+      if (hiddenNodes.has(nodeId)) {
+        res.hidden = true;
+        return res;
+      }
 
       // Path nodes get highlighted
       if (highlightedPath.has(nodeId)) {
@@ -237,12 +291,42 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
         res.zIndex = 3;
       }
 
+      // Collapsed nodes get highlighted to indicate they can be expanded
+      if (isNodeCollapsed(nodeId)) {
+        res.forceLabel = true; // Always show label for collapsed nodes
+      }
+
       return res;
     },
 
-    // Edge reducer: highlight path edges, transitive edges on hover
+    // Edge reducer: highlight path edges, transitive edges on hover, hide collapsed edges
     edgeReducer: (edge, data) => {
       const res: Record<string, unknown> = { ...data };
+
+      // Get source and target from graph
+      const edgeSource = graph.source(edge);
+      const edgeTarget = graph.target(edge);
+
+      // Hide edges connected to hidden nodes
+      const hiddenNodes = getHiddenNodeIds();
+      if (hiddenNodes.has(edgeSource) || hiddenNodes.has(edgeTarget)) {
+        res.hidden = true;
+        return res;
+      }
+
+      // Hide edges that are part of collapsed groups (except the first)
+      if (isEdgeHidden(edge, edgeSource, edgeTarget)) {
+        res.hidden = true;
+        return res;
+      }
+
+      // Check if this edge is the visible one in a collapsed group
+      const collapsedInfo = getCollapsedEdgeInfo(edgeSource, edgeTarget);
+      if (collapsedInfo && collapsedInfo.edgeCount > 1) {
+        // Show count in label
+        res.label = `${collapsedInfo.edgeCount} edges`;
+        res.forceLabel = true;
+      }
 
       // Path edges get special highlight
       if (highlightedPathEdges.has(edge)) {
@@ -298,6 +382,18 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     if (onNodeClick) {
       const attrs = graph.getNodeAttributes(event.node) as ADNodeAttributes;
       onNodeClick(event.node, attrs);
+    }
+  });
+
+  // Double-click handler for toggling node collapse
+  sigma.on("doubleClickNode", (event) => {
+    // Toggle collapse state
+    toggleNodeCollapse(graph, event.node);
+    sigma.refresh();
+
+    if (onNodeDoubleClick) {
+      const attrs = graph.getNodeAttributes(event.node) as ADNodeAttributes;
+      onNodeDoubleClick(event.node, attrs);
     }
   });
 

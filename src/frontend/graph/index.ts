@@ -68,3 +68,15 @@ export {
   getNodeColor,
   getEdgeColor,
 } from "./theme";
+
+// Collapse functionality
+export {
+  isNodeCollapsed,
+  getHiddenChildCount,
+  collapseNode,
+  expandNode,
+  toggleNodeCollapse,
+  autoCollapseGraph,
+  clearCollapseState,
+  getNodeCollapseInfo,
+} from "./collapse";
