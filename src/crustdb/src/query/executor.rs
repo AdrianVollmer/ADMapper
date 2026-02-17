@@ -1575,6 +1575,87 @@ fn evaluate_function_call_with_bindings(
     }
 }
 
+/// Check if an expression is an aggregate function (count, sum, avg, etc.)
+fn is_aggregate_function(expr: &Expression) -> bool {
+    match expr {
+        Expression::FunctionCall { name, .. } => {
+            matches!(
+                name.to_uppercase().as_str(),
+                "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "COLLECT"
+            )
+        }
+        _ => false,
+    }
+}
+
+/// Check if any return item contains an aggregate function
+fn has_aggregate_functions(return_clause: &ReturnClause) -> bool {
+    return_clause
+        .items
+        .iter()
+        .any(|item| is_aggregate_function(&item.expression))
+}
+
+/// Evaluate aggregate function over all bindings
+fn evaluate_aggregate(
+    expr: &Expression,
+    bindings: &[Binding],
+) -> Result<ResultValue> {
+    if let Expression::FunctionCall { name, args } = expr {
+        let name_upper = name.to_uppercase();
+        match name_upper.as_str() {
+            "COUNT" => {
+                // count(*) or count(n) - count number of bindings
+                // For count(n), we count bindings where n is not null
+                if args.is_empty() {
+                    // count(*) - count all rows
+                    Ok(ResultValue::Property(PropertyValue::Integer(
+                        bindings.len() as i64,
+                    )))
+                } else if let Expression::Variable(var_name) = &args[0] {
+                    // count(n) - count rows where variable exists
+                    let count = bindings
+                        .iter()
+                        .filter(|b| b.nodes.contains_key(var_name) || b.edges.contains_key(var_name))
+                        .count();
+                    Ok(ResultValue::Property(PropertyValue::Integer(count as i64)))
+                } else {
+                    // count(expr) - count non-null values
+                    let count = bindings
+                        .iter()
+                        .filter(|b| {
+                            evaluate_expression_with_bindings(&args[0], b)
+                                .map(|v| !matches!(v, PropertyValue::Null))
+                                .unwrap_or(false)
+                        })
+                        .count();
+                    Ok(ResultValue::Property(PropertyValue::Integer(count as i64)))
+                }
+            }
+            "COLLECT" => {
+                // collect(n) - collect all values into a list
+                if args.is_empty() {
+                    return Err(Error::Cypher("collect() requires an argument".into()));
+                }
+                let values: Vec<PropertyValue> = bindings
+                    .iter()
+                    .filter_map(|b| {
+                        evaluate_expression_with_bindings(&args[0], b).ok()
+                    })
+                    .filter(|v| !matches!(v, PropertyValue::Null))
+                    .collect();
+                Ok(ResultValue::Property(PropertyValue::List(values)))
+            }
+            _ => Err(Error::Cypher(format!(
+                "Aggregate function {} not yet implemented",
+                name
+            ))),
+        }
+    } else {
+        Err(Error::Cypher("Expected aggregate function".into()))
+    }
+}
+
 /// Build query result from bindings.
 fn build_match_result_from_bindings(
     bindings: Vec<Binding>,
@@ -1594,7 +1675,33 @@ fn build_match_result_from_bindings(
         })
         .collect();
 
-    // Build rows
+    // Check if we have aggregate functions - if so, return single aggregated row
+    if has_aggregate_functions(return_clause) {
+        let mut values = HashMap::new();
+
+        for (i, item) in return_clause.items.iter().enumerate() {
+            let column_name = &columns[i];
+            let value = if is_aggregate_function(&item.expression) {
+                evaluate_aggregate(&item.expression, &bindings)?
+            } else if bindings.is_empty() {
+                // No bindings, return null for non-aggregate columns
+                ResultValue::Property(PropertyValue::Null)
+            } else {
+                // For non-aggregate columns with aggregates, use first binding
+                // (this matches SQL behavior for non-grouped columns)
+                evaluate_return_item_with_bindings(&item.expression, &bindings[0])?
+            };
+            values.insert(column_name.clone(), value);
+        }
+
+        return Ok(QueryResult {
+            columns,
+            rows: vec![Row { values }],
+            stats: QueryStats::default(),
+        });
+    }
+
+    // Build rows (non-aggregate case)
     let mut rows = Vec::with_capacity(bindings.len());
 
     for binding in bindings {
