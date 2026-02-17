@@ -87,6 +87,15 @@ async function loadStats(): Promise<void> {
   const footer = document.getElementById("db-manager-footer");
   if (!body || !footer) return;
 
+  // Show loading spinner
+  body.innerHTML = `
+    <div class="flex items-center justify-center py-8">
+      <div class="spinner"></div>
+      <span class="ml-3 text-gray-400">Loading stats...</span>
+    </div>
+  `;
+  footer.innerHTML = `<button class="btn btn-secondary" data-action="close">Close</button>`;
+
   try {
     const stats = await api.get<DetailedStats>("/api/graph/detailed-stats");
     renderStats(body, footer, stats);
@@ -95,6 +104,10 @@ async function loadStats(): Promise<void> {
       <div class="text-red-400 p-4">
         Failed to load database stats: ${escapeHtml(err instanceof Error ? err.message : String(err))}
       </div>
+    `;
+    footer.innerHTML = `
+      <button class="btn btn-secondary" data-action="refresh">Retry</button>
+      <button class="btn btn-primary" data-action="close">Close</button>
     `;
   }
 }
