@@ -6,15 +6,15 @@ export default defineConfig({
     environment: "happy-dom",
 
     // Test file patterns
-    include: ["src-frontend/__tests__/**/*.test.ts"],
+    include: ["src/frontend/__tests__/**/*.test.ts"],
 
     // Coverage configuration
     coverage: {
       provider: "v8",
-      include: ["src-frontend/**/*.ts"],
+      include: ["src/frontend/**/*.ts"],
       exclude: [
-        "src-frontend/__tests__/**",
-        "src-frontend/main.ts", // Entry point
+        "src/frontend/__tests__/**",
+        "src/frontend/main.ts", // Entry point
       ],
       reporter: ["text", "html"],
     },
@@ -23,6 +23,6 @@ export default defineConfig({
     testTimeout: 10000,
 
     // Setup files (run before each test file)
-    setupFiles: ["src-frontend/__tests__/setup.ts"],
+    setupFiles: ["src/frontend/__tests__/setup.ts"],
   },
 });

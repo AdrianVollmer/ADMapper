@@ -17,9 +17,14 @@ export function initGraph(): void {
   const container = document.getElementById("graph-canvas");
   if (!container) return;
 
-  // Load demo graph for now
-  const demoGraph = generateDemoGraph(200);
-  loadGraphData(demoGraph);
+  // Only show demo data in development mode
+  if (import.meta.env.DEV) {
+    const demoGraph = generateDemoGraph(200);
+    loadGraphData(demoGraph);
+  } else {
+    // Show placeholder prompting user to connect
+    showNoConnectionPlaceholder();
+  }
 
   // Handle toolbar actions
   document.addEventListener("click", (e) => {
@@ -32,6 +37,49 @@ export function initGraph(): void {
   });
 }
 
+/** Show placeholder when no database is connected */
+export function showNoConnectionPlaceholder(error?: string): void {
+  const container = document.getElementById("graph-canvas");
+  if (!container) return;
+
+  // Clean up existing renderer
+  if (renderer) {
+    renderer.destroy();
+    renderer = null;
+  }
+
+  // Create placeholder
+  container.innerHTML = `
+    <div class="flex flex-col items-center justify-center h-full text-gray-400">
+      <svg class="w-16 h-16 mb-4 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+      </svg>
+      ${error ? `<p class="text-red-400 mb-2 text-center max-w-md">${escapeHtml(error)}</p>` : ""}
+      <p class="text-lg mb-2">No database connected</p>
+      <p class="text-sm text-gray-500 mb-4">Connect to a database to visualize Active Directory permissions</p>
+      <button
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+        data-action="connect-db"
+      >
+        Connect to Database
+      </button>
+    </div>
+  `;
+
+  // Update stats
+  const statsEl = document.getElementById("graph-stats");
+  if (statsEl) {
+    statsEl.textContent = "No graph loaded";
+  }
+}
+
+/** Escape HTML to prevent XSS */
+function escapeHtml(text: string): string {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 /** Load graph data and render */
 export function loadGraphData(data: RawADGraph): void {
   const container = document.getElementById("graph-canvas");
@@ -42,6 +90,9 @@ export function loadGraphData(data: RawADGraph): void {
     renderer.destroy();
     renderer = null;
   }
+
+  // Clear any placeholder content
+  container.innerHTML = "";
 
   // Load and layout the graph
   const graph = loadGraph(data);

@@ -9,6 +9,7 @@
  */
 
 import { appState } from "../main";
+import { showNoConnectionPlaceholder } from "./graph-view";
 
 /** Database types */
 type DatabaseType = "kuzu" | "cozo" | "neo4j" | "falkordb";
@@ -193,6 +194,11 @@ export async function disconnectDb(): Promise<void> {
     appState.databaseConnected = false;
     appState.databaseType = null;
     updateConnectionStatus();
+
+    // Show the no-connection placeholder (only in production, dev shows demo data)
+    if (!import.meta.env.DEV) {
+      showNoConnectionPlaceholder();
+    }
   } catch (error) {
     console.error("Failed to disconnect:", error);
   }
