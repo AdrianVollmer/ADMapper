@@ -7,20 +7,20 @@
 
 import type { ADNodeType, ADEdgeType } from "./types";
 
-/** Color palette for node types */
+/** Color palette for node types - vibrant, modern colors for visual appeal */
 export const NODE_COLORS: Record<ADNodeType, string> = {
-  User: "#17a2b8", // Teal - users are common, neutral color
-  Group: "#ffc107", // Amber - groups connect users to permissions
-  Computer: "#dc3545", // Red - computers are attack targets
-  Domain: "#6f42c1", // Purple - domains are high-value
-  GPO: "#fd7e14", // Orange - GPOs control configuration
-  OU: "#20c997", // Mint - organizational containers
-  Container: "#6c757d", // Gray - generic containers
-  CertTemplate: "#e83e8c", // Pink - certificate templates (PKI)
-  EnterpriseCA: "#e83e8c", // Pink - enterprise CAs (PKI)
-  RootCA: "#e83e8c", // Pink - root CAs (PKI)
-  AIACA: "#e83e8c", // Pink - AIA CAs (PKI)
-  NTAuthStore: "#e83e8c", // Pink - NTAuth store (PKI)
+  User: "#22b8cf", // Cyan - users are common, approachable color
+  Group: "#fab005", // Golden yellow - groups connect users to permissions
+  Computer: "#f03e3e", // Vibrant red - computers are attack targets
+  Domain: "#7950f2", // Vivid purple - domains are high-value
+  GPO: "#fd7e14", // Bright orange - GPOs control configuration
+  OU: "#20c997", // Mint green - organizational containers
+  Container: "#868e96", // Medium gray - generic containers
+  CertTemplate: "#f06595", // Rose pink - certificate templates (PKI)
+  EnterpriseCA: "#f06595", // Rose pink - enterprise CAs (PKI)
+  RootCA: "#f06595", // Rose pink - root CAs (PKI)
+  AIACA: "#f06595", // Rose pink - AIA CAs (PKI)
+  NTAuthStore: "#f06595", // Rose pink - NTAuth store (PKI)
   Unknown: "#adb5bd", // Light gray - unknown types
 };
 

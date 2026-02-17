@@ -163,25 +163,35 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     }
   }
 
-  // Create node image program for rendering icons
+  // Create node image program for rendering icons with high-quality settings
   // "background" mode draws the node color as a circle behind the icon
   const NodeImageProgram = createNodeImageProgram({
-    size: { mode: "force", value: 256 },
+    size: { mode: "force", value: 512 }, // Higher resolution for crisp icons
     drawingMode: "background",
     colorAttribute: "color",
     imageAttribute: "image",
-    padding: 0.15,
+    padding: 0.12, // Slightly less padding for better icon visibility
     keepWithinCircle: true,
   });
 
-  // Create Sigma instance with custom reducers for dynamic styling
+  // Create curved edge program with smooth arrows
+  const CurvedArrowProgram = createEdgeCurveProgram({
+    arrowHead: {
+      extremity: "target",
+      lengthToThicknessRatio: 3.5,
+      widenessToThicknessRatio: 3,
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }) as any;
+
+  // Create Sigma instance with high-quality rendering settings
   const sigma = new Sigma(graph, containerEl, {
     allowInvalidContainer: false,
     renderLabels: true,
     renderEdgeLabels: true,
-    labelDensity: 0.07,
-    labelGridCellSize: 60,
-    labelRenderedSizeThreshold: 6,
+    labelDensity: 0.08,
+    labelGridCellSize: 80,
+    labelRenderedSizeThreshold: 5,
     zIndex: true,
     defaultNodeColor: "#adb5bd",
     defaultEdgeColor: "#6c757d",
@@ -192,18 +202,19 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     nodeProgramClasses: {
       image: NodeImageProgram,
     },
-    defaultEdgeType: "triangle",
+    // Use curved arrows for better visual appearance
+    defaultEdgeType: "curvedArrow",
     edgeProgramClasses: {
       triangle: EdgeTriangleProgram,
-      curvedArrow: createEdgeCurveProgram({
-        arrowHead: {
-          extremity: "target",
-          lengthToThicknessRatio: 4,
-          widenessToThicknessRatio: 4,
-        },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      }) as any,
+      curvedArrow: CurvedArrowProgram,
     },
+    // Better performance settings
+    minCameraRatio: 0.01,
+    maxCameraRatio: 10,
+    // Improved edge rendering
+    enableEdgeEvents: false, // Disable for performance, we don't need edge clicks
+    // Smooth camera transitions
+    stagePadding: 30,
 
     // Node reducer: bring hovered/selected/path nodes to front
     nodeReducer: (nodeId, data) => {
