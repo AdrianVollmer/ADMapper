@@ -254,18 +254,45 @@ impl DatabaseBackend for FalkorDbDatabase {
             return Ok(0);
         }
 
+        // Group nodes by type for efficient batching
+        let mut nodes_by_type: std::collections::HashMap<String, Vec<&DbNode>> =
+            std::collections::HashMap::new();
         for node in nodes {
-            let props_str = serde_json::to_string(&node.properties)?.replace('\'', "\\'");
-            let label = node.label.replace('\'', "\\'");
-            let id = node.id.replace('\'', "\\'");
+            nodes_by_type
+                .entry(node.node_type.clone())
+                .or_default()
+                .push(node);
+        }
 
-            let cypher = format!(
-                "MERGE (n:{} {{objectid: '{}'}}) SET n.name = '{}', n.properties = '{}'",
-                node.node_type, id, label, props_str
-            );
+        // Batch insert nodes of each type using UNWIND
+        const BATCH_SIZE: usize = 200;
+        for (node_type, type_nodes) in nodes_by_type {
+            for chunk in type_nodes.chunks(BATCH_SIZE) {
+                // Build the list literal for UNWIND
+                let items: Vec<String> = chunk
+                    .iter()
+                    .map(|n| {
+                        let id = n.id.replace('\'', "\\'").replace('\\', "\\\\");
+                        let label = n.label.replace('\'', "\\'").replace('\\', "\\\\");
+                        let props = serde_json::to_string(&n.properties)
+                            .unwrap_or_default()
+                            .replace('\'', "\\'")
+                            .replace('\\', "\\\\");
+                        format!("{{id: '{}', label: '{}', props: '{}'}}", id, label, props)
+                    })
+                    .collect();
 
-            if let Err(e) = self.run_query(&cypher) {
-                debug!("Failed to insert node {}: {}", node.id, e);
+                let cypher = format!(
+                    "UNWIND [{}] AS row \
+                     MERGE (n:{} {{objectid: row.id}}) \
+                     SET n.name = row.label, n.properties = row.props",
+                    items.join(", "),
+                    node_type
+                );
+
+                if let Err(e) = self.run_query(&cypher) {
+                    debug!("Failed to insert {} nodes batch: {}", node_type, e);
+                }
             }
         }
 
@@ -277,26 +304,53 @@ impl DatabaseBackend for FalkorDbDatabase {
             return Ok(0);
         }
 
+        // Group edges by type for efficient batching
+        let mut edges_by_type: std::collections::HashMap<String, Vec<&DbEdge>> =
+            std::collections::HashMap::new();
         for edge in edges {
-            let props_str = serde_json::to_string(&edge.properties)?.replace('\'', "\\'");
-            let src = edge.source.replace('\'', "\\'");
-            let tgt = edge.target.replace('\'', "\\'");
+            edges_by_type
+                .entry(edge.edge_type.clone())
+                .or_default()
+                .push(edge);
+        }
 
-            let cypher = format!(
-                "MATCH (a {{objectid: '{}'}}), (b {{objectid: '{}'}}) \
-                 MERGE (a)-[r:{}]->(b) SET r.properties = '{}'",
-                src, tgt, edge.edge_type, props_str
-            );
+        // Batch insert edges of each type using UNWIND
+        const BATCH_SIZE: usize = 200;
+        let mut inserted = 0;
+        for (edge_type, type_edges) in edges_by_type {
+            for chunk in type_edges.chunks(BATCH_SIZE) {
+                // Build the list literal for UNWIND
+                let items: Vec<String> = chunk
+                    .iter()
+                    .map(|e| {
+                        let src = e.source.replace('\'', "\\'").replace('\\', "\\\\");
+                        let tgt = e.target.replace('\'', "\\'").replace('\\', "\\\\");
+                        let props = serde_json::to_string(&e.properties)
+                            .unwrap_or_default()
+                            .replace('\'', "\\'")
+                            .replace('\\', "\\\\");
+                        format!("{{src: '{}', tgt: '{}', props: '{}'}}", src, tgt, props)
+                    })
+                    .collect();
 
-            if let Err(e) = self.run_query(&cypher) {
-                debug!(
-                    "Failed to create edge {} -> {}: {}",
-                    edge.source, edge.target, e
+                let cypher = format!(
+                    "UNWIND [{}] AS row \
+                     MATCH (a {{objectid: row.src}}), (b {{objectid: row.tgt}}) \
+                     MERGE (a)-[r:{}]->(b) \
+                     SET r.properties = row.props",
+                    items.join(", "),
+                    edge_type
                 );
+
+                if let Err(e) = self.run_query(&cypher) {
+                    debug!("Failed to create {} edges batch: {}", edge_type, e);
+                } else {
+                    inserted += chunk.len();
+                }
             }
         }
 
-        Ok(edges.len())
+        Ok(inserted)
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {

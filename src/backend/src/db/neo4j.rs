@@ -182,17 +182,39 @@ impl DatabaseBackend for Neo4jDatabase {
             return Ok(0);
         }
 
+        // Group nodes by type for efficient batching
+        let mut nodes_by_type: HashMap<String, Vec<&DbNode>> = HashMap::new();
         for node in nodes {
-            let props_str = serde_json::to_string(&node.properties)?;
-            let q = query(&format!(
-                "MERGE (n:{} {{objectid: $id}}) SET n.name = $label, n.properties = $props",
-                node.node_type
-            ))
-            .param("id", node.id.clone())
-            .param("label", node.label.clone())
-            .param("props", props_str);
+            nodes_by_type
+                .entry(node.node_type.clone())
+                .or_default()
+                .push(node);
+        }
 
-            self.run_query(q)?;
+        // Batch insert nodes of each type using UNWIND
+        // neo4rs requires separate arrays for each field
+        const BATCH_SIZE: usize = 500;
+        for (node_type, type_nodes) in nodes_by_type {
+            for chunk in type_nodes.chunks(BATCH_SIZE) {
+                let ids: Vec<String> = chunk.iter().map(|n| n.id.clone()).collect();
+                let labels: Vec<String> = chunk.iter().map(|n| n.label.clone()).collect();
+                let props: Vec<String> = chunk
+                    .iter()
+                    .map(|n| serde_json::to_string(&n.properties).unwrap_or_default())
+                    .collect();
+
+                let q = query(&format!(
+                    "UNWIND range(0, size($ids)-1) AS i \
+                     MERGE (n:{} {{objectid: $ids[i]}}) \
+                     SET n.name = $labels[i], n.properties = $props[i]",
+                    node_type
+                ))
+                .param("ids", ids)
+                .param("labels", labels)
+                .param("props", props);
+
+                self.run_query(q)?;
+            }
         }
 
         Ok(nodes.len())
@@ -203,26 +225,47 @@ impl DatabaseBackend for Neo4jDatabase {
             return Ok(0);
         }
 
+        // Group edges by type for efficient batching
+        let mut edges_by_type: HashMap<String, Vec<&DbEdge>> = HashMap::new();
         for edge in edges {
-            let props_str = serde_json::to_string(&edge.properties)?;
-            let q = query(&format!(
-                "MATCH (a {{objectid: $src}}), (b {{objectid: $tgt}}) \
-                 MERGE (a)-[r:{}]->(b) SET r.properties = $props",
-                edge.edge_type
-            ))
-            .param("src", edge.source.clone())
-            .param("tgt", edge.target.clone())
-            .param("props", props_str);
+            edges_by_type
+                .entry(edge.edge_type.clone())
+                .or_default()
+                .push(edge);
+        }
 
-            if let Err(e) = self.run_query(q) {
-                debug!(
-                    "Failed to create edge {} -> {}: {}",
-                    edge.source, edge.target, e
-                );
+        // Batch insert edges of each type using UNWIND
+        const BATCH_SIZE: usize = 500;
+        let mut inserted = 0;
+        for (edge_type, type_edges) in edges_by_type {
+            for chunk in type_edges.chunks(BATCH_SIZE) {
+                let srcs: Vec<String> = chunk.iter().map(|e| e.source.clone()).collect();
+                let tgts: Vec<String> = chunk.iter().map(|e| e.target.clone()).collect();
+                let props: Vec<String> = chunk
+                    .iter()
+                    .map(|e| serde_json::to_string(&e.properties).unwrap_or_default())
+                    .collect();
+
+                let q = query(&format!(
+                    "UNWIND range(0, size($srcs)-1) AS i \
+                     MATCH (a {{objectid: $srcs[i]}}), (b {{objectid: $tgts[i]}}) \
+                     MERGE (a)-[r:{}]->(b) \
+                     SET r.properties = $props[i]",
+                    edge_type
+                ))
+                .param("srcs", srcs)
+                .param("tgts", tgts)
+                .param("props", props);
+
+                if let Err(e) = self.run_query(q) {
+                    debug!("Failed to create {} edges batch: {}", edge_type, e);
+                } else {
+                    inserted += chunk.len();
+                }
             }
         }
 
-        Ok(edges.len())
+        Ok(inserted)
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {
