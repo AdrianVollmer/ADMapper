@@ -211,7 +211,9 @@ impl AppState {
             }
             #[cfg(not(feature = "crustdb"))]
             DatabaseType::CrustDB => {
-                return Err("CrustDB support not compiled in. See Cargo.toml for instructions.".to_string());
+                return Err(
+                    "CrustDB support not compiled in. See Cargo.toml for instructions.".to_string(),
+                );
             }
         };
 
