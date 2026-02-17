@@ -47,6 +47,21 @@
     @apply text-blue-200;
   }
 
+  .menu-option.menu-disabled,
+  .menu-option[disabled] {
+    @apply text-gray-500 cursor-not-allowed pointer-events-none;
+  }
+
+  .menu-option.menu-disabled kbd,
+  .menu-option[disabled] kbd {
+    @apply text-gray-600;
+  }
+
+  .menu-submenu.menu-disabled .menu-submenu-trigger,
+  .menu-submenu[disabled] .menu-submenu-trigger {
+    @apply text-gray-500 cursor-not-allowed pointer-events-none;
+  }
+
   .menu-separator {
     @apply my-1 border-t border-gray-600;
   }

@@ -76,19 +76,19 @@
                 <kbd>Ctrl+V</kbd>
               </button>
               <div class="menu-separator" role="separator"></div>
-              <button class="menu-option" data-action="select-all" role="menuitem">
+              <button class="menu-option" data-action="select-all" data-requires-db role="menuitem">
                 <span>Select All</span>
                 <kbd>Ctrl+A</kbd>
               </button>
-              <button class="menu-option" data-action="find" role="menuitem">
+              <button class="menu-option" data-action="find" data-requires-db role="menuitem">
                 <span>Find...</span>
                 <kbd>Ctrl+F</kbd>
               </button>
               <div class="menu-separator" role="separator"></div>
-              <button class="menu-option" data-action="add-node" role="menuitem">
+              <button class="menu-option" data-action="add-node" data-requires-db role="menuitem">
                 <span>Add Node...</span>
               </button>
-              <button class="menu-option" data-action="add-edge" role="menuitem">
+              <button class="menu-option" data-action="add-edge" data-requires-db role="menuitem">
                 <span>Add Edge...</span>
               </button>
             </div>
@@ -137,33 +137,33 @@
           <div class="menu-item" data-menu="tools">
             <button class="menu-trigger" aria-haspopup="true" aria-expanded="false">Tools</button>
             <div class="menu-dropdown" role="menu" hidden>
-              <button class="menu-option" data-action="import-bloodhound" role="menuitem">
+              <button class="menu-option" data-action="import-bloodhound" data-requires-db role="menuitem">
                 <span>Import BloodHound Data...</span>
               </button>
-              <button class="menu-option" data-action="run-query" role="menuitem">
+              <button class="menu-option" data-action="run-query" data-requires-db role="menuitem">
                 <span>Run Query</span>
                 <kbd>Ctrl+Enter</kbd>
               </button>
               <button class="menu-option" data-action="manage-queries" role="menuitem">
                 <span>Manage Queries</span>
               </button>
-              <button class="menu-option" data-action="query-history" role="menuitem">
+              <button class="menu-option" data-action="query-history" data-requires-db role="menuitem">
                 <span>Query History</span>
               </button>
               <div class="menu-separator" role="separator"></div>
-              <button class="menu-option" data-action="manage-db" role="menuitem">
+              <button class="menu-option" data-action="manage-db" data-requires-db role="menuitem">
                 <span>Manage Database...</span>
               </button>
-              <button class="menu-option" data-action="insights" role="menuitem">
+              <button class="menu-option" data-action="insights" data-requires-db role="menuitem">
                 <span>Security Insights...</span>
                 <kbd>Ctrl+I</kbd>
               </button>
               <div class="menu-separator" role="separator"></div>
-              <button class="menu-option" data-action="layout-graph" role="menuitem">
+              <button class="menu-option" data-action="layout-graph" data-requires-db role="menuitem">
                 <span>Re-layout Graph</span>
                 <kbd>Ctrl+L</kbd>
               </button>
-              <div class="menu-submenu">
+              <div class="menu-submenu" data-requires-db>
                 <div class="menu-submenu-trigger" role="menuitem" aria-haspopup="true">
                   <span>Layout Algorithm</span>
                 </div>

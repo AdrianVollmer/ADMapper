@@ -26,6 +26,10 @@ export function initMenuBar(): void {
     // Handle menu option clicks
     const option = (e.target as HTMLElement).closest(".menu-option");
     if (option) {
+      // Don't dispatch if disabled
+      if (option.hasAttribute("disabled") || option.classList.contains("menu-disabled")) {
+        return;
+      }
       const action = option.getAttribute("data-action");
       if (action) {
         closeAllMenus();

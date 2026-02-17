@@ -36,6 +36,23 @@ export function updateConnectionStatus(): void {
       textEl.textContent = "Not Connected";
     }
   }
+
+  // Update menu items that require database connection
+  updateMenuItemsForConnection(appState.databaseConnected);
+}
+
+/** Enable/disable menu items based on database connection state */
+function updateMenuItemsForConnection(connected: boolean): void {
+  const items = document.querySelectorAll("[data-requires-db]");
+  for (const item of items) {
+    if (connected) {
+      item.removeAttribute("disabled");
+      item.classList.remove("menu-disabled");
+    } else {
+      item.setAttribute("disabled", "");
+      item.classList.add("menu-disabled");
+    }
+  }
 }
 
 /** Fetch and update connection status from server */
