@@ -162,7 +162,7 @@ parse_args() {
 build_admapper() {
     echo -e "${BLUE}Building admapper...${NC}"
 
-    cd "$SCRIPT_DIR/src/backend"
+    cd "$SCRIPT_DIR/../src/backend"
 
     # Build with embedded backends (kuzu and crustdb)
     cargo build --release --no-default-features --features kuzu,crustdb
@@ -174,7 +174,7 @@ build_admapper() {
 
 # Check if admapper binary exists
 check_binary() {
-    local binary="${ADMAPPER_BIN:-$SCRIPT_DIR/src/backend/target/release/admapper}"
+    local binary="${ADMAPPER_BIN:-$SCRIPT_DIR/../src/backend/target/release/admapper}"
 
     if [ ! -x "$binary" ]; then
         echo -e "${YELLOW}ADMapper binary not found: $binary${NC}"
@@ -223,7 +223,7 @@ run_tests() {
 cleanup() {
     if [ "$CLEANUP" = true ]; then
         echo -e "${BLUE}Cleaning up containers...${NC}"
-        cd "$SCRIPT_DIR"
+        cd "$SCRIPT_DIR"/..
         $COMPOSE_CMD -f e2e/docker-compose.yml down --remove-orphans 2>/dev/null || true
     else
         echo -e "${YELLOW}Skipping cleanup (--no-cleanup specified)${NC}"
