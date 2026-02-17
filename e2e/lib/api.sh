@@ -100,11 +100,13 @@ api_import() {
     esac
 }
 
-# Get import progress
+# Get import progress (SSE endpoint)
 # Usage: api_import_progress "job_id"
 api_import_progress() {
     local job_id="$1"
-    api_request "GET" "/api/import/progress/$job_id"
+    local url="${API_BASE}/api/import/progress/$job_id"
+    # SSE returns "data: {...}\n\n", extract JSON from the data line
+    curl -s "$url" 2>/dev/null | grep '^data: ' | head -1 | sed 's/^data: //'
 }
 
 # Get graph statistics
