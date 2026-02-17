@@ -93,12 +93,8 @@ impl CrustDatabase {
             .iter()
             .map(|node| {
                 let labels = vec![node.node_type.clone()];
-                let props = serde_json::json!({
-                    "object_id": node.id,
-                    "label": node.label,
-                    "node_type": node.node_type,
-                    "properties": serde_json::to_string(&node.properties).unwrap_or_default()
-                });
+                // Flatten BloodHound properties into top-level fields
+                let props = Self::flatten_node_properties(node);
                 (labels, props)
             })
             .collect();
@@ -128,22 +124,89 @@ impl CrustDatabase {
     fn insert_nodes_fallback(&self, nodes: &[DbNode]) -> Result<usize> {
         let mut count = 0;
         for node in nodes {
-            let props_str = serde_json::to_string(&node.properties)?;
-            let label = node.label.replace('\'', "''");
-            let props_escaped = props_str.replace('\'', "''");
-            let object_id = node.id.replace('\'', "''");
+            // Build flattened properties for Cypher
+            let props = Self::flatten_node_properties(node);
+            let props_str = Self::json_to_cypher_props(&props);
             let node_type = node.node_type.replace('\'', "''");
 
-            let query = format!(
-                "CREATE (n:{} {{object_id: '{}', label: '{}', node_type: '{}', properties: '{}'}})",
-                node_type, object_id, label, node_type, props_escaped
-            );
+            let query = format!("CREATE (n:{} {})", node_type, props_str);
 
             if self.execute(&query).is_ok() {
                 count += 1;
             }
         }
         Ok(count)
+    }
+
+    /// Flatten BloodHound node properties into a single JSON object.
+    ///
+    /// This merges the nested `properties` from BloodHound into top-level fields,
+    /// making them directly queryable in Cypher.
+    fn flatten_node_properties(node: &DbNode) -> serde_json::Value {
+        let mut props = serde_json::Map::new();
+
+        // Add core identifiers
+        props.insert("object_id".to_string(), serde_json::json!(node.id));
+        props.insert("label".to_string(), serde_json::json!(node.label));
+        props.insert("node_type".to_string(), serde_json::json!(node.node_type));
+
+        // Flatten BloodHound properties into top-level fields
+        if let serde_json::Value::Object(bh_props) = &node.properties {
+            for (key, value) in bh_props {
+                // Skip null values and empty arrays to save space
+                if value.is_null() {
+                    continue;
+                }
+                if let Some(arr) = value.as_array() {
+                    if arr.is_empty() {
+                        continue;
+                    }
+                }
+                // Don't overwrite core fields
+                if key != "object_id" && key != "label" && key != "node_type" {
+                    props.insert(key.clone(), value.clone());
+                }
+            }
+        }
+
+        serde_json::Value::Object(props)
+    }
+
+    /// Convert a JSON object to Cypher property syntax.
+    fn json_to_cypher_props(value: &serde_json::Value) -> String {
+        let obj = match value.as_object() {
+            Some(o) => o,
+            None => return "{}".to_string(),
+        };
+
+        let pairs: Vec<String> = obj
+            .iter()
+            .filter_map(|(k, v)| {
+                let val_str = Self::json_value_to_cypher(v)?;
+                Some(format!("{}: {}", k, val_str))
+            })
+            .collect();
+
+        format!("{{{}}}", pairs.join(", "))
+    }
+
+    /// Convert a JSON value to Cypher literal syntax.
+    fn json_value_to_cypher(value: &serde_json::Value) -> Option<String> {
+        match value {
+            serde_json::Value::Null => None,
+            serde_json::Value::Bool(b) => Some(b.to_string()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            serde_json::Value::String(s) => Some(format!("'{}'", s.replace('\'', "''"))),
+            serde_json::Value::Array(arr) => {
+                let items: Vec<String> =
+                    arr.iter().filter_map(Self::json_value_to_cypher).collect();
+                Some(format!("[{}]", items.join(", ")))
+            }
+            serde_json::Value::Object(_) => {
+                // Skip nested objects for now - Cypher doesn't support them directly
+                None
+            }
+        }
     }
 
     /// Insert a batch of edges using efficient batch insert.
@@ -299,26 +362,88 @@ impl CrustDatabase {
 
     /// Get all nodes.
     pub fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
-        let result =
-            self.execute("MATCH (n) RETURN n.object_id, n.label, n.node_type, n.properties")?;
+        let result = self.execute("MATCH (n) RETURN n")?;
 
         let mut nodes = Vec::new();
         for row in &result.rows {
-            let id = self.get_string_value(&row.values, "n.object_id");
-            let label = self.get_string_value(&row.values, "n.label");
-            let node_type = self.get_string_value(&row.values, "n.node_type");
-            let props_str = self.get_string_value(&row.values, "n.properties");
-
-            let properties = serde_json::from_str(&props_str).unwrap_or(JsonValue::Null);
-            nodes.push(DbNode {
-                id,
-                label,
-                node_type,
-                properties,
-            });
+            if let Some(node) = Self::extract_db_node_from_result(&row.values, "n") {
+                nodes.push(node);
+            }
         }
 
         Ok(nodes)
+    }
+
+    /// Extract a DbNode from a query result row.
+    fn extract_db_node_from_result(
+        values: &std::collections::HashMap<String, crustdb::ResultValue>,
+        key: &str,
+    ) -> Option<DbNode> {
+        let value = values.get(key)?;
+
+        match value {
+            crustdb::ResultValue::Node {
+                id: _,
+                labels,
+                properties,
+            } => {
+                let object_id = properties
+                    .get("object_id")
+                    .and_then(|v| {
+                        if let crustdb::PropertyValue::String(s) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+
+                let label = properties
+                    .get("label")
+                    .and_then(|v| {
+                        if let crustdb::PropertyValue::String(s) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| object_id.clone());
+
+                let node_type = properties
+                    .get("node_type")
+                    .and_then(|v| {
+                        if let crustdb::PropertyValue::String(s) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| labels.first().cloned())
+                    .unwrap_or_else(|| "Unknown".to_string());
+
+                // Convert all properties to JSON
+                let props_json = Self::properties_to_json(properties);
+
+                Some(DbNode {
+                    id: object_id,
+                    label,
+                    node_type,
+                    properties: props_json,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Convert CrustDB properties to JSON.
+    fn properties_to_json(
+        properties: &std::collections::HashMap<String, crustdb::PropertyValue>,
+    ) -> JsonValue {
+        let map: serde_json::Map<String, JsonValue> = properties
+            .iter()
+            .map(|(k, v)| (k.clone(), Self::property_value_to_json(v)))
+            .collect();
+        JsonValue::Object(map)
     }
 
     /// Get all edges.
@@ -404,9 +529,10 @@ impl CrustDatabase {
         let query_escaped = search_query.replace('\'', "''").to_lowercase();
 
         // CrustDB supports CONTAINS for string matching
+        // Return full node to get all flattened properties
         let query = format!(
             "MATCH (n) WHERE n.label CONTAINS '{}' OR n.object_id CONTAINS '{}' \
-             RETURN n.object_id, n.label, n.node_type, n.properties LIMIT {}",
+             RETURN n LIMIT {}",
             query_escaped, query_escaped, limit
         );
 
@@ -414,18 +540,9 @@ impl CrustDatabase {
 
         let mut nodes = Vec::new();
         for row in &result.rows {
-            let id = self.get_string_value(&row.values, "n.object_id");
-            let label = self.get_string_value(&row.values, "n.label");
-            let node_type = self.get_string_value(&row.values, "n.node_type");
-            let props_str = self.get_string_value(&row.values, "n.properties");
-
-            let properties = serde_json::from_str(&props_str).unwrap_or(JsonValue::Null);
-            nodes.push(DbNode {
-                id,
-                label,
-                node_type,
-                properties,
-            });
+            if let Some(node) = Self::extract_db_node_from_result(&row.values, "n") {
+                nodes.push(node);
+            }
         }
 
         debug!(query = %search_query, found = nodes.len(), "Search complete");
@@ -620,9 +737,9 @@ impl CrustDatabase {
             .map(|id| format!("'{}'", id.replace('\'', "''")))
             .collect();
 
+        // Return full node to get all flattened properties
         let query = format!(
-            "MATCH (n) WHERE n.object_id IN [{}] \
-             RETURN n.object_id, n.label, n.node_type, n.properties",
+            "MATCH (n) WHERE n.object_id IN [{}] RETURN n",
             id_list.join(", ")
         );
 
@@ -630,18 +747,9 @@ impl CrustDatabase {
 
         let mut nodes = Vec::new();
         for row in &result.rows {
-            let id = self.get_string_value(&row.values, "n.object_id");
-            let label = self.get_string_value(&row.values, "n.label");
-            let node_type = self.get_string_value(&row.values, "n.node_type");
-            let props_str = self.get_string_value(&row.values, "n.properties");
-
-            let properties = serde_json::from_str(&props_str).unwrap_or(JsonValue::Null);
-            nodes.push(DbNode {
-                id,
-                label,
-                node_type,
-                properties,
-            });
+            if let Some(node) = Self::extract_db_node_from_result(&row.values, "n") {
+                nodes.push(node);
+            }
         }
 
         Ok(nodes)
