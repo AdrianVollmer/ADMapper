@@ -31,6 +31,7 @@ use import::{BloodHoundImporter, ImportProgress};
 use parking_lot::RwLock;
 use serde::Deserialize;
 use serde::Serialize;
+use tokio_util::sync::CancellationToken;
 use serde_json::{json, Value as JsonValue};
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -107,6 +108,59 @@ impl IntoResponse for ApiError {
 }
 
 // ============================================================================
+// Query Tracking Types
+// ============================================================================
+
+/// Status of a running or completed query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QueryStatus {
+    Running,
+    Completed,
+    Failed,
+    Aborted,
+}
+
+impl std::fmt::Display for QueryStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            QueryStatus::Running => write!(f, "running"),
+            QueryStatus::Completed => write!(f, "completed"),
+            QueryStatus::Failed => write!(f, "failed"),
+            QueryStatus::Aborted => write!(f, "aborted"),
+        }
+    }
+}
+
+/// Progress update for a running query.
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryProgress {
+    pub query_id: String,
+    pub status: QueryStatus,
+    pub started_at: i64,
+    pub duration_ms: Option<u64>,
+    pub result_count: Option<i64>,
+    pub error: Option<String>,
+    /// Query results (only populated when status is Completed)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub results: Option<JsonValue>,
+    /// Extracted graph (only populated when status is Completed and extract_graph was true)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph: Option<FullGraph>,
+}
+
+/// State for a running query.
+pub struct RunningQuery {
+    pub query_id: String,
+    pub query: String,
+    pub started_at: std::time::Instant,
+    pub started_at_unix: i64,
+    pub cancel_token: CancellationToken,
+    pub progress_tx: broadcast::Sender<QueryProgress>,
+    pub final_state: RwLock<Option<QueryProgress>>,
+}
+
+// ============================================================================
 // Application State
 // ============================================================================
 
@@ -129,6 +183,8 @@ pub struct AppState {
     connection: Arc<RwLock<Option<DatabaseConnection>>>,
     /// Active import jobs and their progress channels.
     import_jobs: Arc<DashMap<String, Arc<ImportJob>>>,
+    /// Active running queries for tracking and cancellation.
+    running_queries: Arc<DashMap<String, Arc<RunningQuery>>>,
 }
 
 impl AppState {
@@ -137,6 +193,7 @@ impl AppState {
         Self {
             connection: Arc::new(RwLock::new(None)),
             import_jobs: Arc::new(DashMap::new()),
+            running_queries: Arc::new(DashMap::new()),
         }
     }
 
@@ -145,6 +202,7 @@ impl AppState {
         Self {
             connection: Arc::new(RwLock::new(Some(DatabaseConnection { backend, db_type }))),
             import_jobs: Arc::new(DashMap::new()),
+            running_queries: Arc::new(DashMap::new()),
         }
     }
 
@@ -315,6 +373,9 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/edge", post(add_edge))
         .route("/api/graph/insights", get(graph_insights))
         .route("/api/graph/query", post(graph_query))
+        // Query progress and abort
+        .route("/api/query/progress/:id", get(query_progress))
+        .route("/api/query/abort/:id", post(query_abort))
         // Query history
         .route("/api/query-history", get(get_query_history))
         .route("/api/query-history", post(add_query_history))
@@ -672,7 +733,7 @@ async fn graph_clear(State(state): State<AppState>) -> Result<StatusCode, ApiErr
 }
 
 /// Graph node response format.
-#[derive(Serialize, Clone)]
+#[derive(Debug, Clone, Serialize)]
 struct GraphNode {
     id: String,
     label: String,
@@ -682,7 +743,7 @@ struct GraphNode {
 }
 
 /// Graph edge response format.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct GraphEdge {
     source: String,
     target: String,
@@ -728,8 +789,8 @@ async fn graph_edges(State(state): State<AppState>) -> Result<Json<Vec<GraphEdge
 }
 
 /// Full graph response.
-#[derive(Serialize)]
-struct FullGraph {
+#[derive(Debug, Clone, Serialize)]
+pub struct FullGraph {
     nodes: Vec<GraphNode>,
     edges: Vec<GraphEdge>,
 }
@@ -1571,43 +1632,241 @@ struct QueryRequest {
     language: Option<String>,
 }
 
-/// Query response.
+/// Response when starting an async query.
 #[derive(Serialize)]
-struct QueryResponse {
-    /// Raw query results
-    results: JsonValue,
-    /// Extracted graph (if extract_graph was true)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    graph: Option<FullGraph>,
+struct QueryStartResponse {
+    query_id: String,
 }
 
-/// Execute a custom query.
+/// Execute a custom query asynchronously.
+/// Returns immediately with a query_id. Subscribe to /api/query/progress/:id for updates.
 #[instrument(skip(state, body))]
 async fn graph_query(
     State(state): State<AppState>,
     Json(body): Json<QueryRequest>,
-) -> Result<Json<QueryResponse>, ApiError> {
+) -> Result<Json<QueryStartResponse>, ApiError> {
     let db = state.require_db()?;
-    info!(query = %body.query, "Executing custom query");
+    info!(query = %body.query, "Starting async query");
 
-    // Parse language if specified
-    let results = if let Some(lang_str) = &body.language {
-        let lang = QueryLanguage::from_str(lang_str)
-            .ok_or_else(|| ApiError::BadRequest(format!("Unknown query language: {}", lang_str)))?;
-        db.run_query_with_language(&body.query, lang)
-            .map_err(|e| ApiError::BadRequest(format!("Query error: {e}")))?
-    } else {
-        db.run_custom_query(&body.query)
-            .map_err(|e| ApiError::BadRequest(format!("Query error: {e}")))?
+    // Generate query ID and setup tracking
+    let query_id = uuid::Uuid::new_v4().to_string();
+    let cancel_token = CancellationToken::new();
+    let (progress_tx, _) = broadcast::channel::<QueryProgress>(16);
+
+    let started_at = std::time::Instant::now();
+    let started_at_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let running_query = Arc::new(RunningQuery {
+        query_id: query_id.clone(),
+        query: body.query.clone(),
+        started_at,
+        started_at_unix,
+        cancel_token: cancel_token.clone(),
+        progress_tx: progress_tx.clone(),
+        final_state: RwLock::new(None),
+    });
+
+    state
+        .running_queries
+        .insert(query_id.clone(), running_query.clone());
+
+    // Broadcast initial "running" status
+    let initial_progress = QueryProgress {
+        query_id: query_id.clone(),
+        status: QueryStatus::Running,
+        started_at: started_at_unix,
+        duration_ms: None,
+        result_count: None,
+        error: None,
+        results: None,
+        graph: None,
     };
+    let _ = progress_tx.send(initial_progress);
 
-    let graph = if body.extract_graph {
-        extract_graph_from_results(&results, &db)?
-    } else {
-        None
+    // Spawn the query execution
+    let query_id_clone = query_id.clone();
+    let query_text = body.query.clone();
+    let extract_graph = body.extract_graph;
+    let language = body.language.clone();
+    let running_queries = state.running_queries.clone();
+    let running_query_for_task = running_query.clone();
+
+    tokio::task::spawn_blocking(move || {
+        // Check if cancelled before starting
+        if cancel_token.is_cancelled() {
+            let progress = QueryProgress {
+                query_id: query_id_clone.clone(),
+                status: QueryStatus::Aborted,
+                started_at: started_at_unix,
+                duration_ms: Some(started_at.elapsed().as_millis() as u64),
+                result_count: None,
+                error: None,
+                results: None,
+                graph: None,
+            };
+            let _ = progress_tx.send(progress.clone());
+            *running_query_for_task.final_state.write() = Some(progress);
+            return;
+        }
+
+        // Execute the query
+        let result = if let Some(lang_str) = &language {
+            QueryLanguage::from_str(lang_str)
+                .map(|lang| db.run_query_with_language(&query_text, lang))
+                .unwrap_or_else(|| Err(DbError::Database(format!("Unknown language: {}", lang_str))))
+        } else {
+            db.run_custom_query(&query_text)
+        };
+
+        // Check if cancelled after query completion
+        if cancel_token.is_cancelled() {
+            let progress = QueryProgress {
+                query_id: query_id_clone.clone(),
+                status: QueryStatus::Aborted,
+                started_at: started_at_unix,
+                duration_ms: Some(started_at.elapsed().as_millis() as u64),
+                result_count: None,
+                error: None,
+                results: None,
+                graph: None,
+            };
+            let _ = progress_tx.send(progress.clone());
+            *running_query_for_task.final_state.write() = Some(progress);
+            return;
+        }
+
+        let duration_ms = started_at.elapsed().as_millis() as u64;
+
+        let progress = match result {
+            Ok(results) => {
+                // Count results
+                let result_count = results
+                    .get("rows")
+                    .and_then(|r| r.as_array())
+                    .map(|arr| arr.len() as i64);
+
+                // Try to extract graph if requested
+                let graph = if extract_graph {
+                    extract_graph_from_results(&results, &db).ok().flatten()
+                } else {
+                    None
+                };
+
+                debug!(
+                    query_id = %query_id_clone,
+                    duration_ms = duration_ms,
+                    result_count = ?result_count,
+                    has_graph = graph.is_some(),
+                    "Query completed"
+                );
+
+                QueryProgress {
+                    query_id: query_id_clone.clone(),
+                    status: QueryStatus::Completed,
+                    started_at: started_at_unix,
+                    duration_ms: Some(duration_ms),
+                    result_count,
+                    error: None,
+                    results: Some(results),
+                    graph,
+                }
+            }
+            Err(e) => {
+                error!(query_id = %query_id_clone, error = %e, "Query failed");
+                QueryProgress {
+                    query_id: query_id_clone.clone(),
+                    status: QueryStatus::Failed,
+                    started_at: started_at_unix,
+                    duration_ms: Some(duration_ms),
+                    result_count: None,
+                    error: Some(e.to_string()),
+                    results: None,
+                    graph: None,
+                }
+            }
+        };
+
+        // Broadcast final status
+        let _ = progress_tx.send(progress.clone());
+        *running_query_for_task.final_state.write() = Some(progress);
+
+        // Clean up after a delay
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        running_queries.remove(&query_id_clone);
+    });
+
+    Ok(Json(QueryStartResponse { query_id }))
+}
+
+/// SSE endpoint for query progress updates.
+async fn query_progress(
+    State(state): State<AppState>,
+    Path(query_id): Path<String>,
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    use futures::future::Either;
+
+    let query = state
+        .running_queries
+        .get(&query_id)
+        .map(|r| r.value().clone())
+        .ok_or_else(|| ApiError::NotFound("Query not found".to_string()))?;
+
+    // Check if query already completed (late subscriber)
+    let final_state = query.final_state.read().clone();
+    if let Some(progress) = final_state {
+        debug!(query_id = %query_id, "Sending cached final state to late subscriber");
+        let data = serde_json::to_string(&progress).unwrap_or_default();
+        let stream = Either::Left(tokio_stream::once(Ok(Event::default().data(data))));
+        return Ok(Sse::new(stream));
+    }
+
+    // Subscribe to live updates
+    let rx = query.progress_tx.subscribe();
+    let stream = Either::Right(BroadcastStream::new(rx).filter_map(|result| {
+        result.ok().map(|progress| {
+            let data = serde_json::to_string(&progress).unwrap_or_default();
+            Ok(Event::default().data(data))
+        })
+    }));
+
+    Ok(Sse::new(stream))
+}
+
+/// Abort a running query.
+#[instrument(skip(state))]
+async fn query_abort(
+    State(state): State<AppState>,
+    Path(query_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let query = state
+        .running_queries
+        .get(&query_id)
+        .map(|r| r.value().clone())
+        .ok_or_else(|| ApiError::NotFound("Query not found".to_string()))?;
+
+    info!(query_id = %query_id, "Aborting query");
+
+    // Cancel the token - this will signal the query to abort
+    query.cancel_token.cancel();
+
+    // Broadcast aborted status
+    let progress = QueryProgress {
+        query_id: query_id.clone(),
+        status: QueryStatus::Aborted,
+        started_at: query.started_at_unix,
+        duration_ms: Some(query.started_at.elapsed().as_millis() as u64),
+        result_count: None,
+        error: None,
+        results: None,
+        graph: None,
     };
+    let _ = query.progress_tx.send(progress.clone());
+    *query.final_state.write() = Some(progress);
 
-    Ok(Json(QueryResponse { results, graph }))
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ============================================================================
@@ -1622,6 +1881,10 @@ struct QueryHistoryEntry {
     query: String,
     timestamp: i64,
     result_count: Option<i64>,
+    status: QueryStatus,
+    started_at: i64,
+    duration_ms: Option<u64>,
+    error: Option<String>,
 }
 
 /// Query history response with pagination.
@@ -1666,12 +1929,25 @@ async fn get_query_history(
     let entries: Vec<QueryHistoryEntry> = history
         .into_iter()
         .map(
-            |(id, name, query, timestamp, result_count)| QueryHistoryEntry {
-                id,
-                name,
-                query,
-                timestamp,
-                result_count,
+            |(id, name, query, timestamp, result_count, status, started_at, duration_ms, error)| {
+                let status = match status.as_str() {
+                    "running" => QueryStatus::Running,
+                    "completed" => QueryStatus::Completed,
+                    "failed" => QueryStatus::Failed,
+                    "aborted" => QueryStatus::Aborted,
+                    _ => QueryStatus::Completed, // Default fallback
+                };
+                QueryHistoryEntry {
+                    id,
+                    name,
+                    query,
+                    timestamp,
+                    result_count,
+                    status,
+                    started_at,
+                    duration_ms,
+                    error,
+                }
             },
         )
         .collect();
@@ -1696,6 +1972,12 @@ struct AddHistoryRequest {
     name: String,
     query: String,
     result_count: Option<i64>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    duration_ms: Option<u64>,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 /// Add a query to history.
@@ -1706,20 +1988,42 @@ async fn add_query_history(
 ) -> Result<Json<QueryHistoryEntry>, ApiError> {
     let db = state.require_db()?;
     let id = uuid::Uuid::new_v4().to_string();
-    let timestamp = std::time::SystemTime::now()
+    let started_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
 
-    db.add_query_history(&id, &body.name, &body.query, timestamp, body.result_count)?;
+    let status_str = body.status.as_deref().unwrap_or("completed");
+    let status = match status_str {
+        "running" => QueryStatus::Running,
+        "failed" => QueryStatus::Failed,
+        "aborted" => QueryStatus::Aborted,
+        _ => QueryStatus::Completed,
+    };
+
+    db.add_query_history(
+        &id,
+        &body.name,
+        &body.query,
+        started_at, // timestamp
+        body.result_count,
+        status_str,
+        started_at,
+        body.duration_ms,
+        body.error.as_deref(),
+    )?;
 
     info!(id = %id, name = %body.name, "Query added to history");
     Ok(Json(QueryHistoryEntry {
         id,
         name: body.name,
         query: body.query,
-        timestamp,
+        timestamp: started_at,
         result_count: body.result_count,
+        status,
+        started_at,
+        duration_ms: body.duration_ms,
+        error: body.error,
     }))
 }
 

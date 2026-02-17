@@ -75,7 +75,11 @@ impl GraphDatabase {
                 name: String,
                 query: String,
                 timestamp: Int,
-                result_count: Int?
+                result_count: Int?,
+                status: String,
+                started_at: Int,
+                duration_ms: Int?,
+                error: String?
             }
         "#;
 
@@ -870,11 +874,25 @@ impl GraphDatabase {
         query: &str,
         timestamp: i64,
         result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
     ) -> Result<()> {
-        debug!(id = %id, name = %name, "Adding query to history");
+        debug!(id = %id, name = %name, status = %status, "Adding query to history");
 
         let result_val = match result_count {
             Some(c) => DataValue::from(c),
+            None => DataValue::Null,
+        };
+
+        let duration_val = match duration_ms {
+            Some(d) => DataValue::from(d as i64),
+            None => DataValue::Null,
+        };
+
+        let error_val = match error {
+            Some(e) => DataValue::Str(e.into()),
             None => DataValue::Null,
         };
 
@@ -884,6 +902,10 @@ impl GraphDatabase {
             DataValue::Str(query.into()),
             DataValue::from(timestamp),
             result_val,
+            DataValue::Str(status.into()),
+            DataValue::from(started_at),
+            duration_val,
+            error_val,
         ]];
 
         let params = NamedRows {
@@ -893,6 +915,10 @@ impl GraphDatabase {
                 "query".to_string(),
                 "timestamp".to_string(),
                 "result_count".to_string(),
+                "status".to_string(),
+                "started_at".to_string(),
+                "duration_ms".to_string(),
+                "error".to_string(),
             ],
             rows,
             next: None,
@@ -905,13 +931,84 @@ impl GraphDatabase {
         Ok(())
     }
 
+    /// Update a query's status in history.
+    pub fn update_query_status(
+        &self,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        debug!(id = %id, status = %status, "Updating query status");
+
+        // CozoDB doesn't have a native UPDATE - we need to read, delete, and re-insert
+        // First get the existing entry
+        let query = format!(
+            "?[id, name, query, timestamp, result_count, status, started_at, duration_ms, error] := *query_history{{id, name, query, timestamp, result_count, status, started_at, duration_ms, error}}, id = \"{}\"",
+            id.replace('"', "\\\"")
+        );
+
+        let result = self
+            .db
+            .run_script(&query, Default::default(), ScriptMutability::Immutable)?;
+        let json = result.into_json();
+        let rows = json["rows"].as_array();
+
+        if let Some(rows) = rows {
+            if let Some(row) = rows.first() {
+                let name = row.get(1).and_then(|v| v.as_str()).unwrap_or("");
+                let query_str = row.get(2).and_then(|v| v.as_str()).unwrap_or("");
+                let timestamp = row.get(3).and_then(|v| v.as_i64()).unwrap_or(0);
+                let old_result_count = row.get(4).and_then(|v| v.as_i64());
+                let started_at = row.get(6).and_then(|v| v.as_i64()).unwrap_or(0);
+
+                // Use new values or fallback to old ones
+                let final_result_count = result_count.or(old_result_count);
+
+                // Delete the old entry
+                let delete_query = format!("?[id] <- [[\"{id}\"]] :delete query_history {{id}}");
+                self.db
+                    .run_script(&delete_query, Default::default(), ScriptMutability::Mutable)?;
+
+                // Re-insert with updated values
+                self.add_query_history(
+                    id,
+                    name,
+                    query_str,
+                    timestamp,
+                    final_result_count,
+                    status,
+                    started_at,
+                    duration_ms,
+                    error,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Get query history, ordered by timestamp descending.
     #[allow(clippy::type_complexity)]
     pub fn get_query_history(
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
+    ) -> Result<(
+        Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )>,
+        usize,
+    )> {
         debug!(limit = limit, offset = offset, "Getting query history");
 
         // Get total count
@@ -929,7 +1026,7 @@ impl GraphDatabase {
 
         // Get paginated results, ordered by timestamp desc
         let query = format!(
-            "?[id, name, query, timestamp, result_count] := *query_history{{id, name, query, timestamp, result_count}} :order -timestamp :limit {} :offset {}",
+            "?[id, name, query, timestamp, result_count, status, started_at, duration_ms, error] := *query_history{{id, name, query, timestamp, result_count, status, started_at, duration_ms, error}} :order -timestamp :limit {} :offset {}",
             limit, offset
         );
 
@@ -942,19 +1039,27 @@ impl GraphDatabase {
         let mut history = Vec::new();
         if let Some(rows) = rows {
             for row in rows {
-                if let (Some(id), Some(name), Some(query), Some(timestamp)) = (
+                if let (Some(id), Some(name), Some(query), Some(timestamp), Some(status), Some(started_at)) = (
                     row.get(0).and_then(|v| v.as_str()),
                     row.get(1).and_then(|v| v.as_str()),
                     row.get(2).and_then(|v| v.as_str()),
                     row.get(3).and_then(|v| v.as_i64()),
+                    row.get(5).and_then(|v| v.as_str()),
+                    row.get(6).and_then(|v| v.as_i64()),
                 ) {
                     let result_count = row.get(4).and_then(|v| v.as_i64());
+                    let duration_ms = row.get(7).and_then(|v| v.as_u64());
+                    let error = row.get(8).and_then(|v| v.as_str()).map(String::from);
                     history.push((
                         id.to_string(),
                         name.to_string(),
                         query.to_string(),
                         timestamp,
                         result_count,
+                        status.to_string(),
+                        started_at,
+                        duration_ms,
+                        error,
                     ));
                 }
             }
@@ -1098,15 +1203,54 @@ impl DatabaseBackend for GraphDatabase {
         query: &str,
         timestamp: i64,
         result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
     ) -> Result<()> {
-        GraphDatabase::add_query_history(self, id, name, query, timestamp, result_count)
+        GraphDatabase::add_query_history(
+            self,
+            id,
+            name,
+            query,
+            timestamp,
+            result_count,
+            status,
+            started_at,
+            duration_ms,
+            error,
+        )
+    }
+
+    fn update_query_status(
+        &self,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        GraphDatabase::update_query_status(self, id, status, duration_ms, result_count, error)
     }
 
     fn get_query_history(
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
+    ) -> Result<(
+        Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )>,
+        usize,
+    )> {
         GraphDatabase::get_query_history(self, limit, offset)
     }
 
@@ -1458,10 +1602,30 @@ mod tests {
         let db = GraphDatabase::in_memory().unwrap();
 
         // Add entries
-        db.add_query_history("id1", "Query 1", "?[x] := x = 1", 1000, Some(1))
-            .unwrap();
-        db.add_query_history("id2", "Query 2", "?[x] := x = 2", 2000, Some(2))
-            .unwrap();
+        db.add_query_history(
+            "id1",
+            "Query 1",
+            "?[x] := x = 1",
+            1000,
+            Some(1),
+            "completed",
+            1000,
+            Some(50),
+            None,
+        )
+        .unwrap();
+        db.add_query_history(
+            "id2",
+            "Query 2",
+            "?[x] := x = 2",
+            2000,
+            Some(2),
+            "completed",
+            2000,
+            Some(100),
+            None,
+        )
+        .unwrap();
 
         // Read entries
         let (history, total) = db.get_query_history(10, 0).unwrap();
@@ -1486,11 +1650,11 @@ mod tests {
         let db = GraphDatabase::in_memory().unwrap();
 
         // Add entries with different timestamps
-        db.add_query_history("oldest", "Old", "q1", 1000, None)
+        db.add_query_history("oldest", "Old", "q1", 1000, None, "completed", 1000, Some(10), None)
             .unwrap();
-        db.add_query_history("middle", "Mid", "q2", 2000, None)
+        db.add_query_history("middle", "Mid", "q2", 2000, None, "completed", 2000, Some(20), None)
             .unwrap();
-        db.add_query_history("newest", "New", "q3", 3000, None)
+        db.add_query_history("newest", "New", "q3", 3000, None, "completed", 3000, Some(30), None)
             .unwrap();
 
         // Should be ordered by timestamp descending (newest first)
@@ -1511,6 +1675,10 @@ mod tests {
                 &format!("Query {}", i),
                 "query",
                 i as i64 * 1000,
+                None,
+                "completed",
+                i as i64 * 1000,
+                Some(i as u64 * 10),
                 None,
             )
             .unwrap();
@@ -1535,6 +1703,40 @@ mod tests {
         assert_eq!(total, 5);
         assert_eq!(page3.len(), 1);
         assert_eq!(page3[0].0, "id0"); // oldest
+    }
+
+    #[test]
+    fn test_query_history_status_update() {
+        let db = GraphDatabase::in_memory().unwrap();
+
+        // Add a running query
+        db.add_query_history(
+            "id1",
+            "Running Query",
+            "?[x] := x = 1",
+            1000,
+            None,
+            "running",
+            1000,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Verify it's running
+        let (history, _) = db.get_query_history(10, 0).unwrap();
+        assert_eq!(history[0].5, "running");
+        assert!(history[0].7.is_none()); // no duration yet
+
+        // Update to completed
+        db.update_query_status("id1", "completed", Some(150), Some(42), None)
+            .unwrap();
+
+        // Verify update
+        let (history, _) = db.get_query_history(10, 0).unwrap();
+        assert_eq!(history[0].5, "completed");
+        assert_eq!(history[0].7, Some(150)); // duration
+        assert_eq!(history[0].4, Some(42)); // result_count
     }
 
     // ========================================================================

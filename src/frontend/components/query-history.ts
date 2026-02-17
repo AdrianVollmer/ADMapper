@@ -2,12 +2,12 @@
  * Query History Component
  *
  * Modal for viewing, editing, and re-running past queries.
- * History is stored in CozoDB via backend API.
+ * Shows query status (running/completed/failed/aborted), duration, and supports abort.
  */
 
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
-import type { QueryHistoryEntry, QueryHistoryResponse } from "../api/types";
+import type { QueryHistoryEntry, QueryHistoryResponse, QueryStatus } from "../api/types";
 import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
 
 // Re-export for backwards compatibility
@@ -29,6 +29,9 @@ let isEditing = false;
 let editedQuery = "";
 let editedName = "";
 let isLoading = false;
+
+/** Live duration update interval */
+let durationInterval: ReturnType<typeof setInterval> | null = null;
 
 /** Modal element */
 let modalEl: HTMLElement | null = null;
@@ -80,6 +83,9 @@ export async function openQueryHistory(): Promise<void> {
 
   modalEl.removeAttribute("hidden");
   await loadHistory();
+
+  // Start live duration updates for running queries
+  startDurationUpdates();
 }
 
 /** Close the modal */
@@ -89,7 +95,25 @@ export function closeQueryHistory(): void {
   isOpen = false;
   selectedEntry = null;
   isEditing = false;
+  stopDurationUpdates();
   modalEl.setAttribute("hidden", "");
+}
+
+/** Start live duration updates for running queries */
+function startDurationUpdates(): void {
+  stopDurationUpdates();
+  durationInterval = setInterval(() => {
+    // Re-render to update durations
+    renderModal();
+  }, 1000);
+}
+
+/** Stop live duration updates */
+function stopDurationUpdates(): void {
+  if (durationInterval) {
+    clearInterval(durationInterval);
+    durationInterval = null;
+  }
 }
 
 /** Load history from API */
@@ -156,6 +180,17 @@ async function clearHistory(): Promise<void> {
   }
 }
 
+/** Abort a running query */
+async function abortQuery(queryId: string): Promise<void> {
+  try {
+    await api.postNoContent(`/api/query/abort/${queryId}`);
+    // Reload to see updated status
+    await loadHistory();
+  } catch (err) {
+    console.error("Failed to abort query:", err);
+  }
+}
+
 /** Run a query */
 async function runQuery(query: string, name: string): Promise<void> {
   closeQueryHistory();
@@ -175,6 +210,53 @@ async function runQuery(query: string, name: string): Promise<void> {
     console.error("Query execution failed:", err);
     alert(`Query failed: ${getQueryErrorMessage(err)}`);
   }
+}
+
+/** Format duration in human readable format */
+function formatDuration(ms: number | null): string {
+  if (ms === null) return "-";
+  if (ms < 1000) {
+    return `${ms}ms`;
+  } else if (ms < 60000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  } else {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    return `${minutes}m ${seconds}s`;
+  }
+}
+
+/** Calculate live duration for running queries */
+function getLiveDuration(entry: QueryHistoryEntry): number {
+  if (entry.status !== "running") {
+    return entry.duration_ms ?? 0;
+  }
+  // Calculate live duration from started_at
+  const now = Math.floor(Date.now() / 1000);
+  return (now - entry.started_at) * 1000;
+}
+
+/** Get status badge HTML */
+function getStatusBadge(status: QueryStatus, isRunning = false): string {
+  const classes: Record<QueryStatus, string> = {
+    running: "status-badge status-running",
+    completed: "status-badge status-completed",
+    failed: "status-badge status-failed",
+    aborted: "status-badge status-aborted",
+  };
+
+  const labels: Record<QueryStatus, string> = {
+    running: "Running",
+    completed: "Completed",
+    failed: "Failed",
+    aborted: "Aborted",
+  };
+
+  const spinnerHtml = isRunning
+    ? '<span class="spinner-xs mr-1"></span>'
+    : "";
+
+  return `<span class="${classes[status]}">${spinnerHtml}${labels[status]}</span>`;
 }
 
 /** Render the modal content */
@@ -225,18 +307,32 @@ function renderListView(body: HTMLElement, footer: HTMLElement): void {
   body.innerHTML = `
     <div class="query-history-list">
       ${entries
-        .map(
-          (entry) => `
+        .map((entry) => {
+          const isRunning = entry.status === "running";
+          const duration = getLiveDuration(entry);
+          return `
         <div class="query-history-item" data-action="select" data-id="${escapeHtml(entry.id)}">
           <div class="query-history-item-header">
             <span class="query-history-name">${escapeHtml(entry.name)}</span>
-            <span class="query-history-time">${formatTimestamp(entry.timestamp)}</span>
+            <div class="query-history-meta">
+              ${getStatusBadge(entry.status, isRunning)}
+              <span class="query-history-duration">${formatDuration(duration)}</span>
+              ${
+                isRunning
+                  ? `<button class="btn btn-sm btn-danger ml-2" data-action="abort" data-id="${escapeHtml(entry.id)}">Abort</button>`
+                  : ""
+              }
+            </div>
           </div>
           <div class="query-history-query">${escapeHtml(truncate(entry.query, 100))}</div>
-          ${entry.result_count !== null ? `<div class="query-history-results">${entry.result_count} results</div>` : ""}
+          <div class="query-history-footer">
+            <span class="query-history-time">${formatTimestamp(entry.started_at)}</span>
+            ${entry.result_count !== null ? `<span class="query-history-results">${entry.result_count} results</span>` : ""}
+            ${entry.error ? `<span class="query-history-error" title="${escapeHtml(entry.error)}">Error</span>` : ""}
+          </div>
         </div>
-      `
-        )
+      `;
+        })
         .join("")}
     </div>
 
@@ -267,22 +363,44 @@ function renderListView(body: HTMLElement, footer: HTMLElement): void {
 function renderDetailView(body: HTMLElement, footer: HTMLElement): void {
   if (!selectedEntry) return;
 
+  const isRunning = selectedEntry.status === "running";
+  const duration = getLiveDuration(selectedEntry);
+
   body.innerHTML = `
     <div class="query-history-detail">
       <div class="detail-header">
         <h3 class="detail-name">${escapeHtml(selectedEntry.name)}</h3>
-        <span class="detail-time">${formatTimestamp(selectedEntry.timestamp)}</span>
+        <div class="detail-meta">
+          ${getStatusBadge(selectedEntry.status, isRunning)}
+          <span class="detail-time">${formatTimestamp(selectedEntry.started_at)}</span>
+        </div>
       </div>
       <div class="detail-section">
         <label class="detail-label">Query</label>
         <pre class="detail-query">${escapeHtml(selectedEntry.query)}</pre>
       </div>
+      <div class="detail-stats">
+        <div class="detail-stat">
+          <label class="detail-label">Duration</label>
+          <span class="detail-value">${formatDuration(duration)}</span>
+        </div>
+        ${
+          selectedEntry.result_count !== null
+            ? `
+          <div class="detail-stat">
+            <label class="detail-label">Results</label>
+            <span class="detail-value">${selectedEntry.result_count} rows</span>
+          </div>
+        `
+            : ""
+        }
+      </div>
       ${
-        selectedEntry.result_count !== null
+        selectedEntry.error
           ? `
         <div class="detail-section">
-          <label class="detail-label">Last Result</label>
-          <span class="detail-value">${selectedEntry.result_count} rows</span>
+          <label class="detail-label">Error</label>
+          <pre class="detail-error">${escapeHtml(selectedEntry.error)}</pre>
         </div>
       `
           : ""
@@ -290,12 +408,19 @@ function renderDetailView(body: HTMLElement, footer: HTMLElement): void {
     </div>
   `;
 
-  footer.innerHTML = `
-    <button class="btn btn-danger" data-action="delete">Delete</button>
-    <button class="btn btn-secondary" data-action="back">Back</button>
-    <button class="btn btn-secondary" data-action="edit">Edit</button>
-    <button class="btn btn-primary" data-action="run">Run Query</button>
-  `;
+  if (isRunning) {
+    footer.innerHTML = `
+      <button class="btn btn-danger" data-action="abort" data-id="${escapeHtml(selectedEntry.id)}">Abort</button>
+      <button class="btn btn-secondary" data-action="back">Back</button>
+    `;
+  } else {
+    footer.innerHTML = `
+      <button class="btn btn-danger" data-action="delete">Delete</button>
+      <button class="btn btn-secondary" data-action="back">Back</button>
+      <button class="btn btn-secondary" data-action="edit">Edit</button>
+      <button class="btn btn-primary" data-action="run">Run Query</button>
+    `;
+  }
 }
 
 /** Render the edit view */
@@ -406,6 +531,14 @@ function handleModalClick(e: Event): void {
         deleteEntry(selectedEntry.id);
       }
       break;
+
+    case "abort": {
+      const id = actionEl.getAttribute("data-id");
+      if (id) {
+        abortQuery(id);
+      }
+      break;
+    }
 
     case "clear-all":
       clearHistory();

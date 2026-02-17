@@ -259,7 +259,7 @@ pub trait DatabaseBackend: Send + Sync {
     // Query History
     // ========================================================================
 
-    /// Add a query to history.
+    /// Add a query to history with status tracking.
     fn add_query_history(
         &self,
         id: &str,
@@ -267,14 +267,43 @@ pub trait DatabaseBackend: Send + Sync {
         query: &str,
         timestamp: i64,
         result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
+    ) -> Result<()>;
+
+    /// Update a query's status in history.
+    fn update_query_status(
+        &self,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
     ) -> Result<()>;
 
     /// Get query history with pagination.
+    /// Returns: (id, name, query, timestamp, result_count, status, started_at, duration_ms, error)
+    #[allow(clippy::type_complexity)]
     fn get_query_history(
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)>;
+    ) -> Result<(
+        Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )>,
+        usize,
+    )>;
 
     /// Delete a query from history.
     fn delete_query_history(&self, id: &str) -> Result<()>;

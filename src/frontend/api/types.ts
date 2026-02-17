@@ -69,7 +69,27 @@ export interface QueryResult {
   rows: unknown[][];
 }
 
-/** Query response from /api/graph/query */
+/** Status of a running or completed query */
+export type QueryStatus = "running" | "completed" | "failed" | "aborted";
+
+/** Response when starting an async query */
+export interface QueryStartResponse {
+  query_id: string;
+}
+
+/** Progress event from query SSE stream */
+export interface QueryProgressEvent {
+  query_id: string;
+  status: QueryStatus;
+  started_at: number;
+  duration_ms: number | null;
+  result_count: number | null;
+  error: string | null;
+  results?: QueryResult;
+  graph?: GraphData;
+}
+
+/** Query response from /api/graph/query (legacy - now returns QueryStartResponse) */
 export interface QueryResponse {
   results: QueryResult;
   graph?: GraphData;
@@ -86,6 +106,10 @@ export interface QueryHistoryEntry {
   query: string;
   timestamp: number;
   result_count: number | null;
+  status: QueryStatus;
+  started_at: number;
+  duration_ms: number | null;
+  error: string | null;
 }
 
 /** Paginated response wrapper */

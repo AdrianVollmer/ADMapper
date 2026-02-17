@@ -733,15 +733,44 @@ impl DatabaseBackend for Neo4jDatabase {
         query_str: &str,
         timestamp: i64,
         result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
     ) -> Result<()> {
         let q = query(
-            "CREATE (h:QueryHistory {id: $id, name: $name, query: $query, timestamp: $ts, result_count: $cnt})"
+            "CREATE (h:QueryHistory {id: $id, name: $name, query: $query, timestamp: $ts, result_count: $cnt, status: $status, started_at: $started_at, duration_ms: $duration_ms, error: $error})"
         )
         .param("id", id.to_string())
         .param("name", name.to_string())
         .param("query", query_str.to_string())
         .param("ts", timestamp)
-        .param("cnt", result_count.unwrap_or(0));
+        .param("cnt", result_count.unwrap_or(0))
+        .param("status", status.to_string())
+        .param("started_at", started_at)
+        .param("duration_ms", duration_ms.map(|d| d as i64).unwrap_or(0))
+        .param("error", error.unwrap_or("").to_string());
+
+        self.run_query(q)
+    }
+
+    fn update_query_status(
+        &self,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let q = query(
+            "MATCH (h:QueryHistory {id: $id}) \
+             SET h.status = $status, h.duration_ms = $duration_ms, h.result_count = $result_count, h.error = $error"
+        )
+        .param("id", id.to_string())
+        .param("status", status.to_string())
+        .param("duration_ms", duration_ms.map(|d| d as i64).unwrap_or(0))
+        .param("result_count", result_count.unwrap_or(0))
+        .param("error", error.unwrap_or("").to_string());
 
         self.run_query(q)
     }
@@ -750,7 +779,20 @@ impl DatabaseBackend for Neo4jDatabase {
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
+    ) -> Result<(
+        Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )>,
+        usize,
+    )> {
         // Get total count
         let count_rows =
             self.execute_query(query("MATCH (h:QueryHistory) RETURN count(h) AS count"))?;
@@ -762,7 +804,8 @@ impl DatabaseBackend for Neo4jDatabase {
         // Get paginated results
         let q = query(
             "MATCH (h:QueryHistory) \
-             RETURN h.id AS id, h.name AS name, h.query AS query, h.timestamp AS ts, h.result_count AS cnt \
+             RETURN h.id AS id, h.name AS name, h.query AS query, h.timestamp AS ts, h.result_count AS cnt, \
+                    h.status AS status, h.started_at AS started_at, h.duration_ms AS duration_ms, h.error AS error \
              ORDER BY h.timestamp DESC \
              SKIP $offset LIMIT $limit"
         )
@@ -771,7 +814,17 @@ impl DatabaseBackend for Neo4jDatabase {
 
         let rows = self.execute_query(q)?;
 
-        let history: Vec<(String, String, String, i64, Option<i64>)> = rows
+        let history: Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )> = rows
             .iter()
             .filter_map(|r| {
                 let id = r.get::<String>("id").ok()?;
@@ -779,7 +832,11 @@ impl DatabaseBackend for Neo4jDatabase {
                 let query = r.get::<String>("query").ok()?;
                 let ts = r.get::<i64>("ts").ok()?;
                 let cnt = r.get::<i64>("cnt").ok();
-                Some((id, name, query, ts, cnt))
+                let status = r.get::<String>("status").ok().unwrap_or_else(|| "completed".to_string());
+                let started_at = r.get::<i64>("started_at").ok().unwrap_or(ts);
+                let duration_ms = r.get::<i64>("duration_ms").ok().map(|d| d as u64);
+                let error = r.get::<String>("error").ok().filter(|e| !e.is_empty());
+                Some((id, name, query, ts, cnt, status, started_at, duration_ms, error))
             })
             .collect();
 

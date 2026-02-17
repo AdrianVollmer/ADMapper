@@ -1081,7 +1081,7 @@ impl CrustDatabase {
         false
     }
 
-    // Query history methods (simplified in-memory for now)
+    // Query history methods (stub implementation - CrustDB doesn't persist history)
     pub fn add_query_history(
         &self,
         _id: &str,
@@ -1089,8 +1089,23 @@ impl CrustDatabase {
         _query: &str,
         _timestamp: i64,
         _result_count: Option<i64>,
+        _status: &str,
+        _started_at: i64,
+        _duration_ms: Option<u64>,
+        _error: Option<&str>,
     ) -> Result<()> {
-        // TODO: Implement query history storage
+        // CrustDB doesn't persist query history yet
+        Ok(())
+    }
+
+    pub fn update_query_status(
+        &self,
+        _id: &str,
+        _status: &str,
+        _duration_ms: Option<u64>,
+        _result_count: Option<i64>,
+        _error: Option<&str>,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -1099,8 +1114,21 @@ impl CrustDatabase {
         &self,
         _limit: usize,
         _offset: usize,
-    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
-        // TODO: Implement query history retrieval
+    ) -> Result<(
+        Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )>,
+        usize,
+    )> {
+        // Return empty list - CrustDB doesn't persist history
         Ok((Vec::new(), 0))
     }
 
@@ -1224,15 +1252,54 @@ impl DatabaseBackend for CrustDatabase {
         query: &str,
         timestamp: i64,
         result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
     ) -> Result<()> {
-        CrustDatabase::add_query_history(self, id, name, query, timestamp, result_count)
+        CrustDatabase::add_query_history(
+            self,
+            id,
+            name,
+            query,
+            timestamp,
+            result_count,
+            status,
+            started_at,
+            duration_ms,
+            error,
+        )
+    }
+
+    fn update_query_status(
+        &self,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        CrustDatabase::update_query_status(self, id, status, duration_ms, result_count, error)
     }
 
     fn get_query_history(
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
+    ) -> Result<(
+        Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )>,
+        usize,
+    )> {
         CrustDatabase::get_query_history(self, limit, offset)
     }
 

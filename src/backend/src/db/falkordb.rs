@@ -854,14 +854,41 @@ impl DatabaseBackend for FalkorDbDatabase {
         query_str: &str,
         timestamp: i64,
         result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
     ) -> Result<()> {
         let id_escaped = id.replace('\'', "\\'");
         let name_escaped = name.replace('\'', "\\'");
         let query_escaped = query_str.replace('\'', "\\'");
+        let status_escaped = status.replace('\'', "\\'");
+        let error_escaped = error.map(|e| e.replace('\'', "\\'")).unwrap_or_default();
 
         let cypher = format!(
-            "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}}})",
-            id_escaped, name_escaped, query_escaped, timestamp, result_count.unwrap_or(0)
+            "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}, status: '{}', started_at: {}, duration_ms: {}, error: '{}'}})",
+            id_escaped, name_escaped, query_escaped, timestamp, result_count.unwrap_or(0),
+            status_escaped, started_at, duration_ms.unwrap_or(0), error_escaped
+        );
+
+        self.run_query(&cypher)
+    }
+
+    fn update_query_status(
+        &self,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let id_escaped = id.replace('\'', "\\'");
+        let status_escaped = status.replace('\'', "\\'");
+        let error_escaped = error.map(|e| e.replace('\'', "\\'")).unwrap_or_default();
+
+        let cypher = format!(
+            "MATCH (h:QueryHistory {{id: '{}'}}) SET h.status = '{}', h.duration_ms = {}, h.result_count = {}, h.error = '{}'",
+            id_escaped, status_escaped, duration_ms.unwrap_or(0), result_count.unwrap_or(0), error_escaped
         );
 
         self.run_query(&cypher)
@@ -871,7 +898,20 @@ impl DatabaseBackend for FalkorDbDatabase {
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
+    ) -> Result<(
+        Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )>,
+        usize,
+    )> {
         // Get total count
         let count_rows = self.execute_query("MATCH (h:QueryHistory) RETURN count(h) AS count")?;
         let total = count_rows
@@ -883,7 +923,8 @@ impl DatabaseBackend for FalkorDbDatabase {
         // Get paginated results
         let cypher = format!(
             "MATCH (h:QueryHistory) \
-             RETURN h.id AS id, h.name AS name, h.query AS query, h.timestamp AS ts, h.result_count AS cnt \
+             RETURN h.id AS id, h.name AS name, h.query AS query, h.timestamp AS ts, h.result_count AS cnt, \
+                    h.status AS status, h.started_at AS started_at, h.duration_ms AS duration_ms, h.error AS error \
              ORDER BY h.timestamp DESC \
              SKIP {} LIMIT {}",
             offset, limit
@@ -891,7 +932,17 @@ impl DatabaseBackend for FalkorDbDatabase {
 
         let rows = self.execute_query(&cypher)?;
 
-        let history: Vec<(String, String, String, i64, Option<i64>)> = rows
+        let history: Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )> = rows
             .iter()
             .filter_map(|r| {
                 let id = r.get(0)?.as_str()?.to_string();
@@ -899,7 +950,11 @@ impl DatabaseBackend for FalkorDbDatabase {
                 let query = r.get(2)?.as_str()?.to_string();
                 let ts = r.get(3)?.as_i64()?;
                 let cnt = r.get(4).and_then(|v| v.as_i64());
-                Some((id, name, query, ts, cnt))
+                let status = r.get(5).and_then(|v| v.as_str()).unwrap_or("completed").to_string();
+                let started_at = r.get(6).and_then(|v| v.as_i64()).unwrap_or(ts);
+                let duration_ms = r.get(7).and_then(|v| v.as_u64());
+                let error = r.get(8).and_then(|v| v.as_str()).filter(|e| !e.is_empty()).map(String::from);
+                Some((id, name, query, ts, cnt, status, started_at, duration_ms, error))
             })
             .collect();
 

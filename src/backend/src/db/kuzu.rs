@@ -118,7 +118,11 @@ impl KuzuDatabase {
                 name STRING,
                 query STRING,
                 timestamp INT64,
-                result_count INT64
+                result_count INT64,
+                status STRING,
+                started_at INT64,
+                duration_ms INT64,
+                error STRING
             )
         "#;
 
@@ -1044,7 +1048,7 @@ impl KuzuDatabase {
         results
     }
 
-    // Query history methods - simplified for now
+    // Query history methods
     pub fn add_query_history(
         &self,
         id: &str,
@@ -1052,16 +1056,57 @@ impl KuzuDatabase {
         query: &str,
         timestamp: i64,
         result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
     ) -> Result<()> {
         let conn = self.conn()?;
         let id_escaped = id.replace('\'', "''");
         let name_escaped = name.replace('\'', "''");
         let query_escaped = query.replace('\'', "''");
+        let status_escaped = status.replace('\'', "''");
+        let error_escaped = error.map(|e| e.replace('\'', "''")).unwrap_or_default();
         let count = result_count.unwrap_or(0);
+        let duration = duration_ms.unwrap_or(0) as i64;
 
         let cypher = format!(
-            "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}}})",
-            id_escaped, name_escaped, query_escaped, timestamp, count
+            "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}, status: '{}', started_at: {}, duration_ms: {}, error: '{}'}})",
+            id_escaped, name_escaped, query_escaped, timestamp, count, status_escaped, started_at, duration, error_escaped
+        );
+
+        conn.query(&cypher)?;
+        Ok(())
+    }
+
+    pub fn update_query_status(
+        &self,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        let id_escaped = id.replace('\'', "''");
+        let status_escaped = status.replace('\'', "''");
+        let error_escaped = error.map(|e| e.replace('\'', "''")).unwrap_or_default();
+
+        let mut set_parts = vec![format!("h.status = '{}'", status_escaped)];
+        if let Some(duration) = duration_ms {
+            set_parts.push(format!("h.duration_ms = {}", duration as i64));
+        }
+        if let Some(count) = result_count {
+            set_parts.push(format!("h.result_count = {}", count));
+        }
+        if error.is_some() {
+            set_parts.push(format!("h.error = '{}'", error_escaped));
+        }
+
+        let cypher = format!(
+            "MATCH (h:QueryHistory {{id: '{}'}}) SET {}",
+            id_escaped,
+            set_parts.join(", ")
         );
 
         conn.query(&cypher)?;
@@ -1073,7 +1118,20 @@ impl KuzuDatabase {
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
+    ) -> Result<(
+        Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )>,
+        usize,
+    )> {
         let conn = self.conn()?;
 
         // Get total count
@@ -1083,8 +1141,8 @@ impl KuzuDatabase {
         // Get paginated results
         let query = format!(
             "MATCH (h:QueryHistory) \
-             RETURN h.id, h.name, h.query, h.timestamp, h.result_count \
-             ORDER BY h.timestamp DESC \
+             RETURN h.id, h.name, h.query, h.timestamp, h.result_count, h.status, h.started_at, h.duration_ms, h.error \
+             ORDER BY h.started_at DESC \
              SKIP {} LIMIT {}",
             offset, limit
         );
@@ -1095,15 +1153,27 @@ impl KuzuDatabase {
 
         for line in result_str.lines().skip(1) {
             let parts: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
-            if parts.len() >= 5 {
+            if parts.len() >= 9 {
                 let timestamp: i64 = parts[3].parse().unwrap_or(0);
                 let result_count: Option<i64> = parts[4].parse().ok();
+                let status = parts[5].to_string();
+                let started_at: i64 = parts[6].parse().unwrap_or(0);
+                let duration_ms: Option<u64> = parts[7].parse().ok();
+                let error = if parts[8].is_empty() {
+                    None
+                } else {
+                    Some(parts[8].to_string())
+                };
                 history.push((
                     parts[0].to_string(),
                     parts[1].to_string(),
                     parts[2].to_string(),
                     timestamp,
                     result_count,
+                    status,
+                    started_at,
+                    duration_ms,
+                    error,
                 ));
             }
         }
@@ -1239,15 +1309,54 @@ impl DatabaseBackend for KuzuDatabase {
         query: &str,
         timestamp: i64,
         result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
     ) -> Result<()> {
-        KuzuDatabase::add_query_history(self, id, name, query, timestamp, result_count)
+        KuzuDatabase::add_query_history(
+            self,
+            id,
+            name,
+            query,
+            timestamp,
+            result_count,
+            status,
+            started_at,
+            duration_ms,
+            error,
+        )
+    }
+
+    fn update_query_status(
+        &self,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        KuzuDatabase::update_query_status(self, id, status, duration_ms, result_count, error)
     }
 
     fn get_query_history(
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
+    ) -> Result<(
+        Vec<(
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+            String,
+            i64,
+            Option<u64>,
+            Option<String>,
+        )>,
+        usize,
+    )> {
         KuzuDatabase::get_query_history(self, limit, offset)
     }
 

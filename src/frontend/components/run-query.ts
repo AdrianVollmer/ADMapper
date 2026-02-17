@@ -3,13 +3,13 @@
  *
  * Provides a modal for entering and executing database queries.
  * Supports both Cypher (for KuzuDB, Neo4j, FalkorDB) and Datalog (for CozoDB).
+ * Queries run asynchronously with progress tracking and abort support.
  */
 
 import { appState } from "../main";
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
-import type { QueryHistoryResponse } from "../api/types";
-import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
+import type { QueryHistoryResponse, QueryStartResponse, QueryProgressEvent } from "../api/types";
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph } from "../graph/types";
 
@@ -22,11 +22,26 @@ let queryText = "";
 /** Is query executing */
 let isExecuting = false;
 
+/** Current query ID (for abort) */
+let currentQueryId: string | null = null;
+
+/** EventSource for SSE progress */
+let progressEventSource: EventSource | null = null;
+
 /** Error message */
 let errorMessage = "";
 
 /** Info message (e.g., zero rows returned) */
 let infoMessage = "";
+
+/** Current duration for running queries */
+let currentDurationMs = 0;
+
+/** Duration update interval */
+let durationInterval: ReturnType<typeof setInterval> | null = null;
+
+/** Query start time */
+let queryStartTime: number | null = null;
 
 /** Initialize the run query modal */
 export function initRunQuery(): void {
@@ -72,6 +87,9 @@ export async function openRunQuery(): Promise<void> {
   isExecuting = false;
   errorMessage = "";
   infoMessage = "";
+  currentQueryId = null;
+  currentDurationMs = 0;
+  queryStartTime = null;
 
   // Try to load the last query from history
   try {
@@ -100,6 +118,19 @@ export async function openRunQuery(): Promise<void> {
 /** Close the modal */
 export function closeRunQuery(): void {
   if (!modalEl) return;
+
+  // Clean up SSE connection
+  if (progressEventSource) {
+    progressEventSource.close();
+    progressEventSource = null;
+  }
+
+  // Clear duration interval
+  if (durationInterval) {
+    clearInterval(durationInterval);
+    durationInterval = null;
+  }
+
   modalEl.setAttribute("hidden", "");
 }
 
@@ -119,6 +150,19 @@ function getDocsUrl(): string {
     return "https://docs.cozodb.org/en/latest/";
   }
   return "https://neo4j.com/docs/cypher-manual/current/";
+}
+
+/** Format duration in human readable format */
+function formatDuration(ms: number): string {
+  if (ms < 1000) {
+    return `${ms}ms`;
+  } else if (ms < 60000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  } else {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    return `${minutes}m ${seconds}s`;
+  }
 }
 
 /** Render the modal content */
@@ -164,8 +208,23 @@ function renderModal(): void {
           rows="12"
           placeholder="${isDatalog ? "?[name] := *user{name}" : "MATCH (n:User) RETURN n LIMIT 10"}"
           spellcheck="false"
+          ${isExecuting ? "disabled" : ""}
         >${escapeHtml(queryText)}</textarea>
       </div>
+
+      ${
+        isExecuting
+          ? `
+        <div class="query-executing">
+          <div class="flex items-center gap-3">
+            <div class="spinner"></div>
+            <span class="text-gray-300">Executing query...</span>
+            <span class="text-gray-500">${formatDuration(currentDurationMs)}</span>
+          </div>
+        </div>
+      `
+          : ""
+      }
 
       ${
         errorMessage
@@ -197,19 +256,27 @@ function renderModal(): void {
     </div>
   `;
 
-  footer.innerHTML = `
-    <button class="btn btn-secondary" data-action="close">Cancel</button>
-    <button class="btn btn-primary" data-action="execute" ${isExecuting ? "disabled" : ""}>
-      ${
-        isExecuting
-          ? '<span class="spinner-sm"></span> Executing...'
-          : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
+  if (isExecuting) {
+    footer.innerHTML = `
+      <button class="btn btn-secondary" data-action="close">Cancel</button>
+      <button class="btn btn-danger" data-action="abort">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
+          <rect x="6" y="6" width="12" height="12" rx="2"/>
+        </svg>
+        Abort Query
+      </button>
+    `;
+  } else {
+    footer.innerHTML = `
+      <button class="btn btn-secondary" data-action="close">Cancel</button>
+      <button class="btn btn-primary" data-action="execute">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
           <path d="M5 3l14 9-14 9V3z"/>
         </svg>
-        Execute`
-      }
-    </button>
-  `;
+        Execute
+      </button>
+    `;
+  }
 }
 
 /** Execute the query */
@@ -228,28 +295,130 @@ async function executeQuery(): Promise<void> {
   errorMessage = "";
   infoMessage = "";
   queryText = query;
+  queryStartTime = Date.now();
+  currentDurationMs = 0;
   renderModal();
 
-  try {
-    const result = await executeQueryWithHistory("Custom Query", query, true);
-
-    // Load the graph if we got one with nodes
-    if (result.graph && result.graph.nodes.length > 0) {
-      // Close modal on success
-      closeRunQuery();
-      // Cast the GraphData to RawADGraph - the server returns compatible types
-      loadGraphData(result.graph as unknown as RawADGraph);
-    } else {
-      // Show inline message for zero/non-graph results
-      isExecuting = false;
-      infoMessage = `Query returned ${result.resultCount} row${result.resultCount === 1 ? "" : "s"}`;
+  // Start duration update interval
+  durationInterval = setInterval(() => {
+    if (queryStartTime) {
+      currentDurationMs = Date.now() - queryStartTime;
       renderModal();
     }
+  }, 100);
+
+  try {
+    // Start the async query
+    const startResponse = await api.post<QueryStartResponse>("/api/graph/query", {
+      query,
+      extract_graph: true,
+    });
+
+    currentQueryId = startResponse.query_id;
+
+    // Subscribe to progress via SSE
+    progressEventSource = new EventSource(`/api/query/progress/${currentQueryId}`);
+
+    progressEventSource.onmessage = (event) => {
+      try {
+        const progress: QueryProgressEvent = JSON.parse(event.data);
+        handleQueryProgress(progress);
+      } catch (err) {
+        console.error("Failed to parse progress event:", err);
+      }
+    };
+
+    progressEventSource.onerror = () => {
+      // Connection closed, check if we're still executing
+      if (isExecuting) {
+        cleanup();
+        errorMessage = "Lost connection to server";
+        renderModal();
+      }
+    };
   } catch (err) {
-    isExecuting = false;
+    cleanup();
     errorMessage = getQueryErrorMessage(err);
     renderModal();
   }
+}
+
+/** Handle query progress event */
+function handleQueryProgress(progress: QueryProgressEvent): void {
+  currentDurationMs = progress.duration_ms ?? (queryStartTime ? Date.now() - queryStartTime : 0);
+
+  switch (progress.status) {
+    case "running":
+      // Still running, just update duration
+      renderModal();
+      break;
+
+    case "completed":
+      cleanup();
+      // Load the graph if we got one with nodes
+      if (progress.graph && progress.graph.nodes.length > 0) {
+        closeRunQuery();
+        loadGraphData(progress.graph as unknown as RawADGraph);
+      } else {
+        infoMessage = `Query returned ${progress.result_count ?? 0} row${progress.result_count === 1 ? "" : "s"}`;
+        renderModal();
+      }
+      break;
+
+    case "failed":
+      cleanup();
+      errorMessage = progress.error ?? "Query failed";
+      renderModal();
+      break;
+
+    case "aborted":
+      cleanup();
+      infoMessage = "Query was aborted";
+      renderModal();
+      break;
+  }
+}
+
+/** Abort the running query */
+async function abortQuery(): Promise<void> {
+  if (!currentQueryId) return;
+
+  try {
+    await api.postNoContent(`/api/query/abort/${currentQueryId}`);
+    // The SSE will receive the aborted status
+  } catch (err) {
+    console.error("Failed to abort query:", err);
+    cleanup();
+    errorMessage = "Failed to abort query";
+    renderModal();
+  }
+}
+
+/** Clean up after query completes */
+function cleanup(): void {
+  isExecuting = false;
+  currentQueryId = null;
+
+  if (progressEventSource) {
+    progressEventSource.close();
+    progressEventSource = null;
+  }
+
+  if (durationInterval) {
+    clearInterval(durationInterval);
+    durationInterval = null;
+  }
+}
+
+/** Get error message from various error types */
+function getQueryErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === "string") {
+    return err;
+  }
+  return "An unknown error occurred";
 }
 
 /** Handle clicks in the modal */
@@ -274,6 +443,10 @@ function handleModalClick(e: Event): void {
 
     case "execute":
       executeQuery();
+      break;
+
+    case "abort":
+      abortQuery();
       break;
   }
 }

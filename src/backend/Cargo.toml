@@ -20,6 +20,7 @@ axum = { version = "0.7", features = ["multipart"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = "0.7"
 
 # Database backends (all optional)
 # Note: cozo uses storage-sled (pure Rust) instead of storage-sqlite to avoid
