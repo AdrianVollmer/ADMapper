@@ -140,7 +140,7 @@ api_search() {
     local node_type="${2:-}"
     local limit="${3:-10}"
 
-    local query="term=$(jq -rn --arg t "$term" '$t | @uri')"
+    local query="q=$(jq -rn --arg t "$term" '$t | @uri')"
     [ -n "$node_type" ] && query="${query}&node_type=$node_type"
     query="${query}&limit=$limit"
 
