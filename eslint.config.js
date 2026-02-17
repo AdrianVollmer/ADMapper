@@ -49,6 +49,7 @@ export default [
         HTMLSelectElement: "readonly",
         HTMLFormElement: "readonly",
         HTMLSpanElement: "readonly",
+        CustomEvent: "readonly",
         requestAnimationFrame: "readonly",
         RequestInit: "readonly",
       },

@@ -16,6 +16,7 @@ import { openInsights } from "./insights";
 import { openAddNode, openAddEdge } from "./add-node-edge";
 import { openDbConnect, disconnectDb, connectToUrl } from "./db-connect";
 import { openRunQuery } from "./run-query";
+import { openManageQueries } from "./manage-queries";
 import { getRecentConnections, clearConnectionHistory } from "./connection-history";
 
 /** Dispatch an action by name */
@@ -129,9 +130,8 @@ export function dispatchAction(action: string): void {
       openRunQuery();
       break;
 
-    case "saved-queries":
-      console.log("Action: saved-queries");
-      // TODO: Show saved queries
+    case "manage-queries":
+      openManageQueries();
       break;
 
     case "query-history":

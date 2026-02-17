@@ -898,6 +898,35 @@
 }
 
 /* ============================================
+   Manage Queries Modal
+   ============================================ */
+@layer components {
+  .manage-queries-content {
+    @apply space-y-4;
+  }
+
+  .queries-help {
+    @apply text-sm text-gray-400;
+  }
+
+  .queries-help p {
+    @apply mb-2;
+  }
+
+  .schema-example {
+    @apply p-3 bg-gray-900 rounded text-xs font-mono text-gray-300 overflow-x-auto;
+  }
+
+  .json-textarea {
+    @apply min-h-[300px] font-mono text-xs leading-relaxed;
+  }
+
+  .modal-footer .spacer {
+    flex: 1;
+  }
+}
+
+/* ============================================
    Import Progress
    ============================================ */
 @layer components {
