@@ -15,6 +15,7 @@ import { exportPNG, exportSVG, exportJSON } from "./export";
 import { openInsights } from "./insights";
 import { openAddNode, openAddEdge } from "./add-node-edge";
 import { openDbConnect, disconnectDb, connectToUrl } from "./db-connect";
+import { openRunQuery } from "./run-query";
 import { getRecentConnections, clearConnectionHistory } from "./connection-history";
 
 /** Dispatch an action by name */
@@ -125,8 +126,7 @@ export function dispatchAction(action: string): void {
       break;
 
     case "run-query":
-      console.log("Action: run-query");
-      // TODO: Query runner
+      openRunQuery();
       break;
 
     case "saved-queries":

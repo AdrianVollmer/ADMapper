@@ -14,6 +14,7 @@ import { initQueries } from "./components/queries";
 import { initQueryHistory } from "./components/query-history";
 import { initDbManager } from "./components/db-manager";
 import { initDbConnect } from "./components/db-connect";
+import { initRunQuery } from "./components/run-query";
 
 /** Application state */
 export interface AppState {
@@ -44,6 +45,7 @@ function init(): void {
   initQueryHistory();
   initDbManager();
   initDbConnect();
+  initRunQuery();
 
   console.log("ADMapper initialized");
 }

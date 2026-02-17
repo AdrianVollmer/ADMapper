@@ -845,6 +845,59 @@
 }
 
 /* ============================================
+   Run Query Modal
+   ============================================ */
+@layer components {
+  .run-query-content {
+    @apply space-y-4;
+  }
+
+  .query-hint {
+    @apply flex items-start gap-3 p-3 rounded-lg;
+  }
+
+  .query-hint-warning {
+    @apply bg-amber-900/30 border border-amber-700/50 text-amber-200;
+  }
+
+  .hint-icon {
+    @apply w-5 h-5 flex-none mt-0.5;
+  }
+
+  .query-language-info {
+    @apply flex items-center gap-3;
+  }
+
+  .language-badge {
+    @apply px-2 py-0.5 text-xs font-medium rounded bg-blue-600 text-white;
+  }
+
+  .docs-link {
+    @apply flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-300 transition-colors;
+  }
+
+  .docs-icon {
+    @apply w-4 h-4;
+  }
+
+  .query-textarea {
+    @apply min-h-[250px] font-mono text-sm leading-relaxed;
+  }
+
+  .query-error {
+    @apply flex items-start gap-3 p-3 rounded-lg bg-red-900/30 border border-red-700/50 text-red-200;
+  }
+
+  .error-icon {
+    @apply w-5 h-5 flex-none mt-0.5 text-red-400;
+  }
+
+  .btn-icon {
+    @apply w-4 h-4 mr-1.5 inline-block;
+  }
+}
+
+/* ============================================
    Import Progress
    ============================================ */
 @layer components {
