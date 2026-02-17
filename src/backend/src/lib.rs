@@ -807,6 +807,14 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
         .and_then(|v| v.as_str())
         .map(String::from)
         .or_else(|| {
+            // Try getting from properties
+            value
+                .get("properties")
+                .and_then(|p| p.get("object_id"))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .or_else(|| {
             value
                 .get("id")
                 .and_then(|v| v.as_i64())
@@ -823,9 +831,14 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
         })
         .unwrap_or_default();
 
-    let node_type = labels
-        .first()
-        .cloned()
+    let node_type_from_labels = labels.first().cloned();
+    let node_type_from_props = value
+        .get("properties")
+        .and_then(|p| p.get("node_type"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let node_type = node_type_from_props
+        .or(node_type_from_labels)
         .unwrap_or_else(|| "Unknown".to_string());
 
     let label = value
@@ -835,10 +848,8 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
         .map(String::from)
         .unwrap_or_else(|| object_id.clone());
 
-    let properties = value
-        .get("properties")
-        .cloned()
-        .unwrap_or(JsonValue::Object(serde_json::Map::new()));
+    // Extract properties - handle nested JSON string from CrustDB storage
+    let properties = extract_nested_properties(value);
 
     Some(GraphNode {
         id: object_id,
@@ -881,6 +892,54 @@ fn extract_edge_from_json(
         target,
         edge_type,
     })
+}
+
+/// Extract nested properties from a node JSON object.
+///
+/// CrustDB stores original BloodHound properties as a JSON string in the
+/// `properties.properties` field. This function parses that nested JSON
+/// and flattens it into the top-level properties object.
+fn extract_nested_properties(value: &JsonValue) -> JsonValue {
+    let props = match value.get("properties") {
+        Some(p) => p,
+        None => return JsonValue::Object(serde_json::Map::new()),
+    };
+
+    // Check if there's a nested "properties" field that's a JSON string
+    if let Some(nested_str) = props.get("properties").and_then(|p| p.as_str()) {
+        // Try to parse the nested JSON string
+        if let Ok(parsed) = serde_json::from_str::<JsonValue>(nested_str) {
+            if let JsonValue::Object(mut nested_props) = parsed {
+                // Merge with top-level properties, preferring nested values
+                // but keeping object_id, label, node_type from top level
+                if let Some(object_id) = props.get("object_id") {
+                    nested_props.insert("object_id".to_string(), object_id.clone());
+                }
+                if let Some(label) = props.get("label") {
+                    nested_props.insert("label".to_string(), label.clone());
+                }
+                if let Some(node_type) = props.get("node_type") {
+                    nested_props.insert("node_type".to_string(), node_type.clone());
+                }
+                return JsonValue::Object(nested_props);
+            }
+        }
+    }
+
+    // No nested properties or parsing failed - return as-is but remove the
+    // "properties" key if it's a string (to avoid showing raw JSON)
+    if let JsonValue::Object(mut obj) = props.clone() {
+        if obj
+            .get("properties")
+            .map(|p| p.is_string())
+            .unwrap_or(false)
+        {
+            obj.remove("properties");
+        }
+        return JsonValue::Object(obj);
+    }
+
+    props.clone()
 }
 
 /// Get full graph (nodes and edges).
