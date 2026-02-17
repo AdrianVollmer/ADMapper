@@ -46,7 +46,9 @@ run_tests() {
 
     test_start "Import completes successfully"
     local progress
-    if progress=$(wait_for_import "$job_id" 120); then
+    # Neo4j/FalkorDB imports can take longer due to network overhead
+    local import_timeout="${IMPORT_TIMEOUT:-300}"
+    if progress=$(wait_for_import "$job_id" "$import_timeout"); then
         test_pass
     else
         test_fail "Import did not complete"

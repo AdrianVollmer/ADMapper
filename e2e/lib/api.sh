@@ -191,7 +191,7 @@ wait_for_import() {
                 echo "$progress"
                 return 1
                 ;;
-            "processing"|"pending")
+            "running"|"processing"|"pending")
                 log_debug "Import in progress..."
                 ;;
         esac
@@ -235,7 +235,7 @@ start_server() {
             # FalkorDB is an external service, use environment variables or defaults
             local falkor_host="${FALKORDB_HOST:-localhost}"
             local falkor_port="${FALKORDB_PORT:-6379}"
-            db_url="falkor://${falkor_host}:${falkor_port}"
+            db_url="falkordb://${falkor_host}:${falkor_port}"
             ;;
         *)
             log_error "Unknown backend: $backend"
