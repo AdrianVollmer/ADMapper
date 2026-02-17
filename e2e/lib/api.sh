@@ -216,9 +216,26 @@ start_server() {
         kuzu)
             db_url="kuzu://${db_path}"
             ;;
+        cozo)
+            db_url="cozo://${db_path}"
+            ;;
         crustdb)
             # CrustDB uses SQLite, needs a file path not directory
             db_url="crustdb://${db_path}/test.db"
+            ;;
+        neo4j)
+            # Neo4j is an external service, use environment variables or defaults
+            local neo4j_host="${NEO4J_HOST:-localhost}"
+            local neo4j_port="${NEO4J_PORT:-7687}"
+            local neo4j_user="${NEO4J_USER:-neo4j}"
+            local neo4j_pass="${NEO4J_PASSWORD:-neo4j123}"
+            db_url="neo4j://${neo4j_user}:${neo4j_pass}@${neo4j_host}:${neo4j_port}"
+            ;;
+        falkordb)
+            # FalkorDB is an external service, use environment variables or defaults
+            local falkor_host="${FALKORDB_HOST:-localhost}"
+            local falkor_port="${FALKORDB_PORT:-6379}"
+            db_url="falkor://${falkor_host}:${falkor_port}"
             ;;
         *)
             log_error "Unknown backend: $backend"
@@ -227,6 +244,7 @@ start_server() {
     esac
 
     log_info "Starting ADMapper with $backend backend on port $port..."
+    log_info "Database URL: $db_url"
 
     # Start server in background
     ADMAPPER_BIN="${ADMAPPER_BIN:-/workspace/target/release/admapper}"

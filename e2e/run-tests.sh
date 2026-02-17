@@ -34,7 +34,7 @@ ADMAPPER_BIN="${ADMAPPER_BIN:-$PROJECT_ROOT/src/backend/target/release/admapper}
 GOLDEN_FILE="/tmp/golden/expected_stats.json"
 
 # Available backends
-BACKENDS=(kuzu crustdb)
+BACKENDS=(cozo crustdb neo4j falkordb)
 
 # Cleanup handler
 cleanup() {
@@ -138,8 +138,10 @@ show_usage() {
 	echo ""
 	echo "Backends:"
 	echo "  all      - Test all backends"
-	echo "  kuzu     - Test KuzuDB backend only"
+	echo "  cozo     - Test CozoDB backend only"
 	echo "  crustdb  - Test CrustDB backend only"
+	echo "  neo4j    - Test Neo4j backend only"
+	echo "  falkordb - Test FalkorDB backend only"
 	echo ""
 	echo "Environment variables:"
 	echo "  ADMAPPER_BIN  - Path to admapper binary"
@@ -168,7 +170,7 @@ main() {
 	all)
 		backends_to_test=("${BACKENDS[@]}")
 		;;
-	kuzu | crustdb)
+	cozo | crustdb | neo4j | falkordb)
 		backends_to_test=("$target")
 		;;
 	*)
