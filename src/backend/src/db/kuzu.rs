@@ -72,12 +72,20 @@ impl KuzuDatabase {
         let conn = self.conn()?;
 
         // Create node tables for each AD object type
-        // All share the same schema: object_id (PK), label, properties
+        // Schema includes common BloodHound properties as columns for efficient querying
         for node_type in Self::NODE_TYPES {
             let create_table = format!(
                 r#"CREATE NODE TABLE IF NOT EXISTS {}(
                     object_id STRING PRIMARY KEY,
                     label STRING,
+                    name STRING,
+                    domain STRING,
+                    distinguishedname STRING,
+                    enabled BOOL,
+                    admincount BOOL,
+                    samaccountname STRING,
+                    description STRING,
+                    operatingsystem STRING,
                     properties STRING
                 )"#,
                 node_type
@@ -174,6 +182,22 @@ impl KuzuDatabase {
         Ok(())
     }
 
+    /// Flatten BloodHound node properties into individual values for Cypher querying.
+    fn extract_property_string(props: &JsonValue, key: &str) -> Option<String> {
+        props
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    }
+
+    fn extract_property_bool(props: &JsonValue, key: &str) -> Option<bool> {
+        props.get(key).and_then(|v| v.as_bool())
+    }
+
+    fn escape_string(s: &str) -> String {
+        s.replace('\\', "\\\\").replace('\'', "''")
+    }
+
     /// Insert a batch of nodes.
     pub fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
         if nodes.is_empty() {
@@ -184,23 +208,75 @@ impl KuzuDatabase {
 
         for node in nodes {
             let props_str = serde_json::to_string(&node.properties)?;
-            // Escape single quotes in strings
-            let label = node.label.replace('\'', "''");
-            let props_escaped = props_str.replace('\'', "''");
-            let object_id = node.id.replace('\'', "''");
             let table_name = Self::normalize_node_type(&node.node_type);
 
+            // Extract common properties for dedicated columns
+            let object_id = Self::escape_string(&node.id);
+            let label = Self::escape_string(&node.label);
+            let name = Self::extract_property_string(&node.properties, "name")
+                .map(|s| Self::escape_string(&s))
+                .unwrap_or_else(|| label.clone());
+            let domain = Self::extract_property_string(&node.properties, "domain")
+                .map(|s| Self::escape_string(&s))
+                .unwrap_or_default();
+            let distinguishedname =
+                Self::extract_property_string(&node.properties, "distinguishedname")
+                    .map(|s| Self::escape_string(&s))
+                    .unwrap_or_default();
+            let enabled = Self::extract_property_bool(&node.properties, "enabled").unwrap_or(false);
+            let admincount =
+                Self::extract_property_bool(&node.properties, "admincount").unwrap_or(false);
+            let samaccountname = Self::extract_property_string(&node.properties, "samaccountname")
+                .map(|s| Self::escape_string(&s))
+                .unwrap_or_default();
+            let description = Self::extract_property_string(&node.properties, "description")
+                .map(|s| Self::escape_string(&s))
+                .unwrap_or_default();
+            let operatingsystem =
+                Self::extract_property_string(&node.properties, "operatingsystem")
+                    .map(|s| Self::escape_string(&s))
+                    .unwrap_or_default();
+            let props_escaped = Self::escape_string(&props_str);
+
             let query = format!(
-                "CREATE (n:{} {{object_id: '{}', label: '{}', properties: '{}'}})",
-                table_name, object_id, label, props_escaped
+                "CREATE (n:{} {{object_id: '{}', label: '{}', name: '{}', domain: '{}', \
+                 distinguishedname: '{}', enabled: {}, admincount: {}, samaccountname: '{}', \
+                 description: '{}', operatingsystem: '{}', properties: '{}'}})",
+                table_name,
+                object_id,
+                label,
+                name,
+                domain,
+                distinguishedname,
+                enabled,
+                admincount,
+                samaccountname,
+                description,
+                operatingsystem,
+                props_escaped
             );
 
             if let Err(e) = conn.query(&query) {
                 // Node might already exist, try merge instead
                 trace!("Create failed, trying merge: {}", e);
                 let merge_query = format!(
-                    "MERGE (n:{} {{object_id: '{}'}}) SET n.label = '{}', n.properties = '{}'",
-                    table_name, object_id, label, props_escaped
+                    "MERGE (n:{} {{object_id: '{}'}}) \
+                     SET n.label = '{}', n.name = '{}', n.domain = '{}', \
+                     n.distinguishedname = '{}', n.enabled = {}, n.admincount = {}, \
+                     n.samaccountname = '{}', n.description = '{}', n.operatingsystem = '{}', \
+                     n.properties = '{}'",
+                    table_name,
+                    object_id,
+                    label,
+                    name,
+                    domain,
+                    distinguishedname,
+                    enabled,
+                    admincount,
+                    samaccountname,
+                    description,
+                    operatingsystem,
+                    props_escaped
                 );
                 conn.query(&merge_query)?;
             }
@@ -455,7 +531,7 @@ impl KuzuDatabase {
         Ok(types)
     }
 
-    /// Search nodes by label (case-insensitive substring match).
+    /// Search nodes by label/name (case-insensitive substring match).
     pub fn search_nodes(&self, search_query: &str, limit: usize) -> Result<Vec<DbNode>> {
         let conn = self.conn()?;
         let query_escaped = search_query.replace('\'', "''").to_lowercase();
@@ -470,8 +546,9 @@ impl KuzuDatabase {
             let remaining = limit - nodes.len();
             let query = format!(
                 "MATCH (n:{}) WHERE lower(n.label) CONTAINS '{}' OR lower(n.object_id) CONTAINS '{}' \
+                 OR lower(n.name) CONTAINS '{}' \
                  RETURN n.object_id, n.label, n.properties LIMIT {}",
-                node_type, query_escaped, query_escaped, remaining
+                node_type, query_escaped, query_escaped, query_escaped, remaining
             );
 
             if let Ok(result) = conn.query(&query) {
