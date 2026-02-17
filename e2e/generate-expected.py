@@ -140,9 +140,9 @@ def main():
         stats = count_unique_objects(data_dir)
 
         # Write golden file
-        golden_dir = script_dir / "golden"
+        golden_file = Path(os.environ["GOLDEN_FILE"])
+        golden_dir = golden_file.parent
         golden_dir.mkdir(exist_ok=True)
-        golden_file = golden_dir / "expected_stats.json"
 
         with open(golden_file, "w") as f:
             json.dump(stats, f, indent=2, sort_keys=True)

@@ -215,7 +215,8 @@ start_server() {
             db_url="kuzu://${db_path}"
             ;;
         crustdb)
-            db_url="crustdb://${db_path}"
+            # CrustDB uses SQLite, needs a file path not directory
+            db_url="crustdb://${db_path}/test.db"
             ;;
         *)
             log_error "Unknown backend: $backend"

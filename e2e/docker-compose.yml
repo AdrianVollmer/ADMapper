@@ -43,7 +43,7 @@ services:
       dockerfile: e2e/Dockerfile
     volumes:
       - ..:/workspace:ro
-      - ../target:/workspace/target:ro
+      - ./reports:/workspace/e2e/reports:rw
     working_dir: /workspace
     depends_on:
       neo4j:
