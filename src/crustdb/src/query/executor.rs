@@ -3881,4 +3881,140 @@ mod tests {
         let result = execute(&parse("MATCH (n:Person) RETURN n.name").unwrap(), &storage).unwrap();
         assert_eq!(result.rows.len(), 2);
     }
+
+    // =========================================================================
+    // Aggregate Function Tests
+    // =========================================================================
+
+    #[test]
+    fn test_count_all_nodes() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create some nodes
+        execute(
+            &parse("CREATE (n:Person {name: 'Alice'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        execute(&parse("CREATE (n:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+        execute(
+            &parse("CREATE (n:Movie {title: 'Matrix'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Count all nodes
+        let result = execute(&parse("MATCH (n) RETURN count(n)").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1, "Should return single row for aggregate");
+        assert_eq!(result.columns, vec!["count(n)"]);
+
+        // Extract count value
+        let count_val = result.rows[0].values.get("count(n)").unwrap();
+        if let ResultValue::Property(PropertyValue::Integer(count)) = count_val {
+            assert_eq!(*count, 3, "Should count 3 nodes");
+        } else {
+            panic!("Expected integer count, got {:?}", count_val);
+        }
+    }
+
+    #[test]
+    fn test_count_by_label() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create some nodes
+        execute(
+            &parse("CREATE (n:Person {name: 'Alice'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        execute(&parse("CREATE (n:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+        execute(
+            &parse("CREATE (n:Movie {title: 'Matrix'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Count only Person nodes
+        let result = execute(&parse("MATCH (n:Person) RETURN count(n)").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        let count_val = result.rows[0].values.get("count(n)").unwrap();
+        if let ResultValue::Property(PropertyValue::Integer(count)) = count_val {
+            assert_eq!(*count, 2, "Should count 2 Person nodes");
+        } else {
+            panic!("Expected integer count, got {:?}", count_val);
+        }
+    }
+
+    #[test]
+    fn test_count_edges() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create nodes with relationships
+        execute(
+            &parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        execute(
+            &parse("CREATE (c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Diana'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        // Count relationships
+        let result = execute(&parse("MATCH ()-[r]->() RETURN count(r)").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        let count_val = result.rows[0].values.get("count(r)").unwrap();
+        if let ResultValue::Property(PropertyValue::Integer(count)) = count_val {
+            assert_eq!(*count, 2, "Should count 2 relationships");
+        } else {
+            panic!("Expected integer count, got {:?}", count_val);
+        }
+    }
+
+    #[test]
+    fn test_count_empty_result() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Count with no matching nodes
+        let result = execute(&parse("MATCH (n:NonExistent) RETURN count(n)").unwrap(), &storage).unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        let count_val = result.rows[0].values.get("count(n)").unwrap();
+        if let ResultValue::Property(PropertyValue::Integer(count)) = count_val {
+            assert_eq!(*count, 0, "Should count 0 for no matches");
+        } else {
+            panic!("Expected integer count, got {:?}", count_val);
+        }
+    }
+
+    #[test]
+    fn test_count_with_alias() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        execute(
+            &parse("CREATE (n:Person {name: 'Alice'})").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        execute(&parse("CREATE (n:Person {name: 'Bob'})").unwrap(), &storage).unwrap();
+
+        // Count with alias
+        let result = execute(
+            &parse("MATCH (n:Person) RETURN count(n) AS total").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.columns, vec!["total"]);
+        let count_val = result.rows[0].values.get("total").unwrap();
+        if let ResultValue::Property(PropertyValue::Integer(count)) = count_val {
+            assert_eq!(*count, 2);
+        } else {
+            panic!("Expected integer count, got {:?}", count_val);
+        }
+    }
 }

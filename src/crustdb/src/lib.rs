@@ -330,4 +330,58 @@ mod tests {
         let stats = db.stats().unwrap();
         assert_eq!(stats.node_count, 1000);
     }
+
+    #[test]
+    fn test_count_aggregate() {
+        let db = Database::in_memory().unwrap();
+
+        // Create some nodes
+        db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+        db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+        db.execute("CREATE (n:Company {name: 'Acme'})").unwrap();
+
+        // Count all nodes
+        let result = db.execute("MATCH (n) RETURN count(n)").unwrap();
+        assert_eq!(result.rows.len(), 1, "Should return single row");
+
+        // Extract count
+        let count_val = result.rows[0].values.values().next().unwrap();
+        match count_val {
+            ResultValue::Property(PropertyValue::Integer(n)) => {
+                assert_eq!(*n, 3, "Should count 3 nodes");
+            }
+            other => panic!("Expected integer, got {:?}", other),
+        }
+
+        // Count by label
+        let result = db.execute("MATCH (n:Person) RETURN count(n)").unwrap();
+        let count_val = result.rows[0].values.values().next().unwrap();
+        match count_val {
+            ResultValue::Property(PropertyValue::Integer(n)) => {
+                assert_eq!(*n, 2, "Should count 2 Person nodes");
+            }
+            other => panic!("Expected integer, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_count_edges() {
+        let db = Database::in_memory().unwrap();
+
+        // Create nodes with relationships
+        db.execute("CREATE (a:Person)-[:KNOWS]->(b:Person)").unwrap();
+        db.execute("CREATE (c:Person)-[:WORKS_AT]->(d:Company)").unwrap();
+
+        // Count all edges
+        let result = db.execute("MATCH ()-[r]->() RETURN count(r)").unwrap();
+        assert_eq!(result.rows.len(), 1);
+
+        let count_val = result.rows[0].values.values().next().unwrap();
+        match count_val {
+            ResultValue::Property(PropertyValue::Integer(n)) => {
+                assert_eq!(*n, 2, "Should count 2 edges");
+            }
+            other => panic!("Expected integer, got {:?}", other),
+        }
+    }
 }
