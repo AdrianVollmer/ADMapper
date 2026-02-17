@@ -624,6 +624,9 @@ async fn import_bloodhound(
                         "File imported successfully"
                     );
                     final_progress = Some(progress.clone());
+                    // Write final_state immediately to avoid race with SSE subscribers
+                    // who might connect after broadcast but before loop finishes
+                    *job_for_task.final_state.write() = Some(progress.clone());
                 }
                 Err(e) => {
                     error!(filename = %filename, error = %e, "Import failed");
@@ -636,11 +639,6 @@ async fn import_bloodhound(
             if let Err(e) = std::fs::remove_file(&temp_path) {
                 debug!(filename = %filename, error = %e, "Failed to remove temp file (may already be cleaned up)");
             }
-        }
-
-        // Store final state for late subscribers
-        if let Some(progress) = final_progress {
-            *job_for_task.final_state.write() = Some(progress);
         }
 
         debug!(job_id = %job_id_clone, "Import job complete, cleanup scheduled");
