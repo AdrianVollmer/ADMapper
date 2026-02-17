@@ -398,8 +398,8 @@ pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn health_check() -> &'static str {
-    "ok"
+async fn health_check() -> Json<JsonValue> {
+    Json(json!({"status": "ok"}))
 }
 
 // ============================================================================
