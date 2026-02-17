@@ -269,6 +269,54 @@ are in `tests/fixtures/`, organized by milestone:
 
 See `tests/fixtures/README.md` for the TOML format specification.
 
+## Benchmarking
+
+Run the benchmark suite to measure query performance across different graph structures:
+
+```bash
+cargo run --release --example bench_shortest
+```
+
+This tests SHORTEST path queries on:
+- **Linear chains**: Simple A→B→C→...→N paths
+- **Grids**: NxN grids with diagonal shortcuts
+- **Binary trees**: Trees of varying depths
+
+Example output:
+```
+Linear chain graph (A->B->C->...->N):
+       n   setup (ms)   query (ms)
+--------  ------------  ------------
+    1000        52.82        60.59
+
+Grid graph (n x n with diagonal shortcuts):
+       n    nodes   setup (ms)   query (ms)
+--------  --------  ------------  ------------
+      30      900       106.49       102.65
+```
+
+## Profiling
+
+Generate flamegraph SVGs to identify performance bottlenecks:
+
+```bash
+cargo run --release --example profile_shortest -- --grid 20 --iterations 100
+```
+
+This creates `flamegraph.svg` in the current directory. Open it in a browser to explore the interactive flamegraph.
+
+Options:
+- `--grid N` - Profile NxN grid graph (default)
+- `--chain N` - Profile linear chain of N nodes
+- `--tree D` - Profile binary tree of depth D
+- `--iterations N` - Number of query iterations (default: 100)
+- `--output FILE` - Output file (default: flamegraph.svg)
+
+Example profiling a large chain:
+```bash
+cargo run --release --example profile_shortest -- --chain 1000 --iterations 50 --output chain.svg
+```
+
 ## License
 
 MIT
