@@ -187,6 +187,16 @@ impl AppState {
                     .map_err(|e| e.to_string())?;
                 Arc::new(db)
             }
+            #[cfg(feature = "crustdb")]
+            DatabaseType::CrustDB => {
+                let path = parsed.path.ok_or("Missing path for CrustDB")?;
+                let db = CrustDatabase::new(&path).map_err(|e| e.to_string())?;
+                Arc::new(db)
+            }
+            #[cfg(not(feature = "crustdb"))]
+            DatabaseType::CrustDB => {
+                return Err("CrustDB support not compiled in. See Cargo.toml for instructions.".to_string());
+            }
         };
 
         let db_type = parsed.db_type;

@@ -4,9 +4,7 @@
 
 use serde_json::Value as JsonValue;
 
-use super::cozo::{DbEdge, DbError, DbNode, DetailedStats, SecurityInsights};
-
-pub type Result<T> = std::result::Result<T, DbError>;
+use super::types::{DbEdge, DbError, DbNode, DetailedStats, Result, SecurityInsights};
 
 /// Query language supported by a database backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -248,7 +246,7 @@ pub trait DatabaseBackend: Send + Sync {
     /// Returns an error if the language is not supported.
     fn run_query_with_language(&self, query: &str, lang: QueryLanguage) -> Result<JsonValue> {
         if !self.supports_language(lang) {
-            return Err(DbError::Cozo(format!(
+            return Err(DbError::Database(format!(
                 "Database backend '{}' does not support {:?} queries",
                 self.name(),
                 lang

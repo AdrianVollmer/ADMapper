@@ -20,6 +20,8 @@ pub enum DatabaseType {
     CozoDB,
     /// KuzuDB (file-based, Cypher)
     KuzuDB,
+    /// CrustDB (file-based, Cypher)
+    CrustDB,
 }
 
 impl DatabaseType {
@@ -30,6 +32,7 @@ impl DatabaseType {
             DatabaseType::FalkorDB => "FalkorDB",
             DatabaseType::CozoDB => "CozoDB",
             DatabaseType::KuzuDB => "KuzuDB",
+            DatabaseType::CrustDB => "CrustDB",
         }
     }
 
@@ -40,7 +43,10 @@ impl DatabaseType {
 
     /// Check if this database type uses file storage.
     pub fn is_file(&self) -> bool {
-        matches!(self, DatabaseType::CozoDB | DatabaseType::KuzuDB)
+        matches!(
+            self,
+            DatabaseType::CozoDB | DatabaseType::KuzuDB | DatabaseType::CrustDB
+        )
     }
 
     /// Get the default port for network databases.
@@ -48,7 +54,7 @@ impl DatabaseType {
         match self {
             DatabaseType::Neo4j => Some(7687),
             DatabaseType::FalkorDB => Some(6379),
-            DatabaseType::CozoDB | DatabaseType::KuzuDB => None,
+            DatabaseType::CozoDB | DatabaseType::KuzuDB | DatabaseType::CrustDB => None,
         }
     }
 }
@@ -111,6 +117,7 @@ impl DatabaseUrl {
             "falkordb" | "redis" => DatabaseType::FalkorDB,
             "cozodb" | "cozo" => DatabaseType::CozoDB,
             "kuzu" | "kuzudb" => DatabaseType::KuzuDB,
+            "crustdb" | "crust" => DatabaseType::CrustDB,
             other => return Err(ParseError::UnknownScheme(other.to_string())),
         };
 

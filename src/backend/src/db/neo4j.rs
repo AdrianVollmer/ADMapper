@@ -4,8 +4,8 @@
 
 use serde_json::Value as JsonValue;
 
-use super::backend::{DatabaseBackend, QueryLanguage, Result};
-use super::cozo::{DbEdge, DbError, DbNode, DetailedStats, SecurityInsights};
+use super::backend::{DatabaseBackend, QueryLanguage};
+use super::types::{DbEdge, DbError, DbNode, DetailedStats, Result, SecurityInsights};
 
 /// Neo4j database backend.
 ///
@@ -40,7 +40,7 @@ impl Neo4jDatabase {
     }
 
     fn not_implemented<T>(&self) -> Result<T> {
-        Err(DbError::Cozo(
+        Err(DbError::Database(
             "Neo4j backend is not yet implemented".to_string(),
         ))
     }

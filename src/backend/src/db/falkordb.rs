@@ -5,8 +5,8 @@
 
 use serde_json::Value as JsonValue;
 
-use super::backend::{DatabaseBackend, QueryLanguage, Result};
-use super::cozo::{DbEdge, DbError, DbNode, DetailedStats, SecurityInsights};
+use super::backend::{DatabaseBackend, QueryLanguage};
+use super::types::{DbEdge, DbError, DbNode, DetailedStats, Result, SecurityInsights};
 
 /// FalkorDB database backend.
 ///
@@ -38,7 +38,7 @@ impl FalkorDbDatabase {
     }
 
     fn not_implemented<T>(&self) -> Result<T> {
-        Err(DbError::Cozo(
+        Err(DbError::Database(
             "FalkorDB backend is not yet implemented".to_string(),
         ))
     }

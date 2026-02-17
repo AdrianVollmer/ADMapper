@@ -22,8 +22,12 @@ tower-http = { version = "0.5", features = ["fs", "cors"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 
 # Database and import
-cozo = { version = "0.7", features = ["storage-sqlite"] }
+# Note: cozo and crustdb cannot coexist due to SQLite native library linking conflicts.
+# Both sqlite3-src (cozo) and libsqlite3-sys (crustdb/rusqlite) declare `links = "sqlite3"`.
+# To use crustdb instead of cozo, comment out the cozo line and uncomment crustdb.
+cozo = { version = "0.7", features = ["storage-sqlite"], optional = true }
 kuzu = { version = "0.11.2" }
+# crustdb = { path = "../crustdb", optional = true, default-features = false }
 rayon = "=1.10.0"  # Pin to avoid graph_builder incompatibility with 1.11
 zip = "2"
 tempfile = "3"
@@ -40,8 +44,13 @@ tauri = { version = "2", features = [], optional = true }
 tauri-plugin-shell = { version = "2", optional = true }
 
 [features]
-default = ["desktop"]
+default = ["desktop", "cozo"]
 desktop = ["tauri", "tauri-plugin-shell", "tauri-build"]
+# CozoDB backend (default).
+cozo = ["dep:cozo"]
+# CrustDB backend - see Cargo.toml comment above for how to enable.
+# To use: uncomment the crustdb dependency above, comment out cozo, then enable this feature.
+crustdb = []
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }

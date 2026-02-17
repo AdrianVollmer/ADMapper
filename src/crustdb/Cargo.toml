@@ -5,9 +5,14 @@ edition = "2021"
 description = "Embedded graph database with SQLite backend and Cypher support"
 license = "MIT"
 
+[features]
+default = ["bundled-sqlite"]
+# Bundle SQLite (standalone use). Disable when using with cozo to avoid link conflicts.
+bundled-sqlite = ["rusqlite/bundled"]
+
 [dependencies]
-# SQLite
-rusqlite = { version = "0.31", features = ["bundled"] }
+# SQLite - use system SQLite by default, enable bundled-sqlite feature for standalone
+rusqlite = { version = "0.31" }
 
 # Cypher parsing (grammar based on open-cypher crate, MIT OR Apache-2.0)
 pest = "2.7"

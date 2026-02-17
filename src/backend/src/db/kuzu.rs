@@ -9,9 +9,7 @@ use std::sync::Arc;
 use tracing::{debug, info, trace};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
-use super::cozo::{DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, SecurityInsights};
-
-pub type Result<T> = std::result::Result<T, DbError>;
+use super::types::{DbEdge, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights};
 
 /// A graph database backed by KuzuDB.
 #[derive(Clone)]
