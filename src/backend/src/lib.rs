@@ -16,9 +16,13 @@ use axum::{
     Router,
 };
 use dashmap::DashMap;
+#[cfg(feature = "cozo")]
+use db::CozoDatabase;
+#[cfg(feature = "crustdb")]
+use db::CrustDatabase;
 use db::{
-    CozoDatabase, DatabaseBackend, DatabaseType, DatabaseUrl, DbError, FalkorDbDatabase,
-    KuzuDatabase, Neo4jDatabase, QueryLanguage,
+    DatabaseBackend, DatabaseType, DatabaseUrl, DbError, FalkorDbDatabase, KuzuDatabase,
+    Neo4jDatabase, QueryLanguage,
 };
 use import::{BloodHoundImporter, ImportProgress};
 use parking_lot::RwLock;
@@ -162,10 +166,15 @@ impl AppState {
                 let db = KuzuDatabase::new(&path).map_err(|e| e.to_string())?;
                 Arc::new(db)
             }
+            #[cfg(feature = "cozo")]
             DatabaseType::CozoDB => {
                 let path = parsed.path.ok_or("Missing path for CozoDB")?;
                 let db = CozoDatabase::new(&path).map_err(|e| e.to_string())?;
                 Arc::new(db)
+            }
+            #[cfg(not(feature = "cozo"))]
+            DatabaseType::CozoDB => {
+                return Err("CozoDB support not compiled in.".to_string());
             }
             DatabaseType::Neo4j => {
                 let host = parsed.host.ok_or("Missing host for Neo4j")?;
@@ -190,7 +199,7 @@ impl AppState {
             #[cfg(feature = "crustdb")]
             DatabaseType::CrustDB => {
                 let path = parsed.path.ok_or("Missing path for CrustDB")?;
-                let db = CrustDatabase::new(&path).map_err(|e| e.to_string())?;
+                let db = CrustDatabase::new(&path).map_err(|e: db::DbError| e.to_string())?;
                 Arc::new(db)
             }
             #[cfg(not(feature = "crustdb"))]

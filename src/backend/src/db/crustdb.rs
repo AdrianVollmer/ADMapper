@@ -5,27 +5,31 @@
 use crustdb::Database;
 use serde_json::Value as JsonValue;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights};
 
 /// A graph database backed by CrustDB.
+///
+/// Uses a Mutex to ensure thread-safety since rusqlite's Connection is not Sync.
 #[derive(Clone)]
 pub struct CrustDatabase {
-    db: Arc<Database>,
+    db: Arc<Mutex<Database>>,
 }
 
 impl CrustDatabase {
     /// Create or open a database at the given path.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path_str = path.as_ref().to_string_lossy();
+        let path_str = path.as_ref().to_string_lossy().to_string();
         info!(path = %path_str, "Opening CrustDB");
 
         let db = Database::open(&path_str).map_err(|e| DbError::Database(e.to_string()))?;
 
-        let instance = Self { db: Arc::new(db) };
+        let instance = Self {
+            db: Arc::new(Mutex::new(db)),
+        };
         instance.init_schema()?;
         info!("CrustDB initialized successfully");
         Ok(instance)
@@ -37,7 +41,9 @@ impl CrustDatabase {
         debug!("Creating in-memory CrustDB");
         let db = Database::in_memory().map_err(|e| DbError::Database(e.to_string()))?;
 
-        let instance = Self { db: Arc::new(db) };
+        let instance = Self {
+            db: Arc::new(Mutex::new(db)),
+        };
         instance.init_schema()?;
         Ok(instance)
     }
@@ -52,8 +58,8 @@ impl CrustDatabase {
 
     /// Execute a Cypher query and return the raw result.
     fn execute(&self, query: &str) -> Result<crustdb::QueryResult> {
-        self.db
-            .execute(query)
+        let db = self.db.lock().map_err(|e| DbError::Database(e.to_string()))?;
+        db.execute(query)
             .map_err(|e| DbError::Database(e.to_string()))
     }
 
@@ -152,7 +158,7 @@ impl CrustDatabase {
             .first()
             .and_then(|row| row.values.values().next())
             .and_then(|v| match v {
-                crustdb::ResultValue::Property(crustdb::graph::PropertyValue::Integer(n)) => {
+                crustdb::ResultValue::Property(crustdb::PropertyValue::Integer(n)) => {
                     Some(*n as usize)
                 }
                 _ => None,
@@ -245,10 +251,10 @@ impl CrustDatabase {
         values
             .get(key)
             .and_then(|v| match v {
-                crustdb::ResultValue::Property(crustdb::graph::PropertyValue::String(s)) => {
+                crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => {
                     Some(s.clone())
                 }
-                crustdb::ResultValue::Property(crustdb::graph::PropertyValue::Integer(n)) => {
+                crustdb::ResultValue::Property(crustdb::PropertyValue::Integer(n)) => {
                     Some(n.to_string())
                 }
                 _ => None,
@@ -263,7 +269,7 @@ impl CrustDatabase {
         let mut types = Vec::new();
         for row in &result.rows {
             for value in row.values.values() {
-                if let crustdb::ResultValue::Property(crustdb::graph::PropertyValue::String(s)) =
+                if let crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) =
                     value
                 {
                     types.push(s.clone());
@@ -281,7 +287,7 @@ impl CrustDatabase {
         let mut types = Vec::new();
         for row in &result.rows {
             for value in row.values.values() {
-                if let crustdb::ResultValue::Property(crustdb::graph::PropertyValue::String(s)) =
+                if let crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) =
                     value
                 {
                     if !s.is_empty() {
@@ -645,17 +651,17 @@ impl CrustDatabase {
                             .get(col)
                             .map(|v| match v {
                                 crustdb::ResultValue::Property(pv) => match pv {
-                                    crustdb::graph::PropertyValue::String(s) => {
+                                    crustdb::PropertyValue::String(s) => {
                                         JsonValue::String(s.clone())
                                     }
-                                    crustdb::graph::PropertyValue::Integer(n) => {
+                                    crustdb::PropertyValue::Integer(n) => {
                                         JsonValue::Number((*n).into())
                                     }
-                                    crustdb::graph::PropertyValue::Float(f) => serde_json::Number::from_f64(*f)
+                                    crustdb::PropertyValue::Float(f) => serde_json::Number::from_f64(*f)
                                         .map(JsonValue::Number)
                                         .unwrap_or(JsonValue::Null),
-                                    crustdb::graph::PropertyValue::Bool(b) => JsonValue::Bool(*b),
-                                    crustdb::graph::PropertyValue::Null => JsonValue::Null,
+                                    crustdb::PropertyValue::Bool(b) => JsonValue::Bool(*b),
+                                    crustdb::PropertyValue::Null => JsonValue::Null,
                                     _ => JsonValue::String(format!("{:?}", pv)),
                                 },
                                 _ => JsonValue::String(format!("{:?}", v)),

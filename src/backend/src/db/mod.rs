@@ -23,8 +23,6 @@ pub mod url;
 // Re-export common types
 pub use backend::{DatabaseBackend, QueryLanguage};
 pub use types::{DbEdge, DbError, DbNode, DetailedStats, SecurityInsights};
-#[cfg(feature = "crustdb")]
-pub use types::ReachabilityInsight;
 pub use url::{DatabaseType, DatabaseUrl};
 
 // Re-export database implementations
