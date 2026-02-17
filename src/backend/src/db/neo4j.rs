@@ -4,13 +4,15 @@
 
 use neo4rs::{query, Graph, Node as Neo4jNode, Query, Relation, Row};
 use serde_json::{json, Map, Value as JsonValue};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
-use super::types::{DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights};
+use super::types::{
+    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
+};
 
 /// Neo4j database backend.
 pub struct Neo4jDatabase {
@@ -37,9 +39,7 @@ impl Neo4jDatabase {
         let runtime = Runtime::new().map_err(|e| DbError::Database(e.to_string()))?;
 
         // Connect to Neo4j
-        let graph = runtime.block_on(async {
-            Graph::new(&uri, &user, &pass).await
-        })?;
+        let graph = runtime.block_on(async { Graph::new(&uri, &user, &pass).await })?;
 
         info!("Connected to Neo4j");
 
@@ -51,16 +51,20 @@ impl Neo4jDatabase {
 
     /// Convert a Neo4j node to DbNode.
     fn neo4j_node_to_db_node(node: &Neo4jNode) -> DbNode {
-        let id = node.get::<String>("objectid")
+        let id = node
+            .get::<String>("objectid")
             .or_else(|_| node.get::<String>("object_id"))
             .or_else(|_| node.get::<i64>("id").map(|id| id.to_string()))
             .unwrap_or_else(|_| format!("node_{}", node.id()));
 
-        let label = node.get::<String>("name")
+        let label = node
+            .get::<String>("name")
             .or_else(|_| node.get::<String>("label"))
             .unwrap_or_else(|_| id.clone());
 
-        let node_type = node.labels().first()
+        let node_type = node
+            .labels()
+            .first()
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
 
@@ -203,7 +207,10 @@ impl DatabaseBackend for Neo4jDatabase {
             .param("props", props_str);
 
             if let Err(e) = self.run_query(q) {
-                debug!("Failed to create edge {} -> {}: {}", edge.source, edge.target, e);
+                debug!(
+                    "Failed to create edge {} -> {}: {}",
+                    edge.source, edge.target, e
+                );
             }
         }
 
@@ -212,12 +219,14 @@ impl DatabaseBackend for Neo4jDatabase {
 
     fn get_stats(&self) -> Result<(usize, usize)> {
         let node_rows = self.execute_query(query("MATCH (n) RETURN count(n) AS count"))?;
-        let node_count = node_rows.first()
+        let node_count = node_rows
+            .first()
             .and_then(|r| r.get::<i64>("count").ok())
             .unwrap_or(0) as usize;
 
         let edge_rows = self.execute_query(query("MATCH ()-[r]->() RETURN count(r) AS count"))?;
-        let edge_count = edge_rows.first()
+        let edge_count = edge_rows
+            .first()
             .and_then(|r| r.get::<i64>("count").ok())
             .unwrap_or(0) as usize;
 
@@ -229,7 +238,7 @@ impl DatabaseBackend for Neo4jDatabase {
 
         // Get counts by label
         let rows = self.execute_query(query(
-            "MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count"
+            "MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count",
         ))?;
 
         let mut type_counts: HashMap<String, usize> = HashMap::new();
@@ -256,7 +265,8 @@ impl DatabaseBackend for Neo4jDatabase {
 
         // Count total users
         let user_rows = self.execute_query(query("MATCH (n:User) RETURN count(n) AS count"))?;
-        let total_users = user_rows.first()
+        let total_users = user_rows
+            .first()
             .and_then(|r| r.get::<i64>("count").ok())
             .unwrap_or(0) as usize;
 
@@ -264,10 +274,11 @@ impl DatabaseBackend for Neo4jDatabase {
         let real_da_rows = self.execute_query(query(
             "MATCH (u:User)-[:MemberOf*1..]->(g:Group) \
              WHERE g.objectid ENDS WITH '-512' \
-             RETURN DISTINCT u.objectid AS id, u.name AS name"
+             RETURN DISTINCT u.objectid AS id, u.name AS name",
         ))?;
 
-        let real_das: Vec<(String, String)> = real_da_rows.iter()
+        let real_das: Vec<(String, String)> = real_da_rows
+            .iter()
             .filter_map(|r| {
                 let id = r.get::<String>("id").ok()?;
                 let name = r.get::<String>("name").ok().unwrap_or_else(|| id.clone());
@@ -280,10 +291,11 @@ impl DatabaseBackend for Neo4jDatabase {
         let effective_da_rows = self.execute_query(query(
             "MATCH p = (u:User)-[*1..10]->(g:Group) \
              WHERE g.objectid ENDS WITH '-512' \
-             RETURN DISTINCT u.objectid AS id, u.name AS name, min(length(p)) AS hops"
+             RETURN DISTINCT u.objectid AS id, u.name AS name, min(length(p)) AS hops",
         ))?;
 
-        let effective_das: Vec<(String, String, usize)> = effective_da_rows.iter()
+        let effective_das: Vec<(String, String, usize)> = effective_da_rows
+            .iter()
             .filter_map(|r| {
                 let id = r.get::<String>("id").ok()?;
                 let name = r.get::<String>("name").ok().unwrap_or_else(|| id.clone());
@@ -332,7 +344,8 @@ impl DatabaseBackend for Neo4jDatabase {
             };
 
             let rows = self.execute_query(q).unwrap_or_default();
-            let (principal_id, reachable_count) = rows.first()
+            let (principal_id, reachable_count) = rows
+                .first()
                 .map(|r| {
                     let id = r.get::<String>("id").ok();
                     let cnt = r.get::<i64>("cnt").ok().unwrap_or(0) as usize;
@@ -362,7 +375,8 @@ impl DatabaseBackend for Neo4jDatabase {
     fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
         let rows = self.execute_query(query("MATCH (n) RETURN n"))?;
 
-        let nodes: Vec<DbNode> = rows.iter()
+        let nodes: Vec<DbNode> = rows
+            .iter()
             .filter_map(|r| r.get::<Neo4jNode>("n").ok())
             .map(|n| Self::neo4j_node_to_db_node(&n))
             .collect();
@@ -375,7 +389,8 @@ impl DatabaseBackend for Neo4jDatabase {
             "MATCH (a)-[r]->(b) RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel"
         ))?;
 
-        let edges: Vec<DbEdge> = rows.iter()
+        let edges: Vec<DbEdge> = rows
+            .iter()
             .filter_map(|r| {
                 let src = r.get::<String>("src").ok()?;
                 let tgt = r.get::<String>("tgt").ok()?;
@@ -392,11 +407,11 @@ impl DatabaseBackend for Neo4jDatabase {
             return Ok(Vec::new());
         }
 
-        let q = query("MATCH (n) WHERE n.objectid IN $ids RETURN n")
-            .param("ids", ids.to_vec());
+        let q = query("MATCH (n) WHERE n.objectid IN $ids RETURN n").param("ids", ids.to_vec());
 
         let rows = self.execute_query(q)?;
-        let nodes: Vec<DbNode> = rows.iter()
+        let nodes: Vec<DbNode> = rows
+            .iter()
             .filter_map(|r| r.get::<Neo4jNode>("n").ok())
             .map(|n| Self::neo4j_node_to_db_node(&n))
             .collect();
@@ -412,12 +427,13 @@ impl DatabaseBackend for Neo4jDatabase {
         let q = query(
             "MATCH (a)-[r]->(b) \
              WHERE a.objectid IN $ids AND b.objectid IN $ids \
-             RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel"
+             RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel",
         )
         .param("ids", node_ids.to_vec());
 
         let rows = self.execute_query(q)?;
-        let edges: Vec<DbEdge> = rows.iter()
+        let edges: Vec<DbEdge> = rows
+            .iter()
             .filter_map(|r| {
                 let src = r.get::<String>("src").ok()?;
                 let tgt = r.get::<String>("tgt").ok()?;
@@ -432,7 +448,8 @@ impl DatabaseBackend for Neo4jDatabase {
     fn get_edge_types(&self) -> Result<Vec<String>> {
         let rows = self.execute_query(query("MATCH ()-[r]->() RETURN DISTINCT type(r) AS typ"))?;
 
-        let types: Vec<String> = rows.iter()
+        let types: Vec<String> = rows
+            .iter()
             .filter_map(|r| r.get::<String>("typ").ok())
             .collect();
 
@@ -442,7 +459,8 @@ impl DatabaseBackend for Neo4jDatabase {
     fn get_node_types(&self) -> Result<Vec<String>> {
         let rows = self.execute_query(query("MATCH (n) RETURN DISTINCT labels(n)[0] AS label"))?;
 
-        let types: Vec<String> = rows.iter()
+        let types: Vec<String> = rows
+            .iter()
             .filter_map(|r| r.get::<String>("label").ok())
             .collect();
 
@@ -458,7 +476,8 @@ impl DatabaseBackend for Neo4jDatabase {
         .param("limit", limit as i64);
 
         let rows = self.execute_query(q)?;
-        let nodes: Vec<DbNode> = rows.iter()
+        let nodes: Vec<DbNode> = rows
+            .iter()
             .filter_map(|r| r.get::<Neo4jNode>("n").ok())
             .map(|n| Self::neo4j_node_to_db_node(&n))
             .collect();
@@ -480,8 +499,10 @@ impl DatabaseBackend for Neo4jDatabase {
         }
 
         // Try case-insensitive name match
-        let q = query("MATCH (n) WHERE toLower(n.name) = toLower($name) RETURN n.objectid AS id LIMIT 1")
-            .param("name", identifier.to_string());
+        let q = query(
+            "MATCH (n) WHERE toLower(n.name) = toLower($name) RETURN n.objectid AS id LIMIT 1",
+        )
+        .param("name", identifier.to_string());
 
         let rows = self.execute_query(q)?;
         if let Some(row) = rows.first() {
@@ -550,11 +571,7 @@ impl DatabaseBackend for Neo4jDatabase {
         Ok((nodes, edges))
     }
 
-    fn shortest_path(
-        &self,
-        from: &str,
-        to: &str,
-    ) -> Result<Option<Vec<(String, Option<String>)>>> {
+    fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));
         }
@@ -562,7 +579,7 @@ impl DatabaseBackend for Neo4jDatabase {
         let q = query(
             "MATCH p = shortestPath((a {objectid: $from})-[*..20]->(b {objectid: $to})) \
              RETURN [n IN nodes(p) | n.objectid] AS node_ids, \
-                    [r IN relationships(p) | type(r)] AS rel_types"
+                    [r IN relationships(p) | type(r)] AS rel_types",
         )
         .param("from", from.to_string())
         .param("to", to.to_string());
@@ -603,10 +620,14 @@ impl DatabaseBackend for Neo4jDatabase {
         let exclude_clause = if exclude_edge_types.is_empty() {
             String::new()
         } else {
-            let types: Vec<String> = exclude_edge_types.iter()
+            let types: Vec<String> = exclude_edge_types
+                .iter()
                 .map(|t| format!("'{}'", t))
                 .collect();
-            format!("AND NONE(r IN relationships(p) WHERE type(r) IN [{}])", types.join(", "))
+            format!(
+                "AND NONE(r IN relationships(p) WHERE type(r) IN [{}])",
+                types.join(", ")
+            )
         };
 
         let q = query(&format!(
@@ -653,7 +674,21 @@ impl DatabaseBackend for Neo4jDatabase {
                 let mut obj = Map::new();
 
                 // Try common column names that might be returned
-                let try_columns = ["n", "m", "r", "p", "result", "count", "total", "name", "id", "value", "nodes", "relationships", "path"];
+                let try_columns = [
+                    "n",
+                    "m",
+                    "r",
+                    "p",
+                    "result",
+                    "count",
+                    "total",
+                    "name",
+                    "id",
+                    "value",
+                    "nodes",
+                    "relationships",
+                    "path",
+                ];
 
                 for col in try_columns {
                     if let Ok(val) = row.get::<String>(col) {
@@ -668,12 +703,15 @@ impl DatabaseBackend for Neo4jDatabase {
                         obj.insert(col.to_string(), JsonValue::Bool(val));
                     } else if let Ok(node) = row.get::<Neo4jNode>(col) {
                         let db_node = Self::neo4j_node_to_db_node(&node);
-                        obj.insert(col.to_string(), json!({
-                            "id": db_node.id,
-                            "label": db_node.label,
-                            "type": db_node.node_type,
-                            "properties": db_node.properties,
-                        }));
+                        obj.insert(
+                            col.to_string(),
+                            json!({
+                                "id": db_node.id,
+                                "label": db_node.label,
+                                "type": db_node.node_type,
+                                "properties": db_node.properties,
+                            }),
+                        );
                     }
                 }
 
@@ -714,8 +752,10 @@ impl DatabaseBackend for Neo4jDatabase {
         offset: usize,
     ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
         // Get total count
-        let count_rows = self.execute_query(query("MATCH (h:QueryHistory) RETURN count(h) AS count"))?;
-        let total = count_rows.first()
+        let count_rows =
+            self.execute_query(query("MATCH (h:QueryHistory) RETURN count(h) AS count"))?;
+        let total = count_rows
+            .first()
             .and_then(|r| r.get::<i64>("count").ok())
             .unwrap_or(0) as usize;
 
@@ -731,7 +771,8 @@ impl DatabaseBackend for Neo4jDatabase {
 
         let rows = self.execute_query(q)?;
 
-        let history: Vec<(String, String, String, i64, Option<i64>)> = rows.iter()
+        let history: Vec<(String, String, String, i64, Option<i64>)> = rows
+            .iter()
             .filter_map(|r| {
                 let id = r.get::<String>("id").ok()?;
                 let name = r.get::<String>("name").ok()?;
@@ -746,8 +787,7 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn delete_query_history(&self, id: &str) -> Result<()> {
-        let q = query("MATCH (h:QueryHistory {id: $id}) DELETE h")
-            .param("id", id.to_string());
+        let q = query("MATCH (h:QueryHistory {id: $id}) DELETE h").param("id", id.to_string());
         self.run_query(q)
     }
 

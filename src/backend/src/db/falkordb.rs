@@ -10,7 +10,9 @@ use std::sync::Mutex;
 use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
-use super::types::{DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights};
+use super::types::{
+    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
+};
 
 /// FalkorDB database backend.
 pub struct FalkorDbDatabase {
@@ -33,7 +35,9 @@ impl FalkorDbDatabase {
 
         info!(uri = %uri, "Connecting to FalkorDB");
 
-        let connection_info: FalkorConnectionInfo = uri.as_str().try_into()
+        let connection_info: FalkorConnectionInfo = uri
+            .as_str()
+            .try_into()
             .map_err(|e| DbError::Database(format!("Invalid connection info: {}", e)))?;
 
         let client = FalkorClientBuilder::new()
@@ -53,10 +57,13 @@ impl FalkorDbDatabase {
 
     /// Execute a query and parse the results.
     fn execute_query(&self, cypher: &str) -> Result<Vec<Vec<JsonValue>>> {
-        let mut graph = self.graph.lock()
+        let mut graph = self
+            .graph
+            .lock()
             .map_err(|e| DbError::Database(format!("Lock poisoned: {}", e)))?;
 
-        let result = graph.query(cypher)
+        let result = graph
+            .query(cypher)
             .execute()
             .map_err(|e| DbError::Database(e.to_string()))?;
 
@@ -74,10 +81,13 @@ impl FalkorDbDatabase {
 
     /// Execute a write-only query.
     fn run_query(&self, cypher: &str) -> Result<()> {
-        let mut graph = self.graph.lock()
+        let mut graph = self
+            .graph
+            .lock()
             .map_err(|e| DbError::Database(format!("Lock poisoned: {}", e)))?;
 
-        graph.query(cypher)
+        graph
+            .query(cypher)
             .execute()
             .map_err(|e| DbError::Database(e.to_string()))?;
 
@@ -88,27 +98,31 @@ impl FalkorDbDatabase {
     fn parse_node(value: &JsonValue) -> Option<DbNode> {
         let obj = value.as_object()?;
 
-        let id = obj.get("properties")
+        let id = obj
+            .get("properties")
             .and_then(|p| p.get("objectid"))
             .and_then(|v| v.as_str())
             .or_else(|| obj.get("id").and_then(|v| v.as_i64()).map(|_| ""))
             .map(|s| s.to_string())
             .unwrap_or_default();
 
-        let label = obj.get("properties")
+        let label = obj
+            .get("properties")
             .and_then(|p| p.get("name"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| id.clone());
 
-        let node_type = obj.get("labels")
+        let node_type = obj
+            .get("labels")
             .and_then(|l| l.as_array())
             .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
 
-        let properties = obj.get("properties")
+        let properties = obj
+            .get("properties")
             .cloned()
             .unwrap_or(JsonValue::Object(Map::new()));
 
@@ -127,17 +141,16 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
         falkordb::FalkorValue::None => JsonValue::Null,
         falkordb::FalkorValue::Bool(b) => JsonValue::Bool(b),
         falkordb::FalkorValue::I64(i) => JsonValue::Number(i.into()),
-        falkordb::FalkorValue::F64(f) => {
-            serde_json::Number::from_f64(f)
-                .map(JsonValue::Number)
-                .unwrap_or(JsonValue::Null)
-        }
+        falkordb::FalkorValue::F64(f) => serde_json::Number::from_f64(f)
+            .map(JsonValue::Number)
+            .unwrap_or(JsonValue::Null),
         falkordb::FalkorValue::String(s) => JsonValue::String(s),
         falkordb::FalkorValue::Array(arr) => {
             JsonValue::Array(arr.into_iter().map(falkor_value_to_json).collect())
         }
         falkordb::FalkorValue::Map(map) => {
-            let obj: Map<String, JsonValue> = map.into_iter()
+            let obj: Map<String, JsonValue> = map
+                .into_iter()
                 .map(|(k, v)| (k, falkor_value_to_json(v)))
                 .collect();
             JsonValue::Object(obj)
@@ -145,10 +158,13 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
         falkordb::FalkorValue::Node(node) => {
             let mut obj = Map::new();
             obj.insert("id".to_string(), JsonValue::Number(node.entity_id.into()));
-            obj.insert("labels".to_string(), JsonValue::Array(
-                node.labels.into_iter().map(JsonValue::String).collect()
-            ));
-            let props: Map<String, JsonValue> = node.properties.into_iter()
+            obj.insert(
+                "labels".to_string(),
+                JsonValue::Array(node.labels.into_iter().map(JsonValue::String).collect()),
+            );
+            let props: Map<String, JsonValue> = node
+                .properties
+                .into_iter()
                 .map(|(k, v)| (k, falkor_value_to_json(v)))
                 .collect();
             obj.insert("properties".to_string(), JsonValue::Object(props));
@@ -157,20 +173,35 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
         falkordb::FalkorValue::Edge(edge) => {
             let mut obj = Map::new();
             obj.insert("id".to_string(), JsonValue::Number(edge.entity_id.into()));
-            obj.insert("type".to_string(), JsonValue::String(edge.relationship_type));
-            obj.insert("source".to_string(), JsonValue::Number(edge.src_node_id.into()));
-            obj.insert("target".to_string(), JsonValue::Number(edge.dst_node_id.into()));
-            let props: Map<String, JsonValue> = edge.properties.into_iter()
+            obj.insert(
+                "type".to_string(),
+                JsonValue::String(edge.relationship_type),
+            );
+            obj.insert(
+                "source".to_string(),
+                JsonValue::Number(edge.src_node_id.into()),
+            );
+            obj.insert(
+                "target".to_string(),
+                JsonValue::Number(edge.dst_node_id.into()),
+            );
+            let props: Map<String, JsonValue> = edge
+                .properties
+                .into_iter()
                 .map(|(k, v)| (k, falkor_value_to_json(v)))
                 .collect();
             obj.insert("properties".to_string(), JsonValue::Object(props));
             JsonValue::Object(obj)
         }
         falkordb::FalkorValue::Path(path) => {
-            let nodes: Vec<JsonValue> = path.nodes.into_iter()
+            let nodes: Vec<JsonValue> = path
+                .nodes
+                .into_iter()
                 .map(|n| falkor_value_to_json(falkordb::FalkorValue::Node(n)))
                 .collect();
-            let edges: Vec<JsonValue> = path.relationships.into_iter()
+            let edges: Vec<JsonValue> = path
+                .relationships
+                .into_iter()
                 .map(|e| falkor_value_to_json(falkordb::FalkorValue::Edge(e)))
                 .collect();
             json!({ "nodes": nodes, "edges": edges })
@@ -182,9 +213,7 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
             // Vec32 is a special vector type, represent as string
             JsonValue::String("[vector]".to_string())
         }
-        falkordb::FalkorValue::Unparseable(s) => {
-            JsonValue::String(s)
-        }
+        falkordb::FalkorValue::Unparseable(s) => JsonValue::String(s),
     }
 }
 
@@ -226,8 +255,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         }
 
         for node in nodes {
-            let props_str = serde_json::to_string(&node.properties)?
-                .replace('\'', "\\'");
+            let props_str = serde_json::to_string(&node.properties)?.replace('\'', "\\'");
             let label = node.label.replace('\'', "\\'");
             let id = node.id.replace('\'', "\\'");
 
@@ -250,8 +278,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         }
 
         for edge in edges {
-            let props_str = serde_json::to_string(&edge.properties)?
-                .replace('\'', "\\'");
+            let props_str = serde_json::to_string(&edge.properties)?.replace('\'', "\\'");
             let src = edge.source.replace('\'', "\\'");
             let tgt = edge.target.replace('\'', "\\'");
 
@@ -262,7 +289,10 @@ impl DatabaseBackend for FalkorDbDatabase {
             );
 
             if let Err(e) = self.run_query(&cypher) {
-                debug!("Failed to create edge {} -> {}: {}", edge.source, edge.target, e);
+                debug!(
+                    "Failed to create edge {} -> {}: {}",
+                    edge.source, edge.target, e
+                );
             }
         }
 
@@ -271,13 +301,15 @@ impl DatabaseBackend for FalkorDbDatabase {
 
     fn get_stats(&self) -> Result<(usize, usize)> {
         let node_rows = self.execute_query("MATCH (n) RETURN count(n) AS count")?;
-        let node_count = node_rows.first()
+        let node_count = node_rows
+            .first()
             .and_then(|r| r.first())
             .and_then(|v| v.as_i64())
             .unwrap_or(0) as usize;
 
         let edge_rows = self.execute_query("MATCH ()-[r]->() RETURN count(r) AS count")?;
-        let edge_count = edge_rows.first()
+        let edge_count = edge_rows
+            .first()
             .and_then(|r| r.first())
             .and_then(|v| v.as_i64())
             .unwrap_or(0) as usize;
@@ -289,7 +321,8 @@ impl DatabaseBackend for FalkorDbDatabase {
         let (total_nodes, total_edges) = self.get_stats()?;
 
         // Get counts by label
-        let rows = self.execute_query("MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count")?;
+        let rows =
+            self.execute_query("MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count")?;
 
         let mut type_counts: HashMap<String, usize> = HashMap::new();
         for row in rows {
@@ -317,7 +350,8 @@ impl DatabaseBackend for FalkorDbDatabase {
 
         // Count total users
         let user_rows = self.execute_query("MATCH (n:User) RETURN count(n) AS count")?;
-        let total_users = user_rows.first()
+        let total_users = user_rows
+            .first()
             .and_then(|r| r.first())
             .and_then(|v| v.as_i64())
             .unwrap_or(0) as usize;
@@ -326,10 +360,11 @@ impl DatabaseBackend for FalkorDbDatabase {
         let real_da_rows = self.execute_query(
             "MATCH (u:User)-[:MemberOf*1..]->(g:Group) \
              WHERE g.objectid ENDS WITH '-512' \
-             RETURN DISTINCT u.objectid AS id, u.name AS name"
+             RETURN DISTINCT u.objectid AS id, u.name AS name",
         )?;
 
-        let real_das: Vec<(String, String)> = real_da_rows.iter()
+        let real_das: Vec<(String, String)> = real_da_rows
+            .iter()
             .filter_map(|r| {
                 let id = r.get(0)?.as_str()?.to_string();
                 let name = r.get(1).and_then(|v| v.as_str()).unwrap_or(&id).to_string();
@@ -342,10 +377,11 @@ impl DatabaseBackend for FalkorDbDatabase {
         let effective_da_rows = self.execute_query(
             "MATCH p = (u:User)-[*1..10]->(g:Group) \
              WHERE g.objectid ENDS WITH '-512' \
-             RETURN DISTINCT u.objectid AS id, u.name AS name, min(length(p)) AS hops"
+             RETURN DISTINCT u.objectid AS id, u.name AS name, min(length(p)) AS hops",
         )?;
 
-        let effective_das: Vec<(String, String, usize)> = effective_da_rows.iter()
+        let effective_das: Vec<(String, String, usize)> = effective_da_rows
+            .iter()
             .filter_map(|r| {
                 let id = r.get(0)?.as_str()?.to_string();
                 let name = r.get(1).and_then(|v| v.as_str()).unwrap_or(&id).to_string();
@@ -394,7 +430,8 @@ impl DatabaseBackend for FalkorDbDatabase {
             };
 
             let rows = self.execute_query(&cypher).unwrap_or_default();
-            let (principal_id, reachable_count) = rows.first()
+            let (principal_id, reachable_count) = rows
+                .first()
                 .map(|r| {
                     let id = r.get(0).and_then(|v| v.as_str()).map(|s| s.to_string());
                     let cnt = r.get(1).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
@@ -424,7 +461,8 @@ impl DatabaseBackend for FalkorDbDatabase {
     fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
         let rows = self.execute_query("MATCH (n) RETURN n")?;
 
-        let nodes: Vec<DbNode> = rows.iter()
+        let nodes: Vec<DbNode> = rows
+            .iter()
             .filter_map(|r| r.first())
             .filter_map(|v| Self::parse_node(v))
             .collect();
@@ -437,12 +475,14 @@ impl DatabaseBackend for FalkorDbDatabase {
             "MATCH (a)-[r]->(b) RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel"
         )?;
 
-        let edges: Vec<DbEdge> = rows.iter()
+        let edges: Vec<DbEdge> = rows
+            .iter()
             .filter_map(|r| {
                 let src = r.get(0)?.as_str()?.to_string();
                 let tgt = r.get(1)?.as_str()?.to_string();
                 let typ = r.get(2)?.as_str()?.to_string();
-                let props = r.get(3)
+                let props = r
+                    .get(3)
                     .and_then(|v| v.get("properties"))
                     .cloned()
                     .unwrap_or(JsonValue::Object(Map::new()));
@@ -463,7 +503,8 @@ impl DatabaseBackend for FalkorDbDatabase {
             return Ok(Vec::new());
         }
 
-        let id_list: Vec<String> = ids.iter()
+        let id_list: Vec<String> = ids
+            .iter()
             .map(|id| format!("'{}'", id.replace('\'', "\\'")))
             .collect();
 
@@ -473,7 +514,8 @@ impl DatabaseBackend for FalkorDbDatabase {
         );
 
         let rows = self.execute_query(&cypher)?;
-        let nodes: Vec<DbNode> = rows.iter()
+        let nodes: Vec<DbNode> = rows
+            .iter()
             .filter_map(|r| r.first())
             .filter_map(|v| Self::parse_node(v))
             .collect();
@@ -486,7 +528,8 @@ impl DatabaseBackend for FalkorDbDatabase {
             return Ok(Vec::new());
         }
 
-        let id_list: Vec<String> = node_ids.iter()
+        let id_list: Vec<String> = node_ids
+            .iter()
             .map(|id| format!("'{}'", id.replace('\'', "\\'")))
             .collect();
         let id_set = id_list.join(", ");
@@ -499,12 +542,14 @@ impl DatabaseBackend for FalkorDbDatabase {
         );
 
         let rows = self.execute_query(&cypher)?;
-        let edges: Vec<DbEdge> = rows.iter()
+        let edges: Vec<DbEdge> = rows
+            .iter()
             .filter_map(|r| {
                 let src = r.get(0)?.as_str()?.to_string();
                 let tgt = r.get(1)?.as_str()?.to_string();
                 let typ = r.get(2)?.as_str()?.to_string();
-                let props = r.get(3)
+                let props = r
+                    .get(3)
                     .and_then(|v| v.get("properties"))
                     .cloned()
                     .unwrap_or(JsonValue::Object(Map::new()));
@@ -523,7 +568,8 @@ impl DatabaseBackend for FalkorDbDatabase {
     fn get_edge_types(&self) -> Result<Vec<String>> {
         let rows = self.execute_query("MATCH ()-[r]->() RETURN DISTINCT type(r) AS typ")?;
 
-        let types: Vec<String> = rows.iter()
+        let types: Vec<String> = rows
+            .iter()
             .filter_map(|r| r.first())
             .filter_map(|v| v.as_str())
             .map(|s| s.to_string())
@@ -535,7 +581,8 @@ impl DatabaseBackend for FalkorDbDatabase {
     fn get_node_types(&self) -> Result<Vec<String>> {
         let rows = self.execute_query("MATCH (n) RETURN DISTINCT labels(n)[0] AS label")?;
 
-        let types: Vec<String> = rows.iter()
+        let types: Vec<String> = rows
+            .iter()
             .filter_map(|r| r.first())
             .filter_map(|v| v.as_str())
             .map(|s| s.to_string())
@@ -554,7 +601,8 @@ impl DatabaseBackend for FalkorDbDatabase {
         );
 
         let rows = self.execute_query(&cypher)?;
-        let nodes: Vec<DbNode> = rows.iter()
+        let nodes: Vec<DbNode> = rows
+            .iter()
             .filter_map(|r| r.first())
             .filter_map(|v| Self::parse_node(v))
             .collect();
@@ -573,7 +621,11 @@ impl DatabaseBackend for FalkorDbDatabase {
         );
 
         let rows = self.execute_query(&cypher)?;
-        if let Some(id) = rows.first().and_then(|r| r.first()).and_then(|v| v.as_str()) {
+        if let Some(id) = rows
+            .first()
+            .and_then(|r| r.first())
+            .and_then(|v| v.as_str())
+        {
             return Ok(Some(id.to_string()));
         }
 
@@ -584,7 +636,11 @@ impl DatabaseBackend for FalkorDbDatabase {
         );
 
         let rows = self.execute_query(&cypher)?;
-        if let Some(id) = rows.first().and_then(|r| r.first()).and_then(|v| v.as_str()) {
+        if let Some(id) = rows
+            .first()
+            .and_then(|r| r.first())
+            .and_then(|v| v.as_str())
+        {
             return Ok(Some(id.to_string()));
         }
 
@@ -637,16 +693,20 @@ impl DatabaseBackend for FalkorDbDatabase {
         let mut edges = Vec::new();
         for row in &rows {
             if row.len() >= 3 {
-                if let (Some(src_node), Some(tgt_node)) = (Self::parse_node(&row[0]), Self::parse_node(&row[2])) {
+                if let (Some(src_node), Some(tgt_node)) =
+                    (Self::parse_node(&row[0]), Self::parse_node(&row[2]))
+                {
                     node_ids.insert(src_node.id.clone());
                     node_ids.insert(tgt_node.id.clone());
 
                     if let Some(rel) = row[1].as_object() {
-                        let edge_type = rel.get("type")
+                        let edge_type = rel
+                            .get("type")
                             .and_then(|v| v.as_str())
                             .unwrap_or("RELATED")
                             .to_string();
-                        let props = rel.get("properties")
+                        let props = rel
+                            .get("properties")
                             .cloned()
                             .unwrap_or(JsonValue::Object(Map::new()));
 
@@ -667,11 +727,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         Ok((nodes, edges))
     }
 
-    fn shortest_path(
-        &self,
-        from: &str,
-        to: &str,
-    ) -> Result<Option<Vec<(String, Option<String>)>>> {
+    fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));
         }
@@ -695,7 +751,8 @@ impl DatabaseBackend for FalkorDbDatabase {
                 if let (Some(nodes), Some(rels)) = (nodes, rels) {
                     let mut path = Vec::new();
                     for (i, node) in nodes.iter().enumerate() {
-                        let node_id = node.as_object()
+                        let node_id = node
+                            .as_object()
                             .and_then(|o| o.get("properties"))
                             .and_then(|p| p.get("objectid"))
                             .and_then(|v| v.as_str())
@@ -703,7 +760,8 @@ impl DatabaseBackend for FalkorDbDatabase {
                             .to_string();
 
                         let edge_type = if i < rels.len() {
-                            rels[i].as_object()
+                            rels[i]
+                                .as_object()
                                 .and_then(|o| o.get("type"))
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string())
@@ -736,10 +794,14 @@ impl DatabaseBackend for FalkorDbDatabase {
         let exclude_clause = if exclude_edge_types.is_empty() {
             String::new()
         } else {
-            let types: Vec<String> = exclude_edge_types.iter()
+            let types: Vec<String> = exclude_edge_types
+                .iter()
                 .map(|t| format!("'{}'", t))
                 .collect();
-            format!("AND NONE(r IN relationships(p) WHERE type(r) IN [{}])", types.join(", "))
+            format!(
+                "AND NONE(r IN relationships(p) WHERE type(r) IN [{}])",
+                types.join(", ")
+            )
         };
 
         let cypher = format!(
@@ -757,14 +819,17 @@ impl DatabaseBackend for FalkorDbDatabase {
 
         for row in rows {
             if row.len() >= 3 {
-                if let (Some(id), Some(name), Some(hops)) = (
-                    row[0].as_str(),
-                    row[1].as_str(),
-                    row[2].as_i64(),
-                ) {
+                if let (Some(id), Some(name), Some(hops)) =
+                    (row[0].as_str(), row[1].as_str(), row[2].as_i64())
+                {
                     if !seen.contains(id) {
                         seen.insert(id.to_string());
-                        results.push((id.to_string(), "User".to_string(), name.to_string(), hops as usize));
+                        results.push((
+                            id.to_string(),
+                            "User".to_string(),
+                            name.to_string(),
+                            hops as usize,
+                        ));
                     }
                 }
             }
@@ -809,7 +874,8 @@ impl DatabaseBackend for FalkorDbDatabase {
     ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
         // Get total count
         let count_rows = self.execute_query("MATCH (h:QueryHistory) RETURN count(h) AS count")?;
-        let total = count_rows.first()
+        let total = count_rows
+            .first()
             .and_then(|r| r.first())
             .and_then(|v| v.as_i64())
             .unwrap_or(0) as usize;
@@ -825,7 +891,8 @@ impl DatabaseBackend for FalkorDbDatabase {
 
         let rows = self.execute_query(&cypher)?;
 
-        let history: Vec<(String, String, String, i64, Option<i64>)> = rows.iter()
+        let history: Vec<(String, String, String, i64, Option<i64>)> = rows
+            .iter()
             .filter_map(|r| {
                 let id = r.get(0)?.as_str()?.to_string();
                 let name = r.get(1)?.as_str()?.to_string();
