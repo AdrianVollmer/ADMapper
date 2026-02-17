@@ -330,11 +330,12 @@ pub fn create_api_router(state: AppState) -> Router {
 #[tokio::main]
 pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
     // Initialize tracing with colors
+    // RUST_LOG env var controls log level (e.g., RUST_LOG=debug or RUST_LOG=admapper=debug)
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
-        )
+        .with_env_filter(filter)
         .with_target(true)
         .with_ansi(true)
         .init();
