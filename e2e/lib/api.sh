@@ -124,13 +124,73 @@ api_clear() {
     api_request "POST" "/api/graph/clear"
 }
 
-# Execute a Cypher query
-# Usage: api_query "cypher_query"
+# Execute a Cypher query (async with SSE progress)
+# Usage: api_query "cypher_query" [timeout_seconds]
 api_query() {
     local query="$1"
+    local timeout="${2:-60}"
     local escaped_query
     escaped_query=$(echo "$query" | jq -Rs '.')
-    api_request "POST" "/api/graph/query" "{\"query\": $escaped_query}"
+
+    # Start the query
+    local start_response
+    start_response=$(api_request "POST" "/api/graph/query" "{\"query\": $escaped_query}")
+    if [ $? -ne 0 ]; then
+        echo "$start_response"
+        return 1
+    fi
+
+    # Extract query_id
+    local query_id
+    query_id=$(echo "$start_response" | jq -r '.query_id // empty')
+    if [ -z "$query_id" ]; then
+        echo "Failed to get query_id: $start_response"
+        return 1
+    fi
+
+    # Wait for query completion via SSE
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        local progress
+        progress=$(api_query_progress "$query_id")
+
+        local status
+        status=$(echo "$progress" | jq -r '.status // empty' 2>/dev/null)
+
+        case "$status" in
+            "completed")
+                # Return the full progress which includes results
+                echo "$progress"
+                return 0
+                ;;
+            "failed")
+                echo "$progress"
+                return 1
+                ;;
+            "aborted")
+                echo "$progress"
+                return 1
+                ;;
+            "running")
+                # Still running, wait and retry
+                ;;
+        esac
+
+        sleep 0.5
+        elapsed=$((elapsed + 1))
+    done
+
+    echo "Query timeout after ${timeout}s"
+    return 1
+}
+
+# Get query progress (SSE endpoint)
+# Usage: api_query_progress "query_id"
+api_query_progress() {
+    local query_id="$1"
+    local url="${API_BASE}/api/query/progress/$query_id"
+    # SSE returns "data: {...}\n\n", extract JSON from the data line
+    curl -s "$url" 2>/dev/null | grep '^data: ' | head -1 | sed 's/^data: //'
 }
 
 # Search the graph
