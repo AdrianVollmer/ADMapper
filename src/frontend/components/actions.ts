@@ -14,7 +14,8 @@ import { openDbManager } from "./db-manager";
 import { exportPNG, exportSVG, exportJSON } from "./export";
 import { openInsights } from "./insights";
 import { openAddNode, openAddEdge } from "./add-node-edge";
-import { openDbConnect, disconnectDb } from "./db-connect";
+import { openDbConnect, disconnectDb, connectToUrl } from "./db-connect";
+import { getRecentConnections, clearConnectionHistory } from "./connection-history";
 
 /** Dispatch an action by name */
 export function dispatchAction(action: string): void {
@@ -26,6 +27,10 @@ export function dispatchAction(action: string): void {
 
     case "disconnect-db":
       disconnectDb();
+      break;
+
+    case "clear-recent-connections":
+      clearRecentConnectionsMenu();
       break;
 
     case "export-png":
@@ -172,6 +177,61 @@ export function dispatchAction(action: string): void {
       break;
 
     default:
-      console.log(`Unknown action: ${action}`);
+      // Handle dynamic recent connection actions
+      if (action.startsWith("recent-connection-")) {
+        handleRecentConnection(action);
+      } else {
+        console.log(`Unknown action: ${action}`);
+      }
   }
+}
+
+/** Handle connecting to a recent connection */
+async function handleRecentConnection(action: string): Promise<void> {
+  const index = parseInt(action.replace("recent-connection-", ""), 10);
+  const connections = await getRecentConnections();
+  const connection = connections[index];
+  if (connection) {
+    await connectToUrl(connection.url);
+  }
+}
+
+/** Clear recent connections menu */
+async function clearRecentConnectionsMenu(): Promise<void> {
+  await clearConnectionHistory();
+  await updateRecentConnectionsMenu();
+}
+
+/** Update the recent connections submenu */
+export async function updateRecentConnectionsMenu(): Promise<void> {
+  const submenu = document.getElementById("recent-connections-submenu");
+  if (!submenu) return;
+
+  const connections = await getRecentConnections();
+
+  if (connections.length === 0) {
+    submenu.innerHTML = `
+      <div class="menu-empty">No recent connections</div>
+    `;
+    return;
+  }
+
+  let html = "";
+  for (const [index, conn] of connections.entries()) {
+    const escapedName = conn.displayName.replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    html += `
+      <button class="menu-option" data-action="recent-connection-${index}" role="menuitem">
+        <span>${escapedName}</span>
+      </button>
+    `;
+  }
+
+  html += `
+    <div class="menu-separator" role="separator"></div>
+    <button class="menu-option" data-action="clear-recent-connections" role="menuitem">
+      <span>Clear Recent</span>
+    </button>
+  `;
+
+  submenu.innerHTML = html;
 }

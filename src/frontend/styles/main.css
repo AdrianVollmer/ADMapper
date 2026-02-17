@@ -51,6 +51,10 @@
     @apply my-1 border-t border-gray-600;
   }
 
+  .menu-empty {
+    @apply px-3 py-2 text-sm text-gray-500 italic;
+  }
+
   /* Submenu support */
   .menu-submenu {
     @apply relative;

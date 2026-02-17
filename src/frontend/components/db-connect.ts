@@ -10,6 +10,7 @@
 
 import { appState } from "../main";
 import { showNoConnectionPlaceholder } from "./graph-view";
+import { saveConnection, getDisplayName } from "./connection-history";
 
 /** Database types */
 type DatabaseType = "kuzu" | "cozo" | "neo4j" | "falkordb";
@@ -172,6 +173,15 @@ async function connectToDatabase(): Promise<void> {
       appState.databaseConnected = result.connected;
       appState.databaseType = result.database_type;
       updateConnectionStatus();
+
+      // Save to connection history
+      const dbType = result.database_type || selectedDbType;
+      await saveConnection({
+        url,
+        displayName: getDisplayName(url, dbType),
+        databaseType: dbType,
+      });
+
       closeDbConnect();
     } else {
       const error = await response.text();
@@ -184,6 +194,41 @@ async function connectToDatabase(): Promise<void> {
       connectBtn.disabled = false;
       connectBtn.textContent = "Connect";
     }
+  }
+}
+
+/** Connect to a database using a URL directly (for recent connections) */
+export async function connectToUrl(url: string): Promise<boolean> {
+  try {
+    const response = await fetch("/api/database/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      appState.databaseConnected = result.connected;
+      appState.databaseType = result.database_type;
+      updateConnectionStatus();
+
+      // Save to connection history (moves it to top)
+      const dbType = result.database_type || "unknown";
+      await saveConnection({
+        url,
+        displayName: getDisplayName(url, dbType),
+        databaseType: dbType,
+      });
+
+      return true;
+    } else {
+      const error = await response.text();
+      console.error("Connection failed:", error);
+      return false;
+    }
+  } catch (error) {
+    console.error("Connection error:", error);
+    return false;
   }
 }
 

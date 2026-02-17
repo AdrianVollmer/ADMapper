@@ -4,7 +4,7 @@
  * Handles classic dropdown menu behavior with keyboard navigation.
  */
 
-import { dispatchAction } from "./actions";
+import { dispatchAction, updateRecentConnectionsMenu } from "./actions";
 
 let activeMenu: HTMLElement | null = null;
 
@@ -75,6 +75,12 @@ function openMenu(menuItem: HTMLElement): void {
     trigger.setAttribute("aria-expanded", "true");
     dropdown.removeAttribute("hidden");
     activeMenu = menuItem;
+
+    // Update recent connections when File menu is opened
+    const menuName = menuItem.getAttribute("data-menu");
+    if (menuName === "file") {
+      updateRecentConnectionsMenu();
+    }
 
     // Focus first option
     const firstOption = dropdown.querySelector(".menu-option") as HTMLElement;
