@@ -6,7 +6,7 @@ use neo4rs::{query, Graph, Node as Neo4jNode, Query, Relation, Row};
 use serde_json::{json, Map, Value as JsonValue};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::runtime::Runtime;
+use tokio::runtime::Handle;
 use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
@@ -17,7 +17,7 @@ use super::types::{
 /// Neo4j database backend.
 pub struct Neo4jDatabase {
     graph: Arc<Graph>,
-    runtime: Runtime,
+    handle: Handle,
 }
 
 impl Neo4jDatabase {
@@ -35,17 +35,19 @@ impl Neo4jDatabase {
 
         info!(uri = %uri, user = %user, "Connecting to Neo4j");
 
-        // Create a tokio runtime for async operations
-        let runtime = Runtime::new().map_err(|e| DbError::Database(e.to_string()))?;
+        // Get the current tokio runtime handle
+        let handle = Handle::current();
 
-        // Connect to Neo4j
-        let graph = runtime.block_on(async { Graph::new(&uri, &user, &pass).await })?;
+        // Connect to Neo4j using block_in_place to allow blocking in async context
+        let graph = tokio::task::block_in_place(|| {
+            handle.block_on(async { Graph::new(&uri, &user, &pass).await })
+        })?;
 
         info!("Connected to Neo4j");
 
         Ok(Self {
             graph: Arc::new(graph),
-            runtime,
+            handle,
         })
     }
 
@@ -118,21 +120,27 @@ impl Neo4jDatabase {
 
     /// Execute a query and return all rows.
     fn execute_query(&self, q: Query) -> Result<Vec<Row>> {
-        self.runtime.block_on(async {
-            let mut result = self.graph.execute(q).await?;
-            let mut rows = Vec::new();
-            while let Some(row) = result.next().await? {
-                rows.push(row);
-            }
-            Ok(rows)
+        let graph = self.graph.clone();
+        tokio::task::block_in_place(|| {
+            self.handle.block_on(async {
+                let mut result = graph.execute(q).await?;
+                let mut rows = Vec::new();
+                while let Some(row) = result.next().await? {
+                    rows.push(row);
+                }
+                Ok(rows)
+            })
         })
     }
 
     /// Execute a write-only query.
     fn run_query(&self, q: Query) -> Result<()> {
-        self.runtime.block_on(async {
-            self.graph.run(q).await?;
-            Ok(())
+        let graph = self.graph.clone();
+        tokio::task::block_in_place(|| {
+            self.handle.block_on(async {
+                graph.run(q).await?;
+                Ok(())
+            })
         })
     }
 }
@@ -664,63 +672,67 @@ impl DatabaseBackend for Neo4jDatabase {
         debug!(query = %cypher, "Running custom Cypher query");
 
         // Execute the query and collect results
-        let result = self.runtime.block_on(async {
-            let mut stream = self.graph.execute(query(cypher)).await?;
-            let mut rows = Vec::new();
+        let graph = self.graph.clone();
+        let cypher = cypher.to_string();
+        let result = tokio::task::block_in_place(|| {
+            self.handle.block_on(async {
+                let mut stream = graph.execute(query(&cypher)).await?;
+                let mut rows = Vec::new();
 
-            while let Some(row) = stream.next().await? {
-                // Neo4rs Row doesn't expose column names, so we try common patterns
-                // For custom queries, users should use aliases like "RETURN x AS result"
-                let mut obj = Map::new();
+                while let Some(row) = stream.next().await? {
+                    // Neo4rs Row doesn't expose column names, so we try common patterns
+                    // For custom queries, users should use aliases like "RETURN x AS result"
+                    let mut obj = Map::new();
 
-                // Try common column names that might be returned
-                let try_columns = [
-                    "n",
-                    "m",
-                    "r",
-                    "p",
-                    "result",
-                    "count",
-                    "total",
-                    "name",
-                    "id",
-                    "value",
-                    "nodes",
-                    "relationships",
-                    "path",
-                ];
+                    // Try common column names that might be returned
+                    let try_columns = [
+                        "n",
+                        "m",
+                        "r",
+                        "p",
+                        "result",
+                        "count",
+                        "total",
+                        "name",
+                        "id",
+                        "value",
+                        "nodes",
+                        "relationships",
+                        "path",
+                    ];
 
-                for col in try_columns {
-                    if let Ok(val) = row.get::<String>(col) {
-                        obj.insert(col.to_string(), JsonValue::String(val));
-                    } else if let Ok(val) = row.get::<i64>(col) {
-                        obj.insert(col.to_string(), JsonValue::Number(val.into()));
-                    } else if let Ok(val) = row.get::<f64>(col) {
-                        if let Some(n) = serde_json::Number::from_f64(val) {
-                            obj.insert(col.to_string(), JsonValue::Number(n));
+                    for col in try_columns {
+                        if let Ok(val) = row.get::<String>(col) {
+                            obj.insert(col.to_string(), JsonValue::String(val));
+                        } else if let Ok(val) = row.get::<i64>(col) {
+                            obj.insert(col.to_string(), JsonValue::Number(val.into()));
+                        } else if let Ok(val) = row.get::<f64>(col) {
+                            if let Some(n) = serde_json::Number::from_f64(val) {
+                                obj.insert(col.to_string(), JsonValue::Number(n));
+                            }
+                        } else if let Ok(val) = row.get::<bool>(col) {
+                            obj.insert(col.to_string(), JsonValue::Bool(val));
+                        } else if let Ok(node) = row.get::<Neo4jNode>(col) {
+                            let db_node = Neo4jDatabase::neo4j_node_to_db_node(&node);
+                            obj.insert(
+                                col.to_string(),
+                                json!({
+                                    "id": db_node.id,
+                                    "label": db_node.label,
+                                    "type": db_node.node_type,
+                                    "properties": db_node.properties,
+                                }),
+                            );
                         }
-                    } else if let Ok(val) = row.get::<bool>(col) {
-                        obj.insert(col.to_string(), JsonValue::Bool(val));
-                    } else if let Ok(node) = row.get::<Neo4jNode>(col) {
-                        let db_node = Self::neo4j_node_to_db_node(&node);
-                        obj.insert(
-                            col.to_string(),
-                            json!({
-                                "id": db_node.id,
-                                "label": db_node.label,
-                                "type": db_node.node_type,
-                                "properties": db_node.properties,
-                            }),
-                        );
+                    }
+
+                    if !obj.is_empty() {
+                        rows.push(JsonValue::Object(obj));
                     }
                 }
 
-                if !obj.is_empty() {
-                    rows.push(JsonValue::Object(obj));
-                }
-            }
-
-            Ok::<_, neo4rs::Error>(rows)
+                Ok::<_, neo4rs::Error>(rows)
+            })
         })?;
 
         Ok(json!({ "results": result }))
