@@ -48,8 +48,8 @@ run_tests() {
 
     # Extract actual total counts
     local actual_nodes actual_edges
-    actual_nodes=$(echo "$actual" | jq -r '.nodes')
-    actual_edges=$(echo "$actual" | jq -r '.edges')
+    actual_nodes=$(echo "$actual" | jq -r '.total_nodes')
+    actual_edges=$(echo "$actual" | jq -r '.total_edges')
 
     test_start "Total node count matches expected"
     if assert_equals "$expected_nodes" "$actual_nodes" "node count"; then
