@@ -33,9 +33,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 use std::convert::Infallible;
-use std::io::Cursor;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
@@ -64,6 +64,8 @@ pub enum ApiError {
     NotFound(String),
     /// Not connected to a database
     NotConnected,
+    /// Internal server error
+    Internal(String),
 }
 
 impl std::fmt::Display for ApiError {
@@ -73,6 +75,7 @@ impl std::fmt::Display for ApiError {
             ApiError::BadRequest(msg) => write!(f, "Bad request: {msg}"),
             ApiError::NotFound(msg) => write!(f, "Not found: {msg}"),
             ApiError::NotConnected => write!(f, "Not connected to a database"),
+            ApiError::Internal(msg) => write!(f, "Internal error: {msg}"),
         }
     }
 }
@@ -96,6 +99,7 @@ impl IntoResponse for ApiError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Not connected to a database".to_string(),
             ),
+            ApiError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };
 
         (status, message).into_response()
@@ -470,24 +474,48 @@ async fn import_bloodhound(
     });
     state.import_jobs.insert(job_id.clone(), job.clone());
 
-    // Collect uploaded files
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    // Stream uploaded files to temp files to avoid holding large files in memory
+    let mut files: Vec<(String, std::path::PathBuf)> = Vec::new();
 
-    while let Some(field) = multipart.next_field().await.map_err(|e| {
+    while let Some(mut field) = multipart.next_field().await.map_err(|e| {
         error!(error = %e, "Multipart read error");
         ApiError::BadRequest(format!("Multipart error: {e}"))
     })? {
         let filename = field.file_name().unwrap_or("unknown").to_string();
-        let data = field
-            .bytes()
-            .await
-            .map_err(|e| {
-                error!(error = %e, filename = %filename, "Failed to read file data");
-                ApiError::BadRequest(format!("Read error: {e}"))
-            })?
-            .to_vec();
-        debug!(filename = %filename, size = data.len(), "Received file");
-        files.push((filename, data));
+
+        // Create temp file path with unique ID
+        let temp_path = std::env::temp_dir().join(format!(
+            "admapper-upload-{}-{}",
+            uuid::Uuid::new_v4(),
+            filename.replace(std::path::MAIN_SEPARATOR, "_")
+        ));
+
+        // Create and write to temp file
+        let mut async_file = tokio::fs::File::create(&temp_path).await.map_err(|e| {
+            error!(error = %e, path = %temp_path.display(), "Failed to create temp file");
+            ApiError::Internal(format!("Temp file error: {e}"))
+        })?;
+        let mut total_bytes = 0usize;
+
+        // Stream chunks to temp file
+        while let Some(chunk) = field.chunk().await.map_err(|e| {
+            error!(error = %e, filename = %filename, "Failed to read chunk");
+            ApiError::BadRequest(format!("Read error: {e}"))
+        })? {
+            total_bytes += chunk.len();
+            async_file.write_all(&chunk).await.map_err(|e| {
+                error!(error = %e, filename = %filename, "Failed to write chunk");
+                ApiError::Internal(format!("Write error: {e}"))
+            })?;
+        }
+
+        async_file.flush().await.map_err(|e| {
+            error!(error = %e, filename = %filename, "Failed to flush temp file");
+            ApiError::Internal(format!("Flush error: {e}"))
+        })?;
+
+        debug!(filename = %filename, size = total_bytes, path = %temp_path.display(), "Received file");
+        files.push((filename, temp_path));
     }
 
     if files.is_empty() {
@@ -507,17 +535,19 @@ async fn import_bloodhound(
         let mut importer = BloodHoundImporter::new(db, tx);
         let mut final_progress: Option<ImportProgress> = None;
 
-        for (filename, data) in files {
-            info!(filename = %filename, size = data.len(), "Importing file");
+        for (filename, temp_path) in &files {
+            info!(filename = %filename, path = %temp_path.display(), "Importing file");
             let result = if filename.ends_with(".zip") {
-                let cursor = Cursor::new(data);
-                importer.import_zip(cursor, &job_id_clone)
+                // Open temp file for reading
+                match std::fs::File::open(temp_path) {
+                    Ok(file) => importer.import_zip(file, &job_id_clone),
+                    Err(e) => {
+                        error!(error = %e, path = %temp_path.display(), "Failed to open temp file");
+                        Err(format!("Failed to open temp file: {e}"))
+                    }
+                }
             } else if filename.ends_with(".json") {
-                // For JSON, write to temp file and import
-                let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-                let temp_path = temp_dir.path().join(&filename);
-                std::fs::write(&temp_path, &data).expect("Failed to write temp file");
-                importer.import_json_file(&temp_path, &job_id_clone)
+                importer.import_json_file(temp_path, &job_id_clone)
             } else {
                 warn!(filename = %filename, "Unsupported file type");
                 Err(format!("Unsupported file type: {filename}"))
@@ -536,6 +566,13 @@ async fn import_bloodhound(
                 Err(e) => {
                     error!(filename = %filename, error = %e, "Import failed");
                 }
+            }
+        }
+
+        // Clean up temp files
+        for (filename, temp_path) in files {
+            if let Err(e) = std::fs::remove_file(&temp_path) {
+                debug!(filename = %filename, error = %e, "Failed to remove temp file (may already be cleaned up)");
             }
         }
 

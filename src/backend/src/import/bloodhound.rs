@@ -3,6 +3,7 @@
 use crate::db::{DatabaseBackend, DbEdge, DbNode};
 use crate::import::types::ImportProgress;
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
 use std::io::{Read, Seek};
@@ -25,11 +26,14 @@ struct BloodHoundMeta {
     version: Option<i32>,
 }
 
-/// BloodHound file structure.
+/// BloodHound file structure with lazy parsing.
+/// Uses RawValue to defer parsing of individual entities until needed,
+/// reducing peak memory usage for large files.
 #[derive(Debug, Deserialize)]
-struct BloodHoundFile {
+struct BloodHoundFile<'a> {
     meta: Option<BloodHoundMeta>,
-    data: Vec<JsonValue>,
+    #[serde(borrow)]
+    data: Vec<&'a RawValue>,
 }
 
 /// BloodHound data importer.
@@ -159,29 +163,31 @@ impl BloodHoundImporter {
         contents: &str,
         progress: &mut ImportProgress,
     ) -> Result<(), String> {
+        // Parse with RawValue to defer entity parsing - reduces peak memory
         let file: BloodHoundFile = serde_json::from_str(contents).map_err(|e| {
             error!(error = %e, "Failed to parse JSON");
             format!("Invalid JSON: {e}")
         })?;
 
+        // Infer data type from metadata or first entity
         let data_type = file
             .meta
             .as_ref()
             .map(|m| m.data_type.clone())
             .unwrap_or_else(|| {
-                // Try to infer type from data
-                if let Some(first) = file.data.first() {
-                    if first.get("Members").is_some() {
-                        "groups".to_string()
-                    } else if first.get("Sessions").is_some() || first.get("LocalGroups").is_some()
-                    {
-                        "computers".to_string()
-                    } else {
-                        "users".to_string()
+                // Try to infer type from first entity (parse just the first one)
+                if let Some(first_raw) = file.data.first() {
+                    if let Ok(first) = serde_json::from_str::<JsonValue>(first_raw.get()) {
+                        if first.get("Members").is_some() {
+                            return "groups".to_string();
+                        } else if first.get("Sessions").is_some()
+                            || first.get("LocalGroups").is_some()
+                        {
+                            return "computers".to_string();
+                        }
                     }
-                } else {
-                    "unknown".to_string()
                 }
+                "users".to_string()
             });
 
         info!(
@@ -193,9 +199,19 @@ impl BloodHoundImporter {
         let mut node_batch: Vec<DbNode> = Vec::with_capacity(BATCH_SIZE);
         let mut edge_batch: Vec<DbEdge> = Vec::with_capacity(BATCH_SIZE);
 
-        for entity in &file.data {
+        // Process each entity - parse from RawValue on demand
+        for raw_entity in &file.data {
+            // Parse this entity now (lazy parsing)
+            let entity: JsonValue = match serde_json::from_str(raw_entity.get()) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(error = %e, "Failed to parse entity, skipping");
+                    continue;
+                }
+            };
+
             // Extract node
-            if let Some(node) = self.extract_node(&data_type, entity) {
+            if let Some(node) = self.extract_node(&data_type, &entity) {
                 if !self.seen_nodes.contains(&node.id) {
                     self.seen_nodes.insert(node.id.clone());
                     node_batch.push(node);
@@ -207,7 +223,7 @@ impl BloodHoundImporter {
             }
 
             // Extract edges
-            let edges = self.extract_edges(&data_type, entity);
+            let edges = self.extract_edges(&data_type, &entity);
             for edge in edges {
                 edge_batch.push(edge);
 
