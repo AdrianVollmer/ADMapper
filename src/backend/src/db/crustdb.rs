@@ -752,25 +752,7 @@ impl CrustDatabase {
                     .map(|col| {
                         row.values
                             .get(col)
-                            .map(|v| match v {
-                                crustdb::ResultValue::Property(pv) => match pv {
-                                    crustdb::PropertyValue::String(s) => {
-                                        JsonValue::String(s.clone())
-                                    }
-                                    crustdb::PropertyValue::Integer(n) => {
-                                        JsonValue::Number((*n).into())
-                                    }
-                                    crustdb::PropertyValue::Float(f) => {
-                                        serde_json::Number::from_f64(*f)
-                                            .map(JsonValue::Number)
-                                            .unwrap_or(JsonValue::Null)
-                                    }
-                                    crustdb::PropertyValue::Bool(b) => JsonValue::Bool(*b),
-                                    crustdb::PropertyValue::Null => JsonValue::Null,
-                                    _ => JsonValue::String(format!("{:?}", pv)),
-                                },
-                                _ => JsonValue::String(format!("{:?}", v)),
-                            })
+                            .map(|v| Self::result_value_to_json(v))
                             .unwrap_or(JsonValue::Null)
                     })
                     .collect()
@@ -781,6 +763,91 @@ impl CrustDatabase {
             "headers": headers,
             "rows": rows
         }))
+    }
+
+    /// Convert a CrustDB ResultValue to JSON.
+    fn result_value_to_json(v: &crustdb::ResultValue) -> JsonValue {
+        match v {
+            crustdb::ResultValue::Property(pv) => Self::property_value_to_json(pv),
+            crustdb::ResultValue::Node {
+                id,
+                labels,
+                properties,
+            } => {
+                let props: serde_json::Map<String, JsonValue> = properties
+                    .iter()
+                    .map(|(k, pv)| (k.clone(), Self::property_value_to_json(pv)))
+                    .collect();
+                // Get object_id from properties if available
+                let object_id = properties
+                    .get("object_id")
+                    .and_then(|v| {
+                        if let crustdb::PropertyValue::String(s) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| id.to_string());
+                serde_json::json!({
+                    "_type": "node",
+                    "id": id,
+                    "object_id": object_id,
+                    "labels": labels,
+                    "properties": props
+                })
+            }
+            crustdb::ResultValue::Edge {
+                id,
+                source,
+                target,
+                edge_type,
+                properties,
+            } => {
+                let props: serde_json::Map<String, JsonValue> = properties
+                    .iter()
+                    .map(|(k, pv)| (k.clone(), Self::property_value_to_json(pv)))
+                    .collect();
+                serde_json::json!({
+                    "_type": "edge",
+                    "id": id,
+                    "source": source,
+                    "target": target,
+                    "edge_type": edge_type,
+                    "properties": props
+                })
+            }
+            crustdb::ResultValue::Path { nodes, edges } => {
+                serde_json::json!({
+                    "_type": "path",
+                    "nodes": nodes,
+                    "edges": edges
+                })
+            }
+        }
+    }
+
+    /// Convert a CrustDB PropertyValue to JSON.
+    fn property_value_to_json(pv: &crustdb::PropertyValue) -> JsonValue {
+        match pv {
+            crustdb::PropertyValue::String(s) => JsonValue::String(s.clone()),
+            crustdb::PropertyValue::Integer(n) => JsonValue::Number((*n).into()),
+            crustdb::PropertyValue::Float(f) => serde_json::Number::from_f64(*f)
+                .map(JsonValue::Number)
+                .unwrap_or(JsonValue::Null),
+            crustdb::PropertyValue::Bool(b) => JsonValue::Bool(*b),
+            crustdb::PropertyValue::Null => JsonValue::Null,
+            crustdb::PropertyValue::List(items) => {
+                JsonValue::Array(items.iter().map(Self::property_value_to_json).collect())
+            }
+            crustdb::PropertyValue::Map(map) => {
+                let obj: serde_json::Map<String, JsonValue> = map
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Self::property_value_to_json(v)))
+                    .collect();
+                JsonValue::Object(obj)
+            }
+        }
     }
 
     /// Get security insights.
