@@ -20,12 +20,13 @@ use dashmap::DashMap;
 use db::CozoDatabase;
 #[cfg(feature = "crustdb")]
 use db::CrustDatabase;
+#[cfg(feature = "falkordb")]
+use db::FalkorDbDatabase;
 #[cfg(feature = "kuzu")]
 use db::KuzuDatabase;
-use db::{
-    DatabaseBackend, DatabaseType, DatabaseUrl, DbError, FalkorDbDatabase, Neo4jDatabase,
-    QueryLanguage,
-};
+#[cfg(feature = "neo4j")]
+use db::Neo4jDatabase;
+use db::{DatabaseBackend, DatabaseType, DatabaseUrl, DbError, QueryLanguage};
 use import::{BloodHoundImporter, ImportProgress};
 use parking_lot::RwLock;
 use serde::Deserialize;
@@ -183,6 +184,7 @@ impl AppState {
             DatabaseType::CozoDB => {
                 return Err("CozoDB support not compiled in.".to_string());
             }
+            #[cfg(feature = "neo4j")]
             DatabaseType::Neo4j => {
                 let host = parsed.host.ok_or("Missing host for Neo4j")?;
                 let port = parsed.port.unwrap_or(7687);
@@ -196,12 +198,21 @@ impl AppState {
                 .map_err(|e| e.to_string())?;
                 Arc::new(db)
             }
+            #[cfg(not(feature = "neo4j"))]
+            DatabaseType::Neo4j => {
+                return Err("Neo4j support not compiled in.".to_string());
+            }
+            #[cfg(feature = "falkordb")]
             DatabaseType::FalkorDB => {
                 let host = parsed.host.ok_or("Missing host for FalkorDB")?;
                 let port = parsed.port.unwrap_or(6379);
                 let db = FalkorDbDatabase::new(&host, port, parsed.username, parsed.password)
                     .map_err(|e| e.to_string())?;
                 Arc::new(db)
+            }
+            #[cfg(not(feature = "falkordb"))]
+            DatabaseType::FalkorDB => {
+                return Err("FalkorDB support not compiled in.".to_string());
             }
             #[cfg(feature = "crustdb")]
             DatabaseType::CrustDB => {

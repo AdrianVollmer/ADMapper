@@ -93,4 +93,18 @@ impl From<crustdb::Error> for DbError {
     }
 }
 
+#[cfg(feature = "neo4j")]
+impl From<neo4rs::Error> for DbError {
+    fn from(e: neo4rs::Error) -> Self {
+        DbError::Database(e.to_string())
+    }
+}
+
+#[cfg(feature = "falkordb")]
+impl From<falkordb::FalkorDBError> for DbError {
+    fn from(e: falkordb::FalkorDBError) -> Self {
+        DbError::Database(e.to_string())
+    }
+}
+
 pub type Result<T> = std::result::Result<T, DbError>;

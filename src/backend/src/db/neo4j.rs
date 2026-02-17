@@ -1,21 +1,21 @@
-//! Neo4j database backend (stub implementation).
+//! Neo4j database backend.
 //!
-//! Requires `neo4rs` crate for full implementation.
+//! Uses the `neo4rs` crate for connecting to Neo4j via Bolt protocol.
 
-use serde_json::Value as JsonValue;
+use neo4rs::{query, Graph, Node as Neo4jNode, Query, Relation, Row};
+use serde_json::{json, Map, Value as JsonValue};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+use tokio::runtime::Runtime;
+use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
-use super::types::{DbEdge, DbError, DbNode, DetailedStats, Result, SecurityInsights};
+use super::types::{DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights};
 
 /// Neo4j database backend.
-///
-/// This is currently a stub implementation. Full implementation requires
-/// the `neo4rs` crate and an async runtime.
 pub struct Neo4jDatabase {
-    _connection_string: String,
-    _username: Option<String>,
-    _password: Option<String>,
-    _database: Option<String>,
+    graph: Arc<Graph>,
+    runtime: Runtime,
 }
 
 impl Neo4jDatabase {
@@ -25,24 +25,111 @@ impl Neo4jDatabase {
         port: u16,
         username: Option<String>,
         password: Option<String>,
-        database: Option<String>,
+        _database: Option<String>,
     ) -> Result<Self> {
-        let connection_string = format!("bolt://{}:{}", host, port);
+        let uri = format!("{}:{}", host, port);
+        let user = username.unwrap_or_else(|| "neo4j".to_string());
+        let pass = password.unwrap_or_else(|| "neo4j".to_string());
 
-        // TODO: Actually establish connection using neo4rs
-        // For now, just store the configuration
+        info!(uri = %uri, user = %user, "Connecting to Neo4j");
+
+        // Create a tokio runtime for async operations
+        let runtime = Runtime::new().map_err(|e| DbError::Database(e.to_string()))?;
+
+        // Connect to Neo4j
+        let graph = runtime.block_on(async {
+            Graph::new(&uri, &user, &pass).await
+        })?;
+
+        info!("Connected to Neo4j");
+
         Ok(Self {
-            _connection_string: connection_string,
-            _username: username,
-            _password: password,
-            _database: database,
+            graph: Arc::new(graph),
+            runtime,
         })
     }
 
-    fn not_implemented<T>(&self) -> Result<T> {
-        Err(DbError::Database(
-            "Neo4j backend is not yet implemented".to_string(),
-        ))
+    /// Convert a Neo4j node to DbNode.
+    fn neo4j_node_to_db_node(node: &Neo4jNode) -> DbNode {
+        let id = node.get::<String>("objectid")
+            .or_else(|_| node.get::<String>("object_id"))
+            .or_else(|_| node.get::<i64>("id").map(|id| id.to_string()))
+            .unwrap_or_else(|_| format!("node_{}", node.id()));
+
+        let label = node.get::<String>("name")
+            .or_else(|_| node.get::<String>("label"))
+            .unwrap_or_else(|_| id.clone());
+
+        let node_type = node.labels().first()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // Convert all properties to JSON
+        let mut properties = Map::new();
+        for key in node.keys() {
+            if let Ok(val) = node.get::<String>(&key) {
+                properties.insert(key.to_string(), JsonValue::String(val));
+            } else if let Ok(val) = node.get::<i64>(&key) {
+                properties.insert(key.to_string(), JsonValue::Number(val.into()));
+            } else if let Ok(val) = node.get::<f64>(&key) {
+                if let Some(n) = serde_json::Number::from_f64(val) {
+                    properties.insert(key.to_string(), JsonValue::Number(n));
+                }
+            } else if let Ok(val) = node.get::<bool>(&key) {
+                properties.insert(key.to_string(), JsonValue::Bool(val));
+            }
+        }
+
+        DbNode {
+            id,
+            label,
+            node_type,
+            properties: JsonValue::Object(properties),
+        }
+    }
+
+    /// Convert a Neo4j relation to DbEdge.
+    fn neo4j_relation_to_db_edge(rel: &Relation, source_id: &str, target_id: &str) -> DbEdge {
+        let edge_type = rel.typ().to_string();
+
+        // Convert properties to JSON
+        let mut properties = Map::new();
+        for key in rel.keys() {
+            if let Ok(val) = rel.get::<String>(&key) {
+                properties.insert(key.to_string(), JsonValue::String(val));
+            } else if let Ok(val) = rel.get::<i64>(&key) {
+                properties.insert(key.to_string(), JsonValue::Number(val.into()));
+            } else if let Ok(val) = rel.get::<bool>(&key) {
+                properties.insert(key.to_string(), JsonValue::Bool(val));
+            }
+        }
+
+        DbEdge {
+            source: source_id.to_string(),
+            target: target_id.to_string(),
+            edge_type,
+            properties: JsonValue::Object(properties),
+        }
+    }
+
+    /// Execute a query and return all rows.
+    fn execute_query(&self, q: Query) -> Result<Vec<Row>> {
+        self.runtime.block_on(async {
+            let mut result = self.graph.execute(q).await?;
+            let mut rows = Vec::new();
+            while let Some(row) = result.next().await? {
+                rows.push(row);
+            }
+            Ok(rows)
+        })
+    }
+
+    /// Execute a write-only query.
+    fn run_query(&self, q: Query) -> Result<()> {
+        self.runtime.block_on(async {
+            self.graph.run(q).await?;
+            Ok(())
+        })
     }
 }
 
@@ -60,120 +147,611 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn clear(&self) -> Result<()> {
-        self.not_implemented()
+        info!("Clearing all data from Neo4j");
+        // Delete all relationships first, then all nodes
+        self.run_query(query("MATCH ()-[r]->() DELETE r"))?;
+        self.run_query(query("MATCH (n) DELETE n"))?;
+        debug!("Database cleared");
+        Ok(())
     }
 
-    fn insert_node(&self, _node: DbNode) -> Result<()> {
-        self.not_implemented()
+    fn insert_node(&self, node: DbNode) -> Result<()> {
+        self.insert_nodes(&[node])?;
+        Ok(())
     }
 
-    fn insert_edge(&self, _edge: DbEdge) -> Result<()> {
-        self.not_implemented()
+    fn insert_edge(&self, edge: DbEdge) -> Result<()> {
+        self.insert_edges(&[edge])?;
+        Ok(())
     }
 
-    fn insert_nodes(&self, _nodes: &[DbNode]) -> Result<usize> {
-        self.not_implemented()
+    fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
+        if nodes.is_empty() {
+            return Ok(0);
+        }
+
+        for node in nodes {
+            let props_str = serde_json::to_string(&node.properties)?;
+            let q = query(&format!(
+                "MERGE (n:{} {{objectid: $id}}) SET n.name = $label, n.properties = $props",
+                node.node_type
+            ))
+            .param("id", node.id.clone())
+            .param("label", node.label.clone())
+            .param("props", props_str);
+
+            self.run_query(q)?;
+        }
+
+        Ok(nodes.len())
     }
 
-    fn insert_edges(&self, _edges: &[DbEdge]) -> Result<usize> {
-        self.not_implemented()
+    fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
+        if edges.is_empty() {
+            return Ok(0);
+        }
+
+        for edge in edges {
+            let props_str = serde_json::to_string(&edge.properties)?;
+            let q = query(&format!(
+                "MATCH (a {{objectid: $src}}), (b {{objectid: $tgt}}) \
+                 MERGE (a)-[r:{}]->(b) SET r.properties = $props",
+                edge.edge_type
+            ))
+            .param("src", edge.source.clone())
+            .param("tgt", edge.target.clone())
+            .param("props", props_str);
+
+            if let Err(e) = self.run_query(q) {
+                debug!("Failed to create edge {} -> {}: {}", edge.source, edge.target, e);
+            }
+        }
+
+        Ok(edges.len())
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {
-        self.not_implemented()
+        let node_rows = self.execute_query(query("MATCH (n) RETURN count(n) AS count"))?;
+        let node_count = node_rows.first()
+            .and_then(|r| r.get::<i64>("count").ok())
+            .unwrap_or(0) as usize;
+
+        let edge_rows = self.execute_query(query("MATCH ()-[r]->() RETURN count(r) AS count"))?;
+        let edge_count = edge_rows.first()
+            .and_then(|r| r.get::<i64>("count").ok())
+            .unwrap_or(0) as usize;
+
+        Ok((node_count, edge_count))
     }
 
     fn get_detailed_stats(&self) -> Result<DetailedStats> {
-        self.not_implemented()
+        let (total_nodes, total_edges) = self.get_stats()?;
+
+        // Get counts by label
+        let rows = self.execute_query(query(
+            "MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count"
+        ))?;
+
+        let mut type_counts: HashMap<String, usize> = HashMap::new();
+        for row in rows {
+            if let (Ok(label), Ok(count)) = (row.get::<String>("label"), row.get::<i64>("count")) {
+                type_counts.insert(label, count as usize);
+            }
+        }
+
+        Ok(DetailedStats {
+            total_nodes,
+            total_edges,
+            users: type_counts.get("User").copied().unwrap_or(0),
+            computers: type_counts.get("Computer").copied().unwrap_or(0),
+            groups: type_counts.get("Group").copied().unwrap_or(0),
+            domains: type_counts.get("Domain").copied().unwrap_or(0),
+            ous: type_counts.get("OU").copied().unwrap_or(0),
+            gpos: type_counts.get("GPO").copied().unwrap_or(0),
+        })
     }
 
     fn get_security_insights(&self) -> Result<SecurityInsights> {
-        self.not_implemented()
+        debug!("Computing security insights");
+
+        // Count total users
+        let user_rows = self.execute_query(query("MATCH (n:User) RETURN count(n) AS count"))?;
+        let total_users = user_rows.first()
+            .and_then(|r| r.get::<i64>("count").ok())
+            .unwrap_or(0) as usize;
+
+        // Find real DAs (direct MemberOf path to DA groups)
+        let real_da_rows = self.execute_query(query(
+            "MATCH (u:User)-[:MemberOf*1..]->(g:Group) \
+             WHERE g.objectid ENDS WITH '-512' \
+             RETURN DISTINCT u.objectid AS id, u.name AS name"
+        ))?;
+
+        let real_das: Vec<(String, String)> = real_da_rows.iter()
+            .filter_map(|r| {
+                let id = r.get::<String>("id").ok()?;
+                let name = r.get::<String>("name").ok().unwrap_or_else(|| id.clone());
+                Some((id, name))
+            })
+            .collect();
+        let real_da_count = real_das.len();
+
+        // Find effective DAs (any path to DA groups)
+        let effective_da_rows = self.execute_query(query(
+            "MATCH p = (u:User)-[*1..10]->(g:Group) \
+             WHERE g.objectid ENDS WITH '-512' \
+             RETURN DISTINCT u.objectid AS id, u.name AS name, min(length(p)) AS hops"
+        ))?;
+
+        let effective_das: Vec<(String, String, usize)> = effective_da_rows.iter()
+            .filter_map(|r| {
+                let id = r.get::<String>("id").ok()?;
+                let name = r.get::<String>("name").ok().unwrap_or_else(|| id.clone());
+                let hops = r.get::<i64>("hops").ok().unwrap_or(1) as usize;
+                Some((id, name, hops))
+            })
+            .collect();
+        let effective_da_count = effective_das.len();
+
+        let da_ratio = if real_da_count > 0 {
+            effective_da_count as f64 / real_da_count as f64
+        } else {
+            0.0
+        };
+
+        let effective_da_percentage = if total_users > 0 {
+            (effective_da_count as f64 / total_users as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        // Compute reachability from well-known principals
+        let well_known = [
+            ("Everyone", "S-1-1-0"),
+            ("Authenticated Users", "S-1-5-11"),
+            ("Domain Users", "-513"),
+            ("Domain Computers", "-515"),
+        ];
+
+        let mut reachability = Vec::new();
+        for (name, pattern) in well_known {
+            let q = if pattern.starts_with('-') {
+                query(&format!(
+                    "MATCH (p) WHERE p.objectid ENDS WITH '{}' \
+                     OPTIONAL MATCH (p)-[*1..5]->(t) \
+                     RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
+                    pattern
+                ))
+            } else {
+                query(&format!(
+                    "MATCH (p {{objectid: '{}'}}) \
+                     OPTIONAL MATCH (p)-[*1..5]->(t) \
+                     RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
+                    pattern
+                ))
+            };
+
+            let rows = self.execute_query(q).unwrap_or_default();
+            let (principal_id, reachable_count) = rows.first()
+                .map(|r| {
+                    let id = r.get::<String>("id").ok();
+                    let cnt = r.get::<i64>("cnt").ok().unwrap_or(0) as usize;
+                    (id, cnt)
+                })
+                .unwrap_or((None, 0));
+
+            reachability.push(ReachabilityInsight {
+                principal_name: name.to_string(),
+                principal_id,
+                reachable_count,
+            });
+        }
+
+        Ok(SecurityInsights {
+            effective_da_count,
+            real_da_count,
+            da_ratio,
+            total_users,
+            effective_da_percentage,
+            reachability,
+            effective_das,
+            real_das,
+        })
     }
 
     fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
-        self.not_implemented()
+        let rows = self.execute_query(query("MATCH (n) RETURN n"))?;
+
+        let nodes: Vec<DbNode> = rows.iter()
+            .filter_map(|r| r.get::<Neo4jNode>("n").ok())
+            .map(|n| Self::neo4j_node_to_db_node(&n))
+            .collect();
+
+        Ok(nodes)
     }
 
     fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
-        self.not_implemented()
+        let rows = self.execute_query(query(
+            "MATCH (a)-[r]->(b) RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel"
+        ))?;
+
+        let edges: Vec<DbEdge> = rows.iter()
+            .filter_map(|r| {
+                let src = r.get::<String>("src").ok()?;
+                let tgt = r.get::<String>("tgt").ok()?;
+                let rel = r.get::<Relation>("rel").ok()?;
+                Some(Self::neo4j_relation_to_db_edge(&rel, &src, &tgt))
+            })
+            .collect();
+
+        Ok(edges)
     }
 
-    fn get_nodes_by_ids(&self, _ids: &[String]) -> Result<Vec<DbNode>> {
-        self.not_implemented()
+    fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let q = query("MATCH (n) WHERE n.objectid IN $ids RETURN n")
+            .param("ids", ids.to_vec());
+
+        let rows = self.execute_query(q)?;
+        let nodes: Vec<DbNode> = rows.iter()
+            .filter_map(|r| r.get::<Neo4jNode>("n").ok())
+            .map(|n| Self::neo4j_node_to_db_node(&n))
+            .collect();
+
+        Ok(nodes)
     }
 
-    fn get_edges_between(&self, _node_ids: &[String]) -> Result<Vec<DbEdge>> {
-        self.not_implemented()
+    fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>> {
+        if node_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let q = query(
+            "MATCH (a)-[r]->(b) \
+             WHERE a.objectid IN $ids AND b.objectid IN $ids \
+             RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel"
+        )
+        .param("ids", node_ids.to_vec());
+
+        let rows = self.execute_query(q)?;
+        let edges: Vec<DbEdge> = rows.iter()
+            .filter_map(|r| {
+                let src = r.get::<String>("src").ok()?;
+                let tgt = r.get::<String>("tgt").ok()?;
+                let rel = r.get::<Relation>("rel").ok()?;
+                Some(Self::neo4j_relation_to_db_edge(&rel, &src, &tgt))
+            })
+            .collect();
+
+        Ok(edges)
     }
 
     fn get_edge_types(&self) -> Result<Vec<String>> {
-        self.not_implemented()
+        let rows = self.execute_query(query("MATCH ()-[r]->() RETURN DISTINCT type(r) AS typ"))?;
+
+        let types: Vec<String> = rows.iter()
+            .filter_map(|r| r.get::<String>("typ").ok())
+            .collect();
+
+        Ok(types)
     }
 
     fn get_node_types(&self) -> Result<Vec<String>> {
-        self.not_implemented()
+        let rows = self.execute_query(query("MATCH (n) RETURN DISTINCT labels(n)[0] AS label"))?;
+
+        let types: Vec<String> = rows.iter()
+            .filter_map(|r| r.get::<String>("label").ok())
+            .collect();
+
+        Ok(types)
     }
 
-    fn search_nodes(&self, _query: &str, _limit: usize) -> Result<Vec<DbNode>> {
-        self.not_implemented()
+    fn search_nodes(&self, search_query: &str, limit: usize) -> Result<Vec<DbNode>> {
+        // Use toLower and CONTAINS for case-insensitive search (simpler than regex)
+        let q = query(
+            "MATCH (n) WHERE toLower(n.name) CONTAINS toLower($search) OR toLower(n.objectid) CONTAINS toLower($search) RETURN n LIMIT $limit"
+        )
+        .param("search", search_query.to_string())
+        .param("limit", limit as i64);
+
+        let rows = self.execute_query(q)?;
+        let nodes: Vec<DbNode> = rows.iter()
+            .filter_map(|r| r.get::<Neo4jNode>("n").ok())
+            .map(|n| Self::neo4j_node_to_db_node(&n))
+            .collect();
+
+        debug!(query = %search_query, found = nodes.len(), "Search complete");
+        Ok(nodes)
     }
 
-    fn resolve_node_identifier(&self, _identifier: &str) -> Result<Option<String>> {
-        self.not_implemented()
+    fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {
+        // Try exact objectid match
+        let q = query("MATCH (n {objectid: $id}) RETURN n.objectid AS id LIMIT 1")
+            .param("id", identifier.to_string());
+
+        let rows = self.execute_query(q)?;
+        if let Some(row) = rows.first() {
+            if let Ok(id) = row.get::<String>("id") {
+                return Ok(Some(id));
+            }
+        }
+
+        // Try case-insensitive name match
+        let q = query("MATCH (n) WHERE toLower(n.name) = toLower($name) RETURN n.objectid AS id LIMIT 1")
+            .param("name", identifier.to_string());
+
+        let rows = self.execute_query(q)?;
+        if let Some(row) = rows.first() {
+            if let Ok(id) = row.get::<String>("id") {
+                return Ok(Some(id));
+            }
+        }
+
+        Ok(None)
     }
 
     fn get_node_connections(
         &self,
-        _node_id: &str,
-        _direction: &str,
+        node_id: &str,
+        direction: &str,
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
-        self.not_implemented()
+        debug!(node_id = %node_id, direction = %direction, "Getting node connections");
+
+        let q = match direction {
+            "incoming" => query(
+                "MATCH (a)-[r]->(b {objectid: $id}) RETURN a, r, b"
+            ),
+            "outgoing" => query(
+                "MATCH (a {objectid: $id})-[r]->(b) RETURN a, r, b"
+            ),
+            "admin" => query(
+                "MATCH (a {objectid: $id})-[r]->(b) \
+                 WHERE type(r) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember'] \
+                 RETURN a, r, b"
+            ),
+            "memberof" => query(
+                "MATCH (a {objectid: $id})-[r:MemberOf]->(b) RETURN a, r, b"
+            ),
+            "members" => query(
+                "MATCH (a)-[r:MemberOf]->(b {objectid: $id}) RETURN a, r, b"
+            ),
+            _ => query(
+                "MATCH (a {objectid: $id})-[r]-(b) RETURN a, r, b"
+            ),
+        }
+        .param("id", node_id.to_string());
+
+        let rows = self.execute_query(q)?;
+
+        let mut node_ids: HashSet<String> = HashSet::new();
+        node_ids.insert(node_id.to_string());
+
+        let mut edges = Vec::new();
+        for row in &rows {
+            if let (Ok(a), Ok(r), Ok(b)) = (
+                row.get::<Neo4jNode>("a"),
+                row.get::<Relation>("r"),
+                row.get::<Neo4jNode>("b"),
+            ) {
+                let src = Self::neo4j_node_to_db_node(&a);
+                let tgt = Self::neo4j_node_to_db_node(&b);
+                node_ids.insert(src.id.clone());
+                node_ids.insert(tgt.id.clone());
+                edges.push(Self::neo4j_relation_to_db_edge(&r, &src.id, &tgt.id));
+            }
+        }
+
+        let node_id_vec: Vec<String> = node_ids.into_iter().collect();
+        let nodes = self.get_nodes_by_ids(&node_id_vec)?;
+
+        Ok((nodes, edges))
     }
 
     fn shortest_path(
         &self,
-        _from: &str,
-        _to: &str,
+        from: &str,
+        to: &str,
     ) -> Result<Option<Vec<(String, Option<String>)>>> {
-        self.not_implemented()
+        if from == to {
+            return Ok(Some(vec![(from.to_string(), None)]));
+        }
+
+        let q = query(
+            "MATCH p = shortestPath((a {objectid: $from})-[*..20]->(b {objectid: $to})) \
+             RETURN [n IN nodes(p) | n.objectid] AS node_ids, \
+                    [r IN relationships(p) | type(r)] AS rel_types"
+        )
+        .param("from", from.to_string())
+        .param("to", to.to_string());
+
+        let rows = self.execute_query(q)?;
+
+        if let Some(row) = rows.first() {
+            if let (Ok(node_ids), Ok(rel_types)) = (
+                row.get::<Vec<String>>("node_ids"),
+                row.get::<Vec<String>>("rel_types"),
+            ) {
+                let mut path = Vec::new();
+                for (i, node_id) in node_ids.iter().enumerate() {
+                    let edge_type = if i < rel_types.len() {
+                        Some(rel_types[i].clone())
+                    } else {
+                        None
+                    };
+                    path.push((node_id.clone(), edge_type));
+                }
+                // Last node has no outgoing edge
+                if let Some(last) = path.last_mut() {
+                    last.1 = None;
+                }
+                return Ok(Some(path));
+            }
+        }
+
+        Ok(None)
     }
 
     fn find_paths_to_domain_admins(
         &self,
-        _exclude_edge_types: &[String],
+        exclude_edge_types: &[String],
     ) -> Result<Vec<(String, String, String, usize)>> {
-        self.not_implemented()
+        debug!(exclude = ?exclude_edge_types, "Finding paths to Domain Admins");
+
+        let exclude_clause = if exclude_edge_types.is_empty() {
+            String::new()
+        } else {
+            let types: Vec<String> = exclude_edge_types.iter()
+                .map(|t| format!("'{}'", t))
+                .collect();
+            format!("AND NONE(r IN relationships(p) WHERE type(r) IN [{}])", types.join(", "))
+        };
+
+        let q = query(&format!(
+            "MATCH p = (u:User)-[*1..10]->(da:Group) \
+             WHERE da.objectid ENDS WITH '-512' {} \
+             RETURN u.objectid AS id, u.name AS name, min(length(p)) AS hops \
+             ORDER BY hops, name",
+            exclude_clause
+        ));
+
+        let rows = self.execute_query(q)?;
+
+        let mut results = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+
+        for row in rows {
+            if let (Ok(id), Ok(name), Ok(hops)) = (
+                row.get::<String>("id"),
+                row.get::<String>("name"),
+                row.get::<i64>("hops"),
+            ) {
+                if !seen.contains(&id) {
+                    seen.insert(id.clone());
+                    results.push((id, "User".to_string(), name, hops as usize));
+                }
+            }
+        }
+
+        debug!(result_count = results.len(), "Found users with paths to DA");
+        Ok(results)
     }
 
-    fn run_custom_query(&self, _query: &str) -> Result<JsonValue> {
-        self.not_implemented()
+    fn run_custom_query(&self, cypher: &str) -> Result<JsonValue> {
+        debug!(query = %cypher, "Running custom Cypher query");
+
+        // Execute the query and collect results
+        let result = self.runtime.block_on(async {
+            let mut stream = self.graph.execute(query(cypher)).await?;
+            let mut rows = Vec::new();
+
+            while let Some(row) = stream.next().await? {
+                // Neo4rs Row doesn't expose column names, so we try common patterns
+                // For custom queries, users should use aliases like "RETURN x AS result"
+                let mut obj = Map::new();
+
+                // Try common column names that might be returned
+                let try_columns = ["n", "m", "r", "p", "result", "count", "total", "name", "id", "value", "nodes", "relationships", "path"];
+
+                for col in try_columns {
+                    if let Ok(val) = row.get::<String>(col) {
+                        obj.insert(col.to_string(), JsonValue::String(val));
+                    } else if let Ok(val) = row.get::<i64>(col) {
+                        obj.insert(col.to_string(), JsonValue::Number(val.into()));
+                    } else if let Ok(val) = row.get::<f64>(col) {
+                        if let Some(n) = serde_json::Number::from_f64(val) {
+                            obj.insert(col.to_string(), JsonValue::Number(n));
+                        }
+                    } else if let Ok(val) = row.get::<bool>(col) {
+                        obj.insert(col.to_string(), JsonValue::Bool(val));
+                    } else if let Ok(node) = row.get::<Neo4jNode>(col) {
+                        let db_node = Self::neo4j_node_to_db_node(&node);
+                        obj.insert(col.to_string(), json!({
+                            "id": db_node.id,
+                            "label": db_node.label,
+                            "type": db_node.node_type,
+                            "properties": db_node.properties,
+                        }));
+                    }
+                }
+
+                if !obj.is_empty() {
+                    rows.push(JsonValue::Object(obj));
+                }
+            }
+
+            Ok::<_, neo4rs::Error>(rows)
+        })?;
+
+        Ok(json!({ "results": result }))
     }
 
     fn add_query_history(
         &self,
-        _id: &str,
-        _name: &str,
-        _query: &str,
-        _timestamp: i64,
-        _result_count: Option<i64>,
+        id: &str,
+        name: &str,
+        query_str: &str,
+        timestamp: i64,
+        result_count: Option<i64>,
     ) -> Result<()> {
-        self.not_implemented()
+        let q = query(
+            "CREATE (h:QueryHistory {id: $id, name: $name, query: $query, timestamp: $ts, result_count: $cnt})"
+        )
+        .param("id", id.to_string())
+        .param("name", name.to_string())
+        .param("query", query_str.to_string())
+        .param("ts", timestamp)
+        .param("cnt", result_count.unwrap_or(0));
+
+        self.run_query(q)
     }
 
     fn get_query_history(
         &self,
-        _limit: usize,
-        _offset: usize,
+        limit: usize,
+        offset: usize,
     ) -> Result<(Vec<(String, String, String, i64, Option<i64>)>, usize)> {
-        self.not_implemented()
+        // Get total count
+        let count_rows = self.execute_query(query("MATCH (h:QueryHistory) RETURN count(h) AS count"))?;
+        let total = count_rows.first()
+            .and_then(|r| r.get::<i64>("count").ok())
+            .unwrap_or(0) as usize;
+
+        // Get paginated results
+        let q = query(
+            "MATCH (h:QueryHistory) \
+             RETURN h.id AS id, h.name AS name, h.query AS query, h.timestamp AS ts, h.result_count AS cnt \
+             ORDER BY h.timestamp DESC \
+             SKIP $offset LIMIT $limit"
+        )
+        .param("offset", offset as i64)
+        .param("limit", limit as i64);
+
+        let rows = self.execute_query(q)?;
+
+        let history: Vec<(String, String, String, i64, Option<i64>)> = rows.iter()
+            .filter_map(|r| {
+                let id = r.get::<String>("id").ok()?;
+                let name = r.get::<String>("name").ok()?;
+                let query = r.get::<String>("query").ok()?;
+                let ts = r.get::<i64>("ts").ok()?;
+                let cnt = r.get::<i64>("cnt").ok();
+                Some((id, name, query, ts, cnt))
+            })
+            .collect();
+
+        Ok((history, total))
     }
 
-    fn delete_query_history(&self, _id: &str) -> Result<()> {
-        self.not_implemented()
+    fn delete_query_history(&self, id: &str) -> Result<()> {
+        let q = query("MATCH (h:QueryHistory {id: $id}) DELETE h")
+            .param("id", id.to_string());
+        self.run_query(q)
     }
 
     fn clear_query_history(&self) -> Result<()> {
-        self.not_implemented()
+        self.run_query(query("MATCH (h:QueryHistory) DELETE h"))
     }
 }
