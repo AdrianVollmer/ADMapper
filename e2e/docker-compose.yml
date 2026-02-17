@@ -10,7 +10,7 @@
 services:
   # Neo4j database for Cypher tests
   neo4j:
-    image: neo4j:5.18.1-community
+    image: docker.io/neo4j:5.18.1-community
     environment:
       NEO4J_AUTH: neo4j/neo4j123
       NEO4J_PLUGINS: '[]'
@@ -27,7 +27,7 @@ services:
 
   # FalkorDB (Redis + graph module) for Cypher tests
   falkordb:
-    image: falkordb/falkordb:v4.2.1
+    image: docker.io/falkordb/falkordb:v4.2.1
     ports:
       - "6379:6379"
     healthcheck:
