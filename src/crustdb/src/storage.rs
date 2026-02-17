@@ -211,6 +211,176 @@ impl SqliteStorage {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// Insert multiple nodes in a single transaction.
+    ///
+    /// Returns a vector of the created node IDs in the same order as the input.
+    pub fn insert_nodes_batch(
+        &mut self,
+        nodes: &[(Vec<String>, serde_json::Value)],
+    ) -> Result<Vec<i64>> {
+        if nodes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let tx = self.conn.transaction()?;
+        let mut node_ids = Vec::with_capacity(nodes.len());
+
+        // Pre-collect all unique labels and create them
+        let mut label_cache: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        for (labels, _) in nodes {
+            for label in labels {
+                if !label_cache.contains_key(label) {
+                    let label_id: Option<i64> = tx
+                        .query_row(
+                            "SELECT id FROM node_labels WHERE name = ?1",
+                            params![label],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    let label_id = match label_id {
+                        Some(id) => id,
+                        None => {
+                            tx.execute(
+                                "INSERT INTO node_labels (name) VALUES (?1)",
+                                params![label],
+                            )?;
+                            tx.last_insert_rowid()
+                        }
+                    };
+                    label_cache.insert(label.clone(), label_id);
+                }
+            }
+        }
+
+        // Insert nodes using prepared statement
+        {
+            let mut node_stmt = tx.prepare("INSERT INTO nodes (properties) VALUES (?1)")?;
+            let mut label_stmt =
+                tx.prepare("INSERT INTO node_label_map (node_id, label_id) VALUES (?1, ?2)")?;
+
+            for (labels, properties) in nodes {
+                let props_json = serde_json::to_string(properties)?;
+                node_stmt.execute(params![props_json])?;
+                let node_id = tx.last_insert_rowid();
+                node_ids.push(node_id);
+
+                for label in labels {
+                    if let Some(&label_id) = label_cache.get(label) {
+                        label_stmt.execute(params![node_id, label_id])?;
+                    }
+                }
+            }
+        }
+
+        tx.commit()?;
+        Ok(node_ids)
+    }
+
+    /// Insert multiple edges in a single transaction.
+    ///
+    /// Each edge is specified as (source_id, target_id, edge_type, properties).
+    /// Returns a vector of the created edge IDs in the same order as the input.
+    pub fn insert_edges_batch(
+        &mut self,
+        edges: &[(i64, i64, String, serde_json::Value)],
+    ) -> Result<Vec<i64>> {
+        if edges.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let tx = self.conn.transaction()?;
+        let mut edge_ids = Vec::with_capacity(edges.len());
+
+        // Pre-collect all unique edge types and create them
+        let mut type_cache: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        for (_, _, edge_type, _) in edges {
+            if !type_cache.contains_key(edge_type) {
+                let type_id: Option<i64> = tx
+                    .query_row(
+                        "SELECT id FROM edge_types WHERE name = ?1",
+                        params![edge_type],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let type_id = match type_id {
+                    Some(id) => id,
+                    None => {
+                        tx.execute(
+                            "INSERT INTO edge_types (name) VALUES (?1)",
+                            params![edge_type],
+                        )?;
+                        tx.last_insert_rowid()
+                    }
+                };
+                type_cache.insert(edge_type.clone(), type_id);
+            }
+        }
+
+        // Insert edges using prepared statement
+        {
+            let mut edge_stmt = tx.prepare(
+                "INSERT INTO edges (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+
+            for (source_id, target_id, edge_type, properties) in edges {
+                let props_json = serde_json::to_string(properties)?;
+                let type_id = type_cache.get(edge_type).copied().unwrap_or(0);
+                edge_stmt.execute(params![source_id, target_id, type_id, props_json])?;
+                edge_ids.push(tx.last_insert_rowid());
+            }
+        }
+
+        tx.commit()?;
+        Ok(edge_ids)
+    }
+
+    /// Find a node ID by a property value.
+    ///
+    /// Searches for nodes where the JSON properties contain the specified key-value pair.
+    pub fn find_node_by_property(&self, property: &str, value: &str) -> Result<Option<i64>> {
+        // Use JSON extraction to find matching node
+        let query = format!(
+            "SELECT id FROM nodes WHERE json_extract(properties, '$.{}') = ?1 LIMIT 1",
+            property.replace('\'', "''")
+        );
+        let result: Option<i64> = self
+            .conn
+            .query_row(&query, params![value], |row| row.get(0))
+            .optional()?;
+        Ok(result)
+    }
+
+    /// Build an index of property values to node IDs for efficient batch lookups.
+    ///
+    /// Returns a HashMap from property value to node ID.
+    pub fn build_property_index(
+        &self,
+        property: &str,
+    ) -> Result<std::collections::HashMap<String, i64>> {
+        let query = format!(
+            "SELECT id, json_extract(properties, '$.{}') FROM nodes WHERE json_extract(properties, '$.{}') IS NOT NULL",
+            property.replace('\'', "''"),
+            property.replace('\'', "''")
+        );
+        let mut stmt = self.conn.prepare(&query)?;
+        let mut index = std::collections::HashMap::new();
+
+        let rows = stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let value: String = row.get(1)?;
+            Ok((id, value))
+        })?;
+
+        for row in rows {
+            let (id, value) = row?;
+            index.insert(value, id);
+        }
+
+        Ok(index)
+    }
+
     /// Get a node by ID.
     pub fn get_node(&self, id: i64) -> Result<Option<Node>> {
         let node: Option<(i64, String)> = self

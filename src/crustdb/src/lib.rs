@@ -38,31 +38,80 @@ use storage::SqliteStorage;
 
 /// Main database handle.
 pub struct Database {
-    storage: SqliteStorage,
+    storage: std::cell::RefCell<SqliteStorage>,
 }
 
 impl Database {
     /// Open or create a database at the given path.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let storage = SqliteStorage::open(path)?;
-        Ok(Self { storage })
+        Ok(Self {
+            storage: std::cell::RefCell::new(storage),
+        })
     }
 
     /// Create an in-memory database.
     pub fn in_memory() -> Result<Self> {
         let storage = SqliteStorage::in_memory()?;
-        Ok(Self { storage })
+        Ok(Self {
+            storage: std::cell::RefCell::new(storage),
+        })
     }
 
     /// Execute a Cypher query.
     pub fn execute(&self, query: &str) -> Result<QueryResult> {
         let statement = query::parser::parse(query)?;
-        query::executor::execute(&statement, &self.storage)
+        query::executor::execute(&statement, &self.storage.borrow())
     }
 
     /// Get database statistics.
     pub fn stats(&self) -> Result<DatabaseStats> {
-        self.storage.stats()
+        self.storage.borrow().stats()
+    }
+
+    /// Insert multiple nodes in a single transaction.
+    ///
+    /// Each node is specified as (labels, properties).
+    /// Returns a vector of the created node IDs in the same order as the input.
+    ///
+    /// This is significantly faster than executing individual CREATE statements
+    /// because it uses prepared statements and batches all inserts in one transaction.
+    pub fn insert_nodes_batch(
+        &self,
+        nodes: &[(Vec<String>, serde_json::Value)],
+    ) -> Result<Vec<i64>> {
+        self.storage.borrow_mut().insert_nodes_batch(nodes)
+    }
+
+    /// Insert multiple edges in a single transaction.
+    ///
+    /// Each edge is specified as (source_node_id, target_node_id, edge_type, properties).
+    /// Returns a vector of the created edge IDs in the same order as the input.
+    ///
+    /// Use `find_node_by_property` or `build_property_index` to look up node IDs first.
+    pub fn insert_edges_batch(
+        &self,
+        edges: &[(i64, i64, String, serde_json::Value)],
+    ) -> Result<Vec<i64>> {
+        self.storage.borrow_mut().insert_edges_batch(edges)
+    }
+
+    /// Find a node ID by a property value.
+    ///
+    /// Searches for nodes where the JSON properties contain the specified key-value pair.
+    pub fn find_node_by_property(&self, property: &str, value: &str) -> Result<Option<i64>> {
+        self.storage.borrow().find_node_by_property(property, value)
+    }
+
+    /// Build an index of property values to node IDs for efficient batch lookups.
+    ///
+    /// This is useful when inserting edges that reference nodes by a property value
+    /// (like object_id) rather than by database ID.
+    pub fn build_property_index(
+        &self,
+        property: &str,
+    ) -> Result<std::collections::HashMap<String, i64>> {
+        self.storage.borrow().build_property_index(property)
     }
 }
 
@@ -152,5 +201,133 @@ mod tests {
 
         let result = db.execute("CREATE n:Person");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_batch_insert_nodes() {
+        let db = Database::in_memory().unwrap();
+
+        let nodes = vec![
+            (
+                vec!["Person".to_string()],
+                serde_json::json!({"name": "Alice", "object_id": "alice-1"}),
+            ),
+            (
+                vec!["Person".to_string()],
+                serde_json::json!({"name": "Bob", "object_id": "bob-2"}),
+            ),
+            (
+                vec!["Company".to_string()],
+                serde_json::json!({"name": "Acme", "object_id": "acme-3"}),
+            ),
+        ];
+
+        let ids = db.insert_nodes_batch(&nodes).unwrap();
+        assert_eq!(ids.len(), 3);
+
+        let stats = db.stats().unwrap();
+        assert_eq!(stats.node_count, 3);
+        assert_eq!(stats.label_count, 2); // Person, Company
+    }
+
+    #[test]
+    fn test_batch_insert_edges() {
+        let db = Database::in_memory().unwrap();
+
+        // Create nodes first
+        let nodes = vec![
+            (
+                vec!["Person".to_string()],
+                serde_json::json!({"name": "Alice", "object_id": "alice-1"}),
+            ),
+            (
+                vec!["Person".to_string()],
+                serde_json::json!({"name": "Bob", "object_id": "bob-2"}),
+            ),
+            (
+                vec!["Company".to_string()],
+                serde_json::json!({"name": "Acme", "object_id": "acme-3"}),
+            ),
+        ];
+
+        let node_ids = db.insert_nodes_batch(&nodes).unwrap();
+        assert_eq!(node_ids.len(), 3);
+
+        // Create edges using node IDs
+        let edges = vec![
+            (
+                node_ids[0],
+                node_ids[1],
+                "KNOWS".to_string(),
+                serde_json::json!({"since": 2020}),
+            ),
+            (
+                node_ids[0],
+                node_ids[2],
+                "WORKS_AT".to_string(),
+                serde_json::json!({}),
+            ),
+        ];
+
+        let edge_ids = db.insert_edges_batch(&edges).unwrap();
+        assert_eq!(edge_ids.len(), 2);
+
+        let stats = db.stats().unwrap();
+        assert_eq!(stats.node_count, 3);
+        assert_eq!(stats.edge_count, 2);
+        assert_eq!(stats.edge_type_count, 2);
+    }
+
+    #[test]
+    fn test_property_index() {
+        let db = Database::in_memory().unwrap();
+
+        // Create nodes with object_id property
+        let nodes = vec![
+            (
+                vec!["Person".to_string()],
+                serde_json::json!({"name": "Alice", "object_id": "alice-1"}),
+            ),
+            (
+                vec!["Person".to_string()],
+                serde_json::json!({"name": "Bob", "object_id": "bob-2"}),
+            ),
+        ];
+
+        let node_ids = db.insert_nodes_batch(&nodes).unwrap();
+
+        // Build property index
+        let index = db.build_property_index("object_id").unwrap();
+        assert_eq!(index.len(), 2);
+        assert_eq!(index.get("alice-1"), Some(&node_ids[0]));
+        assert_eq!(index.get("bob-2"), Some(&node_ids[1]));
+
+        // Find node by property
+        let found = db.find_node_by_property("object_id", "alice-1").unwrap();
+        assert_eq!(found, Some(node_ids[0]));
+
+        let not_found = db.find_node_by_property("object_id", "nobody").unwrap();
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_batch_insert_large() {
+        let db = Database::in_memory().unwrap();
+
+        // Create 1000 nodes in a batch
+        let nodes: Vec<_> = (0..1000)
+            .map(|i| {
+                (
+                    vec!["TestNode".to_string()],
+                    serde_json::json!({"id": i, "object_id": format!("node-{}", i)}),
+                )
+            })
+            .collect();
+
+        let ids = db.insert_nodes_batch(&nodes).unwrap();
+        assert_eq!(ids.len(), 1000);
+
+        let stats = db.stats().unwrap();
+        assert_eq!(stats.node_count, 1000);
     }
 }

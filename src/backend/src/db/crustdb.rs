@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
-use super::types::{DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights};
+use super::types::{
+    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
+};
 
 /// A graph database backed by CrustDB.
 ///
@@ -58,7 +60,10 @@ impl CrustDatabase {
 
     /// Execute a Cypher query and return the raw result.
     fn execute(&self, query: &str) -> Result<crustdb::QueryResult> {
-        let db = self.db.lock().map_err(|e| DbError::Database(e.to_string()))?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|e| DbError::Database(e.to_string()))?;
         db.execute(query)
             .map_err(|e| DbError::Database(e.to_string()))
     }
@@ -74,12 +79,54 @@ impl CrustDatabase {
         Ok(())
     }
 
-    /// Insert a batch of nodes.
+    /// Insert a batch of nodes using efficient batch insert.
+    ///
+    /// This uses CrustDB's native batch insert which wraps all inserts
+    /// in a single transaction with prepared statements.
     pub fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
         if nodes.is_empty() {
             return Ok(0);
         }
 
+        // Convert DbNodes to the format expected by CrustDB batch insert
+        let batch: Vec<(Vec<String>, serde_json::Value)> = nodes
+            .iter()
+            .map(|node| {
+                let labels = vec![node.node_type.clone()];
+                let props = serde_json::json!({
+                    "object_id": node.id,
+                    "label": node.label,
+                    "node_type": node.node_type,
+                    "properties": serde_json::to_string(&node.properties).unwrap_or_default()
+                });
+                (labels, props)
+            })
+            .collect();
+
+        let db = self
+            .db
+            .lock()
+            .map_err(|e| DbError::Database(e.to_string()))?;
+        match db.insert_nodes_batch(&batch) {
+            Ok(ids) => {
+                debug!("Batch inserted {} nodes", ids.len());
+                Ok(ids.len())
+            }
+            Err(e) => {
+                debug!(
+                    "Batch insert failed, falling back to individual inserts: {}",
+                    e
+                );
+                drop(db);
+                // Fallback to individual inserts if batch fails
+                self.insert_nodes_fallback(nodes)
+            }
+        }
+    }
+
+    /// Fallback method for individual node inserts (used if batch fails).
+    fn insert_nodes_fallback(&self, nodes: &[DbNode]) -> Result<usize> {
+        let mut count = 0;
         for node in nodes {
             let props_str = serde_json::to_string(&node.properties)?;
             let label = node.label.replace('\'', "''");
@@ -92,20 +139,83 @@ impl CrustDatabase {
                 node_type, object_id, label, node_type, props_escaped
             );
 
-            if let Err(e) = self.execute(&query) {
-                debug!("Failed to create node {}: {}", object_id, e);
+            if self.execute(&query).is_ok() {
+                count += 1;
             }
         }
-
-        Ok(nodes.len())
+        Ok(count)
     }
 
-    /// Insert a batch of edges.
+    /// Insert a batch of edges using efficient batch insert.
+    ///
+    /// This builds an index of object_id -> node_id for efficient lookups,
+    /// then uses CrustDB's native batch insert.
     pub fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
         if edges.is_empty() {
             return Ok(0);
         }
 
+        let db = self
+            .db
+            .lock()
+            .map_err(|e| DbError::Database(e.to_string()))?;
+
+        // Build index of object_id -> node_id for efficient lookups
+        let node_index = match db.build_property_index("object_id") {
+            Ok(index) => index,
+            Err(e) => {
+                debug!("Failed to build property index, falling back: {}", e);
+                drop(db);
+                return self.insert_edges_fallback(edges);
+            }
+        };
+
+        // Convert edges to the format expected by CrustDB batch insert
+        let mut batch: Vec<(i64, i64, String, serde_json::Value)> = Vec::with_capacity(edges.len());
+        let mut skipped = 0;
+
+        for edge in edges {
+            let source_id = node_index.get(&edge.source);
+            let target_id = node_index.get(&edge.target);
+
+            match (source_id, target_id) {
+                (Some(&src), Some(&tgt)) => {
+                    let props = serde_json::json!({
+                        "properties": serde_json::to_string(&edge.properties).unwrap_or_default()
+                    });
+                    batch.push((src, tgt, edge.edge_type.clone(), props));
+                }
+                _ => {
+                    debug!(
+                        "Skipping edge {} -> {}: source or target not found",
+                        edge.source, edge.target
+                    );
+                    skipped += 1;
+                }
+            }
+        }
+
+        if batch.is_empty() {
+            debug!("No valid edges to insert (skipped {})", skipped);
+            return Ok(0);
+        }
+
+        match db.insert_edges_batch(&batch) {
+            Ok(ids) => {
+                debug!("Batch inserted {} edges (skipped {})", ids.len(), skipped);
+                Ok(ids.len())
+            }
+            Err(e) => {
+                debug!("Batch edge insert failed, falling back: {}", e);
+                drop(db);
+                self.insert_edges_fallback(edges)
+            }
+        }
+    }
+
+    /// Fallback method for individual edge inserts (used if batch fails).
+    fn insert_edges_fallback(&self, edges: &[DbEdge]) -> Result<usize> {
+        let mut count = 0;
         for edge in edges {
             let props_str = serde_json::to_string(&edge.properties)?;
             let source = edge.source.replace('\'', "''");
@@ -113,19 +223,17 @@ impl CrustDatabase {
             let edge_type = edge.edge_type.replace('\'', "''");
             let props_escaped = props_str.replace('\'', "''");
 
-            // Match nodes by object_id property and create edge
             let query = format!(
                 "MATCH (a {{object_id: '{}'}}), (b {{object_id: '{}'}}) \
                  CREATE (a)-[:{}  {{properties: '{}'}}]->(b)",
                 source, target, edge_type, props_escaped
             );
 
-            if let Err(e) = self.execute(&query) {
-                debug!("Failed to create edge {} -> {}: {}", source, target, e);
+            if self.execute(&query).is_ok() {
+                count += 1;
             }
         }
-
-        Ok(edges.len())
+        Ok(count)
     }
 
     /// Insert a single node.
@@ -172,12 +280,9 @@ impl CrustDatabase {
 
         // Count by node type
         let count_type = |node_type: &str| -> usize {
-            self.execute(&format!(
-                "MATCH (n:{}) RETURN count(n)",
-                node_type
-            ))
-            .map(|r| self.extract_count(&r))
-            .unwrap_or(0)
+            self.execute(&format!("MATCH (n:{}) RETURN count(n)", node_type))
+                .map(|r| self.extract_count(&r))
+                .unwrap_or(0)
         };
 
         Ok(DetailedStats {
@@ -194,9 +299,8 @@ impl CrustDatabase {
 
     /// Get all nodes.
     pub fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
-        let result = self.execute(
-            "MATCH (n) RETURN n.object_id, n.label, n.node_type, n.properties",
-        )?;
+        let result =
+            self.execute("MATCH (n) RETURN n.object_id, n.label, n.node_type, n.properties")?;
 
         let mut nodes = Vec::new();
         for row in &result.rows {
@@ -219,9 +323,8 @@ impl CrustDatabase {
 
     /// Get all edges.
     pub fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
-        let result = self.execute(
-            "MATCH (a)-[r]->(b) RETURN a.object_id, b.object_id, type(r), r.properties",
-        )?;
+        let result = self
+            .execute("MATCH (a)-[r]->(b) RETURN a.object_id, b.object_id, type(r), r.properties")?;
 
         let mut edges = Vec::new();
         for row in &result.rows {
@@ -269,9 +372,7 @@ impl CrustDatabase {
         let mut types = Vec::new();
         for row in &result.rows {
             for value in row.values.values() {
-                if let crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) =
-                    value
-                {
+                if let crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) = value {
                     types.push(s.clone());
                 }
             }
@@ -287,9 +388,7 @@ impl CrustDatabase {
         let mut types = Vec::new();
         for row in &result.rows {
             for value in row.values.values() {
-                if let crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) =
-                    value
-                {
+                if let crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) = value {
                     if !s.is_empty() {
                         types.push(s.clone());
                     }
@@ -344,7 +443,9 @@ impl CrustDatabase {
         );
         if let Ok(result) = self.execute(&query) {
             if !result.rows.is_empty() {
-                return Ok(Some(self.get_string_value(&result.rows[0].values, "n.object_id")));
+                return Ok(Some(
+                    self.get_string_value(&result.rows[0].values, "n.object_id"),
+                ));
             }
         }
 
@@ -355,7 +456,9 @@ impl CrustDatabase {
         );
         if let Ok(result) = self.execute(&query) {
             if !result.rows.is_empty() {
-                return Ok(Some(self.get_string_value(&result.rows[0].values, "n.object_id")));
+                return Ok(Some(
+                    self.get_string_value(&result.rows[0].values, "n.object_id"),
+                ));
             }
         }
 
@@ -657,9 +760,11 @@ impl CrustDatabase {
                                     crustdb::PropertyValue::Integer(n) => {
                                         JsonValue::Number((*n).into())
                                     }
-                                    crustdb::PropertyValue::Float(f) => serde_json::Number::from_f64(*f)
-                                        .map(JsonValue::Number)
-                                        .unwrap_or(JsonValue::Null),
+                                    crustdb::PropertyValue::Float(f) => {
+                                        serde_json::Number::from_f64(*f)
+                                            .map(JsonValue::Number)
+                                            .unwrap_or(JsonValue::Null)
+                                    }
                                     crustdb::PropertyValue::Bool(b) => JsonValue::Bool(*b),
                                     crustdb::PropertyValue::Null => JsonValue::Null,
                                     _ => JsonValue::String(format!("{:?}", pv)),
