@@ -907,6 +907,22 @@
     @apply w-5 h-5 flex-none mt-0.5 text-red-400;
   }
 
+  .query-error-text {
+    @apply flex-1 m-0 font-mono text-sm whitespace-pre-wrap overflow-x-auto;
+  }
+
+  .query-error-text code {
+    @apply bg-transparent p-0;
+  }
+
+  .query-info {
+    @apply flex items-start gap-3 p-3 rounded-lg bg-blue-900/30 border border-blue-700/50 text-blue-200;
+  }
+
+  .info-icon {
+    @apply w-5 h-5 flex-none mt-0.5 text-blue-400;
+  }
+
   .btn-icon {
     @apply w-4 h-4 mr-1.5 inline-block;
   }

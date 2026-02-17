@@ -25,6 +25,9 @@ let isExecuting = false;
 /** Error message */
 let errorMessage = "";
 
+/** Info message (e.g., zero rows returned) */
+let infoMessage = "";
+
 /** Initialize the run query modal */
 export function initRunQuery(): void {
   createModalElement();
@@ -68,6 +71,7 @@ export async function openRunQuery(): Promise<void> {
 
   isExecuting = false;
   errorMessage = "";
+  infoMessage = "";
 
   // Try to load the last query from history
   try {
@@ -171,7 +175,21 @@ function renderModal(): void {
             <circle cx="12" cy="12" r="10"/>
             <path d="M12 8v4m0 4h.01"/>
           </svg>
-          <span>${escapeHtml(errorMessage)}</span>
+          <pre class="query-error-text"><code>${escapeHtml(errorMessage)}</code></pre>
+        </div>
+      `
+          : ""
+      }
+
+      ${
+        infoMessage
+          ? `
+        <div class="query-info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="info-icon">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4m0-4h.01"/>
+          </svg>
+          <span>${escapeHtml(infoMessage)}</span>
         </div>
       `
           : ""
@@ -208,22 +226,24 @@ async function executeQuery(): Promise<void> {
 
   isExecuting = true;
   errorMessage = "";
+  infoMessage = "";
   queryText = query;
   renderModal();
 
   try {
     const result = await executeQueryWithHistory("Custom Query", query, true);
 
-    // Close modal on success
-    closeRunQuery();
-
-    // Load the graph if we got one
+    // Load the graph if we got one with nodes
     if (result.graph && result.graph.nodes.length > 0) {
+      // Close modal on success
+      closeRunQuery();
       // Cast the GraphData to RawADGraph - the server returns compatible types
       loadGraphData(result.graph as unknown as RawADGraph);
     } else {
-      // Show a message for non-graph results
-      alert(`Query returned ${result.resultCount} rows`);
+      // Show inline message for zero/non-graph results
+      isExecuting = false;
+      infoMessage = `Query returned ${result.resultCount} row${result.resultCount === 1 ? "" : "s"}`;
+      renderModal();
     }
   } catch (err) {
     isExecuting = false;
