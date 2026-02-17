@@ -36,3 +36,4 @@ admapper.db
 # E2E tests (generated)
 e2e/golden/
 e2e/reports/
+test_data.zip
