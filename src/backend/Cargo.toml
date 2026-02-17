@@ -21,11 +21,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 
-# Database and import
+# Database backends (all optional)
 # Note: cozo uses storage-sled (pure Rust) instead of storage-sqlite to avoid
 # native library linking conflicts with crustdb's rusqlite. Both can now coexist.
 cozo = { version = "0.7", default-features = false, features = ["storage-sled", "graph-algo"], optional = true }
-kuzu = { version = "0.11.2" }
+kuzu = { version = "0.11.2", optional = true }
 crustdb = { path = "../crustdb", optional = true, default-features = false }
 rayon = "=1.10.0"  # Pin to avoid graph_builder incompatibility with 1.11
 zip = "2"
@@ -43,11 +43,13 @@ tauri = { version = "2", features = [], optional = true }
 tauri-plugin-shell = { version = "2", optional = true }
 
 [features]
-default = ["desktop", "cozo"]
+default = ["desktop", "kuzu"]
 desktop = ["tauri", "tauri-plugin-shell", "tauri-build"]
-# CozoDB backend (default).
+# KuzuDB backend (default) - Cypher-based, file storage.
+kuzu = ["dep:kuzu"]
+# CozoDB backend - Datalog-based, uses sled storage.
 cozo = ["dep:cozo"]
-# CrustDB backend.
+# CrustDB backend - Cypher-based, SQLite storage.
 crustdb = ["dep:crustdb"]
 
 [dev-dependencies]

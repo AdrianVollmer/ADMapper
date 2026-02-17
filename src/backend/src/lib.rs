@@ -20,9 +20,11 @@ use dashmap::DashMap;
 use db::CozoDatabase;
 #[cfg(feature = "crustdb")]
 use db::CrustDatabase;
+#[cfg(feature = "kuzu")]
+use db::KuzuDatabase;
 use db::{
-    DatabaseBackend, DatabaseType, DatabaseUrl, DbError, FalkorDbDatabase, KuzuDatabase,
-    Neo4jDatabase, QueryLanguage,
+    DatabaseBackend, DatabaseType, DatabaseUrl, DbError, FalkorDbDatabase, Neo4jDatabase,
+    QueryLanguage,
 };
 use import::{BloodHoundImporter, ImportProgress};
 use parking_lot::RwLock;
@@ -161,10 +163,15 @@ impl AppState {
         let parsed = DatabaseUrl::parse(url).map_err(|e| e.to_string())?;
 
         let backend: Arc<dyn DatabaseBackend> = match parsed.db_type {
+            #[cfg(feature = "kuzu")]
             DatabaseType::KuzuDB => {
                 let path = parsed.path.ok_or("Missing path for KuzuDB")?;
                 let db = KuzuDatabase::new(&path).map_err(|e| e.to_string())?;
                 Arc::new(db)
+            }
+            #[cfg(not(feature = "kuzu"))]
+            DatabaseType::KuzuDB => {
+                return Err("KuzuDB support not compiled in.".to_string());
             }
             #[cfg(feature = "cozo")]
             DatabaseType::CozoDB => {

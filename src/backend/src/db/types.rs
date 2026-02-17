@@ -79,6 +79,7 @@ impl From<cozo::Error> for DbError {
     }
 }
 
+#[cfg(feature = "kuzu")]
 impl From<kuzu::Error> for DbError {
     fn from(e: kuzu::Error) -> Self {
         DbError::Database(e.to_string())
