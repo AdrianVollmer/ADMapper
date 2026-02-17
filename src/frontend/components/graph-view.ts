@@ -19,13 +19,13 @@ export function initGraph(): void {
   if (!container) return;
 
   // Only show demo data in development mode
+  // In production, the placeholder will be shown after connection status is checked
   if (import.meta.env.DEV) {
     const demoGraph = generateDemoGraph(200);
     loadGraphData(demoGraph);
-  } else {
-    // Show placeholder prompting user to connect
-    showNoConnectionPlaceholder();
   }
+  // Note: In production, the placeholder is shown via updateGraphForConnectionState()
+  // which is called after the connection status is fetched from the server
 
   // Handle toolbar actions
   document.addEventListener("click", (e) => {
@@ -36,6 +36,57 @@ export function initGraph(): void {
     const action = button.getAttribute("data-action");
     handleGraphAction(action);
   });
+}
+
+/** Update the graph view based on connection state */
+export function updateGraphForConnectionState(connected: boolean, error?: string): void {
+  // Don't interfere with dev mode demo data
+  if (import.meta.env.DEV) return;
+
+  // If we have a renderer, the user has already loaded data - don't replace it
+  if (renderer) return;
+
+  if (!connected) {
+    showNoConnectionPlaceholder(error);
+  } else {
+    // Connected but no data loaded yet - show a different message
+    showConnectedPlaceholder();
+  }
+}
+
+/** Show placeholder when connected but no data loaded */
+export function showConnectedPlaceholder(): void {
+  const container = document.getElementById("graph-canvas");
+  if (!container) return;
+
+  // Clean up existing renderer
+  if (renderer) {
+    renderer.destroy();
+    renderer = null;
+  }
+
+  // Create placeholder
+  container.innerHTML = `
+    <div class="flex flex-col items-center justify-center h-full text-gray-400">
+      <svg class="w-16 h-16 mb-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <p class="text-lg mb-2 text-green-400">Database connected</p>
+      <p class="text-sm text-gray-500 mb-4">Run a query or select one from the sidebar to visualize data</p>
+      <button
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+        data-action="run-query"
+      >
+        Run Query
+      </button>
+    </div>
+  `;
+
+  // Update stats
+  const statsEl = document.getElementById("graph-stats");
+  if (statsEl) {
+    statsEl.textContent = "No graph loaded";
+  }
 }
 
 /** Show placeholder when no database is connected */

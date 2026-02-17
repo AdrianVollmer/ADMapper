@@ -9,7 +9,7 @@
  */
 
 import { appState } from "../main";
-import { showNoConnectionPlaceholder } from "./graph-view";
+import { showNoConnectionPlaceholder, updateGraphForConnectionState } from "./graph-view";
 import { saveConnection, getDisplayName } from "./connection-history";
 
 /** Database types */
@@ -47,9 +47,16 @@ export async function refreshConnectionStatus(): Promise<void> {
       appState.databaseConnected = status.connected;
       appState.databaseType = status.database_type || null;
       updateConnectionStatus();
+      // Update graph view based on connection state
+      updateGraphForConnectionState(status.connected);
+    } else {
+      // Server returned error - show placeholder
+      updateGraphForConnectionState(false);
     }
   } catch (error) {
     console.error("Failed to fetch database status:", error);
+    // Could not reach server - show placeholder
+    updateGraphForConnectionState(false, "Could not connect to server");
   }
 }
 
