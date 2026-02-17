@@ -21,6 +21,8 @@ set -e
 # Get script directory for consistent paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# Store tests directory (test scripts overwrite SCRIPT_DIR when sourced)
+TESTS_DIR="$SCRIPT_DIR/tests"
 
 # Source library files
 source "$SCRIPT_DIR/lib/utils.sh"
@@ -101,7 +103,7 @@ run_backend_tests() {
 
 	# Run tests in order
 	local test_failed=0
-	for test_script in "$SCRIPT_DIR/tests/"*.sh; do
+	for test_script in "$TESTS_DIR/"*.sh; do
 		if [ -x "$test_script" ]; then
 			log_info "Running: $(basename "$test_script")"
 			# Source the test script and run its tests
