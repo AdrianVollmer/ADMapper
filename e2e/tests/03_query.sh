@@ -24,8 +24,10 @@ run_tests() {
 
     test_start "Query returns results"
     local total
-    total=$(echo "$response" | jq -r '.results[0].total // .rows[0][0] // 0' 2>/dev/null)
-    if [ "$total" -gt 0 ]; then
+    # Handle different response formats: .results.rows[0][0] for Kuzu/CrustDB, .results.results[0].total for others
+    total=$(echo "$response" | jq -r '.results.rows[0][0] // .results.results[0].total // .results[0].total // 0' 2>/dev/null)
+    total="${total:-0}"  # Default to 0 if empty
+    if [ "$total" -gt 0 ] 2>/dev/null; then
         test_pass
         log_info "Total nodes: $total"
     else
@@ -35,7 +37,7 @@ run_tests() {
     test_start "Query for User nodes"
     if response=$(api_query "MATCH (u:User) RETURN count(u) AS users"); then
         local users
-        users=$(echo "$response" | jq -r '.results[0].users // .rows[0][0] // 0' 2>/dev/null)
+        users=$(echo "$response" | jq -r '.results.rows[0][0] // .results.results[0].users // .results[0].users // 0' 2>/dev/null)
         test_pass
         log_info "User count: $users"
     else
@@ -45,7 +47,7 @@ run_tests() {
     test_start "Query for Computer nodes"
     if response=$(api_query "MATCH (c:Computer) RETURN count(c) AS computers"); then
         local computers
-        computers=$(echo "$response" | jq -r '.results[0].computers // .rows[0][0] // 0' 2>/dev/null)
+        computers=$(echo "$response" | jq -r '.results.rows[0][0] // .results.results[0].computers // .results[0].computers // 0' 2>/dev/null)
         test_pass
         log_info "Computer count: $computers"
     else
@@ -55,7 +57,7 @@ run_tests() {
     test_start "Query for Group nodes"
     if response=$(api_query "MATCH (g:Group) RETURN count(g) AS groups"); then
         local groups
-        groups=$(echo "$response" | jq -r '.results[0].groups // .rows[0][0] // 0' 2>/dev/null)
+        groups=$(echo "$response" | jq -r '.results.rows[0][0] // .results.results[0].groups // .results[0].groups // 0' 2>/dev/null)
         test_pass
         log_info "Group count: $groups"
     else
