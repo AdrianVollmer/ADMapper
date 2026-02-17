@@ -1,0 +1,130 @@
+# M9: Function Tests
+#
+# Tests for built-in Cypher functions like type(), id(), labels().
+
+[[test]]
+name = "type_function"
+description = "type(r) returns the relationship type"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})"]
+[test.query]
+cypher = "MATCH (a:Person)-[r]->(b:Person) RETURN type(r)"
+[test.expected]
+row_count = 1
+columns = ["type(r)"]
+
+[[test]]
+name = "type_function_multiple_types"
+description = "type(r) returns correct type for each relationship"
+[test.setup]
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})",
+    "CREATE (a:Person {name: 'Alice'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})",
+]
+[test.query]
+cypher = "MATCH (a:Person {name: 'Alice'})-[r]->(b:Person) RETURN b.name, type(r)"
+[test.expected]
+row_count = 2
+columns = ["b.name", "type(r)"]
+
+[[test]]
+name = "type_function_in_where"
+description = "type(r) can be used in WHERE clause"
+[test.setup]
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})",
+    "CREATE (a:Person {name: 'Alice'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})",
+]
+[test.query]
+cypher = "MATCH (a:Person)-[r]->(b:Person) WHERE type(r) = 'KNOWS' RETURN b.name"
+[test.expected]
+row_count = 1
+columns = ["b.name"]
+
+[[test]]
+name = "id_function_node"
+description = "id(n) returns the node ID"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'})"]
+[test.query]
+cypher = "MATCH (a:Person) RETURN a.name, id(a)"
+[test.expected]
+row_count = 1
+columns = ["a.name", "id(a)"]
+
+[[test]]
+name = "id_function_edge"
+description = "id(r) returns the relationship ID"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})"]
+[test.query]
+cypher = "MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN id(r)"
+[test.expected]
+row_count = 1
+columns = ["id(r)"]
+
+[[test]]
+name = "labels_function"
+description = "labels(n) returns node labels as a list"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'})"]
+[test.query]
+cypher = "MATCH (a:Person) RETURN labels(a)"
+[test.expected]
+row_count = 1
+columns = ["labels(a)"]
+
+[[test]]
+name = "labels_function_multiple_labels"
+description = "labels(n) returns all labels for multi-labeled nodes"
+[test.setup]
+cypher = ["CREATE (a:Person:Employee {name: 'Alice'})"]
+[test.query]
+cypher = "MATCH (a:Person) RETURN labels(a)"
+[test.expected]
+row_count = 1
+columns = ["labels(a)"]
+
+[[test]]
+name = "size_function_string"
+description = "size() returns string length"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'})"]
+[test.query]
+cypher = "MATCH (a:Person) RETURN size(a.name)"
+[test.expected]
+row_count = 1
+columns = ["size(a.name)"]
+
+[[test]]
+name = "tolower_function"
+description = "toLower() converts string to lowercase"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'ALICE'})"]
+[test.query]
+cypher = "MATCH (a:Person) RETURN toLower(a.name)"
+[test.expected]
+row_count = 1
+columns = ["toLower(a.name)"]
+
+[[test]]
+name = "toupper_function"
+description = "toUpper() converts string to uppercase"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'alice'})"]
+[test.query]
+cypher = "MATCH (a:Person) RETURN toUpper(a.name)"
+[test.expected]
+row_count = 1
+columns = ["toUpper(a.name)"]
+
+[[test]]
+name = "coalesce_function"
+description = "coalesce() returns first non-null value"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'})"]
+[test.query]
+cypher = "MATCH (a:Person) RETURN coalesce(a.nickname, a.name)"
+[test.expected]
+row_count = 1
+columns = ["coalesce(a.nickname, a.name)"]

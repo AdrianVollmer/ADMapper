@@ -1526,6 +1526,51 @@ fn evaluate_function_call_with_bindings(
                 _ => Ok(PropertyValue::Null),
             }
         }
+        "TYPE" => {
+            // type(r) returns the relationship type as a string
+            if args.len() != 1 {
+                return Err(Error::Cypher("type() requires 1 argument".into()));
+            }
+            // The argument should be a relationship variable
+            if let Expression::Variable(var_name) = &args[0] {
+                if let Some(edge) = binding.edges.get(var_name) {
+                    return Ok(PropertyValue::String(edge.edge_type.clone()));
+                }
+            }
+            Ok(PropertyValue::Null)
+        }
+        "ID" => {
+            // id(n) or id(r) returns the internal node/edge ID
+            if args.len() != 1 {
+                return Err(Error::Cypher("id() requires 1 argument".into()));
+            }
+            if let Expression::Variable(var_name) = &args[0] {
+                if let Some(node) = binding.nodes.get(var_name) {
+                    return Ok(PropertyValue::Integer(node.id));
+                }
+                if let Some(edge) = binding.edges.get(var_name) {
+                    return Ok(PropertyValue::Integer(edge.id));
+                }
+            }
+            Ok(PropertyValue::Null)
+        }
+        "LABELS" => {
+            // labels(n) returns the labels of a node as a list
+            if args.len() != 1 {
+                return Err(Error::Cypher("labels() requires 1 argument".into()));
+            }
+            if let Expression::Variable(var_name) = &args[0] {
+                if let Some(node) = binding.nodes.get(var_name) {
+                    let labels: Vec<PropertyValue> = node
+                        .labels
+                        .iter()
+                        .map(|l| PropertyValue::String(l.clone()))
+                        .collect();
+                    return Ok(PropertyValue::List(labels));
+                }
+            }
+            Ok(PropertyValue::Null)
+        }
         _ => Err(Error::Cypher(format!("Unknown function: {}", name))),
     }
 }

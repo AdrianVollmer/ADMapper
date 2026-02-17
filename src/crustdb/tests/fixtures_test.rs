@@ -711,3 +711,128 @@ fn test_m8_quantifier_plus() {
         .unwrap();
     assert_eq!(result.rows.len(), 1);
 }
+
+// =============================================================================
+// M9: Function Tests
+// =============================================================================
+
+#[test]
+fn test_m9_functions_fixtures() {
+    let fixtures = find_fixtures("m9_functions");
+    if fixtures.is_empty() {
+        println!("No M9 fixtures found, skipping");
+        return;
+    }
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for fixture_path in &fixtures {
+        let fixture = load_fixture(fixture_path);
+
+        for test in &fixture.test {
+            let result = std::panic::catch_unwind(|| {
+                run_test_case(test);
+            });
+
+            let desc = test.description.as_deref().unwrap_or("");
+            match result {
+                Ok(()) => {
+                    passed += 1;
+                    println!("  ✓ {}: {}", test.name, desc);
+                }
+                Err(_) => {
+                    failed += 1;
+                    println!("  ✗ {}: {}", test.name, desc);
+                }
+            }
+        }
+    }
+
+    println!("\nM9 Functions: {} passed, {} failed", passed, failed);
+    assert_eq!(failed, 0, "Some M9 function tests failed");
+}
+
+#[test]
+fn test_type_function() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})")
+        .unwrap();
+
+    let result = db
+        .execute("MATCH (a:Person)-[r]->(b:Person) RETURN type(r)")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.columns, vec!["type(r)"]);
+
+    // Check the value is "KNOWS"
+    let row = &result.rows[0];
+    let value = row.values.get("type(r)").unwrap();
+    match value {
+        crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => {
+            assert_eq!(s, "KNOWS");
+        }
+        _ => panic!("Expected string value for type(r)"),
+    }
+}
+
+#[test]
+fn test_type_function_in_where() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})")
+        .unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})")
+        .unwrap();
+
+    let result = db
+        .execute("MATCH (a:Person)-[r]->(b:Person) WHERE type(r) = 'KNOWS' RETURN b.name")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+}
+
+#[test]
+fn test_id_function() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})")
+        .unwrap();
+
+    // Test id() on node
+    let result = db
+        .execute("MATCH (a:Person {name: 'Alice'}) RETURN id(a)")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+
+    let row = &result.rows[0];
+    let value = row.values.get("id(a)").unwrap();
+    match value {
+        crustdb::ResultValue::Property(crustdb::PropertyValue::Integer(id)) => {
+            assert!(*id > 0);
+        }
+        _ => panic!("Expected integer value for id(a)"),
+    }
+
+    // Test id() on relationship
+    let result = db
+        .execute("MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN id(r)")
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+}
+
+#[test]
+fn test_labels_function() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (a:Person:Employee {name: 'Alice'})")
+        .unwrap();
+
+    let result = db.execute("MATCH (a:Person) RETURN labels(a)").unwrap();
+    assert_eq!(result.rows.len(), 1);
+
+    let row = &result.rows[0];
+    let value = row.values.get("labels(a)").unwrap();
+    match value {
+        crustdb::ResultValue::Property(crustdb::PropertyValue::List(labels)) => {
+            assert!(labels.len() >= 1);
+        }
+        _ => panic!("Expected list value for labels(a)"),
+    }
+}
