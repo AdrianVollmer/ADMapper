@@ -1,37 +1,28 @@
 //! Profiling harness for SHORTEST path queries.
 //!
-//! This example is designed to be run with cargo-flamegraph or perf to
-//! generate flamecharts/flamegraphs of query execution.
-//!
-//! # Installation
-//!
-//! ```bash
-//! cargo install flamegraph
-//! ```
+//! Generates flamegraph SVGs using the pprof crate (no perf required).
 //!
 //! # Usage
 //!
-//! Generate a flamegraph (SVG):
 //! ```bash
-//! cargo flamegraph --example profile_shortest -- --grid 20 --iterations 100
+//! cargo run --release --example profile_shortest -- --grid 20 --iterations 100
 //! ```
 //!
-//! Or with perf directly:
-//! ```bash
-//! perf record --call-graph dwarf cargo run --release --example profile_shortest -- --grid 30 --iterations 50
-//! perf script | inferno-collapse-perf | inferno-flamegraph > flamegraph.svg
-//! ```
+//! This generates `flamegraph.svg` in the current directory.
 //!
 //! # Options
 //!
 //! - `--grid N`: Use NxN grid graph (default: 20)
-//! - `--chain N`: Use linear chain of N nodes (default: off)
-//! - `--tree D`: Use binary tree of depth D (default: off)
+//! - `--chain N`: Use linear chain of N nodes
+//! - `--tree D`: Use binary tree of depth D
 //! - `--iterations N`: Number of query iterations (default: 100)
 //! - `--warmup N`: Warmup iterations before profiling (default: 10)
+//! - `--output FILE`: Output file (default: flamegraph.svg)
 
 use crustdb::Database;
+use pprof::ProfilerGuardBuilder;
 use std::env;
+use std::fs::File;
 use std::hint::black_box;
 
 fn main() {
@@ -43,6 +34,7 @@ fn main() {
     let mut tree_depth: Option<usize> = None;
     let mut iterations = 100;
     let mut warmup = 10;
+    let mut output = "flamegraph.svg".to_string();
 
     let mut i = 1;
     while i < args.len() {
@@ -67,6 +59,10 @@ fn main() {
                 warmup = args[i + 1].parse().expect("Invalid warmup");
                 i += 2;
             }
+            "--output" => {
+                output = args[i + 1].clone();
+                i += 2;
+            }
             "--help" | "-h" => {
                 print_help();
                 return;
@@ -85,21 +81,21 @@ fn main() {
     }
 
     if let Some(n) = grid_size {
-        profile_grid(n, iterations, warmup);
+        profile_grid(n, iterations, warmup, &output);
     } else if let Some(n) = chain_size {
-        profile_chain(n, iterations, warmup);
+        profile_chain(n, iterations, warmup, &output);
     } else if let Some(d) = tree_depth {
-        profile_tree(d, iterations, warmup);
+        profile_tree(d, iterations, warmup, &output);
     }
 }
 
 fn print_help() {
     eprintln!(
         r#"
-Profile SHORTEST path queries for flamegraph generation.
+Profile SHORTEST path queries and generate flamegraph SVG.
 
 USAGE:
-    cargo flamegraph --example profile_shortest -- [OPTIONS]
+    cargo run --release --example profile_shortest -- [OPTIONS]
 
 OPTIONS:
     --grid N        Use NxN grid graph (default if no graph specified)
@@ -107,22 +103,23 @@ OPTIONS:
     --tree D        Use binary tree of depth D
     --iterations N  Number of query iterations (default: 100)
     --warmup N      Warmup iterations (default: 10)
+    --output FILE   Output flamegraph file (default: flamegraph.svg)
     --help, -h      Show this help
 
 EXAMPLES:
     # Profile 20x20 grid with 100 iterations
-    cargo flamegraph --example profile_shortest -- --grid 20 --iterations 100
+    cargo run --release --example profile_shortest -- --grid 20 --iterations 100
 
     # Profile large chain
-    cargo flamegraph --example profile_shortest -- --chain 1000 --iterations 50
+    cargo run --release --example profile_shortest -- --chain 1000 --iterations 50
 
-    # Profile binary tree
-    cargo flamegraph --example profile_shortest -- --tree 12 --iterations 100
+    # Profile binary tree with custom output
+    cargo run --release --example profile_shortest -- --tree 12 --output tree_profile.svg
 "#
     );
 }
 
-fn profile_grid(n: usize, iterations: usize, warmup: usize) {
+fn profile_grid(n: usize, iterations: usize, warmup: usize, output: &str) {
     eprintln!("Setting up {}x{} grid ({} nodes)...", n, n, n * n);
 
     let db = Database::in_memory().expect("Failed to create database");
@@ -159,10 +156,10 @@ fn profile_grid(n: usize, iterations: usize, warmup: usize) {
         last_id
     );
 
-    run_profile(&db, &query, iterations, warmup, "grid");
+    run_profile(&db, &query, iterations, warmup, "grid", output);
 }
 
-fn profile_chain(n: usize, iterations: usize, warmup: usize) {
+fn profile_chain(n: usize, iterations: usize, warmup: usize, output: &str) {
     eprintln!("Setting up chain of {} nodes...", n);
 
     let db = Database::in_memory().expect("Failed to create database");
@@ -186,12 +183,15 @@ fn profile_chain(n: usize, iterations: usize, warmup: usize) {
         n - 1
     );
 
-    run_profile(&db, &query, iterations, warmup, "chain");
+    run_profile(&db, &query, iterations, warmup, "chain", output);
 }
 
-fn profile_tree(depth: usize, iterations: usize, warmup: usize) {
+fn profile_tree(depth: usize, iterations: usize, warmup: usize, output: &str) {
     let num_nodes = (1 << depth) - 1;
-    eprintln!("Setting up binary tree depth {} ({} nodes)...", depth, num_nodes);
+    eprintln!(
+        "Setting up binary tree depth {} ({} nodes)...",
+        depth, num_nodes
+    );
 
     let db = Database::in_memory().expect("Failed to create database");
 
@@ -221,10 +221,17 @@ fn profile_tree(depth: usize, iterations: usize, warmup: usize) {
         num_nodes - 1
     );
 
-    run_profile(&db, &query, iterations, warmup, "tree");
+    run_profile(&db, &query, iterations, warmup, "tree", output);
 }
 
-fn run_profile(db: &Database, query: &str, iterations: usize, warmup: usize, graph_type: &str) {
+fn run_profile(
+    db: &Database,
+    query: &str,
+    iterations: usize,
+    warmup: usize,
+    graph_type: &str,
+    output: &str,
+) {
     eprintln!("Warming up ({} iterations)...", warmup);
     for _ in 0..warmup {
         let result = db.execute(query).expect("Query failed");
@@ -237,12 +244,25 @@ fn run_profile(db: &Database, query: &str, iterations: usize, warmup: usize, gra
     );
     eprintln!("Query: {}", query);
 
-    // Main profiling loop - this is what the flamegraph will capture
+    // Start profiler
+    let guard = ProfilerGuardBuilder::default()
+        .frequency(1000)
+        .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+        .build()
+        .expect("Failed to build profiler");
+
+    // Main profiling loop
     for _ in 0..iterations {
         let result = db.execute(query).expect("Query failed");
-        // black_box prevents the compiler from optimizing away the result
         black_box(result);
     }
 
-    eprintln!("Done. Check flamegraph.svg for results.");
+    // Generate flamegraph
+    if let Ok(report) = guard.report().build() {
+        let file = File::create(output).expect("Failed to create output file");
+        report.flamegraph(file).expect("Failed to write flamegraph");
+        eprintln!("Flamegraph written to: {}", output);
+    } else {
+        eprintln!("Failed to generate report");
+    }
 }
