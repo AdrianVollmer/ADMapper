@@ -44,10 +44,44 @@ fn main() {
         .unwrap();
     println!("Edges: {} rows", edges.rows.len());
 
-    // Try to find path (0 to n*n-1)
+    // Test 1: Simple adjacent path (should find path of length 1)
+    println!("\n--- Test 1: Adjacent nodes (0 -> 1) ---");
+    let result = db.execute(
+        "MATCH p = SHORTEST 1 (src:Node)-[:EDGE]-+(dst:Node) WHERE src.id = 0 AND dst.id = 1 RETURN length(p), src.id, dst.id",
+    );
+    println!("Result: {:?}", result);
+
+    // Test 2: Path to node 5 (one down)
+    println!("\n--- Test 2: One hop down (0 -> 5) ---");
+    let result = db.execute(
+        "MATCH p = SHORTEST 1 (src:Node)-[:EDGE]-+(dst:Node) WHERE src.id = 0 AND dst.id = 5 RETURN length(p), src.id, dst.id",
+    );
+    println!("Result: {:?}", result);
+
+    // Test 3: Path to node 6 (diagonal, 2 hops)
+    println!("\n--- Test 3: Diagonal (0 -> 6, 2 hops) ---");
+    let result = db.execute(
+        "MATCH p = SHORTEST 1 (src:Node)-[:EDGE]-+(dst:Node) WHERE src.id = 0 AND dst.id = 6 RETURN length(p), src.id, dst.id",
+    );
+    println!("Result: {:?}", result);
+
+    // Test 4: Full grid traversal (0 -> 24)
+    println!("\n--- Test 4: Full grid (0 -> 24, 8 hops) ---");
     let last_id = n * n - 1;
-    println!("Finding path from 0 to {}", last_id);
-    let query = format!("MATCH p = SHORTEST 1 (src:Node)-[:EDGE]-+(dst:Node) WHERE src.id = 0 AND dst.id = {} RETURN length(p)", last_id);
+    let query = format!(
+        "MATCH p = SHORTEST 1 (src:Node)-[:EDGE]-+(dst:Node) WHERE src.id = 0 AND dst.id = {} RETURN length(p), src.id, dst.id",
+        last_id
+    );
     let result = db.execute(&query);
-    println!("Shortest path result: {:?}", result);
+    println!("Result: {:?}", result);
+
+    // Test 5: Without WHERE clause (should find many paths)
+    println!("\n--- Test 5: No WHERE (all shortest paths) ---");
+    let result = db.execute(
+        "MATCH p = SHORTEST 1 (src:Node)-[:EDGE]-+(dst:Node) RETURN length(p), src.id, dst.id",
+    );
+    match result {
+        Ok(r) => println!("Found {} paths", r.rows.len()),
+        Err(e) => println!("Error: {:?}", e),
+    }
 }

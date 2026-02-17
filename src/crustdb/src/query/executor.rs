@@ -1,16 +1,142 @@
 //! Query executor - runs parsed statements against the storage backend.
 
 use super::parser::{
-    CreateClause, DeleteClause, Direction, Expression, Literal, MatchClause, NodePattern, Pattern,
-    PatternElement, RelQuantifier, RelationshipPattern, ReturnClause, SetClause, SetItem,
-    Statement,
+    BinaryOperator, CreateClause, DeleteClause, Direction, Expression, Literal, MatchClause,
+    NodePattern, Pattern, PatternElement, RelQuantifier, RelationshipPattern, ReturnClause,
+    SetClause, SetItem, Statement,
 };
 use super::{QueryResult, QueryStats, ResultValue, Row};
 use crate::error::{Error, Result};
 use crate::graph::{Edge, Node, PropertyValue};
 use crate::storage::SqliteStorage;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
+
+// =============================================================================
+// Predicate Pushdown for Shortest Path
+// =============================================================================
+
+/// Constraints extracted from WHERE clause for shortest path optimization.
+/// When we know specific source/target property values, BFS can filter nodes early.
+#[derive(Debug, Default)]
+struct PathConstraints {
+    /// Property constraints for source nodes (e.g., `src.name = 'A'` -> ("name", ["A"])).
+    source_props: HashMap<String, Vec<PropertyValue>>,
+    /// Property constraints for target nodes (e.g., `dst.name = 'B'` -> ("name", ["B"])).
+    target_props: HashMap<String, Vec<PropertyValue>>,
+}
+
+/// Extract source/target property constraints from a WHERE clause predicate.
+///
+/// Looks for patterns like:
+/// - `src.id = 5` (integer)
+/// - `dst.name = 'Alice'` (string)
+/// - `src.id = 5 AND dst.name = 'Bob'` (combined)
+fn extract_path_constraints(
+    predicate: &Expression,
+    source_var: &str,
+    target_var: &str,
+) -> PathConstraints {
+    let mut constraints = PathConstraints::default();
+
+    extract_constraints_recursive(predicate, source_var, target_var, &mut constraints);
+
+    constraints
+}
+
+/// Recursively extract constraints from AND-combined predicates.
+fn extract_constraints_recursive(
+    expr: &Expression,
+    source_var: &str,
+    target_var: &str,
+    constraints: &mut PathConstraints,
+) {
+    match expr {
+        // Handle AND: recurse into both sides
+        Expression::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => {
+            extract_constraints_recursive(left, source_var, target_var, constraints);
+            extract_constraints_recursive(right, source_var, target_var, constraints);
+        }
+
+        // Handle equality: var.prop = value
+        Expression::BinaryOp {
+            left,
+            op: BinaryOperator::Eq,
+            right,
+        } => {
+            // Try both orderings: `var.id = 5` and `5 = var.id`
+            if let Some((var, prop, value)) = extract_property_equals(left, right) {
+                add_property_constraint(var, prop, value, source_var, target_var, constraints);
+            } else if let Some((var, prop, value)) = extract_property_equals(right, left) {
+                add_property_constraint(var, prop, value, source_var, target_var, constraints);
+            }
+        }
+
+        _ => {}
+    }
+}
+
+/// Extract (variable, property, value) from `var.prop = literal`.
+fn extract_property_equals<'a>(
+    prop_expr: &'a Expression,
+    value_expr: &'a Expression,
+) -> Option<(&'a str, &'a str, PropertyValue)> {
+    // Check if left side is a property access
+    if let Expression::Property { base, property } = prop_expr {
+        if let Expression::Variable(var) = base.as_ref() {
+            // Check if right side is a literal
+            match value_expr {
+                Expression::Literal(Literal::Integer(val)) => {
+                    return Some((
+                        var.as_str(),
+                        property.as_str(),
+                        PropertyValue::Integer(*val),
+                    ));
+                }
+                Expression::Literal(Literal::String(val)) => {
+                    return Some((
+                        var.as_str(),
+                        property.as_str(),
+                        PropertyValue::String(val.clone()),
+                    ));
+                }
+                Expression::Literal(Literal::Boolean(val)) => {
+                    return Some((var.as_str(), property.as_str(), PropertyValue::Bool(*val)));
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// Add a property constraint if the variable matches source or target.
+fn add_property_constraint(
+    var: &str,
+    prop: &str,
+    value: PropertyValue,
+    source_var: &str,
+    target_var: &str,
+    constraints: &mut PathConstraints,
+) {
+    if var == source_var {
+        constraints
+            .source_props
+            .entry(prop.to_string())
+            .or_default()
+            .push(value);
+    } else if var == target_var {
+        constraints
+            .target_props
+            .entry(prop.to_string())
+            .or_default()
+            .push(value);
+    }
+}
 
 /// Execute a parsed statement against the storage.
 pub fn execute(statement: &Statement, storage: &SqliteStorage) -> Result<QueryResult> {
@@ -203,7 +329,15 @@ fn execute_match(
     // Determine pattern type and execute accordingly
     let bindings = if is_shortest_path_pattern(pattern) {
         // Shortest path pattern: MATCH p = SHORTEST k (a)-[:TYPE]-+(b)
-        execute_shortest_path_pattern(pattern, storage)?
+        // Extract constraints from WHERE clause for predicate pushdown
+        let constraints = if let Some(ref where_clause) = match_clause.where_clause {
+            // Get source/target variable names from pattern
+            let (source_var, target_var) = get_path_endpoint_vars(pattern);
+            extract_path_constraints(&where_clause.predicate, &source_var, &target_var)
+        } else {
+            PathConstraints::default()
+        };
+        execute_shortest_path_pattern(pattern, storage, &constraints)?
     } else if is_single_node_pattern(pattern) {
         // Simple single-node pattern: MATCH (n) or MATCH (n:Label)
         execute_single_node_pattern(pattern, storage)?
@@ -347,12 +481,40 @@ fn is_shortest_path_pattern(pattern: &Pattern) -> bool {
     false
 }
 
+/// Extract source and target variable names from a shortest path pattern.
+fn get_path_endpoint_vars(pattern: &Pattern) -> (String, String) {
+    let source_var = pattern
+        .elements
+        .first()
+        .and_then(|e| match e {
+            PatternElement::Node(n) => n.variable.clone(),
+            _ => None,
+        })
+        .unwrap_or_else(|| "_src".to_string());
+
+    let target_var = pattern
+        .elements
+        .last()
+        .and_then(|e| match e {
+            PatternElement::Node(n) => n.variable.clone(),
+            _ => None,
+        })
+        .unwrap_or_else(|| "_tgt".to_string());
+
+    (source_var, target_var)
+}
+
 /// Execute a shortest path pattern using BFS.
+///
+/// The `constraints` parameter enables predicate pushdown: when the WHERE clause
+/// specifies specific source/target node IDs (e.g., `src.id = 0 AND dst.id = 24`),
+/// we can filter nodes BEFORE BFS starts, enabling proper early termination.
 fn execute_shortest_path_pattern(
     pattern: &Pattern,
     storage: &SqliteStorage,
+    constraints: &PathConstraints,
 ) -> Result<Vec<Binding>> {
-    use std::collections::{HashSet, VecDeque};
+    use std::collections::VecDeque;
 
     // Extract pattern components (must be node-rel-node for now)
     if pattern.elements.len() != 3 {
@@ -395,7 +557,7 @@ fn execute_shortest_path_pattern(
         }
     };
 
-    // BFS state for Yen's k-shortest paths algorithm (simplified)
+    // BFS state
     #[derive(Clone, Debug)]
     struct PathState {
         node_id: i64,
@@ -403,7 +565,7 @@ fn execute_shortest_path_pattern(
         path_edges: Vec<i64>,
     }
 
-    // For collecting k shortest paths
+    // For collecting shortest paths
     #[derive(Debug)]
     struct PathResult {
         length: usize,
@@ -413,40 +575,77 @@ fn execute_shortest_path_pattern(
         target_node: Node,
     }
 
-    // Scan source nodes
+    // Scan source nodes and apply pushed-down constraints
     let source_nodes = scan_nodes(source_pattern, storage)?;
     let source_nodes = filter_by_properties(source_nodes, source_pattern)?;
+    let source_nodes: Vec<Node> = if constraints.source_props.is_empty() {
+        source_nodes
+    } else {
+        // Filter to only nodes matching ALL WHERE clause property constraints
+        source_nodes
+            .into_iter()
+            .filter(|n| {
+                constraints.source_props.iter().all(|(prop, values)| {
+                    n.properties.get(prop).is_some_and(|pv| values.contains(pv))
+                })
+            })
+            .collect()
+    };
 
-    // Scan target nodes to get their IDs for quick lookup
+    // Scan target nodes and apply pushed-down constraints
     let target_nodes = scan_nodes(target_pattern, storage)?;
     let target_nodes = filter_by_properties(target_nodes, target_pattern)?;
+    let target_nodes: Vec<Node> = if constraints.target_props.is_empty() {
+        target_nodes
+    } else {
+        // Filter to only nodes matching ALL WHERE clause property constraints
+        target_nodes
+            .into_iter()
+            .filter(|n| {
+                constraints.target_props.iter().all(|(prop, values)| {
+                    n.properties.get(prop).is_some_and(|pv| values.contains(pv))
+                })
+            })
+            .collect()
+    };
     let target_ids: HashSet<i64> = target_nodes.iter().map(|n| n.id).collect();
     let target_map: std::collections::HashMap<i64, Node> =
         target_nodes.into_iter().map(|n| (n.id, n)).collect();
 
     let mut all_results: Vec<PathResult> = Vec::new();
+    let k = pattern.shortest_k.unwrap_or(1) as usize;
+
+    // Optimization: for SHORTEST 1 with specific target, use simple BFS with visited set
+    // This is O(V+E) instead of exponential in the number of paths
+    let use_fast_bfs = k == 1 && target_ids.len() == 1;
 
     // BFS from each source node to find shortest paths
-    // Uses level-by-level BFS with early termination once we find paths
     for source_node in source_nodes {
+        // For fast single-target BFS, use a visited set to avoid exponential path enumeration
+        let mut visited: HashSet<i64> = HashSet::new();
         let mut found_paths: Vec<PathResult> = Vec::new();
         let mut queue: VecDeque<PathState> = VecDeque::new();
-        let mut shortest_found: Option<usize> = None; // Track shortest path length found
+        let mut shortest_found: Option<usize> = None;
 
         queue.push_back(PathState {
             node_id: source_node.id,
             path_nodes: vec![source_node.id],
             path_edges: vec![],
         });
+        visited.insert(source_node.id);
 
         // BFS level by level to ensure shortest paths first
         while let Some(state) = queue.pop_front() {
             let current_depth = state.path_edges.len();
 
+            // Early termination: if we've found enough paths, stop
+            if found_paths.len() >= k {
+                break;
+            }
+
             // Early termination: if we've found paths at a shorter depth, skip deeper paths
             if let Some(shortest) = shortest_found {
                 if current_depth > shortest {
-                    // All remaining states are at same or deeper levels, stop BFS
                     break;
                 }
             }
@@ -468,9 +667,12 @@ fn execute_shortest_path_pattern(
                             source_node: source_node.clone(),
                             target_node: target_node.clone(),
                         });
-                        // Record shortest path length found
                         if shortest_found.is_none() {
                             shortest_found = Some(current_depth);
+                        }
+                        // For fast BFS with single target, stop immediately
+                        if use_fast_bfs {
+                            break;
                         }
                     }
                 }
@@ -482,7 +684,6 @@ fn execute_shortest_path_pattern(
             }
 
             // Don't expand states that are at the shortest path depth
-            // (further expansion would only find longer paths)
             if let Some(shortest) = shortest_found {
                 if current_depth >= shortest {
                     continue;
@@ -524,8 +725,14 @@ fn execute_shortest_path_pattern(
                     }
                 };
 
-                // Avoid cycles within the same path
-                if state.path_nodes.contains(&next_node_id) {
+                // For fast BFS: skip if already visited (globally)
+                // For k>1 BFS: only avoid cycles within the same path
+                if use_fast_bfs {
+                    if visited.contains(&next_node_id) {
+                        continue;
+                    }
+                    visited.insert(next_node_id);
+                } else if state.path_nodes.contains(&next_node_id) {
                     continue;
                 }
 
@@ -1621,8 +1828,6 @@ fn literal_matches_property(lit: &Literal, prop: &PropertyValue) -> bool {
 // =============================================================================
 // WHERE Clause Evaluation (M4)
 // =============================================================================
-
-use super::parser::BinaryOperator;
 
 /// Convert a literal to a PropertyValue.
 fn literal_to_property_value(lit: &Literal) -> PropertyValue {
