@@ -1686,6 +1686,22 @@ async fn graph_query(
     };
     let _ = progress_tx.send(initial_progress);
 
+    // Add query to history with "running" status
+    let timestamp = started_at_unix;
+    if let Err(e) = db.add_query_history(
+        &query_id,
+        &body.query, // Use query text as name
+        &body.query,
+        timestamp,
+        None,
+        "running",
+        started_at_unix,
+        None,
+        None,
+    ) {
+        warn!(error = %e, "Failed to add query to history");
+    }
+
     // Spawn the query execution
     let query_id_clone = query_id.clone();
     let query_text = body.query.clone();
@@ -1695,13 +1711,22 @@ async fn graph_query(
     let running_query_for_task = running_query.clone();
 
     tokio::task::spawn_blocking(move || {
+        // Helper to update query status in history
+        let update_history = |status: &str, duration_ms: Option<u64>, result_count: Option<i64>, error: Option<&str>| {
+            if let Err(e) = db.update_query_status(&query_id_clone, status, duration_ms, result_count, error) {
+                warn!(error = %e, "Failed to update query history status");
+            }
+        };
+
         // Check if cancelled before starting
         if cancel_token.is_cancelled() {
+            let duration_ms = started_at.elapsed().as_millis() as u64;
+            update_history("aborted", Some(duration_ms), None, None);
             let progress = QueryProgress {
                 query_id: query_id_clone.clone(),
                 status: QueryStatus::Aborted,
                 started_at: started_at_unix,
-                duration_ms: Some(started_at.elapsed().as_millis() as u64),
+                duration_ms: Some(duration_ms),
                 result_count: None,
                 error: None,
                 results: None,
@@ -1723,11 +1748,13 @@ async fn graph_query(
 
         // Check if cancelled after query completion
         if cancel_token.is_cancelled() {
+            let duration_ms = started_at.elapsed().as_millis() as u64;
+            update_history("aborted", Some(duration_ms), None, None);
             let progress = QueryProgress {
                 query_id: query_id_clone.clone(),
                 status: QueryStatus::Aborted,
                 started_at: started_at_unix,
-                duration_ms: Some(started_at.elapsed().as_millis() as u64),
+                duration_ms: Some(duration_ms),
                 result_count: None,
                 error: None,
                 results: None,
@@ -1763,6 +1790,9 @@ async fn graph_query(
                     "Query completed"
                 );
 
+                // Update history with completed status
+                update_history("completed", Some(duration_ms), result_count, None);
+
                 QueryProgress {
                     query_id: query_id_clone.clone(),
                     status: QueryStatus::Completed,
@@ -1775,14 +1805,19 @@ async fn graph_query(
                 }
             }
             Err(e) => {
-                error!(query_id = %query_id_clone, error = %e, "Query failed");
+                let error_msg = e.to_string();
+                error!(query_id = %query_id_clone, error = %error_msg, "Query failed");
+
+                // Update history with failed status
+                update_history("failed", Some(duration_ms), None, Some(&error_msg));
+
                 QueryProgress {
                     query_id: query_id_clone.clone(),
                     status: QueryStatus::Failed,
                     started_at: started_at_unix,
                     duration_ms: Some(duration_ms),
                     result_count: None,
-                    error: Some(e.to_string()),
+                    error: Some(error_msg),
                     results: None,
                     graph: None,
                 }
@@ -1852,12 +1887,21 @@ async fn query_abort(
     // Cancel the token - this will signal the query to abort
     query.cancel_token.cancel();
 
+    let duration_ms = query.started_at.elapsed().as_millis() as u64;
+
+    // Update query history with aborted status
+    if let Some(db) = state.db() {
+        if let Err(e) = db.update_query_status(&query_id, "aborted", Some(duration_ms), None, None) {
+            warn!(error = %e, "Failed to update query history status on abort");
+        }
+    }
+
     // Broadcast aborted status
     let progress = QueryProgress {
         query_id: query_id.clone(),
         status: QueryStatus::Aborted,
         started_at: query.started_at_unix,
-        duration_ms: Some(query.started_at.elapsed().as_millis() as u64),
+        duration_ms: Some(duration_ms),
         result_count: None,
         error: None,
         results: None,
