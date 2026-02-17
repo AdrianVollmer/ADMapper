@@ -94,13 +94,13 @@ build_frontend() {
 
 build_backend() {
 	log_info "Building backend (no Tauri)..."
-	cargo build --manifest-path src/backend/Cargo.toml --no-default-features --release --features crustdb
+	cargo build --manifest-path src/backend/Cargo.toml --no-default-features --release --features kuzu,crustdb
 	log_info "Backend built to src/backend/target/release/"
 }
 
 build_backend_debug() {
 	log_info "Building backend (no Tauri, debug)..."
-	cargo build --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb
+	cargo build --manifest-path src/backend/Cargo.toml --no-default-features --features kuzu,crustdb
 	log_info "Backend built to src/backend/target/debug/"
 }
 

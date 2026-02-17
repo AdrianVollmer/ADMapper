@@ -26,7 +26,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 # native library linking conflicts with crustdb's rusqlite. Both can now coexist.
 cozo = { version = "0.7", default-features = false, features = ["storage-sled", "graph-algo"], optional = true }
 kuzu = { version = "0.11.2", optional = true }
-crustdb = { path = "../crustdb", optional = true, default-features = false }
+crustdb = { path = "../crustdb", optional = true }
 rayon = "=1.10.0"  # Pin to avoid graph_builder incompatibility with 1.11
 zip = "2"
 tempfile = "3"
