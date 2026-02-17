@@ -29,13 +29,8 @@ run_tests() {
         test_pass
         log_info "Found $count results for 'admin'"
     else
-        # admin might not exist in test data, just check response is valid
-        if echo "$response" | jq -e '. | type == "array"' >/dev/null 2>&1; then
-            test_pass
-            log_info "Search returned empty array (valid)"
-        else
-            test_fail "Invalid search response format"
-        fi
+        # Strict check: 'admin' should exist in typical AD data
+        test_fail "Search for 'admin' returned no results (case-insensitive search may be broken)"
     fi
 
     test_start "Search for 'user' returns results"

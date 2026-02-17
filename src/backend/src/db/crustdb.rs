@@ -529,9 +529,9 @@ impl CrustDatabase {
         let query_escaped = search_query.replace('\'', "''").to_lowercase();
 
         // CrustDB supports CONTAINS for string matching
-        // Return full node to get all flattened properties
+        // Use toLower() for case-insensitive search
         let query = format!(
-            "MATCH (n) WHERE n.label CONTAINS '{}' OR n.object_id CONTAINS '{}' \
+            "MATCH (n) WHERE toLower(n.label) CONTAINS '{}' OR toLower(n.object_id) CONTAINS '{}' \
              RETURN n LIMIT {}",
             query_escaped, query_escaped, limit
         );
