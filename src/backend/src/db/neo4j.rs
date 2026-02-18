@@ -321,17 +321,25 @@ impl DatabaseBackend for Neo4jDatabase {
                     "UNWIND range(0, size($srcs)-1) AS i \
                      MATCH (a {{objectid: $srcs[i]}}), (b {{objectid: $tgts[i]}}) \
                      MERGE (a)-[r:{}]->(b) \
-                     SET r.properties = $props[i]",
+                     SET r.properties = $props[i] \
+                     RETURN count(r) AS created",
                     edge_type
                 ))
                 .param("srcs", srcs)
                 .param("tgts", tgts)
                 .param("props", props);
 
-                if let Err(e) = self.run_query(q) {
-                    debug!("Failed to create {} edges batch: {}", edge_type, e);
-                } else {
-                    inserted += chunk.len();
+                match self.execute_query(q) {
+                    Ok(rows) => {
+                        let created = rows
+                            .first()
+                            .and_then(|r| r.get::<i64>("created").ok())
+                            .unwrap_or(0) as usize;
+                        inserted += created;
+                    }
+                    Err(e) => {
+                        debug!("Failed to create {} edges batch: {}", edge_type, e);
+                    }
                 }
             }
         }

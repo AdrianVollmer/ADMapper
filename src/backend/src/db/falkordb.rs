@@ -404,15 +404,24 @@ impl DatabaseBackend for FalkorDbDatabase {
                     "UNWIND [{}] AS row \
                      MATCH (a {{objectid: row.src}}), (b {{objectid: row.tgt}}) \
                      MERGE (a)-[r:{}]->(b) \
-                     SET r.properties = row.props",
+                     SET r.properties = row.props \
+                     RETURN count(r) AS created",
                     items.join(", "),
                     edge_type
                 );
 
-                if let Err(e) = self.run_query(&cypher) {
-                    debug!("Failed to create {} edges batch: {}", edge_type, e);
-                } else {
-                    inserted += chunk.len();
+                match self.execute_query(&cypher) {
+                    Ok(rows) => {
+                        let created = rows
+                            .first()
+                            .and_then(|r| r.first())
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0) as usize;
+                        inserted += created;
+                    }
+                    Err(e) => {
+                        debug!("Failed to create {} edges batch: {}", edge_type, e);
+                    }
                 }
             }
         }
