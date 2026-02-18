@@ -192,6 +192,8 @@ pub struct AppState {
     import_jobs: Arc<DashMap<String, Arc<ImportJob>>>,
     /// Active running queries for tracking and cancellation.
     running_queries: Arc<DashMap<String, Arc<RunningQuery>>>,
+    /// Counter for synchronous queries (path finding, connections, etc.)
+    sync_query_count: Arc<std::sync::atomic::AtomicUsize>,
     /// Broadcast channel for query activity updates.
     query_activity_tx: broadcast::Sender<QueryActivity>,
 }
@@ -204,6 +206,7 @@ impl AppState {
             connection: Arc::new(RwLock::new(None)),
             import_jobs: Arc::new(DashMap::new()),
             running_queries: Arc::new(DashMap::new()),
+            sync_query_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             query_activity_tx,
         }
     }
@@ -215,14 +218,35 @@ impl AppState {
             connection: Arc::new(RwLock::new(Some(DatabaseConnection { backend, db_type }))),
             import_jobs: Arc::new(DashMap::new()),
             running_queries: Arc::new(DashMap::new()),
+            sync_query_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             query_activity_tx,
         }
     }
 
+    /// Get total active query count (async + sync).
+    fn active_query_count(&self) -> usize {
+        self.running_queries.len()
+            + self.sync_query_count.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Broadcast query activity update.
     fn broadcast_query_activity(&self) {
-        let active = self.running_queries.len();
+        let active = self.active_query_count();
         let _ = self.query_activity_tx.send(QueryActivity { active });
+    }
+
+    /// Increment sync query count and broadcast.
+    fn start_sync_query(&self) {
+        self.sync_query_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.broadcast_query_activity();
+    }
+
+    /// Decrement sync query count and broadcast.
+    fn end_sync_query(&self) {
+        self.sync_query_count
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        self.broadcast_query_activity();
     }
 
     /// Check if connected to a database.
@@ -1107,7 +1131,22 @@ async fn graph_search(
     }
 
     let db = state.require_db()?;
-    let nodes = db.search_nodes(&params.q, params.limit)?;
+
+    // Track query activity
+    state.start_sync_query();
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let query = params.q.clone();
+    let limit = params.limit;
+    let nodes_result = tokio::task::spawn_blocking(move || {
+        db.search_nodes(&query, limit)
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
+
+    state.end_sync_query();
+
+    let nodes = nodes_result?;
     let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
 
     debug!(query = %params.q, results = result.len(), "Search complete");
@@ -1207,7 +1246,21 @@ async fn node_connections(
     let db = state.require_db()?;
     info!(node_id = %node_id, direction = %direction, "Loading node connections");
 
-    let (nodes, edges) = db.get_node_connections(&node_id, &direction)?;
+    // Track query activity
+    state.start_sync_query();
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let node_id_clone = node_id.clone();
+    let direction_clone = direction.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        db.get_node_connections(&node_id_clone, &direction_clone)
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
+
+    state.end_sync_query();
+
+    let (nodes, edges) = result?;
 
     Ok(Json(FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
@@ -1353,81 +1406,97 @@ async fn graph_path(
 ) -> Result<Json<PathResponse>, ApiError> {
     let db = state.require_db()?;
 
-    // Resolve identifiers to object IDs (supports both IDs and labels)
-    let from_id = db
-        .resolve_node_identifier(&params.from)?
-        .ok_or_else(|| ApiError::NotFound(format!("Node not found: {}", params.from)))?;
+    // Track query activity
+    state.start_sync_query();
 
-    let to_id = db
-        .resolve_node_identifier(&params.to)?
-        .ok_or_else(|| ApiError::NotFound(format!("Node not found: {}", params.to)))?;
+    // Run all blocking DB work in spawn_blocking
+    let from_param = params.from.clone();
+    let to_param = params.to.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        // Resolve identifiers to object IDs (supports both IDs and labels)
+        let from_id = match db.resolve_node_identifier(&from_param)? {
+            Some(id) => id,
+            None => return Err(DbError::Database(format!("Node not found: {}", from_param))),
+        };
 
-    let path_result = db.shortest_path(&from_id, &to_id)?;
+        let to_id = match db.resolve_node_identifier(&to_param)? {
+            Some(id) => id,
+            None => return Err(DbError::Database(format!("Node not found: {}", to_param))),
+        };
 
-    match path_result {
-        None => {
-            debug!(from = %from_id, to = %to_id, "No path found");
-            Ok(Json(PathResponse {
-                found: false,
-                path: Vec::new(),
-                graph: FullGraph {
-                    nodes: Vec::new(),
-                    edges: Vec::new(),
-                },
-            }))
-        }
-        Some(path) => {
-            // Get node IDs from path
-            let node_ids: Vec<String> = path.iter().map(|(id, _)| id.clone()).collect();
+        let path_result = db.shortest_path(&from_id, &to_id)?;
 
-            // Get full node data
-            let nodes = db.get_nodes_by_ids(&node_ids)?;
-
-            // Build node lookup
-            let node_map: std::collections::HashMap<String, DbNode> = nodes
-                .into_iter()
-                .map(|node| (node.id.clone(), node))
-                .collect();
-
-            // Build path steps
-            let path_steps: Vec<PathStep> = path
-                .iter()
-                .map(|(id, edge_type)| {
-                    let node = node_map.get(id).cloned().unwrap_or_else(|| DbNode {
-                        id: id.clone(),
-                        label: id.clone(),
-                        node_type: "Unknown".to_string(),
-                        properties: JsonValue::Null,
-                    });
-                    PathStep {
-                        node: GraphNode::from(node),
-                        edge_type: edge_type.clone(),
-                    }
+        match path_result {
+            None => {
+                debug!(from = %from_id, to = %to_id, "No path found");
+                Ok(PathResponse {
+                    found: false,
+                    path: Vec::new(),
+                    graph: FullGraph {
+                        nodes: Vec::new(),
+                        edges: Vec::new(),
+                    },
                 })
-                .collect();
+            }
+            Some(path) => {
+                // Get node IDs from path
+                let node_ids: Vec<String> = path.iter().map(|(id, _)| id.clone()).collect();
 
-            // Get edges between path nodes
-            let edges = db.get_edges_between(&node_ids)?;
+                // Get full node data
+                let nodes = db.get_nodes_by_ids(&node_ids)?;
 
-            let graph = FullGraph {
-                nodes: path_steps.iter().map(|s| s.node.clone()).collect(),
-                edges: edges.into_iter().map(GraphEdge::from).collect(),
-            };
+                // Build node lookup
+                let node_map: std::collections::HashMap<String, DbNode> = nodes
+                    .into_iter()
+                    .map(|node| (node.id.clone(), node))
+                    .collect();
 
-            debug!(
-                from = %params.from,
-                to = %params.to,
-                path_len = path_steps.len(),
-                "Path found"
-            );
+                // Build path steps
+                let path_steps: Vec<PathStep> = path
+                    .iter()
+                    .map(|(id, edge_type)| {
+                        let node = node_map.get(id).cloned().unwrap_or_else(|| DbNode {
+                            id: id.clone(),
+                            label: id.clone(),
+                            node_type: "Unknown".to_string(),
+                            properties: JsonValue::Null,
+                        });
+                        PathStep {
+                            node: GraphNode::from(node),
+                            edge_type: edge_type.clone(),
+                        }
+                    })
+                    .collect();
 
-            Ok(Json(PathResponse {
-                found: true,
-                path: path_steps,
-                graph,
-            }))
+                // Get edges between path nodes
+                let edges = db.get_edges_between(&node_ids)?;
+
+                let graph = FullGraph {
+                    nodes: path_steps.iter().map(|s| s.node.clone()).collect(),
+                    edges: edges.into_iter().map(GraphEdge::from).collect(),
+                };
+
+                debug!(
+                    from = %from_param,
+                    to = %to_param,
+                    path_len = path_steps.len(),
+                    "Path found"
+                );
+
+                Ok(PathResponse {
+                    found: true,
+                    path: path_steps,
+                    graph,
+                })
+            }
         }
-    }
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
+
+    state.end_sync_query();
+
+    Ok(Json(result?))
 }
 
 /// Query parameters for paths to Domain Admins.
@@ -1952,29 +2021,36 @@ async fn query_abort(
 async fn query_activity(
     State(state): State<AppState>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    // Send current state immediately
-    let initial = QueryActivity {
-        active: state.running_queries.len(),
-    };
-    let initial_event = std::iter::once(Ok(Event::default()
-        .data(serde_json::to_string(&initial).unwrap_or_default())));
+    let active = state.active_query_count();
+    debug!(active = active, "Query activity SSE connection opened");
 
-    // Subscribe to updates
+    // Subscribe to updates first
     let rx = state.query_activity_tx.subscribe();
-    let update_stream = BroadcastStream::new(rx).filter_map(|result| {
-        result.ok().map(|activity| {
-            let data = serde_json::to_string(&activity).unwrap_or_default();
-            Ok(Event::default().data(data))
-        })
-    });
 
-    // Combine initial event with update stream
-    let stream = tokio_stream::StreamExt::chain(
-        tokio_stream::iter(initial_event),
-        update_stream,
-    );
+    // Create a stream that first sends current state, then updates
+    let initial = QueryActivity { active };
+    let initial_data = serde_json::to_string(&initial).unwrap_or_default();
 
-    Sse::new(stream)
+    let stream = async_stream::stream! {
+        // Send initial state
+        yield Ok(Event::default().data(initial_data));
+
+        // Then stream updates
+        let mut stream = BroadcastStream::new(rx);
+        while let Some(result) = stream.next().await {
+            if let Ok(activity) = result {
+                let data = serde_json::to_string(&activity).unwrap_or_default();
+                yield Ok(Event::default().data(data));
+            }
+        }
+    };
+
+    // Use keep-alive to prevent connection timeout
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("keep-alive")
+    )
 }
 
 // ============================================================================

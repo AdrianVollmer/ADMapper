@@ -13,7 +13,8 @@ let activeQueryCount = 0;
 
 /** Initialize query activity tracking */
 export function initQueryActivity(): void {
-  connectToActivityStream();
+  // Delay connection slightly to ensure page is fully loaded
+  setTimeout(connectToActivityStream, 100);
 }
 
 /** Connect to the query activity SSE stream */
@@ -32,7 +33,7 @@ function connectToActivityStream(): void {
       activeQueryCount = data.active;
       updateQueryIndicator(activeQueryCount > 0);
     } catch (err) {
-      console.error("Failed to parse query activity event:", err);
+      console.error("[QueryActivity] Failed to parse event:", err);
     }
   };
 
@@ -54,12 +55,22 @@ function updateQueryIndicator(running: boolean): void {
   const indicator = document.getElementById("query-indicator");
   if (!indicator) return;
 
+  // Get the child SVGs
+  const staticSvg = indicator.querySelector(".query-indicator-static") as HTMLElement | null;
+  const animatedSvg = indicator.querySelector(".query-indicator-animated") as HTMLElement | null;
+
   if (running) {
     indicator.classList.add("running");
     indicator.title = `${activeQueryCount} query${activeQueryCount === 1 ? "" : "ies"} running...`;
+    // Apply inline styles as fallback for CSS
+    if (staticSvg) staticSvg.style.display = "none";
+    if (animatedSvg) animatedSvg.style.display = "block";
   } else {
     indicator.classList.remove("running");
     indicator.title = "No query running";
+    // Reset inline styles
+    if (staticSvg) staticSvg.style.display = "";
+    if (animatedSvg) animatedSvg.style.display = "";
   }
 }
 

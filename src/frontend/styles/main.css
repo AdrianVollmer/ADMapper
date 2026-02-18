@@ -155,16 +155,16 @@
 
   /* Show static by default, hide animated */
   .query-indicator-animated {
-    @apply hidden;
+    display: none;
   }
 
   /* When running: hide static, show animated */
   .query-indicator.running .query-indicator-static {
-    @apply hidden;
+    display: none;
   }
 
   .query-indicator.running .query-indicator-animated {
-    @apply block;
+    display: block;
   }
 }
 
