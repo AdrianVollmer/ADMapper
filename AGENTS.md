@@ -45,6 +45,13 @@ so never worry about backwards compatibility.
   should use a spinner. Actions that are expected to take more than
   around five seconds should use a background job. Avoid flickering of
   the UI.
+- CrustDB is an independent database supporting Cypher queries with a
+  SQLite backend. It should not rely on BloodHound specifics, like
+  certain edge types or properties being present. Performance is
+  paramount. So is correctness, so test cases should be abundant,
+  including performance tests. Falling back to SQL queries where
+  possible is fine, even preferred as long as we still support the more
+  complex queries.
 
 ## Development
 
