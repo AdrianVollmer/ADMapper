@@ -328,6 +328,8 @@ impl DatabaseBackend for Neo4jDatabase {
                     .collect();
 
                 // MERGE nodes (creates placeholders if not exist), then create edge
+                // Note: We match on objectid only (not label) so placeholder nodes merge
+                // correctly with real nodes inserted later
                 let q = query(&format!(
                     "UNWIND range(0, size($srcs)-1) AS i \
                      MERGE (a {{objectid: $srcs[i]}}) \
