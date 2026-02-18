@@ -1268,48 +1268,8 @@ async fn node_counts(
 ) -> Result<Json<NodeCounts>, ApiError> {
     let db = state.require_db()?;
 
-    // Get all edges to count connections
-    // This is not the most efficient approach, but works across all backends
-    let all_edges = db.get_all_edges()?;
-
-    let mut incoming = 0;
-    let mut outgoing = 0;
-    let mut admin_to = 0;
-    let mut member_of = 0;
-    let mut members = 0;
-
-    // Admin-related edge types
-    let admin_types: std::collections::HashSet<&str> = [
-        "AdminTo",
-        "GenericAll",
-        "GenericWrite",
-        "Owns",
-        "WriteDacl",
-        "WriteOwner",
-        "AllExtendedRights",
-        "ForceChangePassword",
-        "AddMember",
-    ]
-    .into_iter()
-    .collect();
-
-    for edge in &all_edges {
-        if edge.target == node_id {
-            incoming += 1;
-            if edge.edge_type == "MemberOf" {
-                members += 1;
-            }
-        }
-        if edge.source == node_id {
-            outgoing += 1;
-            if edge.edge_type == "MemberOf" {
-                member_of += 1;
-            }
-            if admin_types.contains(edge.edge_type.as_str()) {
-                admin_to += 1;
-            }
-        }
-    }
+    // Use efficient backend-specific counting
+    let (incoming, outgoing, admin_to, member_of, members) = db.get_node_edge_counts(&node_id)?;
 
     debug!(
         node_id = %node_id,

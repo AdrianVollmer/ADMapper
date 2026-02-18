@@ -816,6 +816,108 @@ class TestRunner:
 
         results.append(self._run_test("Perf: Combined pattern with filters", check_combined_pattern))
 
+        # Test 11: Node connections API - get a real node from imported data
+        # First, find a User node with connections
+        test_node_id = None
+
+        def find_test_node():
+            nonlocal test_node_id
+            # Search for a user node to test connections API
+            response = self.api.search("admin", limit=1)
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Search failed: {response.body}", proof
+            items = response.body
+            if not items or not isinstance(items, list) or len(items) == 0:
+                # Fall back to querying for any user
+                response = self.api.query("MATCH (u:User) RETURN u.object_id AS id LIMIT 1")
+                if not response.ok:
+                    return False, f"Query failed: {response.body}", proof
+                result_data = self._body_get(response.body, "results", {})
+                if isinstance(result_data, list) and result_data:
+                    first = result_data[0]
+                    if isinstance(first, list) and first:
+                        test_node_id = str(first[0])
+                    elif isinstance(first, dict):
+                        test_node_id = str(first.get("id", ""))
+                if not test_node_id:
+                    return False, "No nodes found for connections test", proof
+            else:
+                # Use the first search result
+                test_node_id = items[0].get("id", items[0].get("object_id", ""))
+            self.logger.info(f"Using node {test_node_id} for connections tests")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Find test node for connections", find_test_node))
+
+        if not test_node_id:
+            return results
+
+        # Test 12: Node counts API (used for badges)
+        def check_node_counts():
+            start = time.time()
+            response = self.api.node_counts(test_node_id)
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Node counts failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Node counts too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+            # Verify response has expected fields
+            body = response.body
+            if not isinstance(body, dict):
+                return False, f"Expected dict, got {type(body)}", proof
+            required = ["incoming", "outgoing"]
+            for field in required:
+                if field not in body:
+                    return False, f"Missing field: {field}", proof
+            self.logger.info(f"Node counts: {elapsed_ms:.0f}ms, in={body.get('incoming')}, out={body.get('outgoing')}")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Node counts API (<3s)", check_node_counts))
+
+        # Test 13: Incoming connections API
+        def check_incoming_connections():
+            start = time.time()
+            response = self.api.node_connections(test_node_id, "incoming")
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Incoming connections failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Incoming connections too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+            # Verify response structure
+            body = response.body
+            if not isinstance(body, dict):
+                return False, f"Expected dict, got {type(body)}", proof
+            nodes = body.get("nodes", [])
+            edges = body.get("edges", [])
+            self.logger.info(f"Incoming connections: {elapsed_ms:.0f}ms, {len(nodes)} nodes, {len(edges)} edges")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Incoming connections API (<3s)", check_incoming_connections))
+
+        # Test 14: Outgoing connections API
+        def check_outgoing_connections():
+            start = time.time()
+            response = self.api.node_connections(test_node_id, "outgoing")
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Outgoing connections failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Outgoing connections too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+            # Verify response structure
+            body = response.body
+            if not isinstance(body, dict):
+                return False, f"Expected dict, got {type(body)}", proof
+            nodes = body.get("nodes", [])
+            edges = body.get("edges", [])
+            self.logger.info(f"Outgoing connections: {elapsed_ms:.0f}ms, {len(nodes)} nodes, {len(edges)} edges")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Outgoing connections API (<3s)", check_outgoing_connections))
+
         return results
 
     # =========================================================================

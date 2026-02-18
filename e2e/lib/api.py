@@ -121,6 +121,14 @@ class APIClient:
         """Get all edge types."""
         return self.get("/api/graph/edge-types")
 
+    def node_counts(self, node_id: str) -> APIResponse:
+        """Get connection counts for a node."""
+        return self.get(f"/api/graph/node/{node_id}/counts")
+
+    def node_connections(self, node_id: str, direction: str) -> APIResponse:
+        """Get connections for a node in a direction (incoming, outgoing, admin, memberof, members)."""
+        return self.get(f"/api/graph/node/{node_id}/connections/{direction}")
+
     def query_history(self, page: int = 1, per_page: int = 20) -> APIResponse:
         """Get query history."""
         return self.get(f"/api/query-history?page={page}&per_page={per_page}")

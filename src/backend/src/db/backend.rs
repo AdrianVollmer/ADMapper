@@ -121,6 +121,53 @@ pub trait DatabaseBackend: Send + Sync {
         direction: &str,
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)>;
 
+    /// Get edge counts for a node (for badge display).
+    /// Returns (incoming, outgoing, admin_to, member_of, members).
+    /// Default implementation loads all edges; backends should override for efficiency.
+    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+        let all_edges = self.get_all_edges()?;
+
+        let admin_types: std::collections::HashSet<&str> = [
+            "AdminTo",
+            "GenericAll",
+            "GenericWrite",
+            "Owns",
+            "WriteDacl",
+            "WriteOwner",
+            "AllExtendedRights",
+            "ForceChangePassword",
+            "AddMember",
+        ]
+        .into_iter()
+        .collect();
+
+        let mut incoming = 0;
+        let mut outgoing = 0;
+        let mut admin_to = 0;
+        let mut member_of = 0;
+        let mut members = 0;
+
+        for edge in &all_edges {
+            if edge.target == node_id {
+                incoming += 1;
+                if edge.edge_type == "MemberOf" {
+                    members += 1;
+                }
+            }
+            if edge.source == node_id {
+                outgoing += 1;
+                if edge.edge_type == "MemberOf" {
+                    member_of += 1;
+                }
+                if admin_types.contains(edge.edge_type.as_str()) {
+                    admin_to += 1;
+                }
+            }
+        }
+
+        Ok((incoming, outgoing, admin_to, member_of, members))
+    }
+
     /// Check if a node is a transitive member of a target group.
     /// Uses MemberOf edges to traverse group membership.
     fn is_member_of(&self, node_id: &str, target_id: &str) -> Result<bool> {

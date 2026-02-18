@@ -773,6 +773,26 @@ impl SqliteStorage {
         Ok(edges)
     }
 
+    /// Count outgoing edges from a node.
+    pub fn count_outgoing_edges(&self, node_id: i64) -> Result<usize> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM edges WHERE source_id = ?1",
+            params![node_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
+    /// Count incoming edges to a node.
+    pub fn count_incoming_edges(&self, node_id: i64) -> Result<usize> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM edges WHERE target_id = ?1",
+            params![node_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
     /// Get database statistics.
     pub fn stats(&self) -> Result<DatabaseStats> {
         let node_count: usize = self

@@ -840,6 +840,7 @@ impl CrustDatabase {
     }
 
     /// Get node connections in a direction.
+    /// Uses indexed Cypher queries instead of loading all edges.
     pub fn get_node_connections(
         &self,
         node_id: &str,
@@ -847,45 +848,162 @@ impl CrustDatabase {
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
         debug!(node_id = %node_id, direction = %direction, "Getting node connections");
 
-        let all_edges = self.get_all_edges()?;
+        // Escape single quotes in node_id for Cypher query
+        let escaped_id = node_id.replace('\'', "\\'");
 
-        const ADMIN_EDGE_TYPES: &[&str] = &[
-            "AdminTo",
-            "GenericAll",
-            "GenericWrite",
-            "Owns",
-            "WriteDacl",
-            "WriteOwner",
-            "AllExtendedRights",
-            "ForceChangePassword",
-            "AddMember",
-        ];
+        // Build targeted Cypher query based on direction
+        let query = match direction {
+            "incoming" => format!(
+                "MATCH (a)-[r]->(b {{object_id: '{}'}}) \
+                 RETURN a.object_id, b.object_id, type(r), a, b",
+                escaped_id
+            ),
+            "outgoing" => format!(
+                "MATCH (a {{object_id: '{}'}})-[r]->(b) \
+                 RETURN a.object_id, b.object_id, type(r), a, b",
+                escaped_id
+            ),
+            "admin" => format!(
+                "MATCH (a {{object_id: '{}'}})-[r]->(b) \
+                 WHERE type(r) = 'AdminTo' OR type(r) = 'GenericAll' OR type(r) = 'GenericWrite' \
+                 OR type(r) = 'Owns' OR type(r) = 'WriteDacl' OR type(r) = 'WriteOwner' \
+                 OR type(r) = 'AllExtendedRights' OR type(r) = 'ForceChangePassword' \
+                 OR type(r) = 'AddMember' \
+                 RETURN a.object_id, b.object_id, type(r), a, b",
+                escaped_id
+            ),
+            "memberof" => format!(
+                "MATCH (a {{object_id: '{}'}})-[r:MemberOf]->(b) \
+                 RETURN a.object_id, b.object_id, type(r), a, b",
+                escaped_id
+            ),
+            "members" => format!(
+                "MATCH (a)-[r:MemberOf]->(b {{object_id: '{}'}}) \
+                 RETURN a.object_id, b.object_id, type(r), a, b",
+                escaped_id
+            ),
+            _ => format!(
+                "MATCH (a)-[r]-(b {{object_id: '{}'}}) \
+                 RETURN a.object_id, b.object_id, type(r), a, b",
+                escaped_id
+            ),
+        };
 
-        let filtered_edges: Vec<DbEdge> = all_edges
-            .into_iter()
-            .filter(|edge| match direction {
-                "incoming" => edge.target == node_id,
-                "outgoing" => edge.source == node_id,
-                "admin" => {
-                    edge.source == node_id && ADMIN_EDGE_TYPES.contains(&edge.edge_type.as_str())
+        let result = self.execute(&query)?;
+
+        let mut edges = Vec::new();
+        let mut nodes_map: std::collections::HashMap<String, DbNode> =
+            std::collections::HashMap::new();
+
+        for row in &result.rows {
+            let source = self.get_string_value(&row.values, "a.object_id");
+            let target = self.get_string_value(&row.values, "b.object_id");
+            let edge_type = self.get_string_value(&row.values, "type(r)");
+
+            edges.push(DbEdge {
+                source: source.clone(),
+                target: target.clone(),
+                edge_type,
+                properties: JsonValue::Null,
+                ..Default::default()
+            });
+
+            // Extract node info from the result
+            if let Some(crustdb::ResultValue::Node {
+                labels, properties, ..
+            }) = row.values.get("a")
+            {
+                if !nodes_map.contains_key(&source) {
+                    let node_type = labels.first().cloned().unwrap_or_default();
+                    let props = Self::props_to_json(properties);
+                    let label = props
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&source)
+                        .to_string();
+                    nodes_map.insert(
+                        source.clone(),
+                        DbNode {
+                            id: source.clone(),
+                            label,
+                            node_type,
+                            properties: props,
+                        },
+                    );
                 }
-                "memberof" => edge.source == node_id && edge.edge_type == "MemberOf",
-                "members" => edge.target == node_id && edge.edge_type == "MemberOf",
-                _ => edge.source == node_id || edge.target == node_id,
-            })
-            .collect();
+            }
 
-        let mut node_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-        node_ids.insert(node_id.to_string());
-        for edge in &filtered_edges {
-            node_ids.insert(edge.source.clone());
-            node_ids.insert(edge.target.clone());
+            if let Some(crustdb::ResultValue::Node {
+                labels, properties, ..
+            }) = row.values.get("b")
+            {
+                if !nodes_map.contains_key(&target) {
+                    let node_type = labels.first().cloned().unwrap_or_default();
+                    let props = Self::props_to_json(properties);
+                    let label = props
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&target)
+                        .to_string();
+                    nodes_map.insert(
+                        target.clone(),
+                        DbNode {
+                            id: target.clone(),
+                            label,
+                            node_type,
+                            properties: props,
+                        },
+                    );
+                }
+            }
         }
 
-        let node_id_vec: Vec<String> = node_ids.into_iter().collect();
-        let nodes = self.get_nodes_by_ids(&node_id_vec)?;
+        let nodes: Vec<DbNode> = nodes_map.into_values().collect();
+        Ok((nodes, edges))
+    }
 
-        Ok((nodes, filtered_edges))
+    /// Convert CrustDB properties to JSON.
+    fn props_to_json(props: &std::collections::HashMap<String, crustdb::PropertyValue>) -> JsonValue {
+        let map: serde_json::Map<String, JsonValue> = props
+            .iter()
+            .map(|(k, v)| (k.clone(), Self::property_value_to_json(v)))
+            .collect();
+        JsonValue::Object(map)
+    }
+
+    /// Get all edges for a node (both incoming and outgoing) with edge types.
+    /// Used for efficient counting by the backend layer.
+    pub fn get_node_edges(&self, node_id: &str) -> Result<Vec<DbEdge>> {
+        let escaped_id = node_id.replace('\'', "\\'");
+
+        // Get all edges where node is source or target
+        let query = format!(
+            "MATCH (a {{object_id: '{}'}})-[r]->(b) \
+             RETURN a.object_id AS src, b.object_id AS tgt, type(r) AS typ \
+             UNION \
+             MATCH (a)-[r]->(b {{object_id: '{}'}}) \
+             RETURN a.object_id AS src, b.object_id AS tgt, type(r) AS typ",
+            escaped_id, escaped_id
+        );
+
+        let result = self.execute(&query)?;
+
+        let mut edges = Vec::new();
+        for row in &result.rows {
+            let source = self.get_string_value(&row.values, "src");
+            let target = self.get_string_value(&row.values, "tgt");
+            let edge_type = self.get_string_value(&row.values, "typ");
+
+            edges.push(DbEdge {
+                source,
+                target,
+                edge_type,
+                properties: JsonValue::Null,
+                ..Default::default()
+            });
+        }
+
+        Ok(edges)
     }
 
     /// Run a custom Cypher query.
@@ -1272,6 +1390,51 @@ impl DatabaseBackend for CrustDatabase {
         direction: &str,
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
         CrustDatabase::get_node_connections(self, node_id, direction)
+    }
+
+    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+        // Get all edges for this node efficiently
+        let edges = CrustDatabase::get_node_edges(self, node_id)?;
+
+        let admin_types: std::collections::HashSet<&str> = [
+            "AdminTo",
+            "GenericAll",
+            "GenericWrite",
+            "Owns",
+            "WriteDacl",
+            "WriteOwner",
+            "AllExtendedRights",
+            "ForceChangePassword",
+            "AddMember",
+        ]
+        .into_iter()
+        .collect();
+
+        let mut incoming = 0;
+        let mut outgoing = 0;
+        let mut admin_to = 0;
+        let mut member_of = 0;
+        let mut members = 0;
+
+        for edge in &edges {
+            if edge.target == node_id {
+                incoming += 1;
+                if edge.edge_type == "MemberOf" {
+                    members += 1;
+                }
+            }
+            if edge.source == node_id {
+                outgoing += 1;
+                if edge.edge_type == "MemberOf" {
+                    member_of += 1;
+                }
+                if admin_types.contains(edge.edge_type.as_str()) {
+                    admin_to += 1;
+                }
+            }
+        }
+
+        Ok((incoming, outgoing, admin_to, member_of, members))
     }
 
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
