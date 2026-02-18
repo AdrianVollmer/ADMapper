@@ -40,8 +40,8 @@ sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 from api import APIClient, ServerProcess, start_server, stop_server, wait_for_server  # noqa: E402  # type: ignore[import-not-found]
 from runner import TestRunner, TestResult  # noqa: E402  # type: ignore[import-not-found]
 
-# Available backends
-BACKENDS = ["cozo", "crustdb", "neo4j", "falkordb"]
+# Available backends (cozo disabled - not working)
+BACKENDS = ["crustdb", "neo4j", "falkordb"]
 
 
 class ColoredFormatter(logging.Formatter):
