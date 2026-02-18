@@ -433,7 +433,7 @@ class TestRunner:
     def _extract_count(self, results: dict[str, Any], column: str) -> int | None:
         """Extract a count value from query results in various formats."""
         # Format: {"rows": [[value]], "headers": [...]}
-        if "rows" in results and results["rows"]:
+        if isinstance(results, dict) and "rows" in results and results["rows"]:
             try:
                 return int(results["rows"][0][0])
             except (IndexError, TypeError, ValueError):
@@ -441,19 +441,36 @@ class TestRunner:
 
         # Format: [{"column": value}]
         if isinstance(results, list) and results:
-            try:
-                return int(results[0].get(column, 0))
-            except (TypeError, ValueError):
-                pass
-
-        # Format: {"results": [...]}
-        if "results" in results:
-            nested = results["results"]
-            if isinstance(nested, list) and nested:
+            first = results[0]
+            if isinstance(first, dict):
                 try:
-                    return int(nested[0].get(column, 0))
+                    return int(first.get(column, 0))
                 except (TypeError, ValueError):
                     pass
+            # Format: [[value]] - nested list (FalkorDB)
+            elif isinstance(first, list) and first:
+                try:
+                    return int(first[0])
+                except (TypeError, ValueError, IndexError):
+                    pass
+
+        # Format: {"results": [...]}
+        if isinstance(results, dict) and "results" in results:
+            nested = results["results"]
+            if isinstance(nested, list) and nested:
+                first = nested[0]
+                # Format: [{"column": value}]
+                if isinstance(first, dict):
+                    try:
+                        return int(first.get(column, 0))
+                    except (TypeError, ValueError):
+                        pass
+                # Format: [[value]] - nested list (FalkorDB)
+                elif isinstance(first, list) and first:
+                    try:
+                        return int(first[0])
+                    except (TypeError, ValueError, IndexError):
+                        pass
 
         return None
 
