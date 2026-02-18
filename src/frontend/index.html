@@ -213,11 +213,20 @@
           </div>
         </nav>
         <div class="ml-auto flex items-center gap-3 px-3">
-          <div id="connection-status" class="connection-status">
+          <div
+            id="connection-status"
+            class="connection-status cursor-pointer"
+            title="Click to connect or manage database"
+          >
             <span class="status-dot"></span>
             <span class="status-text">Not Connected</span>
           </div>
-          <div id="query-indicator" class="query-indicator" title="No query running">
+          <div
+            id="query-indicator"
+            class="query-indicator cursor-pointer"
+            data-action="run-query"
+            title="No query running"
+          >
             <!-- Static version (idle) -->
             <svg class="query-indicator-static" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <line x1="4" y1="4" x2="12" y2="4" stroke="#4b5563" stroke-width="0.5" />

@@ -11,6 +11,7 @@
 import { appState } from "../main";
 import { showNoConnectionPlaceholder, updateGraphForConnectionState } from "./graph-view";
 import { saveConnection, getDisplayName } from "./connection-history";
+import { openDbManager } from "./db-manager";
 
 /** Database types */
 type DatabaseType = "kuzu" | "cozo" | "neo4j" | "falkordb";
@@ -476,4 +477,16 @@ function createModal(): HTMLElement {
 export function initDbConnect(): void {
   // Fetch initial connection status
   refreshConnectionStatus();
+
+  // Add click handler for connection status indicator
+  const statusEl = document.getElementById("connection-status");
+  if (statusEl) {
+    statusEl.addEventListener("click", () => {
+      if (appState.databaseConnected) {
+        openDbManager();
+      } else {
+        openDbConnect();
+      }
+    });
+  }
 }
