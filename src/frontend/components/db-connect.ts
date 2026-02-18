@@ -14,7 +14,17 @@ import { saveConnection, getDisplayName } from "./connection-history";
 import { openDbManager } from "./db-manager";
 
 /** Database types */
-type DatabaseType = "kuzu" | "cozo" | "neo4j" | "falkordb";
+type DatabaseType = "kuzu" | "cozo" | "crustdb" | "neo4j" | "falkordb";
+
+/** Supported database info from API */
+interface SupportedDatabase {
+  id: DatabaseType;
+  name: string;
+  connection_type: "file" | "network";
+}
+
+/** Cached list of supported database types */
+let supportedDatabases: SupportedDatabase[] = [];
 
 /** Current selected database type */
 let selectedDbType: DatabaseType = "kuzu";
@@ -92,6 +102,10 @@ function buildConnectionUrl(): string {
       const path = (form.querySelector("#db-path") as HTMLInputElement)?.value || "";
       return `cozodb://${path}`;
     }
+    case "crustdb": {
+      const path = (form.querySelector("#db-path") as HTMLInputElement)?.value || "";
+      return `crustdb://${path}`;
+    }
     case "neo4j": {
       const host = (form.querySelector("#db-host") as HTMLInputElement)?.value || "localhost";
       const port = (form.querySelector("#db-port") as HTMLInputElement)?.value || "7687";
@@ -141,7 +155,7 @@ function updateFormFields(): void {
 
   if (!fileFields || !networkFields) return;
 
-  const isFile = selectedDbType === "kuzu" || selectedDbType === "cozo";
+  const isFile = selectedDbType === "kuzu" || selectedDbType === "cozo" || selectedDbType === "crustdb";
 
   fileFields.hidden = !isFile;
   networkFields.hidden = isFile;
@@ -367,13 +381,8 @@ function createModal(): HTMLElement {
         </button>
       </div>
       <div class="modal-body">
-        <!-- Database Type Tabs -->
-        <div class="db-type-tabs">
-          <button class="db-type-tab active" data-type="kuzu">KuzuDB</button>
-          <button class="db-type-tab" data-type="cozo">CozoDB</button>
-          <button class="db-type-tab" data-type="neo4j">Neo4j</button>
-          <button class="db-type-tab" data-type="falkordb">FalkorDB</button>
-        </div>
+        <!-- Database Type Tabs (dynamically populated) -->
+        <div class="db-type-tabs" id="db-type-tabs"></div>
 
         <form id="db-connect-form" class="add-form mt-4">
           <!-- File-based database fields -->
@@ -451,6 +460,33 @@ function createModal(): HTMLElement {
   modal.querySelector("#db-connect-btn")?.addEventListener("click", connectToDatabase);
   modal.querySelector("#db-path-browse")?.addEventListener("click", browseForPath);
 
+  // Populate database type tabs based on supported types
+  const tabsContainer = modal.querySelector("#db-type-tabs");
+  if (tabsContainer) {
+    // Use supportedDatabases if available, otherwise fall back to defaults
+    const databases =
+      supportedDatabases.length > 0
+        ? supportedDatabases
+        : [
+            { id: "kuzu" as DatabaseType, name: "KuzuDB", connection_type: "file" as const },
+            { id: "cozo" as DatabaseType, name: "CozoDB", connection_type: "file" as const },
+            { id: "crustdb" as DatabaseType, name: "CrustDB", connection_type: "file" as const },
+            { id: "neo4j" as DatabaseType, name: "Neo4j", connection_type: "network" as const },
+            { id: "falkordb" as DatabaseType, name: "FalkorDB", connection_type: "network" as const },
+          ];
+
+    for (const db of databases) {
+      const btn = document.createElement("button");
+      btn.className = "db-type-tab";
+      btn.setAttribute("data-type", db.id);
+      btn.textContent = db.name;
+      if (db.id === selectedDbType) {
+        btn.classList.add("active");
+      }
+      tabsContainer.appendChild(btn);
+    }
+  }
+
   // Tab switching
   const tabs = modal.querySelectorAll(".db-type-tab");
   for (const tab of tabs) {
@@ -473,9 +509,34 @@ function createModal(): HTMLElement {
   return modal;
 }
 
+/** Fetch supported database types from server */
+async function fetchSupportedDatabases(): Promise<void> {
+  try {
+    const response = await fetch("/api/database/supported");
+    if (response.ok) {
+      supportedDatabases = await response.json();
+      // Set default to first supported type
+      if (supportedDatabases.length > 0) {
+        selectedDbType = supportedDatabases[0].id;
+      }
+    }
+  } catch (error) {
+    console.error("Failed to fetch supported databases:", error);
+    // Fall back to showing all types
+    supportedDatabases = [
+      { id: "kuzu", name: "KuzuDB", connection_type: "file" },
+      { id: "cozo", name: "CozoDB", connection_type: "file" },
+      { id: "crustdb", name: "CrustDB", connection_type: "file" },
+      { id: "neo4j", name: "Neo4j", connection_type: "network" },
+      { id: "falkordb", name: "FalkorDB", connection_type: "network" },
+    ];
+  }
+}
+
 /** Initialize the database connection component */
 export function initDbConnect(): void {
-  // Fetch initial connection status
+  // Fetch supported database types and connection status
+  fetchSupportedDatabases();
   refreshConnectionStatus();
 
   // Add click handler for connection status indicator

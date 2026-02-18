@@ -431,6 +431,7 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/health", get(health_check))
         // Database connection management
         .route("/api/database/status", get(database_status))
+        .route("/api/database/supported", get(database_supported))
         .route("/api/database/connect", post(database_connect))
         .route("/api/database/disconnect", post(database_disconnect))
         // Import
@@ -572,6 +573,56 @@ async fn database_status(State(state): State<AppState>) -> Json<DatabaseStatus> 
         connected,
         database_type,
     })
+}
+
+/// Supported database info.
+#[derive(Serialize)]
+struct SupportedDatabase {
+    id: &'static str,
+    name: &'static str,
+    connection_type: &'static str,
+}
+
+/// Get list of supported database types based on compiled features.
+async fn database_supported() -> Json<Vec<SupportedDatabase>> {
+    let mut supported = Vec::new();
+
+    #[cfg(feature = "kuzu")]
+    supported.push(SupportedDatabase {
+        id: "kuzu",
+        name: "KuzuDB",
+        connection_type: "file",
+    });
+
+    #[cfg(feature = "cozo")]
+    supported.push(SupportedDatabase {
+        id: "cozo",
+        name: "CozoDB",
+        connection_type: "file",
+    });
+
+    #[cfg(feature = "crustdb")]
+    supported.push(SupportedDatabase {
+        id: "crustdb",
+        name: "CrustDB",
+        connection_type: "file",
+    });
+
+    #[cfg(feature = "neo4j")]
+    supported.push(SupportedDatabase {
+        id: "neo4j",
+        name: "Neo4j",
+        connection_type: "network",
+    });
+
+    #[cfg(feature = "falkordb")]
+    supported.push(SupportedDatabase {
+        id: "falkordb",
+        name: "FalkorDB",
+        connection_type: "network",
+    });
+
+    Json(supported)
 }
 
 /// Database connect request.
