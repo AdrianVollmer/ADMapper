@@ -34,11 +34,15 @@ pub use graph::{Edge, Node, PropertyValue};
 pub use query::{QueryResult, QueryStats, ResultValue, Row};
 
 use std::path::Path;
+use std::sync::Mutex;
 use storage::SqliteStorage;
 
 /// Main database handle.
+///
+/// Uses Mutex for thread-safety. For concurrent queries, consider using
+/// a connection pool in the future.
 pub struct Database {
-    storage: std::cell::RefCell<SqliteStorage>,
+    storage: Mutex<SqliteStorage>,
 }
 
 impl Database {
@@ -46,7 +50,7 @@ impl Database {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let storage = SqliteStorage::open(path)?;
         Ok(Self {
-            storage: std::cell::RefCell::new(storage),
+            storage: Mutex::new(storage),
         })
     }
 
@@ -54,25 +58,28 @@ impl Database {
     pub fn in_memory() -> Result<Self> {
         let storage = SqliteStorage::in_memory()?;
         Ok(Self {
-            storage: std::cell::RefCell::new(storage),
+            storage: Mutex::new(storage),
         })
     }
 
     /// Execute a Cypher query.
     pub fn execute(&self, query: &str) -> Result<QueryResult> {
         let statement = query::parser::parse(query)?;
-        query::executor::execute(&statement, &self.storage.borrow())
+        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        query::executor::execute(&statement, &storage)
     }
 
     /// Get database statistics.
     pub fn stats(&self) -> Result<DatabaseStats> {
-        self.storage.borrow().stats()
+        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        storage.stats()
     }
 
     /// Clear all data from the database.
     /// This is much faster than using Cypher DELETE queries.
     pub fn clear(&self) -> Result<()> {
-        self.storage.borrow().clear()
+        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        storage.clear()
     }
 
     /// Insert multiple nodes in a single transaction.
@@ -86,7 +93,8 @@ impl Database {
         &self,
         nodes: &[(Vec<String>, serde_json::Value)],
     ) -> Result<Vec<i64>> {
-        self.storage.borrow_mut().insert_nodes_batch(nodes)
+        let mut storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        storage.insert_nodes_batch(nodes)
     }
 
     /// Insert multiple edges in a single transaction.
@@ -99,14 +107,16 @@ impl Database {
         &self,
         edges: &[(i64, i64, String, serde_json::Value)],
     ) -> Result<Vec<i64>> {
-        self.storage.borrow_mut().insert_edges_batch(edges)
+        let mut storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        storage.insert_edges_batch(edges)
     }
 
     /// Find a node ID by a property value.
     ///
     /// Searches for nodes where the JSON properties contain the specified key-value pair.
     pub fn find_node_by_property(&self, property: &str, value: &str) -> Result<Option<i64>> {
-        self.storage.borrow().find_node_by_property(property, value)
+        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        storage.find_node_by_property(property, value)
     }
 
     /// Build an index of property values to node IDs for efficient batch lookups.
@@ -117,7 +127,8 @@ impl Database {
         &self,
         property: &str,
     ) -> Result<std::collections::HashMap<String, i64>> {
-        self.storage.borrow().build_property_index(property)
+        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        storage.build_property_index(property)
     }
 }
 

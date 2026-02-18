@@ -43,4 +43,8 @@ pub enum Error {
     /// JSON serialization error.
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// Internal error (e.g., lock poisoned).
+    #[error("Internal error: {0}")]
+    Internal(String),
 }

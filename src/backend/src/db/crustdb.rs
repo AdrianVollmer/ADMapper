@@ -5,7 +5,7 @@
 use crustdb::Database;
 use serde_json::Value as JsonValue;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
@@ -15,10 +15,11 @@ use super::types::{
 
 /// A graph database backed by CrustDB.
 ///
-/// Uses a Mutex to ensure thread-safety since rusqlite's Connection is not Sync.
+/// Database handles its own thread-safety internally via Mutex.
+/// For concurrent queries, a connection pool would be needed.
 #[derive(Clone)]
 pub struct CrustDatabase {
-    db: Arc<Mutex<Database>>,
+    db: Arc<Database>,
 }
 
 impl CrustDatabase {
@@ -29,9 +30,7 @@ impl CrustDatabase {
 
         let db = Database::open(&path_str).map_err(|e| DbError::Database(e.to_string()))?;
 
-        let instance = Self {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let instance = Self { db: Arc::new(db) };
         instance.init_schema()?;
         info!("CrustDB initialized successfully");
         Ok(instance)
@@ -43,9 +42,7 @@ impl CrustDatabase {
         debug!("Creating in-memory CrustDB");
         let db = Database::in_memory().map_err(|e| DbError::Database(e.to_string()))?;
 
-        let instance = Self {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let instance = Self { db: Arc::new(db) };
         instance.init_schema()?;
         Ok(instance)
     }
@@ -60,22 +57,17 @@ impl CrustDatabase {
 
     /// Execute a Cypher query and return the raw result.
     fn execute(&self, query: &str) -> Result<crustdb::QueryResult> {
-        let db = self
-            .db
-            .lock()
-            .map_err(|e| DbError::Database(e.to_string()))?;
-        db.execute(query)
+        self.db
+            .execute(query)
             .map_err(|e| DbError::Database(e.to_string()))
     }
 
     /// Clear all data from the database.
     pub fn clear(&self) -> Result<()> {
         info!("Clearing all data from CrustDB");
-        let db = self
-            .db
-            .lock()
+        self.db
+            .clear()
             .map_err(|e| DbError::Database(e.to_string()))?;
-        db.clear().map_err(|e| DbError::Database(e.to_string()))?;
         debug!("Database cleared");
         Ok(())
     }
@@ -100,11 +92,7 @@ impl CrustDatabase {
             })
             .collect();
 
-        let db = self
-            .db
-            .lock()
-            .map_err(|e| DbError::Database(e.to_string()))?;
-        match db.insert_nodes_batch(&batch) {
+        match self.db.insert_nodes_batch(&batch) {
             Ok(ids) => {
                 debug!("Batch inserted {} nodes", ids.len());
                 Ok(ids.len())
@@ -114,7 +102,6 @@ impl CrustDatabase {
                     "Batch insert failed, falling back to individual inserts: {}",
                     e
                 );
-                drop(db);
                 // Fallback to individual inserts if batch fails
                 self.insert_nodes_fallback(nodes)
             }
@@ -219,17 +206,11 @@ impl CrustDatabase {
             return Ok(0);
         }
 
-        let db = self
-            .db
-            .lock()
-            .map_err(|e| DbError::Database(e.to_string()))?;
-
         // Build index of object_id -> node_id for efficient lookups
-        let node_index = match db.build_property_index("object_id") {
+        let node_index = match self.db.build_property_index("object_id") {
             Ok(index) => index,
             Err(e) => {
                 debug!("Failed to build property index, falling back: {}", e);
-                drop(db);
                 return self.insert_edges_fallback(edges);
             }
         };
@@ -282,7 +263,7 @@ impl CrustDatabase {
                 })
                 .collect();
 
-            match db.insert_nodes_batch(&placeholder_batch) {
+            match self.db.insert_nodes_batch(&placeholder_batch) {
                 Ok(ids) => {
                     debug!("Batch inserted {} placeholder nodes", ids.len());
                 }
@@ -292,7 +273,9 @@ impl CrustDatabase {
             }
 
             // Rebuild index after creating placeholders
-            db.build_property_index("object_id").unwrap_or_default()
+            self.db
+                .build_property_index("object_id")
+                .unwrap_or_default()
         } else {
             node_index
         };
@@ -323,14 +306,13 @@ impl CrustDatabase {
             return Ok(0);
         }
 
-        match db.insert_edges_batch(&batch) {
+        match self.db.insert_edges_batch(&batch) {
             Ok(ids) => {
                 debug!("Batch inserted {} edges (skipped {})", ids.len(), skipped);
                 Ok(ids.len())
             }
             Err(e) => {
                 debug!("Batch edge insert failed, falling back: {}", e);
-                drop(db);
                 self.insert_edges_fallback(edges)
             }
         }
