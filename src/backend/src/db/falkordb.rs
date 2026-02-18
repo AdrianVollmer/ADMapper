@@ -382,6 +382,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         }
 
         // Batch insert edges of each type using UNWIND
+        // Use MERGE for nodes to create placeholders if they don't exist
         const BATCH_SIZE: usize = 200;
         let mut inserted = 0;
         for (edge_type, type_edges) in edges_by_type {
@@ -392,17 +393,34 @@ impl DatabaseBackend for FalkorDbDatabase {
                     .map(|e| {
                         let src = e.source.replace('\'', "\\'").replace('\\', "\\\\");
                         let tgt = e.target.replace('\'', "\\'").replace('\\', "\\\\");
+                        let src_type = e
+                            .source_type
+                            .as_deref()
+                            .unwrap_or("Base")
+                            .replace('\'', "\\'");
+                        let tgt_type = e
+                            .target_type
+                            .as_deref()
+                            .unwrap_or("Base")
+                            .replace('\'', "\\'");
                         let props = serde_json::to_string(&e.properties)
                             .unwrap_or_default()
                             .replace('\'', "\\'")
                             .replace('\\', "\\\\");
-                        format!("{{src: '{}', tgt: '{}', props: '{}'}}", src, tgt, props)
+                        format!(
+                            "{{src: '{}', tgt: '{}', src_type: '{}', tgt_type: '{}', props: '{}'}}",
+                            src, tgt, src_type, tgt_type, props
+                        )
                     })
                     .collect();
 
+                // MERGE nodes (creates placeholders if not exist), then create edge
                 let cypher = format!(
                     "UNWIND [{}] AS row \
-                     MATCH (a {{objectid: row.src}}), (b {{objectid: row.tgt}}) \
+                     MERGE (a {{objectid: row.src}}) \
+                     ON CREATE SET a.placeholder = true, a.node_type = row.src_type \
+                     MERGE (b {{objectid: row.tgt}}) \
+                     ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type \
                      MERGE (a)-[r:{}]->(b) \
                      SET r.properties = row.props \
                      RETURN count(r) AS created",
@@ -621,6 +639,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                     target: tgt,
                     edge_type: typ,
                     properties: props,
+                    ..Default::default()
                 })
             })
             .collect();
@@ -688,6 +707,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                     target: tgt,
                     edge_type: typ,
                     properties: props,
+                    ..Default::default()
                 })
             })
             .collect();
@@ -845,6 +865,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                             target: tgt_node.id,
                             edge_type,
                             properties: props,
+                            ..Default::default()
                         });
                     }
                 }

@@ -11,7 +11,7 @@ use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
+    DbEdge, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
 };
 
 /// Neo4j database backend.
@@ -115,6 +115,7 @@ impl Neo4jDatabase {
             target: target_id.to_string(),
             edge_type,
             properties: JsonValue::Object(properties),
+            ..Default::default()
         }
     }
 
@@ -306,20 +307,33 @@ impl DatabaseBackend for Neo4jDatabase {
         }
 
         // Batch insert edges of each type using UNWIND
+        // Use MERGE for nodes to create placeholders if they don't exist
         const BATCH_SIZE: usize = 500;
         let mut inserted = 0;
         for (edge_type, type_edges) in edges_by_type {
             for chunk in type_edges.chunks(BATCH_SIZE) {
                 let srcs: Vec<String> = chunk.iter().map(|e| e.source.clone()).collect();
                 let tgts: Vec<String> = chunk.iter().map(|e| e.target.clone()).collect();
+                let src_types: Vec<String> = chunk
+                    .iter()
+                    .map(|e| e.source_type.clone().unwrap_or_else(|| "Base".to_string()))
+                    .collect();
+                let tgt_types: Vec<String> = chunk
+                    .iter()
+                    .map(|e| e.target_type.clone().unwrap_or_else(|| "Base".to_string()))
+                    .collect();
                 let props: Vec<String> = chunk
                     .iter()
                     .map(|e| serde_json::to_string(&e.properties).unwrap_or_default())
                     .collect();
 
+                // MERGE nodes (creates placeholders if not exist), then create edge
                 let q = query(&format!(
                     "UNWIND range(0, size($srcs)-1) AS i \
-                     MATCH (a {{objectid: $srcs[i]}}), (b {{objectid: $tgts[i]}}) \
+                     MERGE (a {{objectid: $srcs[i]}}) \
+                     ON CREATE SET a.placeholder = true, a.node_type = $src_types[i] \
+                     MERGE (b {{objectid: $tgts[i]}}) \
+                     ON CREATE SET b.placeholder = true, b.node_type = $tgt_types[i] \
                      MERGE (a)-[r:{}]->(b) \
                      SET r.properties = $props[i] \
                      RETURN count(r) AS created",
@@ -327,6 +341,8 @@ impl DatabaseBackend for Neo4jDatabase {
                 ))
                 .param("srcs", srcs)
                 .param("tgts", tgts)
+                .param("src_types", src_types)
+                .param("tgt_types", tgt_types)
                 .param("props", props);
 
                 match self.execute_query(q) {

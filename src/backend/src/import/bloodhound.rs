@@ -255,21 +255,7 @@ impl BloodHoundImporter {
             .unwrap_or(&id)
             .to_string();
 
-        let node_type = match data_type.to_lowercase().as_str() {
-            "users" => "User",
-            "groups" => "Group",
-            "computers" => "Computer",
-            "domains" => "Domain",
-            "gpos" => "GPO",
-            "ous" => "OU",
-            "containers" => "Container",
-            "certtemplates" => "CertTemplate",
-            "enterprisecas" => "EnterpriseCA",
-            "rootcas" => "RootCA",
-            "aiacas" => "AIACA",
-            "ntauthstores" => "NTAuthStore",
-            _ => "Unknown",
-        };
+        let node_type = self.normalize_type(data_type);
 
         Some(DbNode {
             id,
@@ -280,43 +266,61 @@ impl BloodHoundImporter {
     }
 
     /// Extract edges from a BloodHound entity.
-    fn extract_edges(&self, _data_type: &str, entity: &JsonValue) -> Vec<DbEdge> {
+    fn extract_edges(&self, data_type: &str, entity: &JsonValue) -> Vec<DbEdge> {
         let object_id = match entity.get("ObjectIdentifier").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
             None => return Vec::new(),
         };
 
+        // Normalize type name for consistency
+        let node_type = self.normalize_type(data_type);
+
         let mut edges = Vec::new();
-        self.extract_member_edges(entity, &object_id, &mut edges);
-        self.extract_session_edges(entity, &object_id, &mut edges);
-        self.extract_local_group_edges(entity, &object_id, &mut edges);
-        self.extract_ace_edges(entity, &object_id, &mut edges);
-        self.extract_containment_edges(entity, &object_id, &mut edges);
-        self.extract_delegation_edges(entity, &object_id, &mut edges);
-        self.extract_gpo_link_edges(entity, &object_id, &mut edges);
+        self.extract_member_edges(entity, &object_id, &node_type, &mut edges);
+        self.extract_session_edges(entity, &object_id, &node_type, &mut edges);
+        self.extract_local_group_edges(entity, &object_id, &node_type, &mut edges);
+        self.extract_ace_edges(entity, &object_id, &node_type, &mut edges);
+        self.extract_containment_edges(entity, &object_id, &node_type, &mut edges);
+        self.extract_delegation_edges(entity, &object_id, &node_type, &mut edges);
+        self.extract_gpo_link_edges(entity, &object_id, &node_type, &mut edges);
         self.extract_trust_edges(entity, &object_id, &mut edges);
         edges
     }
 
     /// Extract MemberOf edges from group membership.
-    fn extract_member_edges(&self, entity: &JsonValue, object_id: &str, edges: &mut Vec<DbEdge>) {
+    fn extract_member_edges(
+        &self,
+        entity: &JsonValue,
+        object_id: &str,
+        target_type: &str,
+        edges: &mut Vec<DbEdge>,
+    ) {
         let Some(members) = entity.get("Members").and_then(|v| v.as_array()) else {
             return;
         };
         for member in members {
             if let Some(member_id) = member.get("ObjectIdentifier").and_then(|v| v.as_str()) {
+                let member_type = member.get("ObjectType").and_then(|v| v.as_str());
                 edges.push(DbEdge {
                     source: member_id.to_string(),
                     target: object_id.to_string(),
                     edge_type: "MemberOf".to_string(),
                     properties: JsonValue::Null,
+                    source_type: member_type.map(String::from),
+                    target_type: Some(target_type.to_string()),
                 });
             }
         }
     }
 
     /// Extract HasSession edges from computer sessions.
-    fn extract_session_edges(&self, entity: &JsonValue, object_id: &str, edges: &mut Vec<DbEdge>) {
+    fn extract_session_edges(
+        &self,
+        entity: &JsonValue,
+        object_id: &str,
+        target_type: &str,
+        edges: &mut Vec<DbEdge>,
+    ) {
         for session_field in ["Sessions", "PrivilegedSessions", "RegistrySessions"] {
             let Some(sessions) = entity
                 .get(session_field)
@@ -332,6 +336,8 @@ impl BloodHoundImporter {
                         target: object_id.to_string(),
                         edge_type: "HasSession".to_string(),
                         properties: JsonValue::Null,
+                        source_type: Some("User".to_string()),
+                        target_type: Some(target_type.to_string()),
                     });
                 }
             }
@@ -343,6 +349,7 @@ impl BloodHoundImporter {
         &self,
         entity: &JsonValue,
         object_id: &str,
+        target_type: &str,
         edges: &mut Vec<DbEdge>,
     ) {
         let Some(local_groups) = entity.get("LocalGroups").and_then(|v| v.as_array()) else {
@@ -357,11 +364,14 @@ impl BloodHoundImporter {
             };
             for member in results {
                 if let Some(member_id) = member.get("ObjectIdentifier").and_then(|v| v.as_str()) {
+                    let member_type = member.get("ObjectType").and_then(|v| v.as_str());
                     edges.push(DbEdge {
                         source: member_id.to_string(),
                         target: object_id.to_string(),
                         edge_type: edge_type.to_string(),
                         properties: JsonValue::Null,
+                        source_type: member_type.map(String::from),
+                        target_type: Some(target_type.to_string()),
                     });
                 }
             }
@@ -369,7 +379,13 @@ impl BloodHoundImporter {
     }
 
     /// Extract ACE permission edges.
-    fn extract_ace_edges(&self, entity: &JsonValue, object_id: &str, edges: &mut Vec<DbEdge>) {
+    fn extract_ace_edges(
+        &self,
+        entity: &JsonValue,
+        object_id: &str,
+        target_type: &str,
+        edges: &mut Vec<DbEdge>,
+    ) {
         let Some(aces) = entity.get("Aces").and_then(|v| v.as_array()) else {
             return;
         };
@@ -385,35 +401,43 @@ impl BloodHoundImporter {
                 .get("IsInherited")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let principal_type = ace.get("PrincipalType").and_then(|v| v.as_str());
 
             edges.push(DbEdge {
                 source: principal_sid.to_string(),
                 target: object_id.to_string(),
                 edge_type: edge_type.to_string(),
                 properties: serde_json::json!({"inherited": is_inherited}),
+                source_type: principal_type.map(String::from),
+                target_type: Some(target_type.to_string()),
             });
         }
     }
 
-    /// Extract containment and delegation edges.
+    /// Extract containment edges.
     fn extract_containment_edges(
         &self,
         entity: &JsonValue,
         object_id: &str,
+        target_type: &str,
         edges: &mut Vec<DbEdge>,
     ) {
         // ContainedBy -> Contains edge (reversed direction)
-        if let Some(container_id) = entity
-            .get("ContainedBy")
-            .and_then(|v| v.get("ObjectIdentifier"))
-            .and_then(|v| v.as_str())
-        {
-            edges.push(DbEdge {
-                source: container_id.to_string(),
-                target: object_id.to_string(),
-                edge_type: "Contains".to_string(),
-                properties: JsonValue::Null,
-            });
+        if let Some(contained_by) = entity.get("ContainedBy") {
+            if let Some(container_id) = contained_by
+                .get("ObjectIdentifier")
+                .and_then(|v| v.as_str())
+            {
+                let container_type = contained_by.get("ObjectType").and_then(|v| v.as_str());
+                edges.push(DbEdge {
+                    source: container_id.to_string(),
+                    target: object_id.to_string(),
+                    edge_type: "Contains".to_string(),
+                    properties: JsonValue::Null,
+                    source_type: container_type.map(String::from),
+                    target_type: Some(target_type.to_string()),
+                });
+            }
         }
     }
 
@@ -422,17 +446,21 @@ impl BloodHoundImporter {
         &self,
         entity: &JsonValue,
         object_id: &str,
+        source_type: &str,
         edges: &mut Vec<DbEdge>,
     ) {
         // AllowedToDelegate
         if let Some(delegates) = entity.get("AllowedToDelegate").and_then(|v| v.as_array()) {
             for delegate in delegates {
                 if let Some(target_id) = delegate.get("ObjectIdentifier").and_then(|v| v.as_str()) {
+                    let target_type = delegate.get("ObjectType").and_then(|v| v.as_str());
                     edges.push(DbEdge {
                         source: object_id.to_string(),
                         target: target_id.to_string(),
                         edge_type: "AllowedToDelegate".to_string(),
                         properties: JsonValue::Null,
+                        source_type: Some(source_type.to_string()),
+                        target_type: target_type.map(String::from),
                     });
                 }
             }
@@ -442,11 +470,14 @@ impl BloodHoundImporter {
         if let Some(actors) = entity.get("AllowedToAct").and_then(|v| v.as_array()) {
             for actor in actors {
                 if let Some(actor_id) = actor.get("ObjectIdentifier").and_then(|v| v.as_str()) {
+                    let actor_type = actor.get("ObjectType").and_then(|v| v.as_str());
                     edges.push(DbEdge {
                         source: actor_id.to_string(),
                         target: object_id.to_string(),
                         edge_type: "AllowedToAct".to_string(),
                         properties: JsonValue::Null,
+                        source_type: actor_type.map(String::from),
+                        target_type: Some(source_type.to_string()),
                     });
                 }
             }
@@ -454,7 +485,13 @@ impl BloodHoundImporter {
     }
 
     /// Extract GPO link edges.
-    fn extract_gpo_link_edges(&self, entity: &JsonValue, object_id: &str, edges: &mut Vec<DbEdge>) {
+    fn extract_gpo_link_edges(
+        &self,
+        entity: &JsonValue,
+        object_id: &str,
+        source_type: &str,
+        edges: &mut Vec<DbEdge>,
+    ) {
         let Some(links) = entity.get("Links").and_then(|v| v.as_array()) else {
             return;
         };
@@ -465,13 +502,20 @@ impl BloodHoundImporter {
                     target: gpo_id.to_string(),
                     edge_type: "GPLink".to_string(),
                     properties: JsonValue::Null,
+                    source_type: Some(source_type.to_string()),
+                    target_type: Some("GPO".to_string()),
                 });
             }
         }
     }
 
     /// Extract domain trust edges.
-    fn extract_trust_edges(&self, entity: &JsonValue, object_id: &str, edges: &mut Vec<DbEdge>) {
+    fn extract_trust_edges(
+        &self,
+        entity: &JsonValue,
+        object_id: &str,
+        edges: &mut Vec<DbEdge>,
+    ) {
         let Some(trusts) = entity.get("Trusts").and_then(|v| v.as_array()) else {
             return;
         };
@@ -491,6 +535,8 @@ impl BloodHoundImporter {
                     target: object_id.to_string(),
                     edge_type: "TrustedBy".to_string(),
                     properties: serde_json::json!({"direction": trust_direction}),
+                    source_type: Some("Domain".to_string()),
+                    target_type: Some("Domain".to_string()),
                 });
             }
             // Bidirectional or inbound trust
@@ -500,6 +546,8 @@ impl BloodHoundImporter {
                     target: target_sid.to_string(),
                     edge_type: "TrustedBy".to_string(),
                     properties: serde_json::json!({"direction": trust_direction}),
+                    source_type: Some("Domain".to_string()),
+                    target_type: Some("Domain".to_string()),
                 });
             }
         }
@@ -514,6 +562,26 @@ impl BloodHoundImporter {
             s if s.contains("DISTRIBUTED COM") => "ExecuteDCOM",
             _ => "LocalGroupMember",
         }
+    }
+
+    /// Normalize BloodHound type name to standard format.
+    fn normalize_type(&self, data_type: &str) -> String {
+        match data_type.to_lowercase().as_str() {
+            "users" | "user" => "User",
+            "groups" | "group" => "Group",
+            "computers" | "computer" => "Computer",
+            "domains" | "domain" => "Domain",
+            "gpos" | "gpo" => "GPO",
+            "ous" | "ou" => "OU",
+            "containers" | "container" => "Container",
+            "certtemplates" | "certtemplate" => "CertTemplate",
+            "enterprisecas" | "enterpriseca" => "EnterpriseCA",
+            "rootcas" | "rootca" => "RootCA",
+            "aiacas" | "aiaca" => "AIACA",
+            "ntauthstores" | "ntauthstore" => "NTAuthStore",
+            _ => "Base", // Unknown types get "Base" label
+        }
+        .to_string()
     }
 
     /// Map ACE right name to edge type.

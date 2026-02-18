@@ -555,6 +555,7 @@ impl GraphDatabase {
             target: target.to_string(),
             edge_type: edge_type.to_string(),
             properties,
+            ..Default::default()
         })
     }
 
@@ -1310,6 +1311,7 @@ mod tests {
             target: "group-1".to_string(),
             edge_type: "MemberOf".to_string(),
             properties: serde_json::json!({}),
+            ..Default::default()
         }];
 
         let count = db.insert_edges(&edges).unwrap();
@@ -1381,24 +1383,28 @@ mod tests {
                 target: "S-1-5-21-GROUP1".to_string(),
                 edge_type: "MemberOf".to_string(),
                 properties: serde_json::json!({}),
+                ..Default::default()
             },
             DbEdge {
                 source: "S-1-5-21-USER2".to_string(),
                 target: "S-1-5-21-GROUP2".to_string(),
                 edge_type: "MemberOf".to_string(),
                 properties: serde_json::json!({}),
+                ..Default::default()
             },
             DbEdge {
                 source: "S-1-5-21-GROUP2".to_string(),
                 target: "S-1-5-21-GROUP1".to_string(),
                 edge_type: "MemberOf".to_string(),
                 properties: serde_json::json!({}),
+                ..Default::default()
             },
             DbEdge {
                 source: "S-1-5-21-GROUP1".to_string(),
                 target: "S-1-5-21-COMP1".to_string(),
                 edge_type: "AdminTo".to_string(),
                 properties: serde_json::json!({}),
+                ..Default::default()
             },
         ];
         db.insert_edges(&edges).unwrap();

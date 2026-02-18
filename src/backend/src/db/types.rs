@@ -13,12 +13,16 @@ pub struct DbNode {
 }
 
 /// An edge stored in the database.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DbEdge {
     pub source: String,
     pub target: String,
     pub edge_type: String,
     pub properties: JsonValue,
+    /// Optional type hint for source node (for creating placeholders)
+    pub source_type: Option<String>,
+    /// Optional type hint for target node (for creating placeholders)
+    pub target_type: Option<String>,
 }
 
 /// Detailed statistics about the database.

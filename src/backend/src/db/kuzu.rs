@@ -487,6 +487,7 @@ impl KuzuDatabase {
                                 target: parts[1].to_string(),
                                 edge_type: parts[2].to_string(),
                                 properties,
+                                ..Default::default()
                             });
                         }
                     }
@@ -864,6 +865,7 @@ impl KuzuDatabase {
                                 target: parts[1].to_string(),
                                 edge_type: parts[2].to_string(),
                                 properties,
+                                ..Default::default()
                             });
                         }
                     }

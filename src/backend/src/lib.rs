@@ -1599,6 +1599,7 @@ async fn add_edge(
         } else {
             body.properties
         },
+        ..Default::default()
     };
 
     let db = state.require_db()?;
