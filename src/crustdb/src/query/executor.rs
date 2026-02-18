@@ -410,11 +410,11 @@ fn execute_create(
 // MATCH Execution
 // =============================================================================
 
-/// A path through the graph (sequence of node IDs and edge IDs).
+/// A path through the graph (sequence of nodes and edges with full data).
 #[derive(Debug, Clone)]
 struct Path {
-    node_ids: Vec<i64>,
-    edge_ids: Vec<i64>,
+    nodes: Vec<Node>,
+    edges: Vec<Edge>,
 }
 
 /// A binding represents a matched graph element (node or edge) with its variable name.
@@ -906,26 +906,38 @@ fn execute_shortest_path_pattern(
     all_results.sort_by_key(|r| r.length);
 
     // Convert to bindings
-    let bindings: Vec<Binding> = all_results
-        .into_iter()
-        .map(|result| {
-            let mut binding = Binding::new()
-                .with_node(source_var, result.source_node)
-                .with_node(target_var, result.target_node);
+    let mut bindings: Vec<Binding> = Vec::new();
+    for result in all_results {
+        let mut binding = Binding::new()
+            .with_node(source_var, result.source_node)
+            .with_node(target_var, result.target_node);
 
-            if let Some(pv) = path_var {
-                binding = binding.with_path(
-                    pv,
-                    Path {
-                        node_ids: result.path_nodes,
-                        edge_ids: result.path_edges,
-                    },
-                );
+        if let Some(pv) = path_var {
+            // Fetch full node objects for path
+            let mut path_nodes: Vec<Node> = Vec::new();
+            for &nid in &result.path_nodes {
+                if let Some(node) = storage.get_node(nid)? {
+                    path_nodes.push(node);
+                }
             }
+            // Fetch full edge objects for path
+            let mut path_edges: Vec<Edge> = Vec::new();
+            for &eid in &result.path_edges {
+                if let Some(edge) = storage.get_edge(eid)? {
+                    path_edges.push(edge);
+                }
+            }
+            binding = binding.with_path(
+                pv,
+                Path {
+                    nodes: path_nodes,
+                    edges: path_edges,
+                },
+            );
+        }
 
-            binding
-        })
-        .collect();
+        bindings.push(binding);
+    }
 
     Ok(bindings)
 }
@@ -1044,8 +1056,8 @@ fn execute_single_hop_pattern(pattern: &Pattern, storage: &SqliteStorage) -> Res
             // Add path variable if specified
             if let Some(pv) = path_var {
                 let path = Path {
-                    node_ids: vec![source_node.id, target_node.id],
-                    edge_ids: vec![edge.id],
+                    nodes: vec![source_node.clone(), target_node.clone()],
+                    edges: vec![edge.clone()],
                 };
                 binding = binding.with_path(pv, path);
             }
@@ -1184,19 +1196,31 @@ fn execute_multi_hop_pattern(pattern: &Pattern, storage: &SqliteStorage) -> Resu
     }
 
     // Convert to final bindings with optional path variable
-    let bindings = current_bindings
-        .into_iter()
-        .map(|(mut binding, path_nodes, path_edges)| {
-            if let Some(pv) = path_var {
-                let path = Path {
-                    node_ids: path_nodes,
-                    edge_ids: path_edges,
-                };
-                binding = binding.with_path(pv, path);
+    let mut bindings = Vec::new();
+    for (mut binding, path_node_ids, path_edge_ids) in current_bindings {
+        if let Some(pv) = path_var {
+            // Fetch full node objects
+            let mut path_nodes: Vec<Node> = Vec::new();
+            for &nid in &path_node_ids {
+                if let Some(node) = storage.get_node(nid)? {
+                    path_nodes.push(node);
+                }
             }
-            binding
-        })
-        .collect();
+            // Fetch full edge objects
+            let mut path_edges: Vec<Edge> = Vec::new();
+            for &eid in &path_edge_ids {
+                if let Some(edge) = storage.get_edge(eid)? {
+                    path_edges.push(edge);
+                }
+            }
+            let path = Path {
+                nodes: path_nodes,
+                edges: path_edges,
+            };
+            binding = binding.with_path(pv, path);
+        }
+        bindings.push(binding);
+    }
 
     Ok(bindings)
 }
@@ -1281,11 +1305,18 @@ fn execute_variable_length_pattern(
 
                             // Add path variable if requested
                             if let Some(pv) = path_var {
+                                // Fetch full node objects for the path
+                                let mut path_nodes_full: Vec<Node> = Vec::new();
+                                for &nid in &state.path_nodes {
+                                    if let Some(node) = storage.get_node(nid)? {
+                                        path_nodes_full.push(node);
+                                    }
+                                }
                                 binding = binding.with_path(
                                     pv,
                                     Path {
-                                        node_ids: state.path_nodes.clone(),
-                                        edge_ids: state.path_edges.iter().map(|e| e.id).collect(),
+                                        nodes: path_nodes_full,
+                                        edges: state.path_edges.clone(),
                                     },
                                 );
                             }
@@ -1932,8 +1963,26 @@ fn evaluate_return_item_with_bindings(expr: &Expression, binding: &Binding) -> R
                 })
             } else if let Some(path) = binding.paths.get(name) {
                 Ok(ResultValue::Path {
-                    nodes: path.node_ids.clone(),
-                    edges: path.edge_ids.clone(),
+                    nodes: path
+                        .nodes
+                        .iter()
+                        .map(|n| crate::query::PathNode {
+                            id: n.id,
+                            labels: n.labels.clone(),
+                            properties: n.properties.clone(),
+                        })
+                        .collect(),
+                    edges: path
+                        .edges
+                        .iter()
+                        .map(|e| crate::query::PathEdge {
+                            id: e.id,
+                            source: e.source,
+                            target: e.target,
+                            edge_type: e.edge_type.clone(),
+                            properties: e.properties.clone(),
+                        })
+                        .collect(),
                 })
             } else if let Some(edge_list) = binding.edge_lists.get(name) {
                 // Return edge list as a list of edge property maps
@@ -1979,7 +2028,7 @@ fn evaluate_return_item_with_bindings(expr: &Expression, binding: &Binding) -> R
                         if let Some(path) = binding.paths.get(var_name) {
                             // Return path length (number of edges)
                             return Ok(ResultValue::Property(PropertyValue::Integer(
-                                path.edge_ids.len() as i64,
+                                path.edges.len() as i64,
                             )));
                         }
                         // Fall through to evaluate as property value
@@ -2003,9 +2052,9 @@ fn evaluate_return_item_with_bindings(expr: &Expression, binding: &Binding) -> R
                     if let Expression::Variable(var_name) = &args[0] {
                         if let Some(path) = binding.paths.get(var_name) {
                             let list: Vec<PropertyValue> = path
-                                .node_ids
+                                .nodes
                                 .iter()
-                                .map(|&id| PropertyValue::Integer(id))
+                                .map(|n| PropertyValue::Integer(n.id))
                                 .collect();
                             return Ok(ResultValue::Property(PropertyValue::List(list)));
                         }
@@ -2019,9 +2068,9 @@ fn evaluate_return_item_with_bindings(expr: &Expression, binding: &Binding) -> R
                     if let Expression::Variable(var_name) = &args[0] {
                         if let Some(path) = binding.paths.get(var_name) {
                             let list: Vec<PropertyValue> = path
-                                .edge_ids
+                                .edges
                                 .iter()
-                                .map(|&id| PropertyValue::Integer(id))
+                                .map(|e| PropertyValue::Integer(e.id))
                                 .collect();
                             return Ok(ResultValue::Property(PropertyValue::List(list)));
                         }

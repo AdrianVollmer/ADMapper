@@ -54,6 +54,24 @@ impl Row {
     }
 }
 
+/// A node in a path result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathNode {
+    pub id: i64,
+    pub labels: Vec<String>,
+    pub properties: HashMap<String, PropertyValue>,
+}
+
+/// An edge in a path result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathEdge {
+    pub id: i64,
+    pub source: i64,
+    pub target: i64,
+    pub edge_type: String,
+    pub properties: HashMap<String, PropertyValue>,
+}
+
 /// A value in a query result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
@@ -74,8 +92,11 @@ pub enum ResultValue {
         edge_type: String,
         properties: HashMap<String, PropertyValue>,
     },
-    /// A path (sequence of nodes and edges).
-    Path { nodes: Vec<i64>, edges: Vec<i64> },
+    /// A path (sequence of nodes and edges) with full data.
+    Path {
+        nodes: Vec<PathNode>,
+        edges: Vec<PathEdge>,
+    },
 }
 
 /// Query execution statistics.
