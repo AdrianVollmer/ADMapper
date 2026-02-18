@@ -142,6 +142,20 @@
   .connection-status.connected .status-text {
     @apply text-gray-300;
   }
+
+  /* Query indicator */
+  .query-indicator {
+    @apply w-5 h-5 flex items-center justify-center;
+  }
+
+  .query-indicator-svg {
+    @apply w-5 h-5;
+    filter: grayscale(100%) brightness(0.5);
+  }
+
+  .query-indicator.running .query-indicator-svg {
+    filter: none;
+  }
 }
 
 /* ============================================
