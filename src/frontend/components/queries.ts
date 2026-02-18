@@ -4,10 +4,11 @@
  * Hierarchical query browser with built-in and custom queries.
  */
 
-import { getRenderer } from "./graph-view";
+import { getRenderer, loadGraphData } from "./graph-view";
 import { escapeHtml } from "../utils/html";
 import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
-import { showSuccess, showError } from "../utils/notifications";
+import { showSuccess, showError, showInfo } from "../utils/notifications";
+import type { RawADGraph } from "../graph/types";
 
 /** Query definition */
 export interface Query {
@@ -506,23 +507,31 @@ async function runQuery(queryId: string): Promise<void> {
     return;
   }
 
-  console.log(`Running query: ${query.name}`);
-  console.log(`Query: ${query.query}`);
-
   try {
     const result = await executeQueryWithHistory(query.name, query.query, true);
 
     // Show results
     if (result.graph && result.graph.nodes.length > 0) {
-      // Try to load graph into renderer if available
-      const renderer = getRenderer();
-      if (renderer) {
-        // TODO: Load graph into renderer
-        console.log("Query returned graph:", result.graph);
-      }
+      // Convert GraphData to RawADGraph format and load into renderer
+      const rawGraph: RawADGraph = {
+        nodes: result.graph.nodes.map((n) => ({
+          id: n.id,
+          label: n.label,
+          type: n.type as RawADGraph["nodes"][0]["type"],
+          properties: n.properties,
+        })),
+        edges: result.graph.edges.map((e) => ({
+          source: e.source,
+          target: e.target,
+          type: e.type as RawADGraph["edges"][0]["type"],
+        })),
+      };
+      loadGraphData(rawGraph);
       showSuccess(`"${query.name}" returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
-    } else {
+    } else if (result.resultCount && result.resultCount > 0) {
       showSuccess(`"${query.name}" returned ${result.resultCount} rows`);
+    } else {
+      showInfo(`"${query.name}" returned no results`);
     }
   } catch (err) {
     console.error("Query execution failed:", err);
