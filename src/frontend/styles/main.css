@@ -148,13 +148,23 @@
     @apply w-5 h-5 flex items-center justify-center;
   }
 
-  .query-indicator-svg {
+  .query-indicator-static,
+  .query-indicator-animated {
     @apply w-5 h-5;
-    filter: grayscale(100%) brightness(0.5);
   }
 
-  .query-indicator.running .query-indicator-svg {
-    filter: none;
+  /* Show static by default, hide animated */
+  .query-indicator-animated {
+    @apply hidden;
+  }
+
+  /* When running: hide static, show animated */
+  .query-indicator.running .query-indicator-static {
+    @apply hidden;
+  }
+
+  .query-indicator.running .query-indicator-animated {
+    @apply block;
   }
 }
 
