@@ -539,6 +539,286 @@ class TestRunner:
         return results
 
     # =========================================================================
+    # Performance Tests
+    # =========================================================================
+
+    def test_performance(self) -> list[TestResult]:
+        """Test query performance with synthetic data."""
+        results = []
+        max_time_ms = 3000  # 3 seconds max per query
+
+        # Create test data: 20 PerfUser nodes, 10 PerfGroup nodes
+        # with edges between them - using batch creation for efficiency
+        def setup_perf_data():
+            # Create all users with KNOWS chain in a single query
+            # This creates: u0 -> u1 -> u2 -> ... -> u19
+            user_chain = "-[:PERF_KNOWS]->".join([
+                f"(u{i}:PerfUser {{name: 'perfuser{i}', index: {i}, "
+                f"enabled: {str(i % 2 == 0).lower()}, score: {i * 10}}})"
+                for i in range(20)
+            ])
+            response = self.api.query(f"CREATE {user_chain}")
+            if not response.ok:
+                return False, f"Failed to create users: {response.body}", ""
+
+            # Create all groups in a single query
+            groups = ", ".join([
+                f"(g{i}:PerfGroup {{name: 'perfgroup{i}', index: {i}, priority: {i % 5}}})"
+                for i in range(10)
+            ])
+            response = self.api.query(f"CREATE {groups}")
+            if not response.ok:
+                return False, f"Failed to create groups: {response.body}", ""
+
+            # Note: CrustDB doesn't support MATCH...CREATE for edges between
+            # existing nodes, so we only test with the KNOWS edges created above
+
+            self.logger.info("Created 20 PerfUser (with KNOWS chain), 10 PerfGroup")
+            return True, "", "Performance data created"
+
+        results.append(self._run_test("Setup performance test data", setup_perf_data))
+
+        # Skip remaining tests if setup failed
+        if not results[-1].passed:
+            return results
+
+        # Test 1: Count PerfUser nodes (should be 20)
+        def check_user_count():
+            start = time.time()
+            response = self.api.query("MATCH (u:PerfUser) RETURN count(u) AS total")
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+
+            result_data = self._body_get(response.body, "results", {})
+            total = self._extract_count(result_data, "total")
+            if total != 20:
+                return False, f"Expected 20 PerfUsers, got {total}", proof
+            self.logger.info(f"Count PerfUser: {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Count users (expect 20)", check_user_count))
+
+        # Test 2: Count PerfGroup nodes (should be 10)
+        def check_group_count():
+            start = time.time()
+            response = self.api.query("MATCH (g:PerfGroup) RETURN count(g) AS total")
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+
+            result_data = self._body_get(response.body, "results", {})
+            total = self._extract_count(result_data, "total")
+            if total != 10:
+                return False, f"Expected 10 PerfGroups, got {total}", proof
+            self.logger.info(f"Count PerfGroup: {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Count groups (expect 10)", check_group_count))
+
+        # Test 3: Outgoing KNOWS edges from a user (user 0 -> user 1)
+        def check_outgoing():
+            start = time.time()
+            response = self.api.query(
+                "MATCH (u:PerfUser {index: 0})-[r:PERF_KNOWS]->(other:PerfUser) "
+                "RETURN count(r) AS total"
+            )
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+
+            result_data = self._body_get(response.body, "results", {})
+            total = self._extract_count(result_data, "total")
+            # User 0 has exactly 1 outgoing KNOWS edge (to user 1)
+            if total != 1:
+                return False, f"Expected 1 outgoing KNOWS edge from user 0, got {total}", proof
+            self.logger.info(f"Outgoing edges: {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Outgoing KNOWS edges", check_outgoing))
+
+        # Test 4: Incoming KNOWS edges to a user (user 10 <- user 9)
+        def check_incoming():
+            start = time.time()
+            response = self.api.query(
+                "MATCH (other:PerfUser)-[r:PERF_KNOWS]->(u:PerfUser {index: 10}) "
+                "RETURN count(r) AS total"
+            )
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+
+            result_data = self._body_get(response.body, "results", {})
+            total = self._extract_count(result_data, "total")
+            # User 10 has exactly 1 incoming KNOWS edge (from user 9)
+            if total != 1:
+                return False, f"Expected 1 incoming KNOWS edge to user 10, got {total}", proof
+            self.logger.info(f"Incoming edges: {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Incoming KNOWS edges", check_incoming))
+
+        # Test 5: Simple WHERE clause
+        def check_simple_where():
+            start = time.time()
+            response = self.api.query(
+                "MATCH (u:PerfUser) WHERE u.enabled = true RETURN count(u) AS total"
+            )
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+
+            result_data = self._body_get(response.body, "results", {})
+            total = self._extract_count(result_data, "total")
+            # Users 0, 2, 4, ..., 18 are enabled (10 total)
+            if total != 10:
+                return False, f"Expected 10 enabled users, got {total}", proof
+            self.logger.info(f"Simple WHERE: {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Simple WHERE clause", check_simple_where))
+
+        # Test 6: Complex WHERE with AND
+        def check_complex_where_and():
+            start = time.time()
+            response = self.api.query(
+                "MATCH (u:PerfUser) WHERE u.enabled = true AND u.score >= 100 "
+                "RETURN count(u) AS total"
+            )
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+
+            result_data = self._body_get(response.body, "results", {})
+            total = self._extract_count(result_data, "total")
+            # enabled (even index) AND score >= 100 (index >= 10)
+            # indices: 10, 12, 14, 16, 18 = 5 users
+            if total != 5:
+                return False, f"Expected 5 users (enabled AND score>=100), got {total}", proof
+            self.logger.info(f"Complex WHERE AND: {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Complex WHERE with AND", check_complex_where_and))
+
+        # Test 7: Complex WHERE with OR
+        def check_complex_where_or():
+            start = time.time()
+            response = self.api.query(
+                "MATCH (u:PerfUser) WHERE u.index = 0 OR u.index = 19 "
+                "RETURN count(u) AS total"
+            )
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+
+            result_data = self._body_get(response.body, "results", {})
+            total = self._extract_count(result_data, "total")
+            if total != 2:
+                return False, f"Expected 2 users (index 0 OR 19), got {total}", proof
+            self.logger.info(f"Complex WHERE OR: {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Complex WHERE with OR", check_complex_where_or))
+
+        # Test 8: Shortest path (user 0 to user 10 via KNOWS chain)
+        def check_shortest_path():
+            start = time.time()
+            response = self.api.query(
+                "MATCH p = SHORTEST 1 (src:PerfUser)-[:PERF_KNOWS]-+(dst:PerfUser) "
+                "WHERE src.index = 0 AND dst.index = 10 "
+                "RETURN length(p) AS hops"
+            )
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+
+            result_data = self._body_get(response.body, "results", {})
+            hops = self._extract_count(result_data, "hops")
+            # user0 -> user1 -> ... -> user10 = 10 hops
+            if hops != 10:
+                return False, f"Expected 10 hops, got {hops}", proof
+            self.logger.info(f"Shortest path (10 hops): {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Shortest path (10 hops)", check_shortest_path))
+
+        # Test 9: Longer shortest path (user 0 to user 19)
+        def check_longer_shortest_path():
+            start = time.time()
+            response = self.api.query(
+                "MATCH p = SHORTEST 1 (src:PerfUser)-[:PERF_KNOWS]-+(dst:PerfUser) "
+                "WHERE src.index = 0 AND dst.index = 19 "
+                "RETURN length(p) AS hops"
+            )
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+
+            result_data = self._body_get(response.body, "results", {})
+            hops = self._extract_count(result_data, "hops")
+            if hops != 19:
+                return False, f"Expected 19 hops, got {hops}", proof
+            self.logger.info(f"Shortest path (19 hops): {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Shortest path (19 hops)", check_longer_shortest_path))
+
+        # Test 10: Combined pattern - path traversal with property filter
+        def check_combined_pattern():
+            start = time.time()
+            response = self.api.query(
+                "MATCH (u1:PerfUser)-[:PERF_KNOWS]->(u2:PerfUser) "
+                "WHERE u1.enabled = true AND u2.score >= 50 "
+                "RETURN count(u1) AS total"
+            )
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+
+            # u1.enabled (even index) -> u2.score >= 50 (index >= 5)
+            # Edges: 4->5, 6->7, 8->9, 10->11, 12->13, 14->15, 16->17, 18->19 = 8 pairs
+            result_data = self._body_get(response.body, "results", {})
+            total = self._extract_count(result_data, "total")
+            if total != 8:
+                return False, f"Expected 8 matching pairs, got {total}", proof
+            self.logger.info(f"Combined pattern: {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Perf: Combined pattern with filters", check_combined_pattern))
+
+        return results
+
+    # =========================================================================
     # Query History Tests
     # =========================================================================
 

@@ -264,6 +264,7 @@ class E2ETestRunner:
             ("Query Execution", runner.test_queries),
             ("Search", runner.test_search),
             ("Query History", runner.test_query_history),
+            ("Performance", runner.test_performance),
         ]
 
         for name, test_func in test_modules:
