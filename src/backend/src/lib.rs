@@ -31,7 +31,6 @@ use import::{BloodHoundImporter, ImportProgress};
 use parking_lot::RwLock;
 use serde::Deserialize;
 use serde::Serialize;
-use tokio_util::sync::CancellationToken;
 use serde_json::{json, Value as JsonValue};
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -40,6 +39,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
+use tokio_util::sync::CancellationToken;
 use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
@@ -158,6 +158,8 @@ pub struct RunningQuery {
     pub cancel_token: CancellationToken,
     pub progress_tx: broadcast::Sender<QueryProgress>,
     pub final_state: RwLock<Option<QueryProgress>>,
+    /// When the query completed (for TTL-based cleanup).
+    pub completed_at: RwLock<Option<std::time::Instant>>,
 }
 
 // ============================================================================
@@ -224,9 +226,17 @@ impl AppState {
     }
 
     /// Get total active query count (async + sync).
+    /// Only counts queries that haven't completed yet.
     fn active_query_count(&self) -> usize {
-        self.running_queries.len()
-            + self.sync_query_count.load(std::sync::atomic::Ordering::Relaxed)
+        let async_count = self
+            .running_queries
+            .iter()
+            .filter(|entry| entry.value().completed_at.read().is_none())
+            .count();
+        async_count
+            + self
+                .sync_query_count
+                .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Broadcast query activity update.
@@ -247,6 +257,38 @@ impl AppState {
         self.sync_query_count
             .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         self.broadcast_query_activity();
+    }
+
+    /// Spawn a background task to clean up completed queries after TTL expires.
+    /// Queries that have been completed for more than 2 minutes are removed.
+    pub fn spawn_query_cleanup_task(&self) {
+        let running_queries = self.running_queries.clone();
+        const CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+        const QUERY_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(CLEANUP_INTERVAL).await;
+
+                let now = std::time::Instant::now();
+                let mut to_remove = Vec::new();
+
+                // Find queries that have been completed for longer than TTL
+                for entry in running_queries.iter() {
+                    if let Some(completed_at) = *entry.value().completed_at.read() {
+                        if now.duration_since(completed_at) > QUERY_TTL {
+                            to_remove.push(entry.key().clone());
+                        }
+                    }
+                }
+
+                // Remove expired queries
+                for query_id in to_remove {
+                    running_queries.remove(&query_id);
+                    debug!(query_id = %query_id, "Cleaned up expired query");
+                }
+            }
+        });
     }
 
     /// Check if connected to a database.
@@ -484,6 +526,9 @@ pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
         info!("Starting without database connection");
         AppState::new_disconnected()
     };
+
+    // Start background cleanup task for completed queries
+    state.spawn_query_cleanup_task();
 
     // Serve static files from the build directory
     let static_files = ServeDir::new("build").append_index_html_on_directories(true);
@@ -1138,11 +1183,9 @@ async fn graph_search(
     // Run blocking DB call in spawn_blocking to not block the async runtime
     let query = params.q.clone();
     let limit = params.limit;
-    let nodes_result = tokio::task::spawn_blocking(move || {
-        db.search_nodes(&query, limit)
-    })
-    .await
-    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
+    let nodes_result = tokio::task::spawn_blocking(move || db.search_nodes(&query, limit))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
 
     state.end_sync_query();
 
@@ -1755,6 +1798,7 @@ async fn graph_query(
         cancel_token: cancel_token.clone(),
         progress_tx: progress_tx.clone(),
         final_state: RwLock::new(None),
+        completed_at: RwLock::new(None),
     });
 
     state
@@ -1804,8 +1848,13 @@ async fn graph_query(
 
     tokio::task::spawn_blocking(move || {
         // Helper to update query status in history
-        let update_history = |status: &str, duration_ms: Option<u64>, result_count: Option<i64>, error: Option<&str>| {
-            if let Err(e) = db.update_query_status(&query_id_clone, status, duration_ms, result_count, error) {
+        let update_history = |status: &str,
+                              duration_ms: Option<u64>,
+                              result_count: Option<i64>,
+                              error: Option<&str>| {
+            if let Err(e) =
+                db.update_query_status(&query_id_clone, status, duration_ms, result_count, error)
+            {
                 warn!(error = %e, "Failed to update query history status");
             }
         };
@@ -1826,9 +1875,9 @@ async fn graph_query(
             };
             let _ = progress_tx.send(progress.clone());
             *running_query_for_task.final_state.write() = Some(progress);
-            running_queries.remove(&query_id_clone);
+            *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
             let _ = query_activity_tx.send(QueryActivity {
-                active: running_queries.len(),
+                active: running_queries.len().saturating_sub(1),
             });
             return;
         }
@@ -1837,7 +1886,9 @@ async fn graph_query(
         let result = if let Some(lang_str) = &language {
             QueryLanguage::from_str(lang_str)
                 .map(|lang| db.run_query_with_language(&query_text, lang))
-                .unwrap_or_else(|| Err(DbError::Database(format!("Unknown language: {}", lang_str))))
+                .unwrap_or_else(|| {
+                    Err(DbError::Database(format!("Unknown language: {}", lang_str)))
+                })
         } else {
             db.run_custom_query(&query_text)
         };
@@ -1858,9 +1909,9 @@ async fn graph_query(
             };
             let _ = progress_tx.send(progress.clone());
             *running_query_for_task.final_state.write() = Some(progress);
-            running_queries.remove(&query_id_clone);
+            *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
             let _ = query_activity_tx.send(QueryActivity {
-                active: running_queries.len(),
+                active: running_queries.len().saturating_sub(1),
             });
             return;
         }
@@ -1928,11 +1979,14 @@ async fn graph_query(
         let _ = progress_tx.send(progress.clone());
         *running_query_for_task.final_state.write() = Some(progress);
 
-        // Remove from running queries and broadcast activity update
-        // (do this immediately so the UI shows query is done)
-        running_queries.remove(&query_id_clone);
+        // Mark the query as completed with a timestamp for TTL-based cleanup.
+        // The query stays in running_queries so late subscribers can get the result.
+        // A background task will clean up queries that have been completed for >2 minutes.
+        *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
+
+        // Broadcast activity update (query no longer "running" for UI purposes)
         let _ = query_activity_tx.send(QueryActivity {
-            active: running_queries.len(),
+            active: running_queries.len().saturating_sub(1),
         });
     });
 
@@ -1994,7 +2048,8 @@ async fn query_abort(
 
     // Update query history with aborted status
     if let Some(db) = state.db() {
-        if let Err(e) = db.update_query_status(&query_id, "aborted", Some(duration_ms), None, None) {
+        if let Err(e) = db.update_query_status(&query_id, "aborted", Some(duration_ms), None, None)
+        {
             warn!(error = %e, "Failed to update query history status on abort");
         }
     }
@@ -2049,7 +2104,7 @@ async fn query_activity(
     Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new()
             .interval(std::time::Duration::from_secs(15))
-            .text("keep-alive")
+            .text("keep-alive"),
     )
 }
 
