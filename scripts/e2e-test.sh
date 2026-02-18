@@ -214,7 +214,7 @@ run_tests() {
 		-v "$TEST_DATA:/test_data.zip:ro" \
 		-e "ADMAPPER_BIN=/admapper" \
 		tests \
-		./e2e/run-tests.sh /test_data.zip "$BACKEND" || exit_code=$?
+		./e2e/run_tests.py /test_data.zip "$BACKEND" || exit_code=$?
 
 	return $exit_code
 }
@@ -224,10 +224,10 @@ cleanup() {
 	if [ "$CLEANUP" = true ]; then
 		echo -e "${BLUE}Cleaning up containers...${NC}"
 		cd "$SCRIPT_DIR"/../e2e
-		$COMPOSE_CMD -f e2e/docker-compose.yml down --remove-orphans 2>/dev/null || true
+		$COMPOSE_CMD down --remove-orphans 2>/dev/null || true
 	else
 		echo -e "${YELLOW}Skipping cleanup (--no-cleanup specified)${NC}"
-		echo "To clean up manually: $COMPOSE_CMD -f e2e/docker-compose.yml down"
+		echo "To clean up manually: cd e2e && $COMPOSE_CMD down"
 	fi
 }
 
@@ -242,8 +242,9 @@ main() {
 	parse_args "$@"
 	check_binary
 
-	# Set up cleanup trap
+	# Set up cleanup trap for all exit scenarios
 	trap cleanup EXIT
+	trap 'echo ""; echo -e "${YELLOW}Interrupted, cleaning up...${NC}"; exit 130' INT TERM
 
 	echo ""
 
