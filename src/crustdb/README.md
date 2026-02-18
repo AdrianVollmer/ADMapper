@@ -231,7 +231,8 @@ Basic query planning and optimization.
 - [ ] OPTIONAL MATCH
 - [ ] UNION
 - [ ] WITH clause (query chaining)
-- [ ] ORDER BY, SKIP, LIMIT
+- [ ] ORDER BY
+- [x] SKIP, LIMIT
 - [ ] DISTINCT
 - [ ] CASE expressions
 - [ ] List comprehensions
@@ -266,44 +267,82 @@ are in `tests/fixtures/`, organized by milestone:
 - `m6_multi_hop/` - Variable-length paths
 - `m7_mutation/` - SET and DELETE operations
 - `m8_aggregation/` - Aggregate functions
+- `m10_limit_skip/` - LIMIT and SKIP clauses
 
 See `tests/fixtures/README.md` for the TOML format specification.
 
 ## Benchmarking
 
-Run the benchmark suite to measure query performance across different graph structures:
+### CRUD Operations
+
+Benchmark basic database operations (INSERT, COUNT, MATCH, DELETE):
+
+```bash
+cargo run --release --example bench_crud
+```
+
+Example output:
+```
+COUNT queries (after inserting N nodes):
+   nodes   setup (ms)   count (ms)
+--------  ------------  ------------
+   10000       324.55         1.33
+   50000      1690.56         6.46
+
+MATCH with LIMIT (first 10 of N nodes):
+   nodes   setup (ms)   match (ms)
+--------  ------------  ------------
+   50000      2253.85         1.02
+```
+
+### Shortest Path Queries
+
+Benchmark SHORTEST path queries across different graph structures:
 
 ```bash
 cargo run --release --example bench_shortest
 ```
 
-This tests SHORTEST path queries on:
+This tests on:
 - **Linear chains**: Simple A→B→C→...→N paths
 - **Grids**: NxN grids with diagonal shortcuts
 - **Binary trees**: Trees of varying depths
 
-Example output:
-```
-Linear chain graph (A->B->C->...->N):
-       n   setup (ms)   query (ms)
---------  ------------  ------------
-    1000        52.82        60.59
-
-Grid graph (n x n with diagonal shortcuts):
-       n    nodes   setup (ms)   query (ms)
---------  --------  ------------  ------------
-      30      900       106.49       102.65
-```
-
 ## Profiling
 
-Generate flamegraph SVGs to identify performance bottlenecks:
+Generate flamegraph SVGs to identify performance bottlenecks.
+
+### CRUD Operations
+
+```bash
+cargo run --release --example profile_crud -- --op count --nodes 10000
+```
+
+Operations: `insert`, `count`, `match`, `match-filtered`, `match-limit`, `delete`, `mixed`
+
+Options:
+- `--op OP` - Operation to profile (default: count)
+- `--nodes N` - Number of nodes (default: 10000)
+- `--iterations N` - Number of iterations (default: 100)
+- `--output FILE` - Output file (default: flamegraph.svg)
+
+Examples:
+```bash
+# Profile COUNT on 50k nodes
+cargo run --release --example profile_crud -- --op count --nodes 50000
+
+# Profile MATCH with LIMIT
+cargo run --release --example profile_crud -- --op match-limit --nodes 50000
+
+# Profile mixed workload (insert, count, match, delete cycle)
+cargo run --release --example profile_crud -- --op mixed --iterations 20
+```
+
+### Shortest Path Queries
 
 ```bash
 cargo run --release --example profile_shortest -- --grid 20 --iterations 100
 ```
-
-This creates `flamegraph.svg` in the current directory. Open it in a browser to explore the interactive flamegraph.
 
 Options:
 - `--grid N` - Profile NxN grid graph (default)
@@ -311,11 +350,6 @@ Options:
 - `--tree D` - Profile binary tree of depth D
 - `--iterations N` - Number of query iterations (default: 100)
 - `--output FILE` - Output file (default: flamegraph.svg)
-
-Example profiling a large chain:
-```bash
-cargo run --release --example profile_shortest -- --chain 1000 --iterations 50 --output chain.svg
-```
 
 ## License
 
