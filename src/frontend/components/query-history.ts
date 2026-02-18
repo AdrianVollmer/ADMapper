@@ -252,9 +252,7 @@ function getStatusBadge(status: QueryStatus, isRunning = false): string {
     aborted: "Aborted",
   };
 
-  const spinnerHtml = isRunning
-    ? '<span class="spinner-xs mr-1"></span>'
-    : "";
+  const spinnerHtml = isRunning ? '<span class="spinner-xs mr-1"></span>' : "";
 
   return `<span class="${classes[status]}">${spinnerHtml}${labels[status]}</span>`;
 }

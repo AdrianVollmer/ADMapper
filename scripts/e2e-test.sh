@@ -213,6 +213,7 @@ run_tests() {
 		-v "$ADMAPPER_BIN:/admapper:ro" \
 		-v "$TEST_DATA:/test_data.zip:ro" \
 		-e "ADMAPPER_BIN=/admapper" \
+        -e RUST_LOG=debug \
 		tests \
 		./e2e/run_tests.py /test_data.zip "$BACKEND" || exit_code=$?
 

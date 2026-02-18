@@ -1040,7 +1040,14 @@ impl GraphDatabase {
         let mut history = Vec::new();
         if let Some(rows) = rows {
             for row in rows {
-                if let (Some(id), Some(name), Some(query), Some(timestamp), Some(status), Some(started_at)) = (
+                if let (
+                    Some(id),
+                    Some(name),
+                    Some(query),
+                    Some(timestamp),
+                    Some(status),
+                    Some(started_at),
+                ) = (
                     row.get(0).and_then(|v| v.as_str()),
                     row.get(1).and_then(|v| v.as_str()),
                     row.get(2).and_then(|v| v.as_str()),
@@ -1656,12 +1663,42 @@ mod tests {
         let db = GraphDatabase::in_memory().unwrap();
 
         // Add entries with different timestamps
-        db.add_query_history("oldest", "Old", "q1", 1000, None, "completed", 1000, Some(10), None)
-            .unwrap();
-        db.add_query_history("middle", "Mid", "q2", 2000, None, "completed", 2000, Some(20), None)
-            .unwrap();
-        db.add_query_history("newest", "New", "q3", 3000, None, "completed", 3000, Some(30), None)
-            .unwrap();
+        db.add_query_history(
+            "oldest",
+            "Old",
+            "q1",
+            1000,
+            None,
+            "completed",
+            1000,
+            Some(10),
+            None,
+        )
+        .unwrap();
+        db.add_query_history(
+            "middle",
+            "Mid",
+            "q2",
+            2000,
+            None,
+            "completed",
+            2000,
+            Some(20),
+            None,
+        )
+        .unwrap();
+        db.add_query_history(
+            "newest",
+            "New",
+            "q3",
+            3000,
+            None,
+            "completed",
+            3000,
+            Some(30),
+            None,
+        )
+        .unwrap();
 
         // Should be ordered by timestamp descending (newest first)
         let (history, _) = db.get_query_history(10, 0).unwrap();

@@ -248,12 +248,18 @@ impl CrustDatabase {
 
             // Create placeholder for missing source
             if source_id.is_none() {
-                let node_type = edge.source_type.clone().unwrap_or_else(|| "Base".to_string());
+                let node_type = edge
+                    .source_type
+                    .clone()
+                    .unwrap_or_else(|| "Base".to_string());
                 placeholder_set.insert((edge.source.clone(), node_type));
             }
             // Create placeholder for missing target
             if target_id.is_none() {
-                let node_type = edge.target_type.clone().unwrap_or_else(|| "Base".to_string());
+                let node_type = edge
+                    .target_type
+                    .clone()
+                    .unwrap_or_else(|| "Base".to_string());
                 placeholder_set.insert((edge.target.clone(), node_type));
             }
         }

@@ -28,10 +28,7 @@ export interface QueryExecutionResult {
  * @returns Query execution result
  * @throws Error on query failure or timeout
  */
-export async function executeQuery(
-  query: string,
-  extractGraph: boolean = true
-): Promise<QueryExecutionResult> {
+export async function executeQuery(query: string, extractGraph: boolean = true): Promise<QueryExecutionResult> {
   // Start the async query
   const startResponse = await api.post<QueryStartResponse>("/api/graph/query", {
     query,
@@ -46,10 +43,13 @@ export async function executeQuery(
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     // Timeout after 5 minutes
-    timeoutId = setTimeout(() => {
-      eventSource.close();
-      reject(new Error("Query timed out after 5 minutes"));
-    }, 5 * 60 * 1000);
+    timeoutId = setTimeout(
+      () => {
+        eventSource.close();
+        reject(new Error("Query timed out after 5 minutes"));
+      },
+      5 * 60 * 1000
+    );
 
     const cleanup = () => {
       eventSource.close();

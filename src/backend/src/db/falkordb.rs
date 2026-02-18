@@ -1101,11 +1101,29 @@ impl DatabaseBackend for FalkorDbDatabase {
                 let query = r.get(2)?.as_str()?.to_string();
                 let ts = r.get(3)?.as_i64()?;
                 let cnt = r.get(4).and_then(|v| v.as_i64());
-                let status = r.get(5).and_then(|v| v.as_str()).unwrap_or("completed").to_string();
+                let status = r
+                    .get(5)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("completed")
+                    .to_string();
                 let started_at = r.get(6).and_then(|v| v.as_i64()).unwrap_or(ts);
                 let duration_ms = r.get(7).and_then(|v| v.as_u64());
-                let error = r.get(8).and_then(|v| v.as_str()).filter(|e| !e.is_empty()).map(String::from);
-                Some((id, name, query, ts, cnt, status, started_at, duration_ms, error))
+                let error = r
+                    .get(8)
+                    .and_then(|v| v.as_str())
+                    .filter(|e| !e.is_empty())
+                    .map(String::from);
+                Some((
+                    id,
+                    name,
+                    query,
+                    ts,
+                    cnt,
+                    status,
+                    started_at,
+                    duration_ms,
+                    error,
+                ))
             })
             .collect();
 

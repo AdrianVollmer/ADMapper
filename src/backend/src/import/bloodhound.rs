@@ -515,12 +515,7 @@ impl BloodHoundImporter {
     }
 
     /// Extract domain trust edges.
-    fn extract_trust_edges(
-        &self,
-        entity: &JsonValue,
-        object_id: &str,
-        edges: &mut Vec<DbEdge>,
-    ) {
+    fn extract_trust_edges(&self, entity: &JsonValue, object_id: &str, edges: &mut Vec<DbEdge>) {
         let Some(trusts) = entity.get("Trusts").and_then(|v| v.as_array()) else {
             return;
         };
@@ -663,10 +658,7 @@ impl BloodHoundImporter {
             self.send_progress(progress);
         }
 
-        debug!(
-            total = progress.edges_imported,
-            "All edges inserted"
-        );
+        debug!(total = progress.edges_imported, "All edges inserted");
         self.edge_buffer.clear();
         Ok(())
     }
