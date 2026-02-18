@@ -71,10 +71,11 @@ impl CrustDatabase {
     /// Clear all data from the database.
     pub fn clear(&self) -> Result<()> {
         info!("Clearing all data from CrustDB");
-        // Delete all edges first
-        let _ = self.execute("MATCH ()-[r]->() DELETE r");
-        // Delete all nodes
-        let _ = self.execute("MATCH (n) DELETE n");
+        let db = self
+            .db
+            .lock()
+            .map_err(|e| DbError::Database(e.to_string()))?;
+        db.clear().map_err(|e| DbError::Database(e.to_string()))?;
         debug!("Database cleared");
         Ok(())
     }

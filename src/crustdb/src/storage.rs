@@ -670,6 +670,18 @@ impl SqliteStorage {
         })
     }
 
+    /// Clear all data from the database (nodes, edges, labels, types).
+    /// This is much faster than deleting via Cypher queries.
+    pub fn clear(&self) -> Result<()> {
+        // Delete in order respecting foreign key relationships
+        self.conn.execute("DELETE FROM node_label_map", [])?;
+        self.conn.execute("DELETE FROM edges", [])?;
+        self.conn.execute("DELETE FROM nodes", [])?;
+        self.conn.execute("DELETE FROM edge_types", [])?;
+        self.conn.execute("DELETE FROM node_labels", [])?;
+        Ok(())
+    }
+
     /// Begin a transaction.
     pub fn transaction(&mut self) -> Result<Transaction<'_>> {
         Ok(self.conn.transaction()?)

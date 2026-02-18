@@ -69,6 +69,12 @@ impl Database {
         self.storage.borrow().stats()
     }
 
+    /// Clear all data from the database.
+    /// This is much faster than using Cypher DELETE queries.
+    pub fn clear(&self) -> Result<()> {
+        self.storage.borrow().clear()
+    }
+
     /// Insert multiple nodes in a single transaction.
     ///
     /// Each node is specified as (labels, properties).
