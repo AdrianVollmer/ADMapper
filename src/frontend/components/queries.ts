@@ -7,6 +7,7 @@
 import { getRenderer } from "./graph-view";
 import { escapeHtml } from "../utils/html";
 import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
+import { showSuccess, showError } from "../utils/notifications";
 
 /** Query definition */
 export interface Query {
@@ -394,7 +395,7 @@ function renderCategory(category: QueryCategory, depth: number): string {
         <div
           class="query-item"
           style="padding-left: ${indent + 24}px"
-          data-action="run-query"
+          data-action="execute-sidebar-query"
           data-query-id="${escapeHtml(query.id)}"
           title="${escapeHtml(query.description || query.name)}"
         >
@@ -453,6 +454,7 @@ function handleTreeClick(e: Event): void {
   // Toggle category
   const categoryHeader = target.closest('[data-action="toggle-category"]') as HTMLElement;
   if (categoryHeader) {
+    e.stopPropagation();
     const categoryId = categoryHeader.getAttribute("data-category-id");
     if (categoryId) {
       if (expandedCategories.has(categoryId)) {
@@ -465,9 +467,10 @@ function handleTreeClick(e: Event): void {
     return;
   }
 
-  // Run query
-  const queryItem = target.closest('[data-action="run-query"]') as HTMLElement;
+  // Run query (use unique action name to avoid conflict with global action dispatcher)
+  const queryItem = target.closest('[data-action="execute-sidebar-query"]') as HTMLElement;
   if (queryItem) {
+    e.stopPropagation();
     const queryId = queryItem.getAttribute("data-query-id");
     if (queryId) {
       runQuery(queryId);
@@ -517,13 +520,13 @@ async function runQuery(queryId: string): Promise<void> {
         // TODO: Load graph into renderer
         console.log("Query returned graph:", result.graph);
       }
-      alert(`Query "${query.name}" returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
+      showSuccess(`"${query.name}" returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
     } else {
-      alert(`Query "${query.name}" returned ${result.resultCount} rows`);
+      showSuccess(`"${query.name}" returned ${result.resultCount} rows`);
     }
   } catch (err) {
     console.error("Query execution failed:", err);
-    alert(`Query failed: ${getQueryErrorMessage(err)}`);
+    showError(`Query failed: ${getQueryErrorMessage(err)}`);
   }
 }
 
