@@ -375,8 +375,10 @@ mod tests {
         let db = Database::in_memory().unwrap();
 
         // Create nodes with relationships
-        db.execute("CREATE (a:Person)-[:KNOWS]->(b:Person)").unwrap();
-        db.execute("CREATE (c:Person)-[:WORKS_AT]->(d:Company)").unwrap();
+        db.execute("CREATE (a:Person)-[:KNOWS]->(b:Person)")
+            .unwrap();
+        db.execute("CREATE (c:Person)-[:WORKS_AT]->(d:Company)")
+            .unwrap();
 
         // Count all edges
         let result = db.execute("MATCH ()-[r]->() RETURN count(r)").unwrap();

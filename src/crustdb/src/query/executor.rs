@@ -138,6 +138,147 @@ fn add_property_constraint(
     }
 }
 
+// =============================================================================
+// SQL Pushdown Optimizations
+// =============================================================================
+
+/// Try to execute a COUNT query using optimized SQL pushdown.
+/// Returns Some(result) if optimization was applied, None otherwise.
+fn try_optimized_count(
+    match_clause: &MatchClause,
+    storage: &SqliteStorage,
+) -> Result<Option<QueryResult>> {
+    // Only optimize single-node patterns without WHERE clause (for now)
+    let pattern = &match_clause.pattern;
+
+    // Must be a single node pattern
+    if pattern.elements.len() != 1 {
+        return Ok(None);
+    }
+
+    let node_pattern = match &pattern.elements[0] {
+        PatternElement::Node(np) => np,
+        _ => return Ok(None),
+    };
+
+    // Must have a RETURN clause with exactly COUNT(variable)
+    let return_clause = match &match_clause.return_clause {
+        Some(rc) => rc,
+        None => return Ok(None),
+    };
+
+    // Only single return item
+    if return_clause.items.len() != 1 {
+        return Ok(None);
+    }
+
+    let item = &return_clause.items[0];
+
+    // Must be COUNT function
+    let (fn_name, fn_name_original, args) = match &item.expression {
+        Expression::FunctionCall { name, args } => (name.to_uppercase(), name.clone(), args),
+        _ => return Ok(None),
+    };
+
+    if fn_name != "COUNT" {
+        return Ok(None);
+    }
+
+    // COUNT argument must be the bound variable or empty (COUNT(*))
+    let var_name = node_pattern.variable.as_deref().unwrap_or("_");
+    let is_count_var =
+        args.is_empty() || matches!(&args[0], Expression::Variable(v) if v == var_name);
+
+    if !is_count_var {
+        return Ok(None);
+    }
+
+    // No WHERE clause supported yet (could extend later)
+    if match_clause.where_clause.is_some() {
+        return Ok(None);
+    }
+
+    // No property filters in pattern
+    if node_pattern.properties.is_some() {
+        return Ok(None);
+    }
+
+    // Execute optimized count
+    let count = if node_pattern.labels.is_empty() {
+        // COUNT all nodes
+        storage.count_nodes()?
+    } else if node_pattern.labels.len() == 1 && node_pattern.labels[0].len() == 1 {
+        // COUNT nodes with single label (most common case)
+        let label = &node_pattern.labels[0][0];
+        storage.count_nodes_by_label(label)?
+    } else {
+        // Complex label expression - fall back to general path
+        return Ok(None);
+    };
+
+    // Build result
+    let column_name = if let Some(ref alias) = item.alias {
+        alias.clone()
+    } else {
+        format!("{}({})", fn_name_original, var_name)
+    };
+
+    let mut values = HashMap::new();
+    values.insert(
+        column_name.clone(),
+        ResultValue::Property(PropertyValue::Integer(count as i64)),
+    );
+
+    Ok(Some(QueryResult {
+        columns: vec![column_name],
+        rows: vec![Row { values }],
+        stats: QueryStats::default(),
+    }))
+}
+
+/// Check if LIMIT can be pushed down to SQL.
+/// Returns the limit value if pushable, None otherwise.
+fn get_pushable_limit(match_clause: &MatchClause) -> Option<u64> {
+    // Must be a single node pattern
+    let pattern = &match_clause.pattern;
+    if pattern.elements.len() != 1 {
+        return None;
+    }
+
+    let node_pattern = match &pattern.elements[0] {
+        PatternElement::Node(np) => np,
+        _ => return None,
+    };
+
+    // No property filters (would need to be evaluated after fetch)
+    if node_pattern.properties.is_some() {
+        return None;
+    }
+
+    // No WHERE clause (would need to be evaluated after fetch)
+    if match_clause.where_clause.is_some() {
+        return None;
+    }
+
+    // Must have a RETURN clause with LIMIT
+    let return_clause = match &match_clause.return_clause {
+        Some(rc) => rc,
+        None => return None,
+    };
+
+    // No aggregates (COUNT is handled separately)
+    if has_aggregate_functions(return_clause) {
+        return None;
+    }
+
+    // Must have LIMIT and no SKIP (SKIP complicates pushdown)
+    if return_clause.skip.is_some() {
+        return None;
+    }
+
+    return_clause.limit
+}
+
 /// Execute a parsed statement against the storage.
 pub fn execute(statement: &Statement, storage: &SqliteStorage) -> Result<QueryResult> {
     let start = Instant::now();
@@ -326,6 +467,14 @@ fn execute_match(
 ) -> Result<QueryResult> {
     let pattern = &match_clause.pattern;
 
+    // Try optimized paths for simple queries that can be pushed to SQL
+    if let Some(result) = try_optimized_count(match_clause, storage)? {
+        return Ok(result);
+    }
+
+    // Check if we can push LIMIT to SQL for simple single-node queries
+    let pushdown_limit = get_pushable_limit(match_clause);
+
     // Determine pattern type and execute accordingly
     let bindings = if is_shortest_path_pattern(pattern) {
         // Shortest path pattern: MATCH p = SHORTEST k (a)-[:TYPE]-+(b)
@@ -340,7 +489,7 @@ fn execute_match(
         execute_shortest_path_pattern(pattern, storage, &constraints)?
     } else if is_single_node_pattern(pattern) {
         // Simple single-node pattern: MATCH (n) or MATCH (n:Label)
-        execute_single_node_pattern(pattern, storage)?
+        execute_single_node_pattern(pattern, storage, pushdown_limit)?
     } else if is_single_hop_pattern(pattern) {
         // Single-hop relationship pattern: MATCH (a)-[r]->(b)
         execute_single_hop_pattern(pattern, storage)?
@@ -782,7 +931,11 @@ fn execute_shortest_path_pattern(
 }
 
 /// Execute a single-node pattern match.
-fn execute_single_node_pattern(pattern: &Pattern, storage: &SqliteStorage) -> Result<Vec<Binding>> {
+fn execute_single_node_pattern(
+    pattern: &Pattern,
+    storage: &SqliteStorage,
+    limit: Option<u64>,
+) -> Result<Vec<Binding>> {
     let node_pattern = match &pattern.elements[0] {
         PatternElement::Node(np) => np,
         _ => return Err(Error::Cypher("Expected node pattern".into())),
@@ -790,8 +943,8 @@ fn execute_single_node_pattern(pattern: &Pattern, storage: &SqliteStorage) -> Re
 
     let variable = node_pattern.variable.as_deref().unwrap_or("_");
 
-    // Scan and filter nodes
-    let nodes = scan_nodes(node_pattern, storage)?;
+    // Scan and filter nodes (with optional SQL-level limit)
+    let nodes = scan_nodes_with_limit(node_pattern, storage, limit)?;
     let nodes = filter_by_properties(nodes, node_pattern)?;
 
     // Convert to bindings
@@ -1597,10 +1750,7 @@ fn has_aggregate_functions(return_clause: &ReturnClause) -> bool {
 }
 
 /// Evaluate aggregate function over all bindings
-fn evaluate_aggregate(
-    expr: &Expression,
-    bindings: &[Binding],
-) -> Result<ResultValue> {
+fn evaluate_aggregate(expr: &Expression, bindings: &[Binding]) -> Result<ResultValue> {
     if let Expression::FunctionCall { name, args } = expr {
         let name_upper = name.to_uppercase();
         match name_upper.as_str() {
@@ -1616,7 +1766,9 @@ fn evaluate_aggregate(
                     // count(n) - count rows where variable exists
                     let count = bindings
                         .iter()
-                        .filter(|b| b.nodes.contains_key(var_name) || b.edges.contains_key(var_name))
+                        .filter(|b| {
+                            b.nodes.contains_key(var_name) || b.edges.contains_key(var_name)
+                        })
                         .count();
                     Ok(ResultValue::Property(PropertyValue::Integer(count as i64)))
                 } else {
@@ -1639,9 +1791,7 @@ fn evaluate_aggregate(
                 }
                 let values: Vec<PropertyValue> = bindings
                     .iter()
-                    .filter_map(|b| {
-                        evaluate_expression_with_bindings(&args[0], b).ok()
-                    })
+                    .filter_map(|b| evaluate_expression_with_bindings(&args[0], b).ok())
                     .filter(|v| !matches!(v, PropertyValue::Null))
                     .collect();
                 Ok(ResultValue::Property(PropertyValue::List(values)))
@@ -1714,6 +1864,21 @@ fn build_match_result_from_bindings(
         }
 
         rows.push(Row { values });
+    }
+
+    // Apply SKIP: remove first N rows
+    if let Some(skip_count) = return_clause.skip {
+        let skip = skip_count as usize;
+        if skip >= rows.len() {
+            rows.clear();
+        } else {
+            rows.drain(..skip);
+        }
+    }
+
+    // Apply LIMIT: keep only first N rows
+    if let Some(limit_count) = return_clause.limit {
+        rows.truncate(limit_count as usize);
     }
 
     Ok(QueryResult {
@@ -1916,6 +2081,33 @@ fn scan_nodes(pattern: &NodePattern, storage: &SqliteStorage) -> Result<Vec<Node
         }
 
         Ok(all_nodes)
+    }
+}
+
+/// Scan nodes with optional SQL-level LIMIT pushdown.
+/// Only applies limit when we have a simple label pattern (no OR, no AND of multiple groups).
+fn scan_nodes_with_limit(
+    pattern: &NodePattern,
+    storage: &SqliteStorage,
+    limit: Option<u64>,
+) -> Result<Vec<Node>> {
+    // Can only push limit for simple patterns
+    let can_push_limit = limit.is_some()
+        && pattern.properties.is_none()
+        && (pattern.labels.is_empty()
+            || (pattern.labels.len() == 1 && pattern.labels[0].len() == 1));
+
+    if can_push_limit {
+        let limit = limit.unwrap();
+        if pattern.labels.is_empty() {
+            storage.get_all_nodes_limit(Some(limit))
+        } else {
+            let label = &pattern.labels[0][0];
+            storage.find_nodes_by_label_limit(label, Some(limit))
+        }
+    } else {
+        // Fall back to regular scan (no limit pushdown)
+        scan_nodes(pattern, storage)
     }
 }
 
@@ -3906,7 +4098,11 @@ mod tests {
         // Count all nodes
         let result = execute(&parse("MATCH (n) RETURN count(n)").unwrap(), &storage).unwrap();
 
-        assert_eq!(result.rows.len(), 1, "Should return single row for aggregate");
+        assert_eq!(
+            result.rows.len(),
+            1,
+            "Should return single row for aggregate"
+        );
         assert_eq!(result.columns, vec!["count(n)"]);
 
         // Extract count value
@@ -3936,7 +4132,11 @@ mod tests {
         .unwrap();
 
         // Count only Person nodes
-        let result = execute(&parse("MATCH (n:Person) RETURN count(n)").unwrap(), &storage).unwrap();
+        let result = execute(
+            &parse("MATCH (n:Person) RETURN count(n)").unwrap(),
+            &storage,
+        )
+        .unwrap();
 
         assert_eq!(result.rows.len(), 1);
         let count_val = result.rows[0].values.get("count(n)").unwrap();
@@ -3958,13 +4158,18 @@ mod tests {
         )
         .unwrap();
         execute(
-            &parse("CREATE (c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Diana'})").unwrap(),
+            &parse("CREATE (c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Diana'})")
+                .unwrap(),
             &storage,
         )
         .unwrap();
 
         // Count relationships
-        let result = execute(&parse("MATCH ()-[r]->() RETURN count(r)").unwrap(), &storage).unwrap();
+        let result = execute(
+            &parse("MATCH ()-[r]->() RETURN count(r)").unwrap(),
+            &storage,
+        )
+        .unwrap();
 
         assert_eq!(result.rows.len(), 1);
         let count_val = result.rows[0].values.get("count(r)").unwrap();
@@ -3980,7 +4185,11 @@ mod tests {
         let storage = SqliteStorage::in_memory().unwrap();
 
         // Count with no matching nodes
-        let result = execute(&parse("MATCH (n:NonExistent) RETURN count(n)").unwrap(), &storage).unwrap();
+        let result = execute(
+            &parse("MATCH (n:NonExistent) RETURN count(n)").unwrap(),
+            &storage,
+        )
+        .unwrap();
 
         assert_eq!(result.rows.len(), 1);
         let count_val = result.rows[0].values.get("count(n)").unwrap();

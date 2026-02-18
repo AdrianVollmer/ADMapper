@@ -1,0 +1,171 @@
+# M10: LIMIT and SKIP Clauses
+#
+# Tests for result set limiting with LIMIT and SKIP clauses.
+
+[[test]]
+name = "limit_basic"
+description = "LIMIT returns only the specified number of rows"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+    { id = "d", labels = ["Person"], properties = { name = "David" } },
+    { id = "e", labels = ["Person"], properties = { name = "Eve" } },
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n LIMIT 3"
+[test.expected]
+row_count = 3
+columns = ["n"]
+
+[[test]]
+name = "limit_zero"
+description = "LIMIT 0 returns no rows"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n LIMIT 0"
+[test.expected]
+row_count = 0
+columns = ["n"]
+
+[[test]]
+name = "limit_exceeds_results"
+description = "LIMIT larger than result set returns all rows"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n LIMIT 100"
+[test.expected]
+row_count = 2
+columns = ["n"]
+
+[[test]]
+name = "limit_with_where"
+description = "LIMIT applies after WHERE filtering"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", age = 35 } },
+    { id = "d", labels = ["Person"], properties = { name = "David", age = 40 } },
+]
+[test.query]
+cypher = "MATCH (n:Person) WHERE n.age > 25 RETURN n LIMIT 2"
+[test.expected]
+row_count = 2
+columns = ["n"]
+
+[[test]]
+name = "limit_one"
+description = "LIMIT 1 returns exactly one row"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n LIMIT 1"
+[test.expected]
+row_count = 1
+columns = ["n"]
+
+[[test]]
+name = "skip_basic"
+description = "SKIP removes the first N rows"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+    { id = "d", labels = ["Person"], properties = { name = "David" } },
+    { id = "e", labels = ["Person"], properties = { name = "Eve" } },
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n SKIP 2"
+[test.expected]
+row_count = 3
+columns = ["n"]
+
+[[test]]
+name = "skip_zero"
+description = "SKIP 0 returns all rows"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n SKIP 0"
+[test.expected]
+row_count = 2
+columns = ["n"]
+
+[[test]]
+name = "skip_exceeds_results"
+description = "SKIP larger than result set returns no rows"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n SKIP 100"
+[test.expected]
+row_count = 0
+columns = ["n"]
+
+[[test]]
+name = "skip_and_limit"
+description = "SKIP and LIMIT together for pagination"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice" } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob" } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie" } },
+    { id = "d", labels = ["Person"], properties = { name = "David" } },
+    { id = "e", labels = ["Person"], properties = { name = "Eve" } },
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n SKIP 1 LIMIT 2"
+[test.expected]
+row_count = 2
+columns = ["n"]
+
+[[test]]
+name = "skip_and_limit_with_where"
+description = "SKIP and LIMIT apply after WHERE filtering"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
+    { id = "b", labels = ["Person"], properties = { name = "Bob", age = 25 } },
+    { id = "c", labels = ["Person"], properties = { name = "Charlie", age = 35 } },
+    { id = "d", labels = ["Person"], properties = { name = "David", age = 40 } },
+    { id = "e", labels = ["Person"], properties = { name = "Eve", age = 45 } },
+]
+[test.query]
+cypher = "MATCH (n:Person) WHERE n.age >= 30 RETURN n SKIP 1 LIMIT 2"
+[test.expected]
+row_count = 2
+columns = ["n"]
+
+[[test]]
+name = "limit_empty_result"
+description = "LIMIT on empty result set returns no rows"
+[test.setup]
+nodes = [
+    { id = "a", labels = ["Movie"], properties = { title = "Matrix" } },
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n LIMIT 5"
+[test.expected]
+row_count = 0
+columns = ["n"]

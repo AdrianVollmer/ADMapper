@@ -836,3 +836,87 @@ fn test_labels_function() {
         _ => panic!("Expected list value for labels(a)"),
     }
 }
+
+// =============================================================================
+// M10: LIMIT and SKIP Tests
+// =============================================================================
+
+#[test]
+fn test_m10_limit_skip_fixtures() {
+    let fixtures = find_fixtures("m10_limit_skip");
+    if fixtures.is_empty() {
+        println!("No M10 fixtures found, skipping");
+        return;
+    }
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for fixture_path in &fixtures {
+        let fixture = load_fixture(fixture_path);
+
+        for test in &fixture.test {
+            let result = std::panic::catch_unwind(|| {
+                run_test_case(test);
+            });
+
+            let desc = test.description.as_deref().unwrap_or("");
+            match result {
+                Ok(()) => {
+                    passed += 1;
+                    println!("  ✓ {}: {}", test.name, desc);
+                }
+                Err(e) => {
+                    failed += 1;
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown error".to_string()
+                    };
+                    println!("  ✗ {}: {} - {}", test.name, desc, msg);
+                }
+            }
+        }
+    }
+
+    println!("\nM10 LIMIT/SKIP: {} passed, {} failed", passed, failed);
+    assert_eq!(failed, 0, "Some M10 LIMIT/SKIP tests failed");
+}
+
+#[test]
+fn test_m10_limit_basic() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Charlie'})").unwrap();
+
+    let result = db.execute("MATCH (n:Person) RETURN n LIMIT 2").unwrap();
+    assert_eq!(result.rows.len(), 2);
+}
+
+#[test]
+fn test_m10_skip_basic() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Charlie'})").unwrap();
+
+    let result = db.execute("MATCH (n:Person) RETURN n SKIP 1").unwrap();
+    assert_eq!(result.rows.len(), 2);
+}
+
+#[test]
+fn test_m10_skip_and_limit() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Charlie'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'David'})").unwrap();
+
+    let result = db
+        .execute("MATCH (n:Person) RETURN n SKIP 1 LIMIT 2")
+        .unwrap();
+    assert_eq!(result.rows.len(), 2);
+}

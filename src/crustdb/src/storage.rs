@@ -543,43 +543,35 @@ impl SqliteStorage {
 
     /// Scan all nodes in the database.
     pub fn scan_all_nodes(&self) -> Result<Vec<Node>> {
-        let mut stmt = self.conn.prepare("SELECT id FROM nodes")?;
+        // Fetch all nodes with their labels in a single query using GROUP_CONCAT
+        let mut stmt = self.conn.prepare(
+            "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+             FROM nodes n
+             LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
+             LEFT JOIN node_labels nl ON nlm.label_id = nl.id
+             GROUP BY n.id",
+        )?;
 
-        let node_ids: Vec<i64> = stmt
-            .query_map([], |row| row.get(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        let mut nodes = Vec::with_capacity(node_ids.len());
-        for id in node_ids {
-            if let Some(node) = self.get_node(id)? {
-                nodes.push(node);
-            }
-        }
-
-        Ok(nodes)
+        self.collect_nodes_from_stmt(&mut stmt, [])
     }
 
     /// Find nodes by label.
     pub fn find_nodes_by_label(&self, label: &str) -> Result<Vec<Node>> {
+        // Single query: find nodes with the label, then get ALL their labels
         let mut stmt = self.conn.prepare(
-            "SELECT n.id, n.properties FROM nodes n
+            "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+             FROM nodes n
              JOIN node_label_map nlm ON n.id = nlm.node_id
              JOIN node_labels nl ON nlm.label_id = nl.id
-             WHERE nl.name = ?1",
+             WHERE n.id IN (
+                 SELECT DISTINCT nlm2.node_id FROM node_label_map nlm2
+                 JOIN node_labels nl2 ON nlm2.label_id = nl2.id
+                 WHERE nl2.name = ?1
+             )
+             GROUP BY n.id",
         )?;
 
-        let node_ids: Vec<i64> = stmt
-            .query_map(params![label], |row| row.get(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        let mut nodes = Vec::with_capacity(node_ids.len());
-        for id in node_ids {
-            if let Some(node) = self.get_node(id)? {
-                nodes.push(node);
-            }
-        }
-
-        Ok(nodes)
+        self.collect_nodes_from_stmt(&mut stmt, params![label])
     }
 
     /// Find edges by type.
@@ -602,6 +594,118 @@ impl SqliteStorage {
         }
 
         Ok(edges)
+    }
+
+    /// Count all nodes.
+    pub fn count_nodes(&self) -> Result<u64> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM nodes", [], |row| row.get(0))?;
+        Ok(count as u64)
+    }
+
+    /// Count nodes with a specific label.
+    pub fn count_nodes_by_label(&self, label: &str) -> Result<u64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM nodes n
+             JOIN node_label_map nlm ON n.id = nlm.node_id
+             JOIN node_labels nl ON nlm.label_id = nl.id
+             WHERE nl.name = ?1",
+            params![label],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Count all edges.
+    pub fn count_edges(&self) -> Result<u64> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM edges", [], |row| row.get(0))?;
+        Ok(count as u64)
+    }
+
+    /// Count edges with a specific type.
+    pub fn count_edges_by_type(&self, edge_type: &str) -> Result<u64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM edges e
+             JOIN edge_types et ON e.type_id = et.id
+             WHERE et.name = ?1",
+            params![edge_type],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Find nodes by label with optional limit.
+    pub fn find_nodes_by_label_limit(&self, label: &str, limit: Option<u64>) -> Result<Vec<Node>> {
+        let limit_clause = limit.map_or(String::new(), |n| format!(" LIMIT {}", n));
+        let sql = format!(
+            "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+             FROM nodes n
+             JOIN node_label_map nlm ON n.id = nlm.node_id
+             JOIN node_labels nl ON nlm.label_id = nl.id
+             WHERE n.id IN (
+                 SELECT DISTINCT nlm2.node_id FROM node_label_map nlm2
+                 JOIN node_labels nl2 ON nlm2.label_id = nl2.id
+                 WHERE nl2.name = ?1
+             )
+             GROUP BY n.id{}",
+            limit_clause
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        self.collect_nodes_from_stmt(&mut stmt, params![label])
+    }
+
+    /// Get all nodes with optional limit.
+    pub fn get_all_nodes_limit(&self, limit: Option<u64>) -> Result<Vec<Node>> {
+        let limit_clause = limit.map_or(String::new(), |n| format!(" LIMIT {}", n));
+        let sql = format!(
+            "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+             FROM nodes n
+             LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
+             LEFT JOIN node_labels nl ON nlm.label_id = nl.id
+             GROUP BY n.id{}",
+            limit_clause
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        self.collect_nodes_from_stmt(&mut stmt, [])
+    }
+
+    /// Helper: collect nodes from a prepared statement that returns (id, properties, labels).
+    fn collect_nodes_from_stmt<P: rusqlite::Params>(
+        &self,
+        stmt: &mut rusqlite::Statement,
+        params: P,
+    ) -> Result<Vec<Node>> {
+        let rows = stmt.query_map(params, |row| {
+            let id: i64 = row.get(0)?;
+            let properties_json: String = row.get(1)?;
+            let labels_concat: Option<String> = row.get(2)?;
+            Ok((id, properties_json, labels_concat))
+        })?;
+
+        let mut nodes = Vec::new();
+        for row_result in rows {
+            let (id, properties_json, labels_concat) = row_result?;
+
+            let properties: std::collections::HashMap<String, PropertyValue> =
+                serde_json::from_str(&properties_json)?;
+
+            let labels: Vec<String> = labels_concat
+                .map(|s| s.split(',').map(|l| l.to_string()).collect())
+                .unwrap_or_default();
+
+            nodes.push(Node {
+                id,
+                labels,
+                properties,
+            });
+        }
+
+        Ok(nodes)
     }
 
     /// Find outgoing edges from a node.
