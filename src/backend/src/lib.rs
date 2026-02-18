@@ -831,7 +831,11 @@ async fn import_progress(
 #[instrument(skip(state))]
 async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue>, ApiError> {
     let db = state.require_db()?;
-    let (node_count, edge_count) = db.get_stats()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let (node_count, edge_count) = tokio::task::spawn_blocking(move || db.get_stats())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
 
     debug!(
         nodes = node_count,
@@ -850,7 +854,12 @@ async fn graph_detailed_stats(
     State(state): State<AppState>,
 ) -> Result<Json<db::DetailedStats>, ApiError> {
     let db = state.require_db()?;
-    let stats = db.get_detailed_stats()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let stats = tokio::task::spawn_blocking(move || db.get_detailed_stats())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
     debug!(
         nodes = stats.total_nodes,
         edges = stats.total_edges,
@@ -865,7 +874,12 @@ async fn graph_detailed_stats(
 #[instrument(skip(state))]
 async fn graph_clear(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
     let db = state.require_db()?;
-    db.clear()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    tokio::task::spawn_blocking(move || db.clear())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
     info!("Database cleared");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -913,7 +927,12 @@ impl From<DbEdge> for GraphEdge {
 /// Get all graph nodes.
 async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<GraphNode>>, ApiError> {
     let db = state.require_db()?;
-    let nodes = db.get_all_nodes()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let nodes = tokio::task::spawn_blocking(move || db.get_all_nodes())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
     let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
     Ok(Json(result))
 }
@@ -921,7 +940,12 @@ async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<GraphNode
 /// Get all graph edges.
 async fn graph_edges(State(state): State<AppState>) -> Result<Json<Vec<GraphEdge>>, ApiError> {
     let db = state.require_db()?;
-    let edges = db.get_all_edges()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let edges = tokio::task::spawn_blocking(move || db.get_all_edges())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
     let result: Vec<GraphEdge> = edges.into_iter().map(GraphEdge::from).collect();
     Ok(Json(result))
 }
@@ -1193,8 +1217,15 @@ fn extract_nested_properties(value: &JsonValue) -> JsonValue {
 /// Get full graph (nodes and edges).
 async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>, ApiError> {
     let db = state.require_db()?;
-    let nodes = db.get_all_nodes()?;
-    let edges = db.get_all_edges()?;
+
+    // Run blocking DB calls in spawn_blocking to not block the async runtime
+    let (nodes, edges) = tokio::task::spawn_blocking(move || {
+        let nodes = db.get_all_nodes()?;
+        let edges = db.get_all_edges()?;
+        Ok::<_, db::DbError>((nodes, edges))
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
 
     let result = FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
@@ -1268,8 +1299,12 @@ async fn node_counts(
 ) -> Result<Json<NodeCounts>, ApiError> {
     let db = state.require_db()?;
 
-    // Use efficient backend-specific counting
-    let (incoming, outgoing, admin_to, member_of, members) = db.get_node_edge_counts(&node_id)?;
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let node_id_clone = node_id.clone();
+    let (incoming, outgoing, admin_to, member_of, members) =
+        tokio::task::spawn_blocking(move || db.get_node_edge_counts(&node_id_clone))
+            .await
+            .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
 
     debug!(
         node_id = %node_id,
@@ -1354,78 +1389,86 @@ async fn node_status(
     let db = state.require_db()?;
     info!(node_id = %node_id, "Checking node security status");
 
-    // Get the node to check its properties
-    let nodes = db.get_nodes_by_ids(&[node_id.clone()])?;
-    let node = nodes.first();
+    // Run all blocking DB calls in spawn_blocking to not block the async runtime
+    let node_id_clone = node_id.clone();
+    let status = tokio::task::spawn_blocking(move || {
+        // Get the node to check its properties
+        let nodes = db.get_nodes_by_ids(&[node_id_clone.clone()])?;
+        let node = nodes.first();
 
-    // Check owned status from properties
-    let owned = node
-        .and_then(|n| {
-            let props = &n.properties;
-            props.get("owned").or(props.get("Owned")).and_then(|v| {
-                v.as_bool()
-                    .or_else(|| v.as_i64().map(|i| i == 1))
-                    .or_else(|| v.as_str().map(|s| s == "true"))
-            })
-        })
-        .unwrap_or(false);
-
-    // Check high value from properties
-    let high_value_prop = node
-        .and_then(|n| {
-            let props = &n.properties;
-            props
-                .get("highvalue")
-                .or(props.get("HighValue"))
-                .or(props.get("highValue"))
-                .and_then(|v| {
+        // Check owned status from properties
+        let owned = node
+            .and_then(|n| {
+                let props = &n.properties;
+                props.get("owned").or(props.get("Owned")).and_then(|v| {
                     v.as_bool()
                         .or_else(|| v.as_i64().map(|i| i == 1))
                         .or_else(|| v.as_str().map(|s| s == "true"))
                 })
+            })
+            .unwrap_or(false);
+
+        // Check high value from properties
+        let high_value_prop = node
+            .and_then(|n| {
+                let props = &n.properties;
+                props
+                    .get("highvalue")
+                    .or(props.get("HighValue"))
+                    .or(props.get("highValue"))
+                    .and_then(|v| {
+                        v.as_bool()
+                            .or_else(|| v.as_i64().map(|i| i == 1))
+                            .or_else(|| v.as_str().map(|s| s == "true"))
+                    })
+            })
+            .unwrap_or(false);
+
+        // Check group memberships using graph traversal
+        let is_enterprise_admin = db
+            .find_membership_by_sid_suffix(&node_id_clone, "-519")?
+            .is_some();
+        let is_domain_admin = db
+            .find_membership_by_sid_suffix(&node_id_clone, "-512")?
+            .is_some();
+
+        // High-value RIDs to check membership for
+        let high_value_rids = ["-512", "-519", "-518", "-516", "-498", "-544"];
+        let is_high_value_member = high_value_rids.iter().any(|rid| {
+            db.find_membership_by_sid_suffix(&node_id_clone, rid)
+                .unwrap_or(None)
+                .is_some()
+        });
+
+        let is_high_value = high_value_prop || is_high_value_member;
+
+        // Check for paths to high-value targets (only if not already high value)
+        let (has_path_to_high_value, path_length) =
+            if is_enterprise_admin || is_domain_admin || is_high_value {
+                (false, None)
+            } else {
+                // Use the existing paths-to-DA logic to check for attack paths
+                let paths = db.find_paths_to_domain_admins(&[])?;
+                let path_info = paths.iter().find(|(id, _, _, _)| id == &node_id_clone);
+                match path_info {
+                    Some((_, _, _, hops)) => (true, Some(*hops)),
+                    None => (false, None),
+                }
+            };
+
+        Ok::<_, db::DbError>(NodeStatus {
+            owned,
+            is_enterprise_admin,
+            is_domain_admin,
+            is_high_value,
+            has_path_to_high_value,
+            path_length,
         })
-        .unwrap_or(false);
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
 
-    // Check group memberships using graph traversal
-    let is_enterprise_admin = db
-        .find_membership_by_sid_suffix(&node_id, "-519")?
-        .is_some();
-    let is_domain_admin = db
-        .find_membership_by_sid_suffix(&node_id, "-512")?
-        .is_some();
-
-    // High-value RIDs to check membership for
-    let high_value_rids = ["-512", "-519", "-518", "-516", "-498", "-544"];
-    let is_high_value_member = high_value_rids.iter().any(|rid| {
-        db.find_membership_by_sid_suffix(&node_id, rid)
-            .unwrap_or(None)
-            .is_some()
-    });
-
-    let is_high_value = high_value_prop || is_high_value_member;
-
-    // Check for paths to high-value targets (only if not already high value)
-    let (has_path_to_high_value, path_length) =
-        if is_enterprise_admin || is_domain_admin || is_high_value {
-            (false, None)
-        } else {
-            // Use the existing paths-to-DA logic to check for attack paths
-            let paths = db.find_paths_to_domain_admins(&[])?;
-            let path_info = paths.iter().find(|(id, _, _, _)| id == &node_id);
-            match path_info {
-                Some((_, _, _, hops)) => (true, Some(*hops)),
-                None => (false, None),
-            }
-        };
-
-    Ok(Json(NodeStatus {
-        owned,
-        is_enterprise_admin,
-        is_domain_admin,
-        is_high_value,
-        has_path_to_high_value,
-        path_length,
-    }))
+    Ok(Json(status))
 }
 
 /// Path query parameters.
@@ -1599,7 +1642,11 @@ async fn paths_to_domain_admins(
     debug!(exclude = ?exclude_types, "Finding paths to Domain Admins");
 
     let db = state.require_db()?;
-    let results = db.find_paths_to_domain_admins(&exclude_types)?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let results = tokio::task::spawn_blocking(move || db.find_paths_to_domain_admins(&exclude_types))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
 
     let entries: Vec<PathsToDaEntry> = results
         .into_iter()
@@ -1623,7 +1670,12 @@ async fn graph_insights(
     State(state): State<AppState>,
 ) -> Result<Json<db::SecurityInsights>, ApiError> {
     let db = state.require_db()?;
-    let insights = db.get_security_insights()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let insights = tokio::task::spawn_blocking(move || db.get_security_insights())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
     info!(
         effective_das = insights.effective_da_count,
         real_das = insights.real_da_count,
@@ -1637,7 +1689,12 @@ async fn graph_insights(
 #[instrument(skip(state))]
 async fn graph_edge_types(State(state): State<AppState>) -> Result<Json<Vec<String>>, ApiError> {
     let db = state.require_db()?;
-    let types = db.get_edge_types()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let types = tokio::task::spawn_blocking(move || db.get_edge_types())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
     debug!(count = types.len(), "Edge types retrieved");
     Ok(Json(types))
 }
@@ -1646,7 +1703,12 @@ async fn graph_edge_types(State(state): State<AppState>) -> Result<Json<Vec<Stri
 #[instrument(skip(state))]
 async fn graph_node_types(State(state): State<AppState>) -> Result<Json<Vec<String>>, ApiError> {
     let db = state.require_db()?;
-    let types = db.get_node_types()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let types = tokio::task::spawn_blocking(move || db.get_node_types())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
     debug!(count = types.len(), "Node types retrieved");
     Ok(Json(types))
 }
@@ -1690,7 +1752,11 @@ async fn add_node(
     };
 
     let db = state.require_db()?;
-    db.insert_node(node)?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    tokio::task::spawn_blocking(move || db.insert_node(node))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
 
     info!(id = %body.id, label = %body.label, node_type = %body.node_type, "Node added");
 
@@ -1746,7 +1812,11 @@ async fn add_edge(
     };
 
     let db = state.require_db()?;
-    db.insert_edge(edge)?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    tokio::task::spawn_blocking(move || db.insert_edge(edge))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
 
     info!(
         source = %body.source,
@@ -2174,7 +2244,10 @@ async fn get_query_history(
     let per_page = params.per_page.clamp(1, 100);
     let offset = (page - 1) * per_page;
 
-    let (history, total) = db.get_query_history(per_page, offset)?;
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let (history, total) = tokio::task::spawn_blocking(move || db.get_query_history(per_page, offset))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
 
     let entries: Vec<QueryHistoryEntry> = history
         .into_iter()
@@ -2251,17 +2324,29 @@ async fn add_query_history(
         _ => QueryStatus::Completed,
     };
 
-    db.add_query_history(
-        &id,
-        &body.name,
-        &body.query,
-        started_at, // timestamp
-        body.result_count,
-        status_str,
-        started_at,
-        body.duration_ms,
-        body.error.as_deref(),
-    )?;
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let id_clone = id.clone();
+    let name = body.name.clone();
+    let query = body.query.clone();
+    let result_count = body.result_count;
+    let duration_ms = body.duration_ms;
+    let error = body.error.clone();
+    let status_str_owned = status_str.to_string();
+    tokio::task::spawn_blocking(move || {
+        db.add_query_history(
+            &id_clone,
+            &name,
+            &query,
+            started_at,
+            result_count,
+            &status_str_owned,
+            started_at,
+            duration_ms,
+            error.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
 
     info!(id = %id, name = %body.name, "Query added to history");
     Ok(Json(QueryHistoryEntry {
@@ -2284,7 +2369,13 @@ async fn delete_query_history(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let db = state.require_db()?;
-    db.delete_query_history(&id)?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let id_clone = id.clone();
+    tokio::task::spawn_blocking(move || db.delete_query_history(&id_clone))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
     info!(id = %id, "Query deleted from history");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -2293,7 +2384,12 @@ async fn delete_query_history(
 #[instrument(skip(state))]
 async fn clear_query_history(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
     let db = state.require_db()?;
-    db.clear_query_history()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    tokio::task::spawn_blocking(move || db.clear_query_history())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
     info!("Query history cleared");
     Ok(StatusCode::NO_CONTENT)
 }
