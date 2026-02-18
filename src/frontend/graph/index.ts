@@ -80,3 +80,14 @@ export {
   clearCollapseState,
   getNodeCollapseInfo,
 } from "./collapse";
+
+// Label visibility
+export {
+  getLabelVisibilityMode,
+  setLabelVisibilityMode,
+  cycleLabelVisibility,
+  getLabelVisibilityName,
+  getModeName,
+  getLabelParts,
+} from "./label-visibility";
+export type { LabelVisibilityMode, LabelParts } from "./label-visibility";

@@ -517,7 +517,7 @@ async function fetchSupportedDatabases(): Promise<void> {
       supportedDatabases = await response.json();
       // Set default to first supported type
       if (supportedDatabases.length > 0) {
-        selectedDbType = supportedDatabases[0].id;
+        selectedDbType = supportedDatabases[0]!.id;
       }
     }
   } catch (error) {

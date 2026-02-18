@@ -10,6 +10,7 @@ import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel } from "./sidebars";
 import { autoCollapseGraph, clearCollapseState } from "../graph/collapse";
 import { dispatchAction } from "./actions";
+import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-visibility";
 
 let renderer: ADGraphRenderer | null = null;
 let currentLayout: LayoutType = "force";
@@ -217,6 +218,19 @@ export function relayoutGraph(): void {
 /** Get the current renderer */
 export function getRenderer(): ADGraphRenderer | null {
   return renderer;
+}
+
+/** Toggle label visibility mode and refresh the graph */
+export function toggleLabelVisibility(): string {
+  cycleLabelVisibility();
+  const modeName = getLabelVisibilityName();
+
+  // Refresh the renderer to apply the new label mode
+  if (renderer) {
+    renderer.refresh();
+  }
+
+  return modeName;
 }
 
 /** Generate a demo graph for testing - curated to show multi-edge support */

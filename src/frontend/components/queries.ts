@@ -4,7 +4,7 @@
  * Hierarchical query browser with built-in and custom queries.
  */
 
-import { getRenderer, loadGraphData } from "./graph-view";
+import { loadGraphData } from "./graph-view";
 import { escapeHtml } from "../utils/html";
 import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
 import { showSuccess, showError, showInfo } from "../utils/notifications";
@@ -518,7 +518,7 @@ async function runQuery(queryId: string): Promise<void> {
           id: n.id,
           label: n.label,
           type: n.type as RawADGraph["nodes"][0]["type"],
-          properties: n.properties,
+          properties: n.properties ?? {},
         })),
         edges: result.graph.edges.map((e) => ({
           source: e.source,

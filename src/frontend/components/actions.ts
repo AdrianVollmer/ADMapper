@@ -6,7 +6,7 @@
  */
 
 import { toggleNavSidebar, toggleDetailSidebar, toggleSidebars } from "./sidebars";
-import { getRenderer, setLayout, relayoutGraph } from "./graph-view";
+import { getRenderer, setLayout, relayoutGraph, toggleLabelVisibility } from "./graph-view";
 import { triggerBloodHoundImport } from "./import";
 import { openQueryHistory, goBackInHistory } from "./query-history";
 import { showKeyboardShortcuts } from "./keyboard";
@@ -120,6 +120,15 @@ export function dispatchAction(action: string): void {
         document.documentElement.requestFullscreen();
       }
       break;
+
+    case "toggle-label-visibility": {
+      const modeName = toggleLabelVisibility();
+      // Import dynamically to avoid circular dependency
+      import("../utils/notifications").then(({ showInfo }) => {
+        showInfo(modeName);
+      });
+      break;
+    }
 
     // Tools menu
     case "import-bloodhound":

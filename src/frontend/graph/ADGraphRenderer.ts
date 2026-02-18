@@ -25,6 +25,7 @@ import {
   isEdgeHidden,
   getCollapsedEdgeInfo,
 } from "./collapse";
+import { getLabelParts } from "./label-visibility";
 
 export interface RendererOptions {
   /** Container element or selector */
@@ -130,8 +131,8 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     settings: { labelSize: number; labelWeight: string; labelColor: { color?: string } },
     nodeId?: string
   ): void {
-    const label = data.label;
-    if (!label) return;
+    const parts = getLabelParts(data.label);
+    if (!parts) return;
 
     const size = settings.labelSize;
     const font = `${settings.labelWeight} ${size}px sans-serif`;
@@ -139,12 +140,33 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
     context.font = font;
     context.fillStyle = color;
-    context.textAlign = "center";
     context.textBaseline = "top";
 
     // Position below the node with a small gap
     const yOffset = data.size + 4;
-    context.fillText(label, data.x, data.y + yOffset);
+    const y = data.y + yOffset;
+
+    // Calculate total width for centering
+    const clearWidth = parts.clear ? context.measureText(parts.clear).width : 0;
+    const blurredWidth = parts.blurred ? context.measureText(parts.blurred).width : 0;
+    const totalWidth = clearWidth + blurredWidth;
+    let x = data.x - totalWidth / 2;
+
+    // Draw clear part (no blur)
+    if (parts.clear) {
+      context.textAlign = "left";
+      context.fillText(parts.clear, x, y);
+      x += clearWidth;
+    }
+
+    // Draw blurred part with blur filter
+    if (parts.blurred) {
+      context.save();
+      context.filter = "blur(3px)";
+      context.textAlign = "left";
+      context.fillText(parts.blurred, x, y);
+      context.restore();
+    }
 
     // Draw collapse badge if node is collapsed
     if (nodeId && isNodeCollapsed(nodeId)) {

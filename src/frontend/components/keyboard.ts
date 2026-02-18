@@ -33,6 +33,7 @@ const shortcuts: ShortcutDef[] = [
   { key: "\\", ctrl: true, action: "toggle-sidebars", label: "Toggle Sidebars", category: "View" },
   { key: "b", ctrl: true, action: "toggle-nav-sidebar", label: "Toggle Navigation", category: "View" },
   { key: "d", ctrl: true, action: "toggle-detail-sidebar", label: "Toggle Details", category: "View" },
+  { key: " ", ctrl: true, action: "toggle-label-visibility", label: "Toggle Labels", category: "View" },
   { key: "+", ctrl: true, action: "zoom-in", label: "Zoom In", category: "View" },
   { key: "=", ctrl: true, action: "zoom-in" }, // Also handle = for zoom in (no label, duplicate)
   { key: "-", ctrl: true, action: "zoom-out", label: "Zoom Out", category: "View" },
