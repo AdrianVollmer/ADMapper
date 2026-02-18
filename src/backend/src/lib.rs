@@ -1026,6 +1026,30 @@ fn extract_graph_from_results(
             else if value.get("_type").and_then(|t| t.as_str()) == Some("edge") {
                 raw_edges.push(value.clone());
             }
+            // Check if this is a path object - extract nodes and edges from it
+            else if value.get("_type").and_then(|t| t.as_str()) == Some("path") {
+                // Extract nodes from path
+                if let Some(path_nodes) = value.get("nodes").and_then(|n| n.as_array()) {
+                    for path_node in path_nodes {
+                        if let Some(node) = extract_node_from_json(path_node) {
+                            // Build ID mapping for edge resolution
+                            if let Some(internal_id) = path_node.get("id").and_then(|v| v.as_i64())
+                            {
+                                id_to_object_id.insert(internal_id, node.id.clone());
+                            }
+                            if node_ids.insert(node.id.clone()) {
+                                nodes.push(node);
+                            }
+                        }
+                    }
+                }
+                // Extract edges from path
+                if let Some(path_edges) = value.get("edges").and_then(|e| e.as_array()) {
+                    for path_edge in path_edges {
+                        raw_edges.push(path_edge.clone());
+                    }
+                }
+            }
             // Try to extract object_id from string values
             else if let Some(id) = value.as_str() {
                 if !id.is_empty() {
