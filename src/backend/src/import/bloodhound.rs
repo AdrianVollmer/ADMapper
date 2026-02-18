@@ -42,6 +42,8 @@ pub struct BloodHoundImporter {
     progress_tx: broadcast::Sender<ImportProgress>,
     /// Track which object IDs we've seen to avoid duplicate nodes
     seen_nodes: HashSet<String>,
+    /// Buffer edges across all files, flush at end when all nodes exist
+    edge_buffer: Vec<DbEdge>,
 }
 
 impl BloodHoundImporter {
@@ -53,6 +55,7 @@ impl BloodHoundImporter {
             db,
             progress_tx,
             seen_nodes: HashSet::new(),
+            edge_buffer: Vec::new(),
         }
     }
 
@@ -131,6 +134,13 @@ impl BloodHoundImporter {
             }
         }
 
+        // Flush all buffered edges now that all nodes from all files exist
+        info!(
+            edge_count = self.edge_buffer.len(),
+            "Flushing all buffered edges"
+        );
+        self.flush_edge_buffer(&mut progress)?;
+
         progress.complete();
         self.send_progress(&progress);
         Ok(progress)
@@ -150,6 +160,9 @@ impl BloodHoundImporter {
         self.send_progress(&progress);
 
         self.import_json_str(&contents, &mut progress)?;
+
+        // Flush buffered edges for single-file import
+        self.flush_edge_buffer(&mut progress)?;
 
         progress.files_processed = 1;
         progress.complete();
@@ -197,7 +210,6 @@ impl BloodHoundImporter {
         );
 
         let mut node_batch: Vec<DbNode> = Vec::with_capacity(BATCH_SIZE);
-        let mut edge_batch: Vec<DbEdge> = Vec::with_capacity(BATCH_SIZE);
 
         // Process each entity - parse from RawValue on demand
         for raw_entity in &file.data {
@@ -222,20 +234,13 @@ impl BloodHoundImporter {
                 }
             }
 
-            // Extract edges
+            // Extract edges - buffer them for later (after all nodes from all files exist)
             let edges = self.extract_edges(&data_type, &entity);
-            for edge in edges {
-                edge_batch.push(edge);
-
-                if edge_batch.len() >= BATCH_SIZE {
-                    self.flush_edges(&mut edge_batch, progress)?;
-                }
-            }
+            self.edge_buffer.extend(edges);
         }
 
-        // Flush remaining
+        // Flush remaining nodes (edges are flushed at the end of import_zip)
         self.flush_nodes(&mut node_batch, progress)?;
-        self.flush_edges(&mut edge_batch, progress)?;
 
         Ok(())
     }
@@ -636,31 +641,33 @@ impl BloodHoundImporter {
         Ok(())
     }
 
-    fn flush_edges(
-        &self,
-        batch: &mut Vec<DbEdge>,
-        progress: &mut ImportProgress,
-    ) -> Result<(), String> {
-        if batch.is_empty() {
+    /// Flush all buffered edges in batches.
+    /// Called at the end of import after all nodes from all files are inserted.
+    fn flush_edge_buffer(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
+        if self.edge_buffer.is_empty() {
             return Ok(());
         }
 
-        let batch_size = batch.len();
-        trace!(batch_size = batch_size, "Flushing edge batch");
+        let total_edges = self.edge_buffer.len();
+        info!(total_edges, "Flushing edge buffer");
 
-        let count = self.db.insert_edges(batch).map_err(|e| {
-            error!(error = %e, batch_size = batch_size, "Failed to insert edges");
-            format!("Failed to insert edges: {e}")
-        })?;
+        // Process in batches
+        for chunk in self.edge_buffer.chunks(BATCH_SIZE) {
+            let batch_size = chunk.len();
+            let count = self.db.insert_edges(chunk).map_err(|e| {
+                error!(error = %e, batch_size, "Failed to insert edges");
+                format!("Failed to insert edges: {e}")
+            })?;
 
-        progress.edges_imported += count;
+            progress.edges_imported += count;
+            self.send_progress(progress);
+        }
+
         debug!(
-            inserted = count,
             total = progress.edges_imported,
-            "Edges inserted"
+            "All edges inserted"
         );
-        self.send_progress(progress);
-        batch.clear();
+        self.edge_buffer.clear();
         Ok(())
     }
 
