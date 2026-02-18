@@ -92,10 +92,19 @@ def count_unique_objects(data_dir: Path) -> dict:
     node_counts = {t: len(ids) for t, ids in unique_objects.items()}
     total_nodes = sum(node_counts.values())
 
+    # Output in format expected by test runner (lowercase keys)
     return {
         "total_nodes": total_nodes,
-        "total_edges": edge_count,  # This is approximate
-        "node_types": node_counts,
+        # Note: edge count from source files won't match actual imports
+        # because some edges reference non-existent nodes
+        "total_edges": edge_count,
+        # Individual type counts (lowercase to match test expectations)
+        "users": node_counts.get("User", 0),
+        "computers": node_counts.get("Computer", 0),
+        "groups": node_counts.get("Group", 0),
+        "domains": node_counts.get("Domain", 0),
+        "ous": node_counts.get("OU", 0),
+        "gpos": node_counts.get("GPO", 0),
     }
 
 
