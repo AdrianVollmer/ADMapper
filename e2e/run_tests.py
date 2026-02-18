@@ -263,6 +263,7 @@ class E2ETestRunner:
             ("Graph Stats", runner.test_stats),
             ("Query Execution", runner.test_queries),
             ("Search", runner.test_search),
+            ("Query History", runner.test_query_history),
         ]
 
         for name, test_func in test_modules:

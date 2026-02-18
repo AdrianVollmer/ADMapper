@@ -121,6 +121,10 @@ class APIClient:
         """Get all edge types."""
         return self.get("/api/graph/edge-types")
 
+    def query_history(self, page: int = 1, per_page: int = 20) -> APIResponse:
+        """Get query history."""
+        return self.get(f"/api/query-history?page={page}&per_page={per_page}")
+
     def search(self, query: str, limit: int = 10, node_type: str | None = None) -> APIResponse:
         """Search the graph."""
         params = {"q": query, "limit": str(limit)}

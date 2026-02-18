@@ -537,3 +537,42 @@ class TestRunner:
         results.append(self._run_test("Search returns empty for non-existent", check_no_results))
 
         return results
+
+    # =========================================================================
+    # Query History Tests
+    # =========================================================================
+
+    def test_query_history(self) -> list[TestResult]:
+        """Test query history functionality."""
+        results = []
+
+        # Query history should not be empty (queries were run in test_queries)
+        def check_history_not_empty():
+            response = self.api.query_history(page=1, per_page=10)
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query history failed: {response.body}", proof
+            entries = self._body_get(response.body, "entries", [])
+            if not entries:
+                return False, "Query history is empty", proof
+            self.logger.info(f"Query history has {len(entries)} entries")
+            return True, "", proof
+
+        results.append(self._run_test("Query history is not empty", check_history_not_empty))
+
+        # Query history should respond quickly (< 100ms)
+        def check_history_fast():
+            start = time.time()
+            response = self.api.query_history(page=1, per_page=10)
+            elapsed_ms = (time.time() - start) * 1000
+            proof = f"Response time: {elapsed_ms:.1f}ms"
+            if not response.ok:
+                return False, f"Query history failed: {response.body}", proof
+            if elapsed_ms > 100:
+                return False, f"Query history too slow: {elapsed_ms:.1f}ms (expected <100ms)", proof
+            self.logger.info(f"Query history responded in {elapsed_ms:.1f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Query history responds in <100ms", check_history_fast))
+
+        return results
