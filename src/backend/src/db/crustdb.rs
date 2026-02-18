@@ -973,35 +973,23 @@ impl CrustDatabase {
 
     /// Get all edges for a node (both incoming and outgoing) with edge types.
     /// Used for efficient counting by the backend layer.
+    /// Uses direct SQL for efficiency instead of Cypher queries.
     pub fn get_node_edges(&self, node_id: &str) -> Result<Vec<DbEdge>> {
-        let escaped_id = node_id.replace('\'', "\\'");
+        let raw_edges = self
+            .db
+            .get_node_edges_by_object_id(node_id)
+            .map_err(|e| DbError::Database(e.to_string()))?;
 
-        // Get all edges where node is source or target
-        let query = format!(
-            "MATCH (a {{object_id: '{}'}})-[r]->(b) \
-             RETURN a.object_id AS src, b.object_id AS tgt, type(r) AS typ \
-             UNION \
-             MATCH (a)-[r]->(b {{object_id: '{}'}}) \
-             RETURN a.object_id AS src, b.object_id AS tgt, type(r) AS typ",
-            escaped_id, escaped_id
-        );
-
-        let result = self.execute(&query)?;
-
-        let mut edges = Vec::new();
-        for row in &result.rows {
-            let source = self.get_string_value(&row.values, "src");
-            let target = self.get_string_value(&row.values, "tgt");
-            let edge_type = self.get_string_value(&row.values, "typ");
-
-            edges.push(DbEdge {
+        let edges = raw_edges
+            .into_iter()
+            .map(|(source, target, edge_type)| DbEdge {
                 source,
                 target,
                 edge_type,
                 properties: JsonValue::Null,
                 ..Default::default()
-            });
-        }
+            })
+            .collect();
 
         Ok(edges)
     }

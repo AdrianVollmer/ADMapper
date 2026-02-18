@@ -793,6 +793,75 @@ impl SqliteStorage {
         Ok(count as usize)
     }
 
+    /// Count incoming edges to a node by object_id property.
+    /// Uses a join to find the node and count edges efficiently.
+    pub fn count_incoming_edges_by_object_id(&self, object_id: &str) -> Result<usize> {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM edges e \
+                 JOIN nodes n ON e.target_id = n.id \
+                 WHERE json_extract(n.properties, '$.object_id') = ?1",
+                params![object_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        Ok(count as usize)
+    }
+
+    /// Count outgoing edges from a node by object_id property.
+    /// Uses a join to find the node and count edges efficiently.
+    pub fn count_outgoing_edges_by_object_id(&self, object_id: &str) -> Result<usize> {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM edges e \
+                 JOIN nodes n ON e.source_id = n.id \
+                 WHERE json_extract(n.properties, '$.object_id') = ?1",
+                params![object_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        Ok(count as usize)
+    }
+
+    /// Get all edges for a node by object_id (both incoming and outgoing).
+    /// Returns (source_object_id, target_object_id, edge_type) tuples.
+    pub fn get_node_edges_by_object_id(
+        &self,
+        object_id: &str,
+    ) -> Result<Vec<(String, String, String)>> {
+        let mut edges = Vec::new();
+
+        // Query for edges where node is source or target, joining to get object_ids
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                json_extract(src.properties, '$.object_id') AS src_id,
+                json_extract(tgt.properties, '$.object_id') AS tgt_id,
+                et.name AS edge_type
+             FROM edges e
+             JOIN nodes src ON e.source_id = src.id
+             JOIN nodes tgt ON e.target_id = tgt.id
+             JOIN edge_types et ON e.type_id = et.id
+             WHERE json_extract(src.properties, '$.object_id') = ?1
+                OR json_extract(tgt.properties, '$.object_id') = ?1",
+        )?;
+
+        let rows = stmt.query_map(params![object_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+
+        for row in rows {
+            edges.push(row?);
+        }
+
+        Ok(edges)
+    }
+
     /// Get database statistics.
     pub fn stats(&self) -> Result<DatabaseStats> {
         let node_count: usize = self

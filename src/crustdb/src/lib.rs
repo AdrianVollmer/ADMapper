@@ -130,6 +130,18 @@ impl Database {
         let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
         storage.build_property_index(property)
     }
+
+    /// Get all edges for a node by object_id (both incoming and outgoing).
+    ///
+    /// Returns (source_object_id, target_object_id, edge_type) tuples.
+    /// This is more efficient than using Cypher queries for edge retrieval.
+    pub fn get_node_edges_by_object_id(
+        &self,
+        object_id: &str,
+    ) -> Result<Vec<(String, String, String)>> {
+        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        storage.get_node_edges_by_object_id(object_id)
+    }
 }
 
 /// Database statistics.
