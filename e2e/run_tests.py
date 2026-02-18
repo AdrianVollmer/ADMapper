@@ -309,6 +309,7 @@ class E2ETestRunner:
 
     def _generate_xml_report(self, suite: TestSuite) -> None:
         """Generate JUnit XML report for a test suite."""
+        import html
         import xml.etree.ElementTree as ET
         from datetime import datetime
 
@@ -337,6 +338,15 @@ class E2ETestRunner:
                 time=f"{duration_s:.3f}",
                 status="passed" if result.passed else "failed",
             )
+
+            # Add proof element (truncate if too long)
+            if result.proof:
+                proof_text = result.proof
+                if len(proof_text) > 2000:
+                    proof_text = proof_text[:2000] + "\n... (truncated)"
+                proof_elem = ET.SubElement(testcase, "proof")
+                proof_elem.text = proof_text
+
             if not result.passed:
                 failure = ET.SubElement(testcase, "failure", message=result.message)
 
@@ -418,6 +428,27 @@ failure {
 
 failure::before {
   content: attr(message);
+}
+
+proof {
+  display: block;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: #e9ecef;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: "SF Mono", Monaco, "Courier New", monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow: auto;
+  color: #495057;
+}
+
+proof::before {
+  content: "Response: ";
+  font-weight: 600;
+  color: #6c757d;
 }
 '''
         css_file = self.report_dir / "report.css"
