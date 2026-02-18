@@ -237,8 +237,9 @@ impl CrustDatabase {
         let mut batch: Vec<(i64, i64, String, serde_json::Value)> = Vec::with_capacity(edges.len());
         let mut skipped = 0;
 
-        // Collect placeholder nodes to create
-        let mut placeholder_nodes: Vec<(String, String)> = Vec::new();
+        // Collect unique placeholder nodes to create (deduplicated)
+        let mut placeholder_set: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
 
         for edge in edges {
             let source_id = node_index.get(&edge.source);
@@ -247,33 +248,42 @@ impl CrustDatabase {
             // Create placeholder for missing source
             if source_id.is_none() {
                 let node_type = edge.source_type.clone().unwrap_or_else(|| "Base".to_string());
-                placeholder_nodes.push((edge.source.clone(), node_type));
+                placeholder_set.insert((edge.source.clone(), node_type));
             }
             // Create placeholder for missing target
             if target_id.is_none() {
                 let node_type = edge.target_type.clone().unwrap_or_else(|| "Base".to_string());
-                placeholder_nodes.push((edge.target.clone(), node_type));
+                placeholder_set.insert((edge.target.clone(), node_type));
             }
         }
 
-        // Insert placeholder nodes if any
-        let node_index = if !placeholder_nodes.is_empty() {
-            debug!("Creating {} placeholder nodes", placeholder_nodes.len());
-            for (object_id, node_type) in &placeholder_nodes {
-                let placeholder_props = serde_json::json!({
-                    "object_id": object_id,
-                    "placeholder": true,
-                    "node_type": node_type,
-                });
-                let query = format!(
-                    "CREATE (:{} {})",
-                    node_type,
-                    Self::json_to_cypher_props(&placeholder_props)
-                );
-                if let Err(e) = db.execute(&query) {
-                    debug!("Failed to create placeholder node {}: {}", object_id, e);
+        // Insert placeholder nodes using batch insert
+        let node_index = if !placeholder_set.is_empty() {
+            debug!("Creating {} placeholder nodes", placeholder_set.len());
+
+            // Convert to batch format: (labels, properties)
+            let placeholder_batch: Vec<(Vec<String>, serde_json::Value)> = placeholder_set
+                .iter()
+                .map(|(object_id, node_type)| {
+                    let labels = vec![node_type.clone()];
+                    let props = serde_json::json!({
+                        "object_id": object_id,
+                        "placeholder": true,
+                        "node_type": node_type,
+                    });
+                    (labels, props)
+                })
+                .collect();
+
+            match db.insert_nodes_batch(&placeholder_batch) {
+                Ok(ids) => {
+                    debug!("Batch inserted {} placeholder nodes", ids.len());
+                }
+                Err(e) => {
+                    debug!("Batch placeholder insert failed: {}", e);
                 }
             }
+
             // Rebuild index after creating placeholders
             db.build_property_index("object_id").unwrap_or_default()
         } else {
