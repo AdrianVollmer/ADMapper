@@ -506,19 +506,17 @@ async function runQuery(queryId: string): Promise<void> {
   console.log(`Running query: ${query.name}`);
   console.log(`Query: ${query.query}`);
 
-  const renderer = getRenderer();
-  if (!renderer) {
-    console.warn("No graph renderer available");
-    return;
-  }
-
   try {
     const result = await executeQueryWithHistory(query.name, query.query, true);
 
     // Show results
     if (result.graph && result.graph.nodes.length > 0) {
-      // TODO: Load graph into renderer
-      console.log("Query returned graph:", result.graph);
+      // Try to load graph into renderer if available
+      const renderer = getRenderer();
+      if (renderer) {
+        // TODO: Load graph into renderer
+        console.log("Query returned graph:", result.graph);
+      }
       alert(`Query "${query.name}" returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
     } else {
       alert(`Query "${query.name}" returned ${result.resultCount} rows`);
