@@ -80,7 +80,9 @@ echo ""
 echo "=== Backend Formatting ==="
 
 echo "Running cargo fmt..."
-cargo fmt --manifest-path src-backend/Cargo.toml
+cargo fmt --manifest-path src/backend/Cargo.toml
+cargo fmt --manifest-path src/crustdb/Cargo.toml
+cargo fmt --manifest-path src/crustdb-cli/Cargo.toml
 
 echo ""
 log_info "All formatting complete!"

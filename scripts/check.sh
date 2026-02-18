@@ -86,10 +86,14 @@ echo ""
 echo "=== Backend Checks ==="
 
 echo "Running Cargo clippy..."
-cargo clippy --manifest-path src-backend/Cargo.toml --no-default-features -- -D warnings
+cargo clippy --manifest-path src/backend/Cargo.toml --no-default-features -- -D warnings
+cargo clippy --manifest-path src/crustdb/Cargo.toml --no-default-features -- -D warnings
+cargo clippy --manifest-path src/crustdb-cli/Cargo.toml --no-default-features -- -D warnings
 
 echo "Checking Rust formatting..."
-cargo fmt --manifest-path src-backend/Cargo.toml --check
+cargo fmt --manifest-path src/backend/Cargo.toml --check
+cargo fmt --manifest-path src/crustdb/Cargo.toml --check
+cargo fmt --manifest-path src/crustdb-cli/Cargo.toml --check
 
 echo ""
 log_info "All checks passed!"
