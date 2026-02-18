@@ -23,6 +23,8 @@ export default [
         EventSource: "readonly",
         setTimeout: "readonly",
         clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
         fetch: "readonly",
         FormData: "readonly",
         Event: "readonly",
