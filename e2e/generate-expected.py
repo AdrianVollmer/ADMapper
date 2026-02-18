@@ -112,8 +112,6 @@ def main():
         help="Path to BloodHound data zip file",
     )
     args = parser.parse_args()
-
-    script_dir = Path(__file__).parent
     zip_file = args.zip_file
 
     if not zip_file.exists():

@@ -185,8 +185,6 @@ class APIClient:
 
         Returns the latest progress event or None if unavailable.
         """
-        import socket
-
         url = f"{self.base_url}/api/import/progress/{job_id}"
 
         try:

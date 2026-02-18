@@ -36,8 +36,8 @@ from types import FrameType
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 
-from api import APIClient, ServerProcess, start_server, stop_server, wait_for_server  # type: ignore[import-not-found]
-from runner import TestRunner, TestResult  # type: ignore[import-not-found]
+from api import APIClient, ServerProcess, start_server, stop_server, wait_for_server  # noqa: E402  # type: ignore[import-not-found]
+from runner import TestRunner, TestResult  # noqa: E402  # type: ignore[import-not-found]
 
 # Available backends
 BACKENDS = ["cozo", "crustdb", "neo4j", "falkordb"]
@@ -317,7 +317,6 @@ class E2ETestRunner:
 
     def _generate_xml_report(self, suite: TestSuite) -> None:
         """Generate JUnit XML report for a test suite."""
-        import html
         import xml.etree.ElementTree as ET
         from datetime import datetime
 
@@ -356,7 +355,7 @@ class E2ETestRunner:
                 proof_elem.text = proof_text
 
             if not result.passed:
-                failure = ET.SubElement(testcase, "failure", message=result.message)
+                ET.SubElement(testcase, "failure", message=result.message)
 
         # Write XML file
         tree = ET.ElementTree(testsuites)
