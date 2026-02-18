@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -278,12 +279,63 @@ class APIClient:
         return None
 
 
+class ServerProcess:
+    """Wrapper for ADMapper server process with log streaming."""
+
+    def __init__(
+        self,
+        process: subprocess.Popen[str],
+        logger: logging.Logger,
+    ):
+        self.process = process
+        self.logger = logger
+        self._stop_event = threading.Event()
+        self._log_thread: threading.Thread | None = None
+
+    @property
+    def pid(self) -> int:
+        return self.process.pid
+
+    def start_log_streaming(self) -> None:
+        """Start background thread to stream server logs."""
+        self._log_thread = threading.Thread(
+            target=self._stream_logs,
+            daemon=True,
+        )
+        self._log_thread.start()
+
+    def _stream_logs(self) -> None:
+        """Read and log server output."""
+        if self.process.stdout is None:
+            return
+
+        for line in self.process.stdout:
+            if self._stop_event.is_set():
+                break
+            line = line.rstrip()
+            if line:
+                self.logger.info(f"[server] {line}")
+
+    def stop(self) -> None:
+        """Stop the server and log streaming."""
+        self._stop_event.set()
+        self.logger.info(f"Stopping server (PID: {self.process.pid})...")
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+        if self._log_thread:
+            self._log_thread.join(timeout=1)
+
+
 def start_server(
     binary: Path,
     db_url: str,
     port: int,
     logger: logging.Logger,
-) -> subprocess.Popen[str] | None:
+) -> ServerProcess | None:
     """Start the ADMapper server."""
     logger.info(f"Starting ADMapper on port {port}...")
     logger.info(f"Database URL: {db_url}")
@@ -301,22 +353,18 @@ def start_server(
             stderr=subprocess.STDOUT,
             text=True,
         )
-        return process
+        server = ServerProcess(process, logger)
+        server.start_log_streaming()
+        return server
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
         return None
 
 
-def stop_server(process: subprocess.Popen[str], logger: logging.Logger) -> None:
+def stop_server(server: ServerProcess, logger: logging.Logger) -> None:
     """Stop the ADMapper server."""
-    if process:
-        logger.info(f"Stopping server (PID: {process.pid})...")
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+    if server:
+        server.stop()
 
 
 def wait_for_server(

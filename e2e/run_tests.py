@@ -36,7 +36,7 @@ from types import FrameType
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 
-from api import APIClient, start_server, stop_server, wait_for_server  # type: ignore[import-not-found]
+from api import APIClient, ServerProcess, start_server, stop_server, wait_for_server  # type: ignore[import-not-found]
 from runner import TestRunner, TestResult  # type: ignore[import-not-found]
 
 # Available backends
@@ -57,6 +57,7 @@ class ColoredFormatter(logging.Formatter):
         "FAIL": "\033[0;31m",  # Red
     }
     RESET = "\033[0m"
+    DIM = "\033[2m"
 
     def format(self, record: logging.LogRecord) -> str:
         # Handle custom log levels
@@ -65,7 +66,14 @@ class ColoredFormatter(logging.Formatter):
             levelname = record.custom_level
 
         color = self.COLORS.get(levelname, "")
-        record.levelname = f"{color}[{levelname}]{self.RESET}"
+
+        # Dim server output for visual distinction
+        if record.msg.startswith("[server]"):
+            record.levelname = f"{self.DIM}[SERVER]{self.RESET}"
+            record.msg = f"{self.DIM}{record.msg[8:].strip()}{self.RESET}"
+        else:
+            record.levelname = f"{color}[{levelname}]{self.RESET}"
+
         return super().format(record)
 
 
@@ -147,7 +155,7 @@ class E2ETestRunner:
         self.report_dir = report_dir
         self.debug = debug
         self.logger = setup_logging(debug)
-        self.server_process: subprocess.Popen[str] | None = None
+        self.server_process: ServerProcess | None = None
         self.temp_db_dir: Path | None = None
         self.golden_file = Path("/tmp/golden/expected_stats.json")
 
