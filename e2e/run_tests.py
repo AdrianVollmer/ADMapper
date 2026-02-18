@@ -28,6 +28,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import FrameType
@@ -566,8 +567,23 @@ Environment variables:
         )
     )
 
-    # Set up report directory
-    report_dir = SCRIPT_DIR / "reports"
+    # Set up report directory with timestamp
+    reports_base = SCRIPT_DIR / "reports"
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    report_dir = reports_base / timestamp
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    # Update "latest" symlink
+    latest_link = reports_base / "latest"
+    if latest_link.is_symlink():
+        latest_link.unlink()
+    elif latest_link.exists():
+        # If it's a regular file/dir, remove it
+        if latest_link.is_dir():
+            shutil.rmtree(latest_link)
+        else:
+            latest_link.unlink()
+    latest_link.symlink_to(timestamp)
 
     runner = E2ETestRunner(
         test_data=args.test_data,
