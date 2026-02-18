@@ -9,6 +9,7 @@ import type { ADGraphRenderer, LayoutType } from "../graph";
 import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel } from "./sidebars";
 import { autoCollapseGraph, clearCollapseState } from "../graph/collapse";
+import { dispatchAction } from "./actions";
 
 let renderer: ADGraphRenderer | null = null;
 let currentLayout: LayoutType = "force";
@@ -27,14 +28,16 @@ export function initGraph(): void {
   // Note: In production, the placeholder is shown via updateGraphForConnectionState()
   // which is called after the connection status is fetched from the server
 
-  // Handle toolbar actions
+  // Handle toolbar actions - delegate to central action dispatcher
   document.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
     const button = target.closest("[data-action]") as HTMLElement;
     if (!button) return;
 
     const action = button.getAttribute("data-action");
-    handleGraphAction(action);
+    if (action) {
+      dispatchAction(action);
+    }
   });
 }
 
@@ -182,40 +185,8 @@ export function loadGraphData(data: RawADGraph): void {
   }
 }
 
-/** Handle graph-related actions */
-function handleGraphAction(action: string | null): void {
-  if (!renderer || !action) return;
-
-  switch (action) {
-    case "zoom-in":
-      renderer.sigma.getCamera().animatedZoom({ duration: 200 });
-      break;
-
-    case "zoom-out":
-      renderer.sigma.getCamera().animatedUnzoom({ duration: 200 });
-      break;
-
-    case "zoom-reset":
-    case "fit-graph":
-      renderer.resetCamera();
-      break;
-
-    case "layout-graph":
-      relayoutGraph();
-      break;
-
-    case "layout-force":
-      setLayout("force");
-      break;
-
-    case "layout-hierarchical":
-      setLayout("hierarchical");
-      break;
-  }
-}
-
 /** Set the layout type and re-layout */
-function setLayout(layout: LayoutType): void {
+export function setLayout(layout: LayoutType): void {
   currentLayout = layout;
   relayoutGraph();
   updateLayoutIndicator();
@@ -234,7 +205,7 @@ function updateLayoutIndicator(): void {
 }
 
 /** Re-run layout algorithm with current layout type */
-function relayoutGraph(): void {
+export function relayoutGraph(): void {
   if (!renderer) return;
 
   const graph = renderer.sigma.getGraph();

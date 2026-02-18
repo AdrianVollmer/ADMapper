@@ -6,7 +6,7 @@
  */
 
 import { toggleNavSidebar, toggleDetailSidebar, toggleSidebars } from "./sidebars";
-import { getRenderer } from "./graph-view";
+import { getRenderer, setLayout, relayoutGraph } from "./graph-view";
 import { triggerBloodHoundImport } from "./import";
 import { openQueryHistory, goBackInHistory } from "./query-history";
 import { showKeyboardShortcuts } from "./keyboard";
@@ -150,11 +150,17 @@ export function dispatchAction(action: string): void {
       openInsights();
       break;
 
-    case "layout-graph": {
-      console.log("Action: layout-graph");
-      // Re-layout is handled in graph-view.ts via the button click
+    case "layout-graph":
+      relayoutGraph();
       break;
-    }
+
+    case "layout-force":
+      setLayout("force");
+      break;
+
+    case "layout-hierarchical":
+      setLayout("hierarchical");
+      break;
 
     // Help menu
     case "documentation":
