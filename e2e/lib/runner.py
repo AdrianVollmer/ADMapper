@@ -2,12 +2,15 @@
 Test runner and test implementations for E2E tests.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any
 
 from api import APIClient
 
@@ -37,10 +40,10 @@ class TestRunner:
         self.test_data = test_data
         self.golden_file = golden_file
         self.logger = logger
-        self._expected_stats: Optional[dict] = None
+        self._expected_stats: dict[str, Any] | None = None
 
     @property
-    def expected_stats(self) -> dict:
+    def expected_stats(self) -> dict[str, Any]:
         """Load expected stats from golden file."""
         if self._expected_stats is None:
             if self.golden_file.exists():
@@ -53,13 +56,7 @@ class TestRunner:
         """Run a single test and capture the result."""
         start = time.time()
         try:
-            result = test_fn()
-            # Support both (passed, message) and (passed, message, proof)
-            if len(result) == 2:
-                passed, message = result
-                proof = ""
-            else:
-                passed, message, proof = result
+            passed, message, proof = test_fn()
         except Exception as e:
             passed = False
             message = str(e)
@@ -67,7 +64,7 @@ class TestRunner:
         duration_ms = int((time.time() - start) * 1000)
         return TestResult(name=name, passed=passed, duration_ms=duration_ms, message=message, proof=proof)
 
-    def _to_proof(self, data) -> str:
+    def _to_proof(self, data: Any) -> str:
         """Convert data to a proof string (JSON formatted)."""
         if isinstance(data, str):
             return data
@@ -75,6 +72,12 @@ class TestRunner:
             return json.dumps(data, indent=2, default=str)
         except Exception:
             return str(data)
+
+    def _body_get(self, body: dict[str, Any] | list[Any], key: str, default: Any = None) -> Any:
+        """Safely get a value from response body that might be dict or list."""
+        if isinstance(body, dict):
+            return body.get(key, default)
+        return default
 
     # =========================================================================
     # Health Check Tests
@@ -98,7 +101,7 @@ class TestRunner:
             proof = self._to_proof(response.body)
             if not response.ok:
                 return False, f"DB status failed: {response.body}", proof
-            if not response.body.get("connected"):
+            if not self._body_get(response.body, "connected"):
                 return False, "Database not connected", proof
             return True, "", proof
 
@@ -131,7 +134,7 @@ class TestRunner:
             proof = self._to_proof(response.body)
             if not response.ok:
                 return False, f"Import request failed: {response.body}", proof
-            job_id = response.body.get("job_id")
+            job_id = self._body_get(response.body, "job_id")
             if not job_id:
                 return False, "No job_id in response", proof
             return True, "", proof
@@ -214,8 +217,8 @@ class TestRunner:
             proof = self._to_proof(response.body)
             if not response.ok:
                 return False, f"Stats request failed: {response.body}", proof
-            nodes = response.body.get("nodes", 0)
-            edges = response.body.get("edges", 0)
+            nodes = self._body_get(response.body, "nodes", 0)
+            edges = self._body_get(response.body, "edges", 0)
             if nodes <= 0 or edges <= 0:
                 return False, f"Invalid stats: nodes={nodes}, edges={edges}", proof
             return True, "", proof
@@ -328,7 +331,7 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             # Extract count from various result formats
-            result_data = response.body.get("results", {})
+            result_data = self._body_get(response.body, "results", {})
             total = self._extract_count(result_data, "total")
             if total is None or total <= 0:
                 return False, f"Query returned no results: {result_data}", proof
@@ -419,7 +422,7 @@ class TestRunner:
 
         return results
 
-    def _extract_count(self, results: dict, column: str) -> Optional[int]:
+    def _extract_count(self, results: dict[str, Any], column: str) -> int | None:
         """Extract a count value from query results in various formats."""
         # Format: {"rows": [[value]], "headers": [...]}
         if "rows" in results and results["rows"]:
@@ -487,9 +490,10 @@ class TestRunner:
             proof = self._to_proof(response.body)
             if not response.ok:
                 return False, f"Search failed: {response.body}", proof
-            items = response.body
-            for item in items:
-                if item.get("node_type") != "User":
+            if not isinstance(response.body, list):
+                return False, "Expected list response", proof
+            for item in response.body:
+                if isinstance(item, dict) and item.get("node_type") != "User":
                     return False, f"Type filter not respected: {item.get('node_type')}", proof
             return True, "", proof
 

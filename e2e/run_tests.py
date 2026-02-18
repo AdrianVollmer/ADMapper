@@ -16,9 +16,10 @@ Environment variables:
     DEBUG         - Enable debug output
 """
 
+from __future__ import annotations
+
 import argparse
 import atexit
-import json
 import logging
 import os
 import random
@@ -27,17 +28,16 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from types import FrameType
 
 # Add lib directory to path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 
-from api import APIClient, start_server, stop_server, wait_for_server
-from runner import TestRunner, TestResult
+from api import APIClient, start_server, stop_server, wait_for_server  # type: ignore[import-not-found]
+from runner import TestRunner, TestResult  # type: ignore[import-not-found]
 
 # Available backends
 BACKENDS = ["cozo", "crustdb", "neo4j", "falkordb"]
@@ -147,8 +147,8 @@ class E2ETestRunner:
         self.report_dir = report_dir
         self.debug = debug
         self.logger = setup_logging(debug)
-        self.server_process: Optional[subprocess.Popen] = None
-        self.temp_db_dir: Optional[Path] = None
+        self.server_process: subprocess.Popen[str] | None = None
+        self.temp_db_dir: Path | None = None
         self.golden_file = Path("/tmp/golden/expected_stats.json")
 
         # Register cleanup handler
@@ -156,7 +156,7 @@ class E2ETestRunner:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-    def _signal_handler(self, signum: int, frame) -> None:
+    def _signal_handler(self, signum: int, frame: FrameType | None) -> None:
         """Handle signals gracefully."""
         self.logger.info("Received signal, cleaning up...")
         self.cleanup()
@@ -289,7 +289,7 @@ class E2ETestRunner:
 
         return suite
 
-    def _get_db_url(self, backend: str, db_dir: Path, port: int) -> Optional[str]:
+    def _get_db_url(self, backend: str, db_dir: Path, port: int) -> str | None:
         """Get database URL for a backend."""
         if backend == "cozo":
             return f"cozo://{db_dir}"

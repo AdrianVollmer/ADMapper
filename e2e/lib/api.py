@@ -4,13 +4,15 @@ API client for ADMapper E2E tests.
 Provides HTTP client for interacting with the ADMapper backend.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from urllib.parse import urlencode
@@ -21,11 +23,11 @@ class APIResponse:
     """Response from an API call."""
 
     status_code: int
-    body: Any
+    body: dict[str, Any] | list[Any]
     ok: bool
 
     @classmethod
-    def from_error(cls, status_code: int, message: str) -> "APIResponse":
+    def from_error(cls, status_code: int, message: str) -> APIResponse:
         return cls(status_code=status_code, body={"error": message}, ok=False)
 
 
@@ -40,8 +42,8 @@ class APIClient:
         self,
         method: str,
         endpoint: str,
-        data: Optional[dict] = None,
-        timeout: Optional[int] = None,
+        data: dict[str, Any] | None = None,
+        timeout: int | None = None,
     ) -> APIResponse:
         """Make an HTTP request."""
         url = f"{self.base_url}{endpoint}"
@@ -84,11 +86,11 @@ class APIClient:
         except Exception as e:
             return APIResponse.from_error(0, str(e))
 
-    def get(self, endpoint: str, **kwargs) -> APIResponse:
+    def get(self, endpoint: str, **kwargs: Any) -> APIResponse:
         """Make a GET request."""
         return self._request("GET", endpoint, **kwargs)
 
-    def post(self, endpoint: str, data: Optional[dict] = None, **kwargs) -> APIResponse:
+    def post(self, endpoint: str, data: dict[str, Any] | None = None, **kwargs: Any) -> APIResponse:
         """Make a POST request."""
         return self._request("POST", endpoint, data=data, **kwargs)
 
@@ -118,7 +120,7 @@ class APIClient:
         """Get all edge types."""
         return self.get("/api/graph/edge-types")
 
-    def search(self, query: str, limit: int = 10, node_type: Optional[str] = None) -> APIResponse:
+    def search(self, query: str, limit: int = 10, node_type: str | None = None) -> APIResponse:
         """Search the graph."""
         params = {"q": query, "limit": str(limit)}
         if node_type:
@@ -176,7 +178,7 @@ class APIClient:
         except Exception as e:
             return APIResponse.from_error(0, str(e))
 
-    def import_progress(self, job_id: str) -> Optional[dict]:
+    def import_progress(self, job_id: str) -> dict[str, Any] | None:
         """
         Get import progress via SSE endpoint.
 
@@ -202,7 +204,7 @@ class APIClient:
 
     def wait_for_import(
         self, job_id: str, timeout: int = 300, poll_interval: float = 2.0
-    ) -> Optional[dict]:
+    ) -> dict[str, Any] | None:
         """
         Wait for an import to complete.
 
@@ -232,6 +234,9 @@ class APIClient:
         if not response.ok:
             return response
 
+        if not isinstance(response.body, dict):
+            return APIResponse.from_error(500, "Unexpected response format")
+
         query_id = response.body.get("query_id")
         if not query_id:
             return APIResponse.from_error(500, "No query_id in response")
@@ -256,7 +261,7 @@ class APIClient:
 
         return APIResponse.from_error(504, f"Query timeout after {timeout}s")
 
-    def _get_query_progress(self, query_id: str) -> Optional[dict]:
+    def _get_query_progress(self, query_id: str) -> dict[str, Any] | None:
         """Get query progress via SSE endpoint."""
         url = f"{self.base_url}/api/query/progress/{query_id}"
         try:
@@ -278,7 +283,7 @@ def start_server(
     db_url: str,
     port: int,
     logger: logging.Logger,
-) -> Optional[subprocess.Popen]:
+) -> subprocess.Popen[str] | None:
     """Start the ADMapper server."""
     logger.info(f"Starting ADMapper on port {port}...")
     logger.info(f"Database URL: {db_url}")
@@ -302,7 +307,7 @@ def start_server(
         return None
 
 
-def stop_server(process: subprocess.Popen, logger: logging.Logger) -> None:
+def stop_server(process: subprocess.Popen[str], logger: logging.Logger) -> None:
     """Stop the ADMapper server."""
     if process:
         logger.info(f"Stopping server (PID: {process.pid})...")
@@ -317,7 +322,7 @@ def stop_server(process: subprocess.Popen, logger: logging.Logger) -> None:
 def wait_for_server(
     api: APIClient,
     timeout: int = 30,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
 ) -> bool:
     """Wait for the server to be ready."""
     elapsed = 0
