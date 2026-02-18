@@ -176,6 +176,13 @@ struct DatabaseConnection {
     db_type: DatabaseType,
 }
 
+/// Query activity update (number of active queries changed).
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryActivity {
+    /// Number of currently active queries.
+    pub active: usize,
+}
+
 /// Application state shared across requests.
 #[derive(Clone)]
 pub struct AppState {
@@ -185,25 +192,37 @@ pub struct AppState {
     import_jobs: Arc<DashMap<String, Arc<ImportJob>>>,
     /// Active running queries for tracking and cancellation.
     running_queries: Arc<DashMap<String, Arc<RunningQuery>>>,
+    /// Broadcast channel for query activity updates.
+    query_activity_tx: broadcast::Sender<QueryActivity>,
 }
 
 impl AppState {
     /// Create a new AppState without a database connection.
     pub fn new_disconnected() -> Self {
+        let (query_activity_tx, _) = broadcast::channel(16);
         Self {
             connection: Arc::new(RwLock::new(None)),
             import_jobs: Arc::new(DashMap::new()),
             running_queries: Arc::new(DashMap::new()),
+            query_activity_tx,
         }
     }
 
     /// Create a new AppState with an initial database connection.
     pub fn new_connected(backend: Arc<dyn DatabaseBackend>, db_type: DatabaseType) -> Self {
+        let (query_activity_tx, _) = broadcast::channel(16);
         Self {
             connection: Arc::new(RwLock::new(Some(DatabaseConnection { backend, db_type }))),
             import_jobs: Arc::new(DashMap::new()),
             running_queries: Arc::new(DashMap::new()),
+            query_activity_tx,
         }
+    }
+
+    /// Broadcast query activity update.
+    fn broadcast_query_activity(&self) {
+        let active = self.running_queries.len();
+        let _ = self.query_activity_tx.send(QueryActivity { active });
     }
 
     /// Check if connected to a database.
@@ -376,6 +395,7 @@ pub fn create_api_router(state: AppState) -> Router {
         // Query progress and abort
         .route("/api/query/progress/:id", get(query_progress))
         .route("/api/query/abort/:id", post(query_abort))
+        .route("/api/query/activity", get(query_activity))
         // Query history
         .route("/api/query-history", get(get_query_history))
         .route("/api/query-history", post(add_query_history))
@@ -1672,6 +1692,9 @@ async fn graph_query(
         .running_queries
         .insert(query_id.clone(), running_query.clone());
 
+    // Broadcast query activity update (new query started)
+    state.broadcast_query_activity();
+
     // Broadcast initial "running" status
     let initial_progress = QueryProgress {
         query_id: query_id.clone(),
@@ -1707,6 +1730,7 @@ async fn graph_query(
     let extract_graph = body.extract_graph;
     let language = body.language.clone();
     let running_queries = state.running_queries.clone();
+    let query_activity_tx = state.query_activity_tx.clone();
     let running_query_for_task = running_query.clone();
 
     tokio::task::spawn_blocking(move || {
@@ -1733,6 +1757,10 @@ async fn graph_query(
             };
             let _ = progress_tx.send(progress.clone());
             *running_query_for_task.final_state.write() = Some(progress);
+            running_queries.remove(&query_id_clone);
+            let _ = query_activity_tx.send(QueryActivity {
+                active: running_queries.len(),
+            });
             return;
         }
 
@@ -1761,6 +1789,10 @@ async fn graph_query(
             };
             let _ = progress_tx.send(progress.clone());
             *running_query_for_task.final_state.write() = Some(progress);
+            running_queries.remove(&query_id_clone);
+            let _ = query_activity_tx.send(QueryActivity {
+                active: running_queries.len(),
+            });
             return;
         }
 
@@ -1827,9 +1859,12 @@ async fn graph_query(
         let _ = progress_tx.send(progress.clone());
         *running_query_for_task.final_state.write() = Some(progress);
 
-        // Clean up after a delay
-        std::thread::sleep(std::time::Duration::from_secs(60));
+        // Remove from running queries and broadcast activity update
+        // (do this immediately so the UI shows query is done)
         running_queries.remove(&query_id_clone);
+        let _ = query_activity_tx.send(QueryActivity {
+            active: running_queries.len(),
+        });
     });
 
     Ok(Json(QueryStartResponse { query_id }))
@@ -1910,6 +1945,36 @@ async fn query_abort(
     *query.final_state.write() = Some(progress);
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// SSE endpoint for query activity updates.
+/// Broadcasts when the number of active queries changes.
+async fn query_activity(
+    State(state): State<AppState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    // Send current state immediately
+    let initial = QueryActivity {
+        active: state.running_queries.len(),
+    };
+    let initial_event = std::iter::once(Ok(Event::default()
+        .data(serde_json::to_string(&initial).unwrap_or_default())));
+
+    // Subscribe to updates
+    let rx = state.query_activity_tx.subscribe();
+    let update_stream = BroadcastStream::new(rx).filter_map(|result| {
+        result.ok().map(|activity| {
+            let data = serde_json::to_string(&activity).unwrap_or_default();
+            Ok(Event::default().data(data))
+        })
+    });
+
+    // Combine initial event with update stream
+    let stream = tokio_stream::StreamExt::chain(
+        tokio_stream::iter(initial_event),
+        update_stream,
+    );
+
+    Sse::new(stream)
 }
 
 // ============================================================================

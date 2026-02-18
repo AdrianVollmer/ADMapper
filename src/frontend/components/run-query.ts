@@ -297,7 +297,6 @@ async function executeQuery(): Promise<void> {
   queryText = query;
   queryStartTime = Date.now();
   currentDurationMs = 0;
-  updateQueryIndicator(true);
   renderModal();
 
   // Start duration update interval
@@ -399,7 +398,6 @@ async function abortQuery(): Promise<void> {
 function cleanup(): void {
   isExecuting = false;
   currentQueryId = null;
-  updateQueryIndicator(false);
 
   if (progressEventSource) {
     progressEventSource.close();
@@ -409,20 +407,6 @@ function cleanup(): void {
   if (durationInterval) {
     clearInterval(durationInterval);
     durationInterval = null;
-  }
-}
-
-/** Update the query indicator in the menubar */
-function updateQueryIndicator(running: boolean): void {
-  const indicator = document.getElementById("query-indicator");
-  if (!indicator) return;
-
-  if (running) {
-    indicator.classList.add("running");
-    indicator.title = "Query running...";
-  } else {
-    indicator.classList.remove("running");
-    indicator.title = "No query running";
   }
 }
 

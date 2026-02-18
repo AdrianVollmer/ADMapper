@@ -12,3 +12,4 @@ export { initSearch, setPathStart, setPathEnd } from "./search";
 export { initQueries, addCustomQuery, importQueries, exportQueries } from "./queries";
 export { initQueryHistory, openQueryHistory, addToHistory } from "./query-history";
 export { initDbConnect, openDbConnect, disconnectDb, updateConnectionStatus } from "./db-connect";
+export { initQueryActivity, getActiveQueryCount, hasActiveQueries } from "./query-activity";
