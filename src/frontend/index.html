@@ -479,6 +479,49 @@
       </div>
     </div>
 
+    <!-- Placeholder Node Explanation Modal -->
+    <div id="placeholder-modal" class="modal-overlay" hidden>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Placeholder Nodes</h2>
+          <button class="modal-close" onclick="hidePlaceholderModal()" aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-4">
+            <strong>What is a placeholder node?</strong>
+          </p>
+          <p class="mb-4 text-gray-300">
+            Placeholder nodes are automatically created when importing BloodHound data.
+            They represent Active Directory objects that are referenced by relationships
+            but were not found in the imported data files.
+          </p>
+          <p class="mb-4">
+            <strong>Why does this happen?</strong>
+          </p>
+          <ul class="list-disc list-inside mb-4 text-gray-300 space-y-2">
+            <li>The node may be defined in a different BloodHound data file that wasn't imported</li>
+            <li>The node may have been filtered out during BloodHound collection</li>
+            <li>The object may no longer exist in Active Directory but is still referenced by other objects</li>
+          </ul>
+          <p class="mb-4">
+            <strong>What should I do?</strong>
+          </p>
+          <p class="text-gray-300">
+            You can import additional BloodHound data files to populate these placeholder nodes
+            with their actual properties. If you have the complete data set, the placeholder
+            nodes will be updated with real data upon re-import.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" onclick="hidePlaceholderModal()">Got it</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

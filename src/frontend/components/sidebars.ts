@@ -766,6 +766,27 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
     }
   }
 
+  // Check if this is a placeholder node
+  const isPlaceholder = attrs.properties?.placeholder === true;
+
+  // Build placeholder warning banner if applicable
+  const placeholderBanner = isPlaceholder
+    ? `
+    <div class="placeholder-warning">
+      <svg class="placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <div class="placeholder-text">
+        <span class="placeholder-title">Placeholder Node</span>
+        <span class="placeholder-desc">
+          This node was auto-created as a placeholder.
+          <button class="placeholder-learn-more" onclick="showPlaceholderModal()">Learn more</button>
+        </span>
+      </div>
+    </div>
+    `
+    : "";
+
   content.innerHTML = `
     <div class="detail-header">
       <div class="detail-header-top">
@@ -779,6 +800,8 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
         ${actionsHtml}
       </div>
     </div>
+
+    ${placeholderBanner}
 
     ${
       propsHtml

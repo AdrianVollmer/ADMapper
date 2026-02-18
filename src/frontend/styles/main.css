@@ -570,6 +570,33 @@
     @apply text-red-400 hover:text-red-300 hover:bg-red-900/30;
   }
 
+  /* Placeholder node warning banner */
+  .placeholder-warning {
+    @apply flex items-start gap-3 p-3 mx-3 mt-3 rounded-lg
+           bg-yellow-900/30 border border-yellow-700/50;
+  }
+
+  .placeholder-icon {
+    @apply w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5;
+  }
+
+  .placeholder-text {
+    @apply flex flex-col gap-0.5;
+  }
+
+  .placeholder-title {
+    @apply text-sm font-medium text-yellow-400;
+  }
+
+  .placeholder-desc {
+    @apply text-xs text-yellow-200/70;
+  }
+
+  .placeholder-learn-more {
+    @apply text-yellow-400 hover:text-yellow-300 underline
+           cursor-pointer bg-transparent border-none p-0 text-xs;
+  }
+
   .detail-section {
     @apply p-3 border-b border-gray-700;
   }
