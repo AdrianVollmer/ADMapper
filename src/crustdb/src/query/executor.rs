@@ -4226,4 +4226,191 @@ mod tests {
             panic!("Expected integer count, got {:?}", count_val);
         }
     }
+
+    // ==========================================================================
+    // E2E scenario tests - verify queries that failed in integration tests
+    // ==========================================================================
+
+    #[test]
+    fn test_count_all_nodes_no_label() {
+        // E2E test: "Simple count query" - MATCH (n) RETURN count(n)
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create nodes with different labels (like BloodHound data)
+        for i in 0..50 {
+            execute(
+                &parse(&format!("CREATE (n:User {{name: 'User{}'}})", i)).unwrap(),
+                &storage,
+            )
+            .unwrap();
+        }
+        for i in 0..20 {
+            execute(
+                &parse(&format!("CREATE (n:Computer {{name: 'Computer{}'}})", i)).unwrap(),
+                &storage,
+            )
+            .unwrap();
+        }
+        for i in 0..30 {
+            execute(
+                &parse(&format!("CREATE (n:Group {{name: 'Group{}'}})", i)).unwrap(),
+                &storage,
+            )
+            .unwrap();
+        }
+
+        // Count ALL nodes (no label filter) - this should use optimized path
+        let result = execute(
+            &parse("MATCH (n) RETURN count(n) AS total").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        let count_val = result.rows[0].values.get("total").unwrap();
+        if let ResultValue::Property(PropertyValue::Integer(count)) = count_val {
+            assert_eq!(*count, 100, "Should count all 100 nodes");
+        } else {
+            panic!("Expected integer count, got {:?}", count_val);
+        }
+    }
+
+    #[test]
+    fn test_count_nodes_multiple_labels() {
+        // E2E tests: Count User, Computer, Group nodes separately
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create nodes with different labels
+        for i in 0..99 {
+            execute(
+                &parse(&format!("CREATE (n:User {{name: 'User{}'}})", i)).unwrap(),
+                &storage,
+            )
+            .unwrap();
+        }
+        for i in 0..34 {
+            execute(
+                &parse(&format!("CREATE (n:Computer {{name: 'Computer{}'}})", i)).unwrap(),
+                &storage,
+            )
+            .unwrap();
+        }
+        for i in 0..219 {
+            execute(
+                &parse(&format!("CREATE (n:Group {{name: 'Group{}'}})", i)).unwrap(),
+                &storage,
+            )
+            .unwrap();
+        }
+
+        // Count Users
+        let result = execute(
+            &parse("MATCH (u:User) RETURN count(u) AS users").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        let count_val = result.rows[0].values.get("users").unwrap();
+        if let ResultValue::Property(PropertyValue::Integer(count)) = count_val {
+            assert_eq!(*count, 99);
+        }
+
+        // Count Computers
+        let result = execute(
+            &parse("MATCH (c:Computer) RETURN count(c) AS computers").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        let count_val = result.rows[0].values.get("computers").unwrap();
+        if let ResultValue::Property(PropertyValue::Integer(count)) = count_val {
+            assert_eq!(*count, 34);
+        }
+
+        // Count Groups
+        let result = execute(
+            &parse("MATCH (g:Group) RETURN count(g) AS groups").unwrap(),
+            &storage,
+        )
+        .unwrap();
+        let count_val = result.rows[0].values.get("groups").unwrap();
+        if let ResultValue::Property(PropertyValue::Integer(count)) = count_val {
+            assert_eq!(*count, 219);
+        }
+    }
+
+    #[test]
+    fn test_labels_function_with_limit() {
+        // E2E test: MATCH (n) RETURN labels(n) LIMIT 5
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create nodes with various labels
+        for i in 0..50 {
+            execute(
+                &parse(&format!("CREATE (n:User {{name: 'User{}'}})", i)).unwrap(),
+                &storage,
+            )
+            .unwrap();
+        }
+
+        // This should use LIMIT pushdown and be fast
+        let result = execute(
+            &parse("MATCH (n) RETURN labels(n) AS labels LIMIT 5").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 5);
+    }
+
+    #[test]
+    fn test_return_property_with_limit() {
+        // E2E test: MATCH (u:User) RETURN u.name LIMIT 5
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        for i in 0..100 {
+            execute(
+                &parse(&format!("CREATE (n:User {{name: 'User{}'}})", i)).unwrap(),
+                &storage,
+            )
+            .unwrap();
+        }
+
+        let result = execute(
+            &parse("MATCH (u:User) RETURN u.name AS name LIMIT 5").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 5);
+    }
+
+    #[test]
+    fn test_count_with_property_filter() {
+        // E2E test: MATCH (u:User) WHERE u.enabled = true RETURN count(u)
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        for i in 0..100 {
+            let enabled = if i % 4 == 0 { "false" } else { "true" };
+            execute(
+                &parse(&format!(
+                    "CREATE (n:User {{name: 'User{}', enabled: {}}})",
+                    i, enabled
+                ))
+                .unwrap(),
+                &storage,
+            )
+            .unwrap();
+        }
+
+        let result = execute(
+            &parse("MATCH (u:User) WHERE u.enabled = true RETURN count(u) AS enabled").unwrap(),
+            &storage,
+        )
+        .unwrap();
+
+        assert_eq!(result.rows.len(), 1);
+        let count_val = result.rows[0].values.get("enabled").unwrap();
+        if let ResultValue::Property(PropertyValue::Integer(count)) = count_val {
+            assert_eq!(*count, 75); // 100 - 25 (every 4th is false)
+        }
+    }
 }

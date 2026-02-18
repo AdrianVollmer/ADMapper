@@ -639,20 +639,36 @@ impl SqliteStorage {
 
     /// Find nodes by label with optional limit.
     pub fn find_nodes_by_label_limit(&self, label: &str, limit: Option<u64>) -> Result<Vec<Node>> {
-        let limit_clause = limit.map_or(String::new(), |n| format!(" LIMIT {}", n));
-        let sql = format!(
-            "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
-             FROM nodes n
-             JOIN node_label_map nlm ON n.id = nlm.node_id
-             JOIN node_labels nl ON nlm.label_id = nl.id
-             WHERE n.id IN (
-                 SELECT DISTINCT nlm2.node_id FROM node_label_map nlm2
-                 JOIN node_labels nl2 ON nlm2.label_id = nl2.id
-                 WHERE nl2.name = ?1
-             )
-             GROUP BY n.id{}",
-            limit_clause
-        );
+        // Use subquery to limit nodes BEFORE joining for all labels
+        // This ensures we only process N nodes instead of all matching nodes
+        let sql = match limit {
+            Some(n) => format!(
+                "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+                 FROM (
+                     SELECT DISTINCT nodes.id, nodes.properties
+                     FROM nodes
+                     JOIN node_label_map nlm ON nodes.id = nlm.node_id
+                     JOIN node_labels nl ON nlm.label_id = nl.id
+                     WHERE nl.name = ?1
+                     LIMIT {}
+                 ) AS n
+                 LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
+                 LEFT JOIN node_labels nl ON nlm.label_id = nl.id
+                 GROUP BY n.id, n.properties",
+                n
+            ),
+            None => "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+                     FROM nodes n
+                     JOIN node_label_map nlm ON n.id = nlm.node_id
+                     JOIN node_labels nl ON nlm.label_id = nl.id
+                     WHERE n.id IN (
+                         SELECT DISTINCT nlm2.node_id FROM node_label_map nlm2
+                         JOIN node_labels nl2 ON nlm2.label_id = nl2.id
+                         WHERE nl2.name = ?1
+                     )
+                     GROUP BY n.id"
+                .to_string(),
+        };
 
         let mut stmt = self.conn.prepare(&sql)?;
         self.collect_nodes_from_stmt(&mut stmt, params![label])
@@ -660,15 +676,24 @@ impl SqliteStorage {
 
     /// Get all nodes with optional limit.
     pub fn get_all_nodes_limit(&self, limit: Option<u64>) -> Result<Vec<Node>> {
-        let limit_clause = limit.map_or(String::new(), |n| format!(" LIMIT {}", n));
-        let sql = format!(
-            "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
-             FROM nodes n
-             LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
-             LEFT JOIN node_labels nl ON nlm.label_id = nl.id
-             GROUP BY n.id{}",
-            limit_clause
-        );
+        // Use subquery to limit nodes BEFORE joining for labels
+        // This ensures we only process N nodes instead of all nodes
+        let sql = match limit {
+            Some(n) => format!(
+                "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+                 FROM (SELECT id, properties FROM nodes LIMIT {}) AS n
+                 LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
+                 LEFT JOIN node_labels nl ON nlm.label_id = nl.id
+                 GROUP BY n.id, n.properties",
+                n
+            ),
+            None => "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+                     FROM nodes n
+                     LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
+                     LEFT JOIN node_labels nl ON nlm.label_id = nl.id
+                     GROUP BY n.id"
+                .to_string(),
+        };
 
         let mut stmt = self.conn.prepare(&sql)?;
         self.collect_nodes_from_stmt(&mut stmt, [])
