@@ -18,6 +18,9 @@ let currentLayout: LayoutType = "force";
 
 /** Initialize the graph view */
 export function initGraph(): void {
+  // Set initial layout from user's default setting (only once at startup)
+  currentLayout = getDefaultLayout();
+
   const container = document.getElementById("graph-canvas");
   if (!container) return;
 
@@ -160,10 +163,7 @@ export function loadGraphData(data: RawADGraph): void {
   // Clear previous collapse state
   clearCollapseState();
 
-  // Use default layout from settings
-  currentLayout = getDefaultLayout();
-
-  // Load and layout the graph
+  // Load and layout the graph (uses currentLayout which persists across loads)
   const graph = loadGraph(data);
   applyLayout(graph, { type: currentLayout });
 
