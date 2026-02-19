@@ -4,13 +4,15 @@
  * Supports:
  * - ForceAtlas2: Force-directed layout, good for exploring relationships
  * - Hierarchical: Left-to-right layered layout, edges flow from sources to targets
+ * - Grid: Simple grid arrangement
+ * - Circular: Concentric circles based on node depth, sinks at center
  */
 
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import type { ADGraphType } from "./ADGraph";
 
 /** Available layout algorithms */
-export type LayoutType = "force" | "hierarchical";
+export type LayoutType = "force" | "hierarchical" | "grid" | "circular";
 
 export interface LayoutOptions {
   /** Layout algorithm to use */
@@ -21,6 +23,10 @@ export interface LayoutOptions {
   settings?: ForceAtlas2Settings;
   /** Settings for hierarchical layout */
   hierarchical?: HierarchicalSettings;
+  /** Settings for grid layout */
+  grid?: GridSettings;
+  /** Settings for circular layout */
+  circular?: CircularSettings;
 }
 
 export interface HierarchicalSettings {
@@ -30,6 +36,22 @@ export interface HierarchicalSettings {
   nodeSpacing?: number;
   /** Direction of the layout */
   direction?: "left-to-right" | "top-to-bottom";
+}
+
+export interface GridSettings {
+  /** Horizontal spacing between nodes */
+  columnSpacing?: number;
+  /** Vertical spacing between nodes */
+  rowSpacing?: number;
+  /** Number of columns (if not set, computed from node count) */
+  columns?: number;
+}
+
+export interface CircularSettings {
+  /** Spacing between concentric rings */
+  ringSpacing?: number;
+  /** Minimum radius for first ring (when center is empty) */
+  minRadius?: number;
 }
 
 export interface ForceAtlas2Settings {
@@ -72,6 +94,16 @@ const DEFAULT_HIERARCHICAL_SETTINGS: HierarchicalSettings = {
   direction: "left-to-right",
 };
 
+const DEFAULT_GRID_SETTINGS: GridSettings = {
+  columnSpacing: 150,
+  rowSpacing: 150,
+};
+
+const DEFAULT_CIRCULAR_SETTINGS: CircularSettings = {
+  ringSpacing: 150,
+  minRadius: 100,
+};
+
 /** Default iterations based on graph size */
 function getDefaultIterations(nodeCount: number): number {
   if (nodeCount < 100) return 100;
@@ -91,10 +123,19 @@ export function applyLayout(graph: ADGraphType, options: LayoutOptions = {}): vo
 
   const layoutType = options.type ?? "force";
 
-  if (layoutType === "hierarchical") {
-    applyHierarchicalLayout(graph, options.hierarchical);
-  } else {
-    applyForceLayout(graph, options);
+  switch (layoutType) {
+    case "hierarchical":
+      applyHierarchicalLayout(graph, options.hierarchical);
+      break;
+    case "grid":
+      applyGridLayout(graph, options.grid);
+      break;
+    case "circular":
+      applyCircularLayout(graph, options.circular);
+      break;
+    default:
+      applyForceLayout(graph, options);
+      break;
   }
 }
 
@@ -154,6 +195,185 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
       }
     }
   }
+}
+
+/**
+ * Apply grid layout - arranges nodes in a simple grid pattern.
+ */
+function applyGridLayout(graph: ADGraphType, options: GridSettings = {}): void {
+  const settings = { ...DEFAULT_GRID_SETTINGS, ...options };
+  const { columnSpacing, rowSpacing } = settings;
+
+  // Get all nodes and sort for consistent ordering
+  const nodes: string[] = [];
+  graph.forEachNode((nodeId) => nodes.push(nodeId));
+  nodes.sort((a, b) => {
+    // Sort by type first, then by label
+    const typeA = graph.getNodeAttribute(a, "nodeType") || "";
+    const typeB = graph.getNodeAttribute(b, "nodeType") || "";
+    if (typeA !== typeB) return typeA.localeCompare(typeB);
+    const labelA = graph.getNodeAttribute(a, "label") || a;
+    const labelB = graph.getNodeAttribute(b, "label") || b;
+    return labelA.localeCompare(labelB);
+  });
+
+  // Compute grid dimensions
+  const columns = settings.columns ?? Math.ceil(Math.sqrt(nodes.length));
+  const rows = Math.ceil(nodes.length / columns);
+
+  // Center the grid
+  const gridWidth = (columns - 1) * columnSpacing!;
+  const gridHeight = (rows - 1) * rowSpacing!;
+  const startX = -gridWidth / 2;
+  const startY = -gridHeight / 2;
+
+  // Assign positions
+  for (let i = 0; i < nodes.length; i++) {
+    const col = i % columns;
+    const row = Math.floor(i / columns);
+    graph.setNodeAttribute(nodes[i], "x", startX + col * columnSpacing!);
+    graph.setNodeAttribute(nodes[i], "y", startY + row * rowSpacing!);
+  }
+}
+
+/**
+ * Apply circular layout - arranges nodes in concentric circles based on depth.
+ *
+ * Sinks (nodes with no outgoing edges) are at the center or innermost ring.
+ * If there's exactly one sink, it's placed at the center.
+ * Otherwise, sinks form the first ring around an empty center.
+ * Higher-depth nodes (those that feed into sinks) form outer rings.
+ */
+function applyCircularLayout(graph: ADGraphType, options: CircularSettings = {}): void {
+  const settings = { ...DEFAULT_CIRCULAR_SETTINGS, ...options };
+  const { ringSpacing, minRadius } = settings;
+
+  // Compute layers from sinks (reverse of hierarchical)
+  const layers = computeSinkBasedLayers(graph);
+
+  // Group nodes by layer
+  const layerGroups = new Map<number, string[]>();
+  let maxLayer = 0;
+  for (const [nodeId, layer] of layers.entries()) {
+    const group = layerGroups.get(layer) ?? [];
+    group.push(nodeId);
+    layerGroups.set(layer, group);
+    maxLayer = Math.max(maxLayer, layer);
+  }
+
+  // Sort nodes within each layer for consistent ordering
+  for (const nodes of layerGroups.values()) {
+    nodes.sort((a, b) => {
+      const degDiff = graph.degree(b) - graph.degree(a);
+      return degDiff !== 0 ? degDiff : a.localeCompare(b);
+    });
+  }
+
+  // Check if there's exactly one sink (layer 0)
+  const sinks = layerGroups.get(0) ?? [];
+  const singleCenterNode = sinks.length === 1;
+
+  // Place nodes on concentric circles
+  if (singleCenterNode) {
+    // Place the single sink at center
+    graph.setNodeAttribute(sinks[0], "x", 0);
+    graph.setNodeAttribute(sinks[0], "y", 0);
+
+    // Place other layers in rings starting from minRadius
+    for (let layer = 1; layer <= maxLayer; layer++) {
+      const nodes = layerGroups.get(layer) ?? [];
+      if (nodes.length === 0) continue;
+
+      const radius = minRadius! + (layer - 1) * ringSpacing!;
+      placeNodesOnCircle(graph, nodes, radius);
+    }
+  } else {
+    // No center node - sinks form the first ring
+    for (let layer = 0; layer <= maxLayer; layer++) {
+      const nodes = layerGroups.get(layer) ?? [];
+      if (nodes.length === 0) continue;
+
+      const radius = minRadius! + layer * ringSpacing!;
+      placeNodesOnCircle(graph, nodes, radius);
+    }
+  }
+}
+
+/**
+ * Place nodes evenly distributed on a circle.
+ */
+function placeNodesOnCircle(graph: ADGraphType, nodes: string[], radius: number): void {
+  const angleStep = (2 * Math.PI) / nodes.length;
+  // Start from top (-PI/2) and go clockwise
+  const startAngle = -Math.PI / 2;
+
+  for (let i = 0; i < nodes.length; i++) {
+    const angle = startAngle + i * angleStep;
+    const x = radius * Math.cos(angle);
+    const y = radius * Math.sin(angle);
+    graph.setNodeAttribute(nodes[i], "x", x);
+    graph.setNodeAttribute(nodes[i], "y", y);
+  }
+}
+
+/**
+ * Compute layers based on distance from sink nodes (nodes with no outgoing edges).
+ * Sinks are at layer 0, nodes that connect directly to sinks are at layer 1, etc.
+ */
+function computeSinkBasedLayers(graph: ADGraphType): Map<string, number> {
+  const layers = new Map<string, number>();
+
+  // Find sink nodes (no outgoing edges)
+  const sinks: string[] = [];
+  graph.forEachNode((nodeId) => {
+    if (graph.outDegree(nodeId) === 0) {
+      sinks.push(nodeId);
+    }
+  });
+
+  // If no sinks (fully cyclic or all nodes have outgoing edges), use nodes with minimum out-degree
+  if (sinks.length === 0) {
+    let minOutDegree = Infinity;
+    graph.forEachNode((nodeId) => {
+      const outDeg = graph.outDegree(nodeId);
+      if (outDeg < minOutDegree) {
+        minOutDegree = outDeg;
+        sinks.length = 0;
+        sinks.push(nodeId);
+      } else if (outDeg === minOutDegree) {
+        sinks.push(nodeId);
+      }
+    });
+  }
+
+  // BFS from sinks, traversing edges in reverse
+  const queue: string[] = [];
+  for (const sink of sinks) {
+    layers.set(sink, 0);
+    queue.push(sink);
+  }
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const currentLayer = layers.get(current)!;
+
+    // Traverse incoming edges (reverse direction)
+    graph.forEachInNeighbor(current, (neighbor) => {
+      if (!layers.has(neighbor)) {
+        layers.set(neighbor, currentLayer + 1);
+        queue.push(neighbor);
+      }
+    });
+  }
+
+  // Handle any remaining unvisited nodes (isolated)
+  graph.forEachNode((nodeId) => {
+    if (!layers.has(nodeId)) {
+      layers.set(nodeId, 0);
+    }
+  });
+
+  return layers;
 }
 
 /**
@@ -242,7 +462,7 @@ function computeNodeLayers(graph: ADGraphType): Map<string, number> {
  * Apply layout with progress callback.
  *
  * Runs layout in chunks to allow UI updates.
- * Only applicable for force layout; hierarchical is fast enough to run synchronously.
+ * Only applicable for force layout; other layouts are fast enough to run synchronously.
  */
 export async function applyLayoutAsync(
   graph: ADGraphType,
@@ -254,9 +474,19 @@ export async function applyLayoutAsync(
 
   const layoutType = options.type ?? "force";
 
-  // Hierarchical layout is fast, run synchronously
+  // Non-force layouts are fast, run synchronously
   if (layoutType === "hierarchical") {
     applyHierarchicalLayout(graph, options.hierarchical);
+    if (onProgress) onProgress(1);
+    return;
+  }
+  if (layoutType === "grid") {
+    applyGridLayout(graph, options.grid);
+    if (onProgress) onProgress(1);
+    return;
+  }
+  if (layoutType === "circular") {
+    applyCircularLayout(graph, options.circular);
     if (onProgress) onProgress(1);
     return;
   }

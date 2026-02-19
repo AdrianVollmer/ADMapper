@@ -141,7 +141,7 @@ function createModal(): void {
           <div class="form-group">
             <label class="form-label">Default Graph Layout</label>
             <p class="form-help">Layout used when loading a new graph</p>
-            <div class="settings-option-group" id="layout-options">
+            <div class="settings-layout-grid" id="layout-options">
               <label class="settings-option">
                 <input type="radio" name="layout" value="force">
                 <span class="settings-option-content">
@@ -156,7 +156,7 @@ function createModal(): void {
                     <line x1="8" y1="16" x2="10" y2="14"/>
                     <line x1="14" y1="14" x2="16" y2="16"/>
                   </svg>
-                  <span class="settings-option-label">Force-Directed</span>
+                  <span class="settings-option-label">Force</span>
                 </span>
               </label>
               <label class="settings-option">
@@ -172,6 +172,29 @@ function createModal(): void {
                     <line x1="18" y1="12" x2="18" y2="17"/>
                   </svg>
                   <span class="settings-option-label">Hierarchical</span>
+                </span>
+              </label>
+              <label class="settings-option">
+                <input type="radio" name="layout" value="grid">
+                <span class="settings-option-content">
+                  <svg class="settings-option-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/>
+                    <rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/>
+                    <rect x="14" y="14" width="7" height="7" rx="1"/>
+                  </svg>
+                  <span class="settings-option-label">Grid</span>
+                </span>
+              </label>
+              <label class="settings-option">
+                <input type="radio" name="layout" value="circular">
+                <span class="settings-option-content">
+                  <svg class="settings-option-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="9"/>
+                    <circle cx="12" cy="12" r="5"/>
+                    <circle cx="12" cy="12" r="1"/>
+                  </svg>
+                  <span class="settings-option-label">Circular</span>
                 </span>
               </label>
             </div>

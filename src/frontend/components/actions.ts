@@ -59,6 +59,8 @@ export const Actions = {
   LAYOUT_GRAPH: "layout-graph",
   LAYOUT_FORCE: "layout-force",
   LAYOUT_HIERARCHICAL: "layout-hierarchical",
+  LAYOUT_GRID: "layout-grid",
+  LAYOUT_CIRCULAR: "layout-circular",
   // Help menu
   DOCUMENTATION: "documentation",
   KEYBOARD_SHORTCUTS: "keyboard-shortcuts",
@@ -135,6 +137,8 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "layout-graph": () => relayoutGraph(),
   "layout-force": () => setLayout("force"),
   "layout-hierarchical": () => setLayout("hierarchical"),
+  "layout-grid": () => setLayout("grid"),
+  "layout-circular": () => setLayout("circular"),
   // Help menu
   documentation: () => window.open("https://github.com/admapper/admapper", "_blank"),
   "keyboard-shortcuts": () => showKeyboardShortcuts(),

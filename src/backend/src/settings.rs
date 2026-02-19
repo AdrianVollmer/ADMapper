@@ -12,7 +12,7 @@ use std::path::PathBuf;
 pub struct Settings {
     /// UI theme: "dark" or "light"
     pub theme: String,
-    /// Default graph layout: "force" or "hierarchical"
+    /// Default graph layout: "force", "hierarchical", "grid", or "circular"
     pub default_graph_layout: String,
 }
 

@@ -210,7 +210,9 @@ function updateLayoutIndicator(): void {
     const action = el.getAttribute("data-action");
     const isActive =
       (action === "layout-force" && currentLayout === "force") ||
-      (action === "layout-hierarchical" && currentLayout === "hierarchical");
+      (action === "layout-hierarchical" && currentLayout === "hierarchical") ||
+      (action === "layout-grid" && currentLayout === "grid") ||
+      (action === "layout-circular" && currentLayout === "circular");
     el.setAttribute("data-checked", isActive ? "true" : "false");
   }
 }

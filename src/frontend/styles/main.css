@@ -1498,6 +1498,10 @@
     @apply flex gap-3 mt-2;
   }
 
+  .settings-layout-grid {
+    @apply grid grid-cols-2 gap-3 mt-2;
+  }
+
   .settings-option {
     @apply flex-1 cursor-pointer;
   }

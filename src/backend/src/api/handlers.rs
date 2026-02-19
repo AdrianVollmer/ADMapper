@@ -1347,10 +1347,12 @@ pub async fn update_settings(Json(body): Json<Settings>) -> Result<Json<Settings
     }
 
     // Validate layout
-    if body.default_graph_layout != "force" && body.default_graph_layout != "hierarchical" {
+    let valid_layouts = ["force", "hierarchical", "grid", "circular"];
+    if !valid_layouts.contains(&body.default_graph_layout.as_str()) {
         return Err(ApiError::BadRequest(format!(
-            "Invalid layout: {}. Must be 'force' or 'hierarchical'",
-            body.default_graph_layout
+            "Invalid layout: {}. Must be one of: {}",
+            body.default_graph_layout,
+            valid_layouts.join(", ")
         )));
     }
 

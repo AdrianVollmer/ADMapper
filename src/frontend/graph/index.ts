@@ -55,7 +55,14 @@ export type { RendererOptions, ADGraphRenderer } from "./ADGraphRenderer";
 
 // Layout
 export { applyLayout, applyLayoutAsync, normalizePositions } from "./layout";
-export type { LayoutType, LayoutOptions, ForceAtlas2Settings, HierarchicalSettings } from "./layout";
+export type {
+  LayoutType,
+  LayoutOptions,
+  ForceAtlas2Settings,
+  HierarchicalSettings,
+  GridSettings,
+  CircularSettings,
+} from "./layout";
 
 // Theme
 export {

@@ -162,7 +162,7 @@ export interface ApiError {
 export type Theme = "dark" | "light";
 
 /** Graph layout options */
-export type GraphLayout = "force" | "hierarchical";
+export type GraphLayout = "force" | "hierarchical" | "grid" | "circular";
 
 /** Application settings */
 export interface Settings {
