@@ -9,6 +9,7 @@ use crate::query::parser::{
 use crate::storage::SqliteStorage;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use super::eval::floats_equal;
 use super::{Binding, Path, PathConstraints};
 
 // =============================================================================
@@ -1072,11 +1073,11 @@ fn literal_matches_property(lit: &Literal, prop: &PropertyValue) -> bool {
         (Literal::Null, _) => false, // NULL never equals anything
         (Literal::Boolean(a), PropertyValue::Bool(b)) => a == b,
         (Literal::Integer(a), PropertyValue::Integer(b)) => a == b,
-        (Literal::Float(a), PropertyValue::Float(b)) => (a - b).abs() < f64::EPSILON,
+        (Literal::Float(a), PropertyValue::Float(b)) => floats_equal(*a, *b),
         (Literal::String(a), PropertyValue::String(b)) => a == b,
         // Cross-type comparisons
-        (Literal::Integer(a), PropertyValue::Float(b)) => (*a as f64 - b).abs() < f64::EPSILON,
-        (Literal::Float(a), PropertyValue::Integer(b)) => (a - *b as f64).abs() < f64::EPSILON,
+        (Literal::Integer(a), PropertyValue::Float(b)) => floats_equal(*a as f64, *b),
+        (Literal::Float(a), PropertyValue::Integer(b)) => floats_equal(*a, *b as f64),
         _ => false,
     }
 }

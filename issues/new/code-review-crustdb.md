@@ -192,10 +192,21 @@ This allows constraint extraction to be reused for other pattern types (e.g., pr
 - Good separation between parser grammar (pest) and AST construction
 
 ### Minor Issues Not in Top 10
-- No prepared statement caching for frequently-used queries
-- Expression evaluation re-walks AST for each row (could cache compiled expressions)
-- `PropertyValue::Float` comparison uses `f64::EPSILON` which may be too strict for large values
-- Some `let _ = node_id;` statements that do nothing (line 349)
+
+- ~~`PropertyValue::Float` comparison uses `f64::EPSILON` which may be too strict for large values~~ ✅ FIXED
+  - Added `floats_equal()` helper using relative tolerance (1e-10) for large values
+  - Updated `values_equal()`, `literal_matches_property()` in eval.rs and pattern.rs
+
+- ~~Some `let _ = node_id;` statements that do nothing~~ ✅ FIXED
+  - Removed dead code in `create.rs:45` - simplified to not compute unused variable
+
+- No prepared statement caching for frequently-used queries ⏸️ DEFERRED
+  - Would require significant refactoring of SqliteStorage
+  - Consider adding a `StatementCache` wrapper around rusqlite's connection
+
+- Expression evaluation re-walks AST for each row (could cache compiled expressions) ⏸️ DEFERRED
+  - Would require expression compilation pass before evaluation
+  - Benefit depends on query complexity and result set size
 
 ### Performance Notes
 - BFS path enumeration can be exponential for k>1 shortest paths

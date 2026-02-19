@@ -20,6 +20,33 @@ use super::Binding;
 /// against malicious patterns.
 const REGEX_SIZE_LIMIT: usize = 256 * 1024;
 
+/// Relative tolerance for float comparison.
+///
+/// Using a relative tolerance handles both small and large values correctly.
+/// For values near zero, the absolute difference must be small. For large values,
+/// the relative difference must be small.
+const FLOAT_RELATIVE_TOLERANCE: f64 = 1e-10;
+
+/// Compare two floats for approximate equality.
+///
+/// Uses relative comparison to handle both small and large values correctly.
+/// `f64::EPSILON` alone is too strict for large values (e.g., comparing
+/// 1e15 with 1e15 + 1 would fail even though they're effectively equal
+/// for most practical purposes).
+#[inline]
+pub(super) fn floats_equal(a: f64, b: f64) -> bool {
+    let diff = (a - b).abs();
+    let max_abs = a.abs().max(b.abs());
+
+    if max_abs < 1.0 {
+        // For small values, use absolute comparison
+        diff < FLOAT_RELATIVE_TOLERANCE
+    } else {
+        // For larger values, use relative comparison
+        diff < max_abs * FLOAT_RELATIVE_TOLERANCE
+    }
+}
+
 /// Filter bindings by WHERE clause predicate.
 pub fn filter_bindings_by_where(
     bindings: Vec<Binding>,
@@ -330,14 +357,10 @@ pub fn values_equal(a: &PropertyValue, b: &PropertyValue) -> bool {
         (PropertyValue::Null, _) | (_, PropertyValue::Null) => false,
         (PropertyValue::Bool(a), PropertyValue::Bool(b)) => a == b,
         (PropertyValue::Integer(a), PropertyValue::Integer(b)) => a == b,
-        (PropertyValue::Float(a), PropertyValue::Float(b)) => (a - b).abs() < f64::EPSILON,
+        (PropertyValue::Float(a), PropertyValue::Float(b)) => floats_equal(*a, *b),
         (PropertyValue::String(a), PropertyValue::String(b)) => a == b,
-        (PropertyValue::Integer(a), PropertyValue::Float(b)) => {
-            (*a as f64 - b).abs() < f64::EPSILON
-        }
-        (PropertyValue::Float(a), PropertyValue::Integer(b)) => {
-            (a - *b as f64).abs() < f64::EPSILON
-        }
+        (PropertyValue::Integer(a), PropertyValue::Float(b)) => floats_equal(*a as f64, *b),
+        (PropertyValue::Float(a), PropertyValue::Integer(b)) => floats_equal(*a, *b as f64),
         (PropertyValue::List(a), PropertyValue::List(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y))
         }
@@ -441,10 +464,10 @@ pub fn literal_matches_property(lit: &Literal, prop: &PropertyValue) -> bool {
         (Literal::Null, _) => false,
         (Literal::Boolean(a), PropertyValue::Bool(b)) => a == b,
         (Literal::Integer(a), PropertyValue::Integer(b)) => a == b,
-        (Literal::Float(a), PropertyValue::Float(b)) => (a - b).abs() < f64::EPSILON,
+        (Literal::Float(a), PropertyValue::Float(b)) => floats_equal(*a, *b),
         (Literal::String(a), PropertyValue::String(b)) => a == b,
-        (Literal::Integer(a), PropertyValue::Float(b)) => (*a as f64 - b).abs() < f64::EPSILON,
-        (Literal::Float(a), PropertyValue::Integer(b)) => (a - *b as f64).abs() < f64::EPSILON,
+        (Literal::Integer(a), PropertyValue::Float(b)) => floats_equal(*a as f64, *b),
+        (Literal::Float(a), PropertyValue::Integer(b)) => floats_equal(*a, *b as f64),
         _ => false,
     }
 }

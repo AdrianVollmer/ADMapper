@@ -26,23 +26,17 @@ pub fn execute_create(
         match &elements[i] {
             PatternElement::Node(node_pattern) => {
                 // Check if this variable is already bound
-                let node_id = if let Some(ref var) = node_pattern.variable {
-                    if let Some(&existing_id) = bindings.get(var) {
-                        // Variable already bound - use existing node
-                        existing_id
-                    } else {
+                if let Some(ref var) = node_pattern.variable {
+                    if !bindings.contains_key(var) {
                         // Create new node and bind it
                         let id = create_node(node_pattern, storage, stats)?;
                         bindings.insert(var.clone(), id);
-                        id
                     }
+                    // If already bound, nothing to do - node exists
                 } else {
                     // Anonymous node - always create
-                    create_node(node_pattern, storage, stats)?
-                };
-
-                // Store for relationship lookup (even if we didn't create it)
-                let _ = node_id;
+                    create_node(node_pattern, storage, stats)?;
+                }
 
                 i += 1;
             }
