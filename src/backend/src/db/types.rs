@@ -1,13 +1,18 @@
 //! Common types for all database backends.
 
+use serde::Serialize;
 use serde_json::Value as JsonValue;
 use thiserror::Error;
 
 /// A node stored in the database.
-#[derive(Clone, Debug)]
+///
+/// This type is used both for internal storage and API responses.
+/// The `node_type` field is serialized as "type" for API compatibility.
+#[derive(Clone, Debug, Serialize)]
 pub struct DbNode {
     pub id: String,
     pub label: String,
+    #[serde(rename = "type")]
     pub node_type: String,
     pub properties: JsonValue,
 }

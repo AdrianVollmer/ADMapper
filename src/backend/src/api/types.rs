@@ -1,6 +1,6 @@
 //! API request and response types.
 
-use crate::db::DbError;
+use crate::db::{DbError, DbNode};
 use crate::graph::FullGraph;
 use axum::{
     http::StatusCode,
@@ -213,7 +213,7 @@ pub struct PathParams {
 /// Path step in the response.
 #[derive(Serialize)]
 pub struct PathStep {
-    pub node: crate::graph::GraphNode,
+    pub node: DbNode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edge_type: Option<String>,
 }

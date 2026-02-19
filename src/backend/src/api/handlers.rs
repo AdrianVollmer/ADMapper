@@ -7,7 +7,7 @@ use crate::api::types::{
     QueryProgress, QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
 };
 use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, QueryLanguage, Result as DbResult};
-use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
+use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge};
 use crate::import::{BloodHoundImporter, ImportProgress};
 use crate::state::{AppState, ImportJob, RunningQuery};
 use axum::{
@@ -365,11 +365,10 @@ pub async fn graph_clear(State(state): State<AppState>) -> Result<StatusCode, Ap
 // ============================================================================
 
 /// Get all graph nodes.
-pub async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<GraphNode>>, ApiError> {
+pub async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<DbNode>>, ApiError> {
     let db = state.require_db()?;
     let nodes: Vec<DbNode> = run_db(db, |db| db.get_all_nodes()).await?;
-    let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
-    Ok(Json(result))
+    Ok(Json(nodes))
 }
 
 /// Get all graph edges.
@@ -391,7 +390,7 @@ pub async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>,
     .await?;
 
     let result = FullGraph {
-        nodes: nodes.into_iter().map(GraphNode::from).collect(),
+        nodes,
         edges: edges.into_iter().map(GraphEdge::from).collect(),
     };
 
@@ -403,7 +402,7 @@ pub async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>,
 pub async fn graph_search(
     State(state): State<AppState>,
     Query(params): Query<SearchParams>,
-) -> Result<Json<Vec<GraphNode>>, ApiError> {
+) -> Result<Json<Vec<DbNode>>, ApiError> {
     if params.q.len() < 2 {
         return Ok(Json(Vec::new()));
     }
@@ -417,10 +416,9 @@ pub async fn graph_search(
 
     state.end_sync_query();
     let nodes: Vec<DbNode> = nodes_result?;
-    let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
 
-    debug!(query = %params.q, results = result.len(), "Search complete");
-    Ok(Json(result))
+    debug!(query = %params.q, results = nodes.len(), "Search complete");
+    Ok(Json(nodes))
 }
 
 /// Get connection counts for a node.
@@ -476,7 +474,7 @@ pub async fn node_connections(
     let (nodes, edges): (Vec<DbNode>, Vec<DbEdge>) = result?;
 
     Ok(Json(FullGraph {
-        nodes: nodes.into_iter().map(GraphNode::from).collect(),
+        nodes,
         edges: edges.into_iter().map(GraphEdge::from).collect(),
     }))
 }
@@ -637,7 +635,7 @@ pub async fn graph_path(
                             properties: JsonValue::Null,
                         });
                         PathStep {
-                            node: GraphNode::from(node),
+                            node,
                             edge_type: edge_type.clone(),
                         }
                     })
@@ -764,7 +762,7 @@ pub async fn graph_node_types(
 pub async fn add_node(
     State(state): State<AppState>,
     Json(body): Json<AddNodeRequest>,
-) -> Result<Json<GraphNode>, ApiError> {
+) -> Result<Json<DbNode>, ApiError> {
     // Validate inputs
     if body.id.is_empty() {
         return Err(ApiError::BadRequest("Node ID is required".to_string()));
@@ -791,7 +789,7 @@ pub async fn add_node(
     run_db(db, move |db| db.insert_node(node)).await?;
     info!(id = %body.id, label = %body.label, node_type = %body.node_type, "Node added");
 
-    Ok(Json(GraphNode {
+    Ok(Json(DbNode {
         id: body.id,
         label: body.label,
         node_type: body.node_type,

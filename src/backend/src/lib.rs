@@ -24,7 +24,7 @@ use tauri::Manager;
 // Re-export public types
 pub use api::types::ApiError;
 pub use db::{DbEdge, DbNode};
-pub use graph::{FullGraph, GraphEdge, GraphNode};
+pub use graph::{FullGraph, GraphEdge};
 pub use state::AppState;
 
 /// Run as Tauri desktop application.

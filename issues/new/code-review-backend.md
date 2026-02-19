@@ -221,7 +221,7 @@ through to the Neo4j driver configuration.
 
 ---
 
-### 9. Duplicate types: `GraphNode` vs `DbNode`
+### 9. Duplicate types: `GraphNode` vs `DbNode` - FIXED
 
 `GraphNode` (lib.rs:888-895) and `DbNode` (types.rs:7-13) have identical fields.
 The conversion is just `From` impl that copies fields 1:1.
@@ -230,6 +230,14 @@ The conversion is just `From` impl that copies fields 1:1.
 the `node_type` field, eliminating the duplicate type.
 
 **Impact:** DRY principle
+
+**Resolution:**
+- Added `Serialize` derive and `#[serde(rename = "type")]` to `DbNode.node_type` in `db/types.rs`
+- Removed `GraphNode` struct and `From<DbNode> for GraphNode` impl from `graph.rs`
+- Updated `FullGraph` to use `Vec<DbNode>` instead of `Vec<GraphNode>`
+- Updated all API handlers (`graph_nodes`, `graph_search`, `add_node`, etc.) to return `DbNode` directly
+- Updated `PathStep` in `api/types.rs` to use `DbNode`
+- Kept `GraphEdge` as it genuinely differs from `DbEdge` (subset of fields for API responses)
 
 ---
 

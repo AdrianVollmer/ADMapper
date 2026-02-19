@@ -10,34 +10,16 @@ use std::sync::Arc;
 // Graph Types
 // ============================================================================
 
-/// Graph node response format.
-#[derive(Debug, Clone, Serialize)]
-pub struct GraphNode {
-    pub id: String,
-    pub label: String,
-    #[serde(rename = "type")]
-    pub node_type: String,
-    pub properties: JsonValue,
-}
-
 /// Graph edge response format.
+///
+/// This is a subset of `DbEdge` used for API responses, excluding
+/// internal fields like `properties`, `source_type`, and `target_type`.
 #[derive(Debug, Clone, Serialize)]
 pub struct GraphEdge {
     pub source: String,
     pub target: String,
     #[serde(rename = "type")]
     pub edge_type: String,
-}
-
-impl From<DbNode> for GraphNode {
-    fn from(node: DbNode) -> Self {
-        GraphNode {
-            id: node.id,
-            label: node.label,
-            node_type: node.node_type,
-            properties: node.properties,
-        }
-    }
 }
 
 impl From<DbEdge> for GraphEdge {
@@ -53,7 +35,7 @@ impl From<DbEdge> for GraphEdge {
 /// Full graph response.
 #[derive(Debug, Clone, Serialize)]
 pub struct FullGraph {
-    pub nodes: Vec<GraphNode>,
+    pub nodes: Vec<DbNode>,
     pub edges: Vec<GraphEdge>,
 }
 
@@ -74,7 +56,7 @@ impl FullGraph {
         let edges = db.get_edges_between(node_ids)?;
 
         Ok(FullGraph {
-            nodes: nodes.into_iter().map(GraphNode::from).collect(),
+            nodes,
             edges: edges.into_iter().map(GraphEdge::from).collect(),
         })
     }
@@ -99,7 +81,7 @@ pub fn extract_graph_from_results(
         _ => return Ok(None),
     };
 
-    let mut nodes: Vec<GraphNode> = Vec::new();
+    let mut nodes: Vec<DbNode> = Vec::new();
     let mut raw_edges: Vec<JsonValue> = Vec::new();
     let mut node_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     // Map internal database IDs to object_ids for edge resolution
@@ -186,7 +168,7 @@ pub fn extract_graph_from_results(
             let additional_nodes = db.get_nodes_by_ids(&missing_ids)?;
             for node in additional_nodes {
                 if node_ids.insert(node.id.clone()) {
-                    nodes.push(GraphNode::from(node));
+                    nodes.push(node);
                 }
             }
         }
@@ -203,8 +185,8 @@ pub fn extract_graph_from_results(
     FullGraph::from_node_ids(db, &ids).map(Some)
 }
 
-/// Extract a GraphNode from a JSON node object.
-fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
+/// Extract a DbNode from a JSON node object.
+fn extract_node_from_json(value: &JsonValue) -> Option<DbNode> {
     let object_id = value
         .get("object_id")
         .and_then(|v| v.as_str())
@@ -254,7 +236,7 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
     // Extract properties - handle nested JSON string from CrustDB storage
     let properties = extract_nested_properties(value);
 
-    Some(GraphNode {
+    Some(DbNode {
         id: object_id,
         label,
         node_type,
