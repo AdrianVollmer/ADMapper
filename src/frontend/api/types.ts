@@ -164,8 +164,16 @@ export type Theme = "dark" | "light";
 /** Graph layout options */
 export type GraphLayout = "force" | "hierarchical" | "grid" | "circular";
 
+/** Force layout settings */
+export interface ForceLayoutSettings {
+  gravity: number;
+  scalingRatio: number;
+  adjustSizes: boolean;
+}
+
 /** Application settings */
 export interface Settings {
   theme: Theme;
   defaultGraphLayout: GraphLayout;
+  forceLayout?: ForceLayoutSettings;
 }

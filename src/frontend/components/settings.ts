@@ -4,20 +4,30 @@
  * Modal for configuring application settings:
  * - Theme (dark/light)
  * - Default graph layout (force/hierarchical)
+ * - Force layout parameters (gravity, spread, prevent overlap)
  */
 
 import { api } from "../api/client";
-import type { Settings, Theme, GraphLayout } from "../api/types";
+import type { Settings, Theme, GraphLayout, ForceLayoutSettings } from "../api/types";
 import { applyTheme } from "../utils/theme";
 import { showSuccess, showError } from "../utils/notifications";
+import { setUserForceSettings } from "../graph";
 
 /** Modal element */
 let modalEl: HTMLElement | null = null;
+
+/** Default force layout settings */
+const DEFAULT_FORCE_LAYOUT: ForceLayoutSettings = {
+  gravity: 0.5,
+  scalingRatio: 10,
+  adjustSizes: true,
+};
 
 /** Current settings (cached) */
 let currentSettings: Settings = {
   theme: "dark",
   defaultGraphLayout: "force",
+  forceLayout: DEFAULT_FORCE_LAYOUT,
 };
 
 /** Initialize the settings modal */
@@ -33,6 +43,10 @@ export async function applyInitialSettings(): Promise<void> {
   try {
     currentSettings = await api.get<Settings>("/api/settings");
     applyTheme(currentSettings.theme);
+    // Apply force layout settings
+    if (currentSettings.forceLayout) {
+      setUserForceSettings(currentSettings.forceLayout);
+    }
   } catch {
     // Use defaults if settings can't be loaded
     applyTheme("dark");
@@ -199,6 +213,39 @@ function createModal(): void {
               </label>
             </div>
           </div>
+
+          <!-- Force Layout Settings -->
+          <div class="form-group" id="force-layout-settings">
+            <label class="form-label">Force Layout Settings</label>
+            <p class="form-help">Fine-tune how force-directed layout spreads nodes</p>
+
+            <div class="settings-slider-group">
+              <div class="settings-slider">
+                <div class="settings-slider-header">
+                  <span class="settings-slider-label">Gravity</span>
+                  <span class="settings-slider-value" id="gravity-value">0.5</span>
+                </div>
+                <input type="range" name="gravity" id="gravity-slider"
+                       min="0.1" max="2" step="0.1" value="0.5">
+                <p class="settings-slider-help">How strongly nodes pull toward center (lower = more spread)</p>
+              </div>
+
+              <div class="settings-slider">
+                <div class="settings-slider-header">
+                  <span class="settings-slider-label">Spread</span>
+                  <span class="settings-slider-value" id="spread-value">10</span>
+                </div>
+                <input type="range" name="scalingRatio" id="spread-slider"
+                       min="1" max="50" step="1" value="10">
+                <p class="settings-slider-help">How far apart nodes spread (higher = more spacing)</p>
+              </div>
+
+              <label class="settings-checkbox">
+                <input type="checkbox" name="adjustSizes" id="adjust-sizes-checkbox" checked>
+                <span class="settings-checkbox-label">Prevent node overlap</span>
+              </label>
+            </div>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
@@ -210,6 +257,23 @@ function createModal(): void {
 
   modalEl.addEventListener("click", handleClick);
   document.body.appendChild(modalEl);
+
+  // Add slider input listeners to update display values
+  const gravitySlider = modalEl.querySelector("#gravity-slider") as HTMLInputElement | null;
+  const gravityValue = modalEl.querySelector("#gravity-value") as HTMLElement | null;
+  if (gravitySlider && gravityValue) {
+    gravitySlider.addEventListener("input", () => {
+      gravityValue.textContent = gravitySlider.value;
+    });
+  }
+
+  const spreadSlider = modalEl.querySelector("#spread-slider") as HTMLInputElement | null;
+  const spreadValue = modalEl.querySelector("#spread-value") as HTMLElement | null;
+  if (spreadSlider && spreadValue) {
+    spreadSlider.addEventListener("input", () => {
+      spreadValue.textContent = spreadSlider.value;
+    });
+  }
 
   // Close on Escape
   document.addEventListener("keydown", (e) => {
@@ -234,6 +298,28 @@ function populateForm(): void {
     `input[name="layout"][value="${currentSettings.defaultGraphLayout}"]`
   ) as HTMLInputElement | null;
   if (layoutRadio) layoutRadio.checked = true;
+
+  // Force layout settings
+  const forceLayout = currentSettings.forceLayout ?? DEFAULT_FORCE_LAYOUT;
+
+  const gravitySlider = modalEl.querySelector("#gravity-slider") as HTMLInputElement | null;
+  const gravityValue = modalEl.querySelector("#gravity-value") as HTMLElement | null;
+  if (gravitySlider && gravityValue) {
+    gravitySlider.value = String(forceLayout.gravity);
+    gravityValue.textContent = String(forceLayout.gravity);
+  }
+
+  const spreadSlider = modalEl.querySelector("#spread-slider") as HTMLInputElement | null;
+  const spreadValue = modalEl.querySelector("#spread-value") as HTMLElement | null;
+  if (spreadSlider && spreadValue) {
+    spreadSlider.value = String(forceLayout.scalingRatio);
+    spreadValue.textContent = String(forceLayout.scalingRatio);
+  }
+
+  const adjustSizesCheckbox = modalEl.querySelector("#adjust-sizes-checkbox") as HTMLInputElement | null;
+  if (adjustSizesCheckbox) {
+    adjustSizesCheckbox.checked = forceLayout.adjustSizes;
+  }
 }
 
 /** Handle click events */
@@ -269,10 +355,20 @@ async function saveSettings(): Promise<void> {
   // Get form values
   const themeRadio = modalEl.querySelector('input[name="theme"]:checked') as HTMLInputElement | null;
   const layoutRadio = modalEl.querySelector('input[name="layout"]:checked') as HTMLInputElement | null;
+  const gravitySlider = modalEl.querySelector("#gravity-slider") as HTMLInputElement | null;
+  const spreadSlider = modalEl.querySelector("#spread-slider") as HTMLInputElement | null;
+  const adjustSizesCheckbox = modalEl.querySelector("#adjust-sizes-checkbox") as HTMLInputElement | null;
+
+  const forceLayout: ForceLayoutSettings = {
+    gravity: gravitySlider ? parseFloat(gravitySlider.value) : DEFAULT_FORCE_LAYOUT.gravity,
+    scalingRatio: spreadSlider ? parseFloat(spreadSlider.value) : DEFAULT_FORCE_LAYOUT.scalingRatio,
+    adjustSizes: adjustSizesCheckbox ? adjustSizesCheckbox.checked : DEFAULT_FORCE_LAYOUT.adjustSizes,
+  };
 
   const newSettings: Settings = {
     theme: (themeRadio?.value as Theme) || "dark",
     defaultGraphLayout: (layoutRadio?.value as GraphLayout) || "force",
+    forceLayout,
   };
 
   try {
@@ -280,6 +376,9 @@ async function saveSettings(): Promise<void> {
 
     // Apply theme immediately
     applyTheme(currentSettings.theme);
+
+    // Apply force layout settings immediately
+    setUserForceSettings(currentSettings.forceLayout ?? null);
 
     showSuccess("Settings saved");
     closeModal();

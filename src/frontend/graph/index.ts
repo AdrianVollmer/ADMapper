@@ -54,7 +54,13 @@ export { createRenderer } from "./ADGraphRenderer";
 export type { RendererOptions, ADGraphRenderer } from "./ADGraphRenderer";
 
 // Layout
-export { applyLayout, applyLayoutAsync, normalizePositions } from "./layout";
+export {
+  applyLayout,
+  applyLayoutAsync,
+  normalizePositions,
+  setUserForceSettings,
+  getUserForceSettings,
+} from "./layout";
 export type {
   LayoutType,
   LayoutOptions,
@@ -62,6 +68,7 @@ export type {
   HierarchicalSettings,
   GridSettings,
   CircularSettings,
+  UserForceSettings,
 } from "./layout";
 
 // Theme

@@ -1546,6 +1546,67 @@
   .settings-option input:checked + .settings-option-content .settings-option-label {
     @apply text-blue-300;
   }
+
+  /* Force Layout Settings */
+  .settings-slider-group {
+    @apply space-y-4 mt-3;
+  }
+
+  .settings-slider {
+    @apply space-y-1;
+  }
+
+  .settings-slider-header {
+    @apply flex justify-between items-center;
+  }
+
+  .settings-slider-label {
+    @apply text-sm text-gray-300;
+  }
+
+  .settings-slider-value {
+    @apply text-sm font-mono text-blue-400 bg-gray-800 px-2 py-0.5 rounded;
+  }
+
+  .settings-slider input[type="range"] {
+    @apply w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer;
+  }
+
+  .settings-slider input[type="range"]::-webkit-slider-thumb {
+    @apply appearance-none w-4 h-4 bg-blue-500 rounded-full cursor-pointer
+           hover:bg-blue-400 transition-colors;
+  }
+
+  .settings-slider input[type="range"]::-moz-range-thumb {
+    @apply w-4 h-4 bg-blue-500 rounded-full cursor-pointer border-0
+           hover:bg-blue-400 transition-colors;
+  }
+
+  .settings-slider input[type="range"]:focus {
+    @apply outline-none;
+  }
+
+  .settings-slider input[type="range"]:focus::-webkit-slider-thumb {
+    @apply ring-2 ring-blue-400 ring-offset-2 ring-offset-gray-900;
+  }
+
+  .settings-slider-help {
+    @apply text-xs text-gray-500 mt-1;
+  }
+
+  .settings-checkbox {
+    @apply flex items-center gap-3 cursor-pointer py-2;
+  }
+
+  .settings-checkbox input[type="checkbox"] {
+    @apply w-5 h-5 rounded border-gray-600 bg-gray-700
+           text-blue-500 focus:ring-blue-500 focus:ring-offset-0 focus:ring-offset-gray-800
+           cursor-pointer;
+  }
+
+  .settings-checkbox-label {
+    @apply text-sm text-gray-300;
+  }
 }
 
 /* ============================================
@@ -1824,6 +1885,31 @@ body[data-theme="light"] {
 }
 
 [data-theme="light"] .settings-option-label {
+  @apply text-gray-700;
+}
+
+/* Force layout settings light theme */
+[data-theme="light"] .settings-slider-label {
+  @apply text-gray-700;
+}
+
+[data-theme="light"] .settings-slider-value {
+  @apply bg-gray-200 text-blue-600;
+}
+
+[data-theme="light"] .settings-slider input[type="range"] {
+  @apply bg-gray-300;
+}
+
+[data-theme="light"] .settings-slider-help {
+  @apply text-gray-500;
+}
+
+[data-theme="light"] .settings-checkbox input[type="checkbox"] {
+  @apply border-gray-400 bg-white;
+}
+
+[data-theme="light"] .settings-checkbox-label {
   @apply text-gray-700;
 }
 

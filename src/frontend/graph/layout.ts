@@ -9,6 +9,7 @@
  */
 
 import forceAtlas2 from "graphology-layout-forceatlas2";
+import noverlap from "graphology-layout-noverlap";
 import type { ADGraphType } from "./ADGraph";
 
 /** Available layout algorithms */
@@ -77,16 +78,36 @@ export interface ForceAtlas2Settings {
 
 /** Default layout settings optimized for AD graphs */
 const DEFAULT_FORCE_SETTINGS: ForceAtlas2Settings = {
-  gravity: 1,
-  scalingRatio: 2,
+  gravity: 0.5,
+  scalingRatio: 10,
   slowDown: 1,
   barnesHutOptimize: true,
   barnesHutTheta: 0.5,
-  adjustSizes: false,
+  adjustSizes: true,
   edgeWeightInfluence: 1,
-  linLogMode: false,
+  linLogMode: true, // Better for graphs with hub nodes (common in AD)
   strongGravityMode: false,
 };
+
+/** User-configurable force layout settings */
+export interface UserForceSettings {
+  gravity: number;
+  scalingRatio: number;
+  adjustSizes: boolean;
+}
+
+/** Current user force settings (loaded from settings API) */
+let userForceSettings: UserForceSettings | null = null;
+
+/** Set user force settings (called from settings component) */
+export function setUserForceSettings(settings: UserForceSettings | null): void {
+  userForceSettings = settings;
+}
+
+/** Get current user force settings */
+export function getUserForceSettings(): UserForceSettings | null {
+  return userForceSettings;
+}
 
 const DEFAULT_HIERARCHICAL_SETTINGS: HierarchicalSettings = {
   layerSpacing: 200,
@@ -106,10 +127,13 @@ const DEFAULT_CIRCULAR_SETTINGS: CircularSettings = {
 
 /** Default iterations based on graph size */
 function getDefaultIterations(nodeCount: number): number {
-  if (nodeCount < 100) return 100;
-  if (nodeCount < 1000) return 50;
-  if (nodeCount < 5000) return 30;
-  return 20; // Large graphs: fewer iterations, rely on Barnes-Hut
+  // ForceAtlas2 needs many iterations to converge properly
+  if (nodeCount < 50) return 500;
+  if (nodeCount < 200) return 400;
+  if (nodeCount < 500) return 300;
+  if (nodeCount < 1000) return 200;
+  if (nodeCount < 5000) return 150;
+  return 100; // Large graphs: fewer iterations, rely on Barnes-Hut
 }
 
 /**
@@ -143,11 +167,35 @@ export function applyLayout(graph: ADGraphType, options: LayoutOptions = {}): vo
 function applyForceLayout(graph: ADGraphType, options: LayoutOptions): void {
   const nodeCount = graph.order;
   const iterations = options.iterations ?? getDefaultIterations(nodeCount);
-  const settings = { ...DEFAULT_FORCE_SETTINGS, ...options.settings };
 
+  // Merge defaults with user settings (if any) and explicit options
+  let settings = { ...DEFAULT_FORCE_SETTINGS };
+  if (userForceSettings) {
+    settings = {
+      ...settings,
+      gravity: userForceSettings.gravity,
+      scalingRatio: userForceSettings.scalingRatio,
+      adjustSizes: userForceSettings.adjustSizes,
+    };
+  }
+  if (options.settings) {
+    settings = { ...settings, ...options.settings };
+  }
+
+  // Run ForceAtlas2 to compute initial positions
   forceAtlas2.assign(graph, {
     iterations,
     settings,
+  });
+
+  // Post-process with noverlap to eliminate any remaining overlaps
+  // This spreads out nodes that are still too close together
+  noverlap.assign(graph, {
+    maxIterations: 50,
+    settings: {
+      ratio: 1.5, // How much to expand the layout to remove overlaps
+      margin: 10, // Minimum margin between nodes
+    },
   });
 }
 
@@ -772,9 +820,22 @@ export async function applyLayoutAsync(
 
   // Force layout: run in chunks
   const totalIterations = options.iterations ?? getDefaultIterations(nodeCount);
-  const settings = { ...DEFAULT_FORCE_SETTINGS, ...options.settings };
 
-  const chunkSize = 10;
+  // Merge defaults with user settings (if any) and explicit options
+  let settings = { ...DEFAULT_FORCE_SETTINGS };
+  if (userForceSettings) {
+    settings = {
+      ...settings,
+      gravity: userForceSettings.gravity,
+      scalingRatio: userForceSettings.scalingRatio,
+      adjustSizes: userForceSettings.adjustSizes,
+    };
+  }
+  if (options.settings) {
+    settings = { ...settings, ...options.settings };
+  }
+
+  const chunkSize = 20;
   let completed = 0;
 
   while (completed < totalIterations) {
@@ -789,11 +850,25 @@ export async function applyLayoutAsync(
     completed += iterations;
 
     if (onProgress) {
-      onProgress(completed / totalIterations);
+      // Reserve last 5% for noverlap
+      onProgress((completed / totalIterations) * 0.95);
     }
 
     // Yield to allow UI updates
     await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  // Post-process with noverlap to eliminate any remaining overlaps
+  noverlap.assign(graph, {
+    maxIterations: 50,
+    settings: {
+      ratio: 1.5,
+      margin: 10,
+    },
+  });
+
+  if (onProgress) {
+    onProgress(1);
   }
 }
 
