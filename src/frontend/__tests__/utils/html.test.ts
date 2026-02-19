@@ -22,10 +22,12 @@ describe("escapeHtml", () => {
     expect(escapeHtml("foo & bar")).toBe("foo &amp; bar");
   });
 
-  it("escapes quotes", () => {
-    // Note: textContent/innerHTML escaping behavior varies
-    // The implementation uses textContent which escapes < > &
-    expect(escapeHtml('say "hello"')).toBe('say "hello"');
+  it("escapes double quotes", () => {
+    expect(escapeHtml('say "hello"')).toBe("say &quot;hello&quot;");
+  });
+
+  it("escapes single quotes", () => {
+    expect(escapeHtml("it's")).toBe("it&#39;s");
   });
 
   it("escapes nested HTML tags", () => {

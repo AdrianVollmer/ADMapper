@@ -97,7 +97,7 @@ components.
 **Fix:** Either centralize state in `main.ts` appState, or create a minimal
 reactive store with an observer pattern for UI updates.
 
-### 5. escapeHtml creates DOM elements on every call
+### 5. ~~escapeHtml creates DOM elements on every call~~ DONE
 
 **File:** `utils/html.ts:9-13`
 
