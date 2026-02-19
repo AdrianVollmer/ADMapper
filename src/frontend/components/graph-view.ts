@@ -146,10 +146,34 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
+/** Thresholds for large graph warning */
+const LARGE_GRAPH_NODE_THRESHOLD = 1000;
+const LARGE_GRAPH_EDGE_THRESHOLD = 500;
+
 /** Load graph data and render */
 export function loadGraphData(data: RawADGraph): void {
   const container = document.getElementById("graph-canvas");
   if (!container) return;
+
+  // Check for large graphs and ask for confirmation
+  const nodeCount = data.nodes.length;
+  const edgeCount = data.edges.length;
+
+  if (nodeCount > LARGE_GRAPH_NODE_THRESHOLD || edgeCount > LARGE_GRAPH_EDGE_THRESHOLD) {
+    const confirmed = confirm(
+      `This graph is very large (${nodeCount.toLocaleString()} nodes, ${edgeCount.toLocaleString()} edges) ` +
+        `and may cause performance issues or browser slowdown.\n\n` +
+        `Do you want to render it anyway?`
+    );
+    if (!confirmed) {
+      // Update stats to show what was skipped
+      const statsEl = document.getElementById("graph-stats");
+      if (statsEl) {
+        statsEl.textContent = `Skipped: ${nodeCount.toLocaleString()} nodes, ${edgeCount.toLocaleString()} edges`;
+      }
+      return;
+    }
+  }
 
   // Clean up existing renderer
   if (renderer) {
