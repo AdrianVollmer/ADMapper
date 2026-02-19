@@ -20,18 +20,20 @@ The code appears written by someone who understands Rust, database internals, an
 
 ## Top 10 Issues to Improve Code Quality
 
-### 1. Monolithic executor.rs (2700+ lines)
+### 1. ~~Monolithic executor.rs (2700+ lines)~~ ✅ FIXED
 
-**Location:** `src/crustdb/src/query/executor.rs`
+**Location:** `src/crustdb/src/query/executor.rs` (now `src/crustdb/src/query/executor/`)
 
-The executor handles too many concerns: pattern matching, expression evaluation, aggregation, BFS traversal, mutations. This makes testing individual features difficult and increases cognitive load.
+~~The executor handles too many concerns: pattern matching, expression evaluation, aggregation, BFS traversal, mutations. This makes testing individual features difficult and increases cognitive load.~~
 
-**Recommendation:** Split into submodules:
-- `executor/pattern.rs` - Pattern matching (single-node, single-hop, multi-hop, variable-length)
+**Fixed:** Split into submodules:
+- `executor/mod.rs` - Main entry point, `execute()` function, core types (`Binding`, `Path`, `PathConstraints`)
+- `executor/pattern.rs` - Pattern matching (single-node, single-hop, multi-hop, variable-length, shortest path)
 - `executor/eval.rs` - Expression evaluation and comparison functions
 - `executor/aggregate.rs` - Aggregate function evaluation
 - `executor/mutation.rs` - SET and DELETE execution
-- `executor/shortest_path.rs` - BFS/Dijkstra path finding
+- `executor/create.rs` - CREATE statement execution
+- `executor/result.rs` - Query result building from bindings
 
 ---
 
