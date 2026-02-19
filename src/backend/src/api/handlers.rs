@@ -6,7 +6,7 @@ use crate::api::types::{
     PathsToDaParams, PathsToDaResponse, QueryActivity, QueryHistoryEntry, QueryHistoryResponse,
     QueryProgress, QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
 };
-use crate::db::{DbEdge, DbError, DbNode, QueryLanguage};
+use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, QueryLanguage, Result as DbResult};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
 use crate::import::{BloodHoundImporter, ImportProgress};
 use crate::state::{AppState, ImportJob, RunningQuery};
@@ -28,6 +28,25 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn};
+
+// ============================================================================
+// Database Helper
+// ============================================================================
+
+/// Run a blocking database operation in a spawn_blocking task.
+///
+/// This helper reduces boilerplate for the common pattern of running
+/// synchronous database operations in an async context.
+async fn run_db<T, F>(db: Arc<dyn DatabaseBackend>, f: F) -> Result<T, ApiError>
+where
+    F: FnOnce(&dyn DatabaseBackend) -> DbResult<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || f(db.as_ref()))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {e}")))?
+        .map_err(Into::into)
+}
 
 // ============================================================================
 // Health Check
@@ -294,11 +313,7 @@ pub async fn import_progress(
 #[instrument(skip(state))]
 pub async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue>, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    let (node_count, edge_count) = tokio::task::spawn_blocking(move || db.get_stats())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+    let (node_count, edge_count) = run_db(db, |db| db.get_stats()).await?;
 
     debug!(
         nodes = node_count,
@@ -317,11 +332,7 @@ pub async fn graph_detailed_stats(
     State(state): State<AppState>,
 ) -> Result<Json<crate::db::DetailedStats>, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    let stats = tokio::task::spawn_blocking(move || db.get_detailed_stats())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+    let stats = run_db(db, |db| db.get_detailed_stats()).await?;
 
     debug!(
         nodes = stats.total_nodes,
@@ -337,12 +348,7 @@ pub async fn graph_detailed_stats(
 #[instrument(skip(state))]
 pub async fn graph_clear(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    tokio::task::spawn_blocking(move || db.clear())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
-
+    run_db(db, |db| db.clear()).await?;
     info!("Database cleared");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -354,12 +360,7 @@ pub async fn graph_clear(State(state): State<AppState>) -> Result<StatusCode, Ap
 /// Get all graph nodes.
 pub async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<GraphNode>>, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    let nodes = tokio::task::spawn_blocking(move || db.get_all_nodes())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
-
+    let nodes: Vec<DbNode> = run_db(db, |db| db.get_all_nodes()).await?;
     let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
     Ok(Json(result))
 }
@@ -367,12 +368,7 @@ pub async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<Graph
 /// Get all graph edges.
 pub async fn graph_edges(State(state): State<AppState>) -> Result<Json<Vec<GraphEdge>>, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    let edges = tokio::task::spawn_blocking(move || db.get_all_edges())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
-
+    let edges: Vec<DbEdge> = run_db(db, |db| db.get_all_edges()).await?;
     let result: Vec<GraphEdge> = edges.into_iter().map(GraphEdge::from).collect();
     Ok(Json(result))
 }
@@ -380,15 +376,12 @@ pub async fn graph_edges(State(state): State<AppState>) -> Result<Json<Vec<Graph
 /// Get full graph (nodes and edges).
 pub async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB calls in spawn_blocking to not block the async runtime
-    let (nodes, edges) = tokio::task::spawn_blocking(move || {
+    let (nodes, edges): (Vec<DbNode>, Vec<DbEdge>) = run_db(db, |db| {
         let nodes = db.get_all_nodes()?;
         let edges = db.get_all_edges()?;
-        Ok::<_, crate::db::DbError>((nodes, edges))
+        Ok((nodes, edges))
     })
-    .await
-    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+    .await?;
 
     let result = FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
@@ -409,20 +402,14 @@ pub async fn graph_search(
     }
 
     let db = state.require_db()?;
-
-    // Track query activity
     state.start_sync_query();
 
-    // Run blocking DB call in spawn_blocking to not block the async runtime
     let query = params.q.clone();
     let limit = params.limit;
-    let nodes_result = tokio::task::spawn_blocking(move || db.search_nodes(&query, limit))
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
+    let nodes_result = run_db(db, move |db| db.search_nodes(&query, limit)).await;
 
     state.end_sync_query();
-
-    let nodes = nodes_result?;
+    let nodes: Vec<DbNode> = nodes_result?;
     let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
 
     debug!(query = %params.q, results = result.len(), "Search complete");
@@ -437,13 +424,9 @@ pub async fn node_counts(
     Path(node_id): Path<String>,
 ) -> Result<Json<NodeCounts>, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
     let node_id_clone = node_id.clone();
     let (incoming, outgoing, admin_to, member_of, members) =
-        tokio::task::spawn_blocking(move || db.get_node_edge_counts(&node_id_clone))
-            .await
-            .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+        run_db(db, move |db| db.get_node_edge_counts(&node_id_clone)).await?;
 
     debug!(
         node_id = %node_id,
@@ -474,21 +457,16 @@ pub async fn node_connections(
     let db = state.require_db()?;
     info!(node_id = %node_id, direction = %direction, "Loading node connections");
 
-    // Track query activity
     state.start_sync_query();
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
     let node_id_clone = node_id.clone();
     let direction_clone = direction.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_db(db, move |db| {
         db.get_node_connections(&node_id_clone, &direction_clone)
     })
-    .await
-    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
-
+    .await;
     state.end_sync_query();
 
-    let (nodes, edges) = result?;
+    let (nodes, edges): (Vec<DbNode>, Vec<DbEdge>) = result?;
 
     Ok(Json(FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
@@ -506,9 +484,8 @@ pub async fn node_status(
     let db = state.require_db()?;
     info!(node_id = %node_id, "Checking node security status");
 
-    // Run all blocking DB calls in spawn_blocking to not block the async runtime
     let node_id_clone = node_id.clone();
-    let status = tokio::task::spawn_blocking(move || {
+    let status = run_db(db, move |db| {
         // Get the node to check its properties
         let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
         let node = nodes.first();
@@ -573,7 +550,7 @@ pub async fn node_status(
                 }
             };
 
-        Ok::<_, crate::db::DbError>(NodeStatus {
+        Ok(NodeStatus {
             owned,
             is_enterprise_admin,
             is_domain_admin,
@@ -582,8 +559,7 @@ pub async fn node_status(
             path_length,
         })
     })
-    .await
-    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+    .await?;
 
     Ok(Json(status))
 }
@@ -600,14 +576,11 @@ pub async fn graph_path(
     Query(params): Query<PathParams>,
 ) -> Result<Json<PathResponse>, ApiError> {
     let db = state.require_db()?;
-
-    // Track query activity
     state.start_sync_query();
 
-    // Run all blocking DB work in spawn_blocking
     let from_param = params.from.clone();
     let to_param = params.to.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_db(db, move |db| {
         // Resolve identifiers to object IDs (supports both IDs and labels)
         let from_id = match db.resolve_node_identifier(&from_param)? {
             Some(id) => id,
@@ -686,11 +659,9 @@ pub async fn graph_path(
             }
         }
     })
-    .await
-    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
+    .await;
 
     state.end_sync_query();
-
     Ok(Json(result?))
 }
 
@@ -715,12 +686,8 @@ pub async fn paths_to_domain_admins(
     debug!(exclude = ?exclude_types, "Finding paths to Domain Admins");
 
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    let results =
-        tokio::task::spawn_blocking(move || db.find_paths_to_domain_admins(&exclude_types))
-            .await
-            .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+    let results: Vec<(String, String, String, usize)> =
+        run_db(db, move |db| db.find_paths_to_domain_admins(&exclude_types)).await?;
 
     let entries: Vec<PathsToDaEntry> = results
         .into_iter()
@@ -748,11 +715,7 @@ pub async fn graph_insights(
     State(state): State<AppState>,
 ) -> Result<Json<crate::db::SecurityInsights>, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    let insights = tokio::task::spawn_blocking(move || db.get_security_insights())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+    let insights = run_db(db, |db| db.get_security_insights()).await?;
 
     info!(
         effective_das = insights.effective_da_count,
@@ -769,12 +732,7 @@ pub async fn graph_edge_types(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<String>>, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    let types = tokio::task::spawn_blocking(move || db.get_edge_types())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
-
+    let types: Vec<String> = run_db(db, |db| db.get_edge_types()).await?;
     debug!(count = types.len(), "Edge types retrieved");
     Ok(Json(types))
 }
@@ -785,12 +743,7 @@ pub async fn graph_node_types(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<String>>, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    let types = tokio::task::spawn_blocking(move || db.get_node_types())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
-
+    let types: Vec<String> = run_db(db, |db| db.get_node_types()).await?;
     debug!(count = types.len(), "Node types retrieved");
     Ok(Json(types))
 }
@@ -828,12 +781,7 @@ pub async fn add_node(
     };
 
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    tokio::task::spawn_blocking(move || db.insert_node(node))
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
-
+    run_db(db, move |db| db.insert_node(node)).await?;
     info!(id = %body.id, label = %body.label, node_type = %body.node_type, "Node added");
 
     Ok(Json(GraphNode {
@@ -878,12 +826,7 @@ pub async fn add_edge(
     };
 
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    tokio::task::spawn_blocking(move || db.insert_edge(edge))
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
-
+    run_db(db, move |db| db.insert_edge(edge)).await?;
     info!(
         source = %body.source,
         target = %body.target,
@@ -1256,11 +1199,8 @@ pub async fn get_query_history(
     let per_page = params.per_page.clamp(1, 100);
     let offset = (page - 1) * per_page;
 
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    let (history, total) =
-        tokio::task::spawn_blocking(move || db.get_query_history(per_page, offset))
-            .await
-            .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+    let (history, total): (Vec<_>, usize) =
+        run_db(db, move |db| db.get_query_history(per_page, offset)).await?;
 
     let entries: Vec<QueryHistoryEntry> = history
         .into_iter()
@@ -1323,7 +1263,6 @@ pub async fn add_query_history(
         _ => QueryStatus::Completed,
     };
 
-    // Run blocking DB call in spawn_blocking to not block the async runtime
     let id_clone = id.clone();
     let name = body.name.clone();
     let query = body.query.clone();
@@ -1331,7 +1270,7 @@ pub async fn add_query_history(
     let duration_ms = body.duration_ms;
     let error = body.error.clone();
     let status_str_owned = status_str.to_string();
-    tokio::task::spawn_blocking(move || {
+    run_db(db, move |db| {
         db.add_query_history(
             &id_clone,
             &name,
@@ -1344,8 +1283,7 @@ pub async fn add_query_history(
             error.as_deref(),
         )
     })
-    .await
-    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+    .await?;
 
     info!(id = %id, name = %body.name, "Query added to history");
     Ok(Json(QueryHistoryEntry {
@@ -1368,13 +1306,8 @@ pub async fn delete_query_history(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
     let id_clone = id.clone();
-    tokio::task::spawn_blocking(move || db.delete_query_history(&id_clone))
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
-
+    run_db(db, move |db| db.delete_query_history(&id_clone)).await?;
     info!(id = %id, "Query deleted from history");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1383,12 +1316,7 @@ pub async fn delete_query_history(
 #[instrument(skip(state))]
 pub async fn clear_query_history(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
     let db = state.require_db()?;
-
-    // Run blocking DB call in spawn_blocking to not block the async runtime
-    tokio::task::spawn_blocking(move || db.clear_query_history())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
-
+    run_db(db, |db| db.clear_query_history()).await?;
     info!("Query history cleared");
     Ok(StatusCode::NO_CONTENT)
 }

@@ -39,7 +39,7 @@ streaming, and graph extraction logic all mixed together.
 
 ---
 
-### 2. Repeated `spawn_blocking` boilerplate
+### 2. Repeated `spawn_blocking` boilerplate - FIXED
 
 Nearly every API handler repeats the same pattern:
 
@@ -66,6 +66,11 @@ where
 ```
 
 **Impact:** DRY principle, maintainability
+
+**Resolution:** Added `run_db` helper function to `api/handlers.rs` and refactored
+~20 handler functions to use it, reducing boilerplate from 3-4 lines per call to 1 line.
+The remaining `spawn_blocking` calls (in `import_bloodhound` and `graph_query`) are
+intentionally different as they spawn long-running tasks with complex state management.
 
 ---
 
