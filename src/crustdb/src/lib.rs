@@ -166,6 +166,18 @@ impl Database {
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.get_node_edges_by_object_id(object_id)
     }
+
+    /// Get counts for all node labels in a single efficient query.
+    ///
+    /// Returns a HashMap of label name to count.
+    /// This is much faster than running separate Cypher COUNT queries for each label.
+    pub fn get_label_counts(&self) -> Result<std::collections::HashMap<String, usize>> {
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.get_label_counts()
+    }
 }
 
 /// Database statistics.

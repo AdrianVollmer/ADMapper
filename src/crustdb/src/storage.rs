@@ -942,6 +942,29 @@ impl SqliteStorage {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(types)
     }
+
+    /// Get counts for all node labels in a single query.
+    /// Returns a HashMap of label name to count.
+    pub fn get_label_counts(&self) -> Result<std::collections::HashMap<String, usize>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT nl.name, COUNT(*) as cnt
+             FROM node_labels nl
+             JOIN node_label_map nlm ON nl.id = nlm.label_id
+             GROUP BY nl.id, nl.name",
+        )?;
+
+        let mut counts = std::collections::HashMap::new();
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+        })?;
+
+        for row in rows {
+            let (label, count) = row?;
+            counts.insert(label, count);
+        }
+
+        Ok(counts)
+    }
 }
 
 #[cfg(test)]
@@ -1168,6 +1191,38 @@ mod tests {
 
         let types = storage.get_all_edge_types().unwrap();
         assert_eq!(types, vec!["ACTED_IN", "DIRECTED"]);
+    }
+
+    #[test]
+    fn test_get_label_counts() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Insert nodes with various labels
+        storage
+            .insert_node(
+                &["Person".to_string()],
+                &serde_json::json!({"name": "Alice"}),
+            )
+            .unwrap();
+        storage
+            .insert_node(&["Person".to_string()], &serde_json::json!({"name": "Bob"}))
+            .unwrap();
+        storage
+            .insert_node(
+                &["Company".to_string()],
+                &serde_json::json!({"name": "Acme"}),
+            )
+            .unwrap();
+        storage
+            .insert_node(&["User".to_string()], &serde_json::json!({"name": "User1"}))
+            .unwrap();
+
+        let counts = storage.get_label_counts().unwrap();
+
+        assert_eq!(counts.get("Person"), Some(&2));
+        assert_eq!(counts.get("Company"), Some(&1));
+        assert_eq!(counts.get("User"), Some(&1));
+        assert_eq!(counts.get("Unknown"), None);
     }
 
     #[test]
