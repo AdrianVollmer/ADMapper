@@ -9,6 +9,7 @@ use crate::api::types::{
 use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, QueryLanguage, Result as DbResult};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge};
 use crate::import::{BloodHoundImporter, ImportProgress};
+use crate::settings::{self, Settings};
 use crate::state::{AppState, ImportJob, RunningQuery};
 use axum::{
     extract::{Multipart, Path, Query, State},
@@ -1321,4 +1322,41 @@ pub async fn clear_query_history(State(state): State<AppState>) -> Result<Status
     run_db(db, |db| db.clear_query_history()).await?;
     info!("Query history cleared");
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ============================================================================
+// Settings Endpoints
+// ============================================================================
+
+/// Get current application settings.
+pub async fn get_settings() -> Json<Settings> {
+    let settings = settings::load();
+    debug!(theme = %settings.theme, layout = %settings.default_graph_layout, "Settings loaded");
+    Json(settings)
+}
+
+/// Update application settings.
+#[instrument(skip(body))]
+pub async fn update_settings(Json(body): Json<Settings>) -> Result<Json<Settings>, ApiError> {
+    // Validate theme
+    if body.theme != "dark" && body.theme != "light" {
+        return Err(ApiError::BadRequest(format!(
+            "Invalid theme: {}. Must be 'dark' or 'light'",
+            body.theme
+        )));
+    }
+
+    // Validate layout
+    if body.default_graph_layout != "force" && body.default_graph_layout != "hierarchical" {
+        return Err(ApiError::BadRequest(format!(
+            "Invalid layout: {}. Must be 'force' or 'hierarchical'",
+            body.default_graph_layout
+        )));
+    }
+
+    settings::save(&body)
+        .map_err(|e| ApiError::Internal(format!("Failed to save settings: {e}")))?;
+
+    info!(theme = %body.theme, layout = %body.default_graph_layout, "Settings updated");
+    Ok(Json(body))
 }

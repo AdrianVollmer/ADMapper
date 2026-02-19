@@ -6,10 +6,11 @@ mod api;
 mod db;
 mod graph;
 mod import;
+mod settings;
 mod state;
 
 use api::handlers;
-use axum::{routing::get, routing::post, Router};
+use axum::{routing::get, routing::post, routing::put, Router};
 use std::net::SocketAddr;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -117,6 +118,9 @@ pub fn create_api_router(state: AppState) -> Router {
             "/api/query-history/clear",
             post(handlers::clear_query_history),
         )
+        // Settings
+        .route("/api/settings", get(handlers::get_settings))
+        .route("/api/settings", put(handlers::update_settings))
         .with_state(state)
 }
 

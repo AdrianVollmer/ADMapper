@@ -153,3 +153,19 @@ export interface ApiError {
   status: number;
   message: string;
 }
+
+// ============================================================================
+// Settings Types
+// ============================================================================
+
+/** Theme options */
+export type Theme = "dark" | "light";
+
+/** Graph layout options */
+export type GraphLayout = "force" | "hierarchical";
+
+/** Application settings */
+export interface Settings {
+  theme: Theme;
+  defaultGraphLayout: GraphLayout;
+}

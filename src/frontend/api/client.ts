@@ -74,6 +74,29 @@ export class ApiClient {
   }
 
   /**
+   * Make a PUT request with JSON body.
+   * @param url - The URL to put to
+   * @param body - The request body (will be JSON stringified)
+   * @param signal - Optional AbortSignal for cancellation
+   * @throws {ApiClientError} If the request fails or response is not OK
+   */
+  async put<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: signal ?? null,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  /**
    * Make a POST request with JSON body, expecting no content response.
    * @param url - The URL to post to
    * @param body - Optional request body (will be JSON stringified)

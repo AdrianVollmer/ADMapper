@@ -17,6 +17,7 @@ import { initDbConnect } from "./components/db-connect";
 import { initRunQuery } from "./components/run-query";
 import { initManageQueries } from "./components/manage-queries";
 import { initQueryActivity } from "./components/query-activity";
+import { initSettings, applyInitialSettings } from "./components/settings";
 
 /** Application state */
 export interface AppState {
@@ -50,7 +51,10 @@ function handleDocumentClick(e: MouseEvent): void {
 }
 
 /** Initialize the application */
-function init(): void {
+async function init(): Promise<void> {
+  // Apply settings (especially theme) before UI renders
+  await applyInitialSettings();
+
   // Initialize components (they no longer add document click listeners)
   initMenuBar();
   initSidebars();
@@ -65,6 +69,7 @@ function init(): void {
   initRunQuery();
   initManageQueries();
   initQueryActivity();
+  initSettings();
 
   // Single consolidated document click handler
   document.addEventListener("click", handleDocumentClick);

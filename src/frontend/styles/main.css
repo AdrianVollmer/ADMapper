@@ -1485,3 +1485,375 @@
     opacity: 0;
   }
 }
+
+/* ============================================
+   Settings Modal
+   ============================================ */
+@layer components {
+  .settings-form {
+    @apply space-y-6;
+  }
+
+  .settings-option-group {
+    @apply flex gap-3 mt-2;
+  }
+
+  .settings-option {
+    @apply flex-1 cursor-pointer;
+  }
+
+  .settings-option input[type="radio"] {
+    @apply sr-only;
+  }
+
+  .settings-option-content {
+    @apply flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-gray-600
+           bg-gray-800 transition-all;
+  }
+
+  .settings-option input:checked + .settings-option-content {
+    @apply border-blue-500 bg-blue-900/30;
+  }
+
+  .settings-option:hover .settings-option-content {
+    @apply border-gray-500;
+  }
+
+  .settings-option input:checked + .settings-option-content {
+    @apply border-blue-500;
+  }
+
+  .settings-option-icon {
+    @apply w-8 h-8 text-gray-400;
+  }
+
+  .settings-option input:checked + .settings-option-content .settings-option-icon {
+    @apply text-blue-400;
+  }
+
+  .settings-option-label {
+    @apply text-sm font-medium text-gray-300;
+  }
+
+  .settings-option input:checked + .settings-option-content .settings-option-label {
+    @apply text-blue-300;
+  }
+}
+
+/* ============================================
+   Light Theme
+   ============================================ */
+[data-theme="light"] {
+  --color-gray-850: #f3f4f6;
+}
+
+/* Override inline Tailwind classes on body */
+body[data-theme="light"] {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+/* Menu bar - override bg-gray-800 */
+[data-theme="light"] #menubar {
+  background-color: #f9fafb !important;
+  border-bottom-color: #d1d5db !important;
+}
+
+/* Graph container - override bg-gray-900 */
+[data-theme="light"] #graph-container {
+  background-color: #ffffff !important;
+}
+
+/* Menu bar */
+[data-theme="light"] .menu-trigger {
+  @apply text-gray-700 hover:bg-gray-200 hover:text-gray-900;
+}
+
+[data-theme="light"] .menu-trigger[aria-expanded="true"] {
+  @apply bg-gray-200 text-gray-900;
+}
+
+[data-theme="light"] .menu-dropdown {
+  @apply bg-white border-gray-300;
+}
+
+[data-theme="light"] .menu-option {
+  @apply text-gray-700 hover:bg-blue-500 hover:text-white;
+}
+
+[data-theme="light"] .menu-option kbd {
+  @apply text-gray-400;
+}
+
+[data-theme="light"] .menu-separator {
+  @apply border-gray-200;
+}
+
+[data-theme="light"] .menu-submenu-trigger {
+  @apply text-gray-700 hover:bg-blue-500 hover:text-white;
+}
+
+[data-theme="light"] .menu-submenu-dropdown {
+  @apply bg-white border-gray-300;
+}
+
+[data-theme="light"] .menu-radio {
+  @apply text-gray-700 hover:bg-blue-500 hover:text-white;
+}
+
+/* Connection status */
+[data-theme="light"] .connection-status {
+  @apply text-gray-600;
+}
+
+[data-theme="light"] .connection-status .status-text {
+  @apply text-gray-600;
+}
+
+[data-theme="light"] .connection-status.connected .status-text {
+  @apply text-gray-700;
+}
+
+/* Sidebars - override inline bg-gray-850 */
+[data-theme="light"] #nav-sidebar,
+[data-theme="light"] #detail-sidebar {
+  background-color: #f9fafb !important;
+  border-color: #d1d5db !important;
+}
+
+[data-theme="light"] .bg-gray-850 {
+  background-color: #f3f4f6;
+}
+
+[data-theme="light"] .sidebar-header {
+  @apply bg-gray-100 border-gray-200;
+}
+
+[data-theme="light"] .sidebar-title {
+  @apply text-gray-700;
+}
+
+[data-theme="light"] .sidebar-toggle {
+  @apply text-gray-500 hover:text-gray-900 hover:bg-gray-200;
+}
+
+[data-theme="light"] .sidebar-section {
+  @apply border-gray-200;
+}
+
+[data-theme="light"] .section-title {
+  @apply text-gray-500;
+}
+
+[data-theme="light"] .sidebar-expand-btn {
+  @apply bg-gray-100 border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-200;
+}
+
+/* Search */
+[data-theme="light"] .search-input {
+  @apply bg-white border-gray-300 text-gray-900 placeholder-gray-400;
+}
+
+[data-theme="light"] .search-results {
+  @apply bg-white border-gray-300;
+}
+
+[data-theme="light"] .search-results .search-result-item {
+  @apply hover:bg-gray-100;
+}
+
+[data-theme="light"] .search-results .search-result-item .node-name {
+  @apply text-gray-900;
+}
+
+/* Query tree */
+[data-theme="light"] .query-category-header {
+  @apply text-gray-700 hover:bg-gray-200;
+}
+
+[data-theme="light"] .query-item {
+  @apply text-gray-600 hover:bg-gray-200 hover:text-gray-900;
+}
+
+[data-theme="light"] .query-count {
+  @apply text-gray-500 bg-gray-200;
+}
+
+/* Graph container */
+[data-theme="light"] .graph-toolbar {
+  @apply bg-white/90 border-gray-300;
+}
+
+[data-theme="light"] .toolbar-btn {
+  @apply text-gray-500 hover:text-gray-900 hover:bg-gray-200;
+}
+
+[data-theme="light"] .toolbar-separator {
+  @apply bg-gray-300;
+}
+
+[data-theme="light"] .graph-status {
+  @apply bg-white/90 border-gray-300 text-gray-600;
+}
+
+/* Graph canvas placeholder content */
+[data-theme="light"] #graph-canvas .text-gray-400 {
+  color: #4b5563; /* gray-600 */
+}
+
+[data-theme="light"] #graph-canvas .text-gray-500 {
+  color: #6b7280; /* gray-500 */
+}
+
+[data-theme="light"] #graph-canvas .text-green-400 {
+  color: #16a34a; /* green-600 */
+}
+
+[data-theme="light"] #graph-canvas .text-green-500 {
+  color: #16a34a; /* green-600 */
+}
+
+/* Modals */
+[data-theme="light"] .modal-overlay {
+  @apply bg-black/50;
+}
+
+[data-theme="light"] .modal-content {
+  @apply bg-white border-gray-300;
+}
+
+[data-theme="light"] .modal-header {
+  @apply border-gray-200;
+}
+
+[data-theme="light"] .modal-title {
+  @apply text-gray-900;
+}
+
+[data-theme="light"] .modal-close {
+  @apply text-gray-500 hover:text-gray-900 hover:bg-gray-100;
+}
+
+[data-theme="light"] .modal-footer {
+  @apply border-gray-200;
+}
+
+[data-theme="light"] .btn-secondary {
+  @apply bg-gray-200 text-gray-700 hover:bg-gray-300;
+}
+
+/* Forms */
+[data-theme="light"] .form-label {
+  @apply text-gray-700;
+}
+
+[data-theme="light"] .form-input,
+[data-theme="light"] .form-textarea,
+[data-theme="light"] .form-select {
+  @apply bg-white border-gray-300 text-gray-900 placeholder-gray-400;
+}
+
+[data-theme="light"] .form-help {
+  @apply text-gray-500;
+}
+
+/* Detail panel */
+[data-theme="light"] .detail-header {
+  @apply border-gray-200;
+}
+
+[data-theme="light"] .detail-node-name {
+  @apply text-gray-900;
+}
+
+[data-theme="light"] .detail-actions {
+  @apply border-gray-200;
+}
+
+[data-theme="light"] .detail-action-btn {
+  @apply text-gray-500 hover:text-gray-900 hover:bg-gray-100;
+}
+
+[data-theme="light"] .detail-section {
+  @apply border-gray-200;
+}
+
+[data-theme="light"] .detail-section-title {
+  @apply text-gray-500;
+}
+
+[data-theme="light"] .detail-prop-label {
+  @apply text-gray-500;
+}
+
+[data-theme="light"] .detail-prop-value {
+  @apply text-gray-900 hover:bg-gray-100;
+}
+
+[data-theme="light"] .detail-edge {
+  @apply hover:bg-gray-100;
+}
+
+[data-theme="light"] .detail-edge-target {
+  @apply text-gray-900;
+}
+
+/* Settings modal specific */
+[data-theme="light"] .settings-option-content {
+  @apply border-gray-300 bg-gray-50;
+}
+
+[data-theme="light"] .settings-option:hover .settings-option-content {
+  @apply border-gray-400;
+}
+
+[data-theme="light"] .settings-option input:checked + .settings-option-content {
+  @apply border-blue-500 bg-blue-50;
+}
+
+[data-theme="light"] .settings-option-icon {
+  @apply text-gray-500;
+}
+
+[data-theme="light"] .settings-option-label {
+  @apply text-gray-700;
+}
+
+/* Database stats */
+[data-theme="light"] .db-stat-item {
+  @apply bg-gray-100;
+}
+
+[data-theme="light"] .db-stat-item-value {
+  @apply text-gray-900;
+}
+
+/* Query history */
+[data-theme="light"] .query-history-item {
+  @apply bg-gray-100 hover:bg-gray-200;
+}
+
+[data-theme="light"] .query-history-name {
+  @apply text-gray-900;
+}
+
+[data-theme="light"] .query-history-query {
+  @apply text-gray-600;
+}
+
+[data-theme="light"] .detail-query {
+  @apply bg-gray-100 text-gray-900;
+}
+
+/* Scrollbar */
+[data-theme="light"] * {
+  scrollbar-color: theme("colors.gray.400") transparent;
+}
+
+[data-theme="light"] *::-webkit-scrollbar-thumb {
+  background-color: theme("colors.gray.400");
+}
+
+[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
+  background-color: theme("colors.gray.500");
+}

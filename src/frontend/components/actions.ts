@@ -19,6 +19,7 @@ import { openRunQuery } from "./run-query";
 import { openManageQueries } from "./manage-queries";
 import { getRecentConnections, clearConnectionHistory } from "./connection-history";
 import { escapeHtml } from "../utils/html";
+import { openSettings } from "./settings";
 
 /** Action name constants for type-safe dispatch */
 export const Actions = {
@@ -85,9 +86,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "export-png": () => exportPNG(),
   "export-svg": () => exportSVG(),
   "export-json": () => exportJSON(),
-  settings: () => {
-    // TODO: Settings dialog
-  },
+  settings: () => openSettings(),
   quit: () => {
     if ("__TAURI__" in window) {
       // @ts-expect-error Tauri global

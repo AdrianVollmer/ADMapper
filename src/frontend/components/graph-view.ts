@@ -11,6 +11,7 @@ import { updateDetailPanel } from "./sidebars";
 import { autoCollapseGraph, clearCollapseState } from "../graph/collapse";
 import { dispatchAction, type Action } from "./actions";
 import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-visibility";
+import { getDefaultLayout } from "./settings";
 
 let renderer: ADGraphRenderer | null = null;
 let currentLayout: LayoutType = "force";
@@ -159,9 +160,12 @@ export function loadGraphData(data: RawADGraph): void {
   // Clear previous collapse state
   clearCollapseState();
 
+  // Use default layout from settings
+  currentLayout = getDefaultLayout();
+
   // Load and layout the graph
   const graph = loadGraph(data);
-  applyLayout(graph);
+  applyLayout(graph, { type: currentLayout });
 
   // Auto-collapse nodes with many children for large graphs
   autoCollapseGraph(graph);

@@ -35,6 +35,7 @@ zip = "2"
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 dashmap = "6"
+dirs = "6"
 parking_lot = "0.12"
 futures = "0.3"
 async-stream = "0.3"
