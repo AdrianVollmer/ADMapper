@@ -176,7 +176,7 @@ async get<T>(url: string, signal?: AbortSignal): Promise<T> {
 }
 ```
 
-### 9. Credential URLs may be logged
+### 9. ~~Credential URLs may be logged~~ DONE
 
 **File:** `db-connect.ts:109-126`
 

@@ -12,6 +12,7 @@ import { appState } from "../main";
 import { showNoConnectionPlaceholder, updateGraphForConnectionState } from "./graph-view";
 import { saveConnection, getDisplayName } from "./connection-history";
 import { openDbManager } from "./db-manager";
+import { redactUrlCredentials } from "../utils/html";
 
 /** Database types */
 type DatabaseType = "kuzu" | "cozo" | "crustdb" | "neo4j" | "falkordb";
@@ -262,11 +263,13 @@ export async function connectToUrl(url: string): Promise<boolean> {
       return true;
     } else {
       const error = await response.text();
-      console.error("Connection failed:", error);
+      // Use redacted URL in logs to avoid exposing credentials
+      console.error("Connection failed:", redactUrlCredentials(url), error);
       return false;
     }
   } catch (error) {
-    console.error("Connection error:", error);
+    // Use redacted URL in logs to avoid exposing credentials
+    console.error("Connection error:", redactUrlCredentials(url), error);
     return false;
   }
 }
