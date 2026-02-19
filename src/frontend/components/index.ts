@@ -6,7 +6,7 @@ export { initMenuBar } from "./menubar";
 export { initSidebars, toggleNavSidebar, toggleDetailSidebar, updateDetailPanel } from "./sidebars";
 export { initGraph, loadGraphData, getRenderer } from "./graph-view";
 export { initKeyboardShortcuts } from "./keyboard";
-export { dispatchAction } from "./actions";
+export { dispatchAction, Actions, type Action, type StaticAction, type RecentConnectionAction } from "./actions";
 export { initImport, triggerBloodHoundImport } from "./import";
 export { initSearch, setPathStart, setPathEnd } from "./search";
 export { initQueries, addCustomQuery, importQueries, exportQueries } from "./queries";

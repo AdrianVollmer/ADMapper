@@ -9,7 +9,7 @@ import type { ADGraphRenderer, LayoutType } from "../graph";
 import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel } from "./sidebars";
 import { autoCollapseGraph, clearCollapseState } from "../graph/collapse";
-import { dispatchAction } from "./actions";
+import { dispatchAction, type Action } from "./actions";
 import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-visibility";
 
 let renderer: ADGraphRenderer | null = null;
@@ -37,7 +37,7 @@ export function initGraph(): void {
 
     const action = button.getAttribute("data-action");
     if (action) {
-      dispatchAction(action);
+      dispatchAction(action as Action);
     }
   });
 }

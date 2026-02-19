@@ -29,7 +29,7 @@ framework rewrite.
 
 ## Top 10 Issues
 
-### 1. String-based action dispatch lacks type safety
+### 1. ~~String-based action dispatch lacks type safety~~ DONE
 
 **File:** `components/actions.ts:23-201`
 

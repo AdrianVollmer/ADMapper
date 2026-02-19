@@ -4,7 +4,7 @@
  * Handles classic dropdown menu behavior with keyboard navigation.
  */
 
-import { dispatchAction, updateRecentConnectionsMenu } from "./actions";
+import { dispatchAction, updateRecentConnectionsMenu, type Action } from "./actions";
 
 let activeMenu: HTMLElement | null = null;
 
@@ -33,7 +33,7 @@ export function initMenuBar(): void {
       const action = option.getAttribute("data-action");
       if (action) {
         closeAllMenus();
-        dispatchAction(action);
+        dispatchAction(action as Action);
       }
     }
   });

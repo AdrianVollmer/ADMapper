@@ -19,8 +19,61 @@ import { openRunQuery } from "./run-query";
 import { openManageQueries } from "./manage-queries";
 import { getRecentConnections, clearConnectionHistory } from "./connection-history";
 
+/** Action name constants for type-safe dispatch */
+export const Actions = {
+  // File menu
+  CONNECT_DB: "connect-db",
+  DISCONNECT_DB: "disconnect-db",
+  CLEAR_RECENT_CONNECTIONS: "clear-recent-connections",
+  EXPORT_PNG: "export-png",
+  EXPORT_SVG: "export-svg",
+  EXPORT_JSON: "export-json",
+  SETTINGS: "settings",
+  QUIT: "quit",
+  // Edit menu
+  SELECT_ALL: "select-all",
+  FIND: "find",
+  ADD_NODE: "add-node",
+  ADD_EDGE: "add-edge",
+  // View menu
+  TOGGLE_SIDEBARS: "toggle-sidebars",
+  TOGGLE_NAV_SIDEBAR: "toggle-nav-sidebar",
+  TOGGLE_DETAIL_SIDEBAR: "toggle-detail-sidebar",
+  ZOOM_IN: "zoom-in",
+  ZOOM_OUT: "zoom-out",
+  ZOOM_RESET: "zoom-reset",
+  FIT_GRAPH: "fit-graph",
+  FULLSCREEN: "fullscreen",
+  TOGGLE_LABEL_VISIBILITY: "toggle-label-visibility",
+  // Tools menu
+  IMPORT_BLOODHOUND: "import-bloodhound",
+  RUN_QUERY: "run-query",
+  MANAGE_QUERIES: "manage-queries",
+  QUERY_HISTORY: "query-history",
+  HISTORY_BACK: "history-back",
+  MANAGE_DB: "manage-db",
+  INSIGHTS: "insights",
+  LAYOUT_GRAPH: "layout-graph",
+  LAYOUT_FORCE: "layout-force",
+  LAYOUT_HIERARCHICAL: "layout-hierarchical",
+  // Help menu
+  DOCUMENTATION: "documentation",
+  KEYBOARD_SHORTCUTS: "keyboard-shortcuts",
+  CHECK_UPDATES: "check-updates",
+  ABOUT: "about",
+} as const;
+
+/** Static action type derived from the Actions const */
+export type StaticAction = (typeof Actions)[keyof typeof Actions];
+
+/** Dynamic action for recent connections (e.g., "recent-connection-0") */
+export type RecentConnectionAction = `recent-connection-${number}`;
+
+/** All valid action types */
+export type Action = StaticAction | RecentConnectionAction;
+
 /** Dispatch an action by name */
-export function dispatchAction(action: string): void {
+export function dispatchAction(action: Action): void {
   switch (action) {
     // File menu
     case "connect-db":

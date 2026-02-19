@@ -4,7 +4,7 @@
  * Global keyboard shortcuts for the application.
  */
 
-import { dispatchAction } from "./actions";
+import { dispatchAction, type StaticAction } from "./actions";
 
 /** Shortcut definition with display info */
 interface ShortcutDef {
@@ -12,7 +12,7 @@ interface ShortcutDef {
   ctrl?: boolean;
   shift?: boolean;
   alt?: boolean;
-  action: string;
+  action: StaticAction;
   label?: string;
   category?: string;
 }
