@@ -46,6 +46,7 @@ const shortcuts: ShortcutDef[] = [
   { key: "Enter", ctrl: true, action: "run-query", label: "Run Query", category: "Tools" },
   { key: "i", ctrl: true, action: "insights", label: "Security Insights", category: "Tools" },
   { key: "l", ctrl: true, action: "layout-graph", label: "Re-layout Graph", category: "Tools" },
+  { key: "l", ctrl: true, shift: true, action: "cycle-layout", label: "Cycle Layout", category: "Tools" },
 
   // Help menu
   { key: "F1", action: "documentation", label: "Documentation", category: "Help" },
