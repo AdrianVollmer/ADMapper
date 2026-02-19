@@ -27,3 +27,4 @@ export {
 export { initQueryHistory, openQueryHistory, addToHistory } from "./query-history";
 export { initDbConnect, openDbConnect, disconnectDb, updateConnectionStatus } from "./db-connect";
 export { initQueryActivity, getActiveQueryCount, hasActiveQueries } from "./query-activity";
+export { initListView, openListView, closeListView } from "./list-view";

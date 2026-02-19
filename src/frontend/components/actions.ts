@@ -20,6 +20,7 @@ import { openManageQueries } from "./manage-queries";
 import { getRecentConnections, clearConnectionHistory } from "./connection-history";
 import { escapeHtml } from "../utils/html";
 import { openSettings, toggleTheme } from "./settings";
+import { openListView } from "./list-view";
 
 /** Action name constants for type-safe dispatch */
 export const Actions = {
@@ -62,6 +63,7 @@ export const Actions = {
   LAYOUT_GRID: "layout-grid",
   LAYOUT_CIRCULAR: "layout-circular",
   CYCLE_LAYOUT: "cycle-layout",
+  LIST_VIEW: "list-view",
   // Help menu
   DOCUMENTATION: "documentation",
   KEYBOARD_SHORTCUTS: "keyboard-shortcuts",
@@ -146,6 +148,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
       showInfo(`Layout: ${layoutName}`);
     });
   },
+  "list-view": () => openListView(),
   // Help menu
   documentation: () => window.open("https://github.com/admapper/admapper", "_blank"),
   "keyboard-shortcuts": () => showKeyboardShortcuts(),

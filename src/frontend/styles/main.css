@@ -748,6 +748,10 @@
     @apply max-w-2xl;
   }
 
+  .modal-content.modal-xl {
+    @apply max-w-4xl;
+  }
+
   .modal-header {
     @apply px-6 py-4 border-b border-gray-700 flex items-center justify-between;
   }
@@ -1860,4 +1864,115 @@ body[data-theme="light"] {
 
 [data-theme="light"] *::-webkit-scrollbar-thumb:hover {
   background-color: theme("colors.gray.500");
+}
+
+/* ============================================
+   List View Modal
+   ============================================ */
+@layer components {
+  .list-view-toolbar {
+    @apply flex items-center gap-4 mb-4;
+  }
+
+  .list-view-count {
+    @apply text-sm text-gray-400 flex-shrink-0;
+  }
+
+  .list-view-table-container {
+    @apply max-h-96 overflow-y-auto rounded border border-gray-700;
+  }
+
+  .list-view-table {
+    @apply w-full text-sm;
+  }
+
+  .list-view-table thead {
+    @apply sticky top-0 bg-gray-800;
+  }
+
+  .list-view-table th {
+    @apply px-3 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide
+           border-b border-gray-700;
+  }
+
+  .list-view-table th.sortable {
+    @apply cursor-pointer hover:bg-gray-700 transition-colors select-none;
+  }
+
+  .list-view-table tbody tr {
+    @apply border-b border-gray-700/50 hover:bg-gray-700/50 transition-colors;
+  }
+
+  .list-view-table tbody tr:last-child {
+    @apply border-b-0;
+  }
+
+  .list-view-table td {
+    @apply px-3 py-2 text-gray-300;
+  }
+
+  .node-type-badge {
+    @apply inline-block px-2 py-0.5 text-xs font-medium rounded;
+  }
+
+  .node-type-badge.type-user {
+    @apply bg-cyan-600 text-white;
+  }
+
+  .node-type-badge.type-group {
+    @apply bg-amber-500 text-gray-900;
+  }
+
+  .node-type-badge.type-computer {
+    @apply bg-red-600 text-white;
+  }
+
+  .node-type-badge.type-domain {
+    @apply bg-purple-600 text-white;
+  }
+
+  .node-type-badge.type-gpo {
+    @apply bg-orange-500 text-white;
+  }
+
+  .node-type-badge.type-ou {
+    @apply bg-teal-500 text-white;
+  }
+
+  .node-type-badge.type-container {
+    @apply bg-pink-600 text-white;
+  }
+
+  .node-type-badge.type-unknown {
+    @apply bg-gray-600 text-white;
+  }
+}
+
+/* Light theme overrides for list view */
+[data-theme="light"] .list-view-table-container {
+  @apply border-gray-300;
+}
+
+[data-theme="light"] .list-view-table thead {
+  @apply bg-gray-100;
+}
+
+[data-theme="light"] .list-view-table th {
+  @apply text-gray-600 border-gray-300;
+}
+
+[data-theme="light"] .list-view-table th.sortable:hover {
+  @apply bg-gray-200;
+}
+
+[data-theme="light"] .list-view-table tbody tr {
+  @apply border-gray-200 hover:bg-gray-100;
+}
+
+[data-theme="light"] .list-view-table td {
+  @apply text-gray-900;
+}
+
+[data-theme="light"] .list-view-count {
+  @apply text-gray-600;
 }

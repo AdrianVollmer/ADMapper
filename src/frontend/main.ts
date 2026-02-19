@@ -18,6 +18,7 @@ import { initRunQuery } from "./components/run-query";
 import { initManageQueries } from "./components/manage-queries";
 import { initQueryActivity } from "./components/query-activity";
 import { initSettings, applyInitialSettings } from "./components/settings";
+import { initListView } from "./components/list-view";
 
 /** Application state */
 export interface AppState {
@@ -70,6 +71,7 @@ async function init(): Promise<void> {
   initManageQueries();
   initQueryActivity();
   initSettings();
+  initListView();
 
   // Single consolidated document click handler
   document.addEventListener("click", handleDocumentClick);
