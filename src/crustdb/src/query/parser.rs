@@ -29,6 +29,23 @@ pub enum Statement {
     Set(SetClause),
 }
 
+impl Statement {
+    /// Returns true if this statement only reads data (no mutations).
+    ///
+    /// This is useful for determining whether a query can safely run without
+    /// exclusive database access. Read-only queries can potentially run
+    /// concurrently with other read-only queries.
+    pub fn is_read_only(&self) -> bool {
+        match self {
+            Statement::Match(m) => m.set_clause.is_none() && m.delete_clause.is_none(),
+            Statement::Create(_)
+            | Statement::Merge(_)
+            | Statement::Delete(_)
+            | Statement::Set(_) => false,
+        }
+    }
+}
+
 /// MATCH clause AST.
 #[derive(Debug, Clone)]
 pub struct MatchClause {
@@ -2529,5 +2546,42 @@ mod tests {
             },
             _ => panic!("Expected MATCH statement"),
         }
+    }
+
+    // is_read_only() tests
+    #[test]
+    fn test_is_read_only_match() {
+        let stmt = parse("MATCH (n:Person) RETURN n").unwrap();
+        assert!(stmt.is_read_only());
+    }
+
+    #[test]
+    fn test_is_read_only_match_with_where() {
+        let stmt = parse("MATCH (n:Person) WHERE n.age > 30 RETURN n").unwrap();
+        assert!(stmt.is_read_only());
+    }
+
+    #[test]
+    fn test_is_read_only_create() {
+        let stmt = parse("CREATE (n:Person {name: 'Alice'})").unwrap();
+        assert!(!stmt.is_read_only());
+    }
+
+    #[test]
+    fn test_is_read_only_match_with_set() {
+        let stmt = parse("MATCH (n:Person) SET n.age = 31").unwrap();
+        assert!(!stmt.is_read_only());
+    }
+
+    #[test]
+    fn test_is_read_only_match_with_delete() {
+        let stmt = parse("MATCH (n:Person) DELETE n").unwrap();
+        assert!(!stmt.is_read_only());
+    }
+
+    #[test]
+    fn test_is_read_only_merge() {
+        let stmt = parse("MERGE (n:Person {name: 'Alice'})").unwrap();
+        assert!(!stmt.is_read_only());
     }
 }

@@ -86,23 +86,34 @@ The planner defines a complete operator hierarchy (`PlanOperator`, `FilterPredic
 
 ---
 
-### 6. Mutex Bottleneck for Concurrent Access
+### 6. ~~Mutex Bottleneck for Concurrent Access~~ ✅ FIXED
 
-**Location:** `lib.rs:44-46`
+**Location:** `lib.rs:44-46`, `storage.rs:init_schema()`, `parser.rs:Statement`
+
+~~Using `Mutex` serializes all database access, even read-only queries. This becomes a bottleneck under concurrent load.~~
+
+**Analysis:** The original recommendation to use `RwLock<SqliteStorage>` won't work because `rusqlite::Connection` is `Send` but not `Sync`. This means the connection cannot be shared across threads even with a read lock. True concurrent reads would require a connection pool or separate connections per thread.
+
+**Fixed:** Implemented practical improvements that work within SQLite's threading model:
+
+1. **WAL Mode** (`storage.rs:init_schema()`): Enabled Write-Ahead Logging which allows readers and writers to proceed concurrently at the SQLite level. Readers don't block writers and writers don't block readers—only writers block other writers.
+
+2. **Busy Timeout** (`storage.rs:init_schema()`): Set `PRAGMA busy_timeout = 5000` so SQLite retries for up to 5 seconds when encountering a lock, rather than failing immediately.
+
+3. **Query Classification** (`parser.rs:Statement::is_read_only()`): Added method to classify queries as read-only or mutating. This enables future optimizations like connection pooling where read-only queries could use separate read connections.
 
 ```rust
-pub struct Database {
-    storage: Mutex<SqliteStorage>,
+impl Statement {
+    pub fn is_read_only(&self) -> bool {
+        match self {
+            Statement::Match(m) => m.set_clause.is_none() && m.delete_clause.is_none(),
+            Statement::Create(_) | Statement::Merge(_) | Statement::Delete(_) | Statement::Set(_) => false,
+        }
+    }
 }
 ```
 
-Using `Mutex` serializes all database access, even read-only queries. This becomes a bottleneck under concurrent load.
-
-**Recommendation:** Use `RwLock<SqliteStorage>` to allow concurrent reads:
-```rust
-storage: RwLock<SqliteStorage>,
-```
-Then use `storage.read()` for queries and `storage.write()` for mutations.
+**Future work:** For true concurrent reads, consider a connection pool (e.g., `r2d2`) with separate read connections.
 
 ---
 

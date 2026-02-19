@@ -55,6 +55,16 @@ impl SqliteStorage {
 
     /// Initialize the database schema.
     fn init_schema(&self) -> Result<()> {
+        // Enable WAL mode for better concurrency.
+        // WAL allows readers and writers to proceed concurrently - readers don't block
+        // writers and writers don't block readers. Only writers block other writers.
+        // This significantly reduces contention in multi-threaded scenarios.
+        self.conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+
+        // Set busy timeout to 5 seconds. When the database is locked, SQLite will
+        // retry for up to this duration before returning SQLITE_BUSY.
+        self.conn.execute_batch("PRAGMA busy_timeout = 5000;")?;
+
         // Enable foreign keys
         self.conn.execute_batch("PRAGMA foreign_keys = ON;")?;
 
@@ -1166,12 +1176,12 @@ mod tests {
 
         // Create a node with a valid property
         let props = serde_json::json!({"object_id": "test123"});
-        storage
-            .insert_node(&["Test".to_string()], &props)
-            .unwrap();
+        storage.insert_node(&["Test".to_string()], &props).unwrap();
 
         // Valid property names should work
-        assert!(storage.find_node_by_property("object_id", "test123").is_ok());
+        assert!(storage
+            .find_node_by_property("object_id", "test123")
+            .is_ok());
         assert!(storage.find_node_by_property("valid_name", "value").is_ok());
         assert!(storage.find_node_by_property("name123", "value").is_ok());
 
@@ -1181,7 +1191,9 @@ mod tests {
         assert!(storage.find_node_by_property("name'--", "value").is_err());
         assert!(storage.find_node_by_property("name)", "value").is_err());
         assert!(storage.find_node_by_property("name$", "value").is_err());
-        assert!(storage.find_node_by_property("name space", "value").is_err());
+        assert!(storage
+            .find_node_by_property("name space", "value")
+            .is_err());
 
         // Same validation for build_property_index
         assert!(storage.build_property_index("object_id").is_ok());
