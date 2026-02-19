@@ -805,32 +805,26 @@ impl SqliteStorage {
     /// Count incoming edges to a node by object_id property.
     /// Uses a join to find the node and count edges efficiently.
     pub fn count_incoming_edges_by_object_id(&self, object_id: &str) -> Result<usize> {
-        let count: i64 = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM edges e \
-                 JOIN nodes n ON e.target_id = n.id \
-                 WHERE json_extract(n.properties, '$.object_id') = ?1",
-                params![object_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM edges e \
+             JOIN nodes n ON e.target_id = n.id \
+             WHERE json_extract(n.properties, '$.object_id') = ?1",
+            params![object_id],
+            |row| row.get(0),
+        )?;
         Ok(count as usize)
     }
 
     /// Count outgoing edges from a node by object_id property.
     /// Uses a join to find the node and count edges efficiently.
     pub fn count_outgoing_edges_by_object_id(&self, object_id: &str) -> Result<usize> {
-        let count: i64 = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM edges e \
-                 JOIN nodes n ON e.source_id = n.id \
-                 WHERE json_extract(n.properties, '$.object_id') = ?1",
-                params![object_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM edges e \
+             JOIN nodes n ON e.source_id = n.id \
+             WHERE json_extract(n.properties, '$.object_id') = ?1",
+            params![object_id],
+            |row| row.get(0),
+        )?;
         Ok(count as usize)
     }
 

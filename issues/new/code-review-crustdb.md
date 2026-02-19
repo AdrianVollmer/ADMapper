@@ -47,20 +47,15 @@ The code appears written by someone who understands Rust, database internals, an
 
 ---
 
-### 3. Silent Error Swallowing with unwrap_or(0)
+### 3. ~~Silent Error Swallowing with unwrap_or(0)~~ ✅ FIXED
 
-**Location:** `storage.rs:808`, `storage.rs:824`
+**Location:** `storage.rs:807-818`, `storage.rs:823-834`
 
-```rust
-let count: i64 = self.conn.query_row(...).unwrap_or(0);
-```
+~~Database errors are silently converted to 0, masking potential issues like schema corruption or connection problems.~~
 
-Database errors are silently converted to 0, masking potential issues like schema corruption or connection problems.
+**Fixed:** Changed `count_incoming_edges_by_object_id` and `count_outgoing_edges_by_object_id` to properly propagate database errors using `?` instead of `unwrap_or(0)`.
 
-**Recommendation:** Propagate errors properly:
-```rust
-let count: i64 = self.conn.query_row(...)?;
-```
+Note: The `unwrap_or(0)` in `get_schema_version()` (line 63) is intentional - it handles the case where the schema doesn't exist yet during database initialization.
 
 ---
 
