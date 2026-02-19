@@ -9,6 +9,7 @@ import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import type { QueryHistoryEntry, QueryHistoryResponse, QueryStatus } from "../api/types";
 import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
+import { hasActiveQueries } from "./query-activity";
 
 // Re-export for backwards compatibility
 export type { QueryHistoryEntry } from "../api/types";
@@ -103,10 +104,13 @@ export function closeQueryHistory(): void {
 function startDurationUpdates(): void {
   stopDurationUpdates();
   durationInterval = setInterval(() => {
-    // Check if any queries are still running - if so, refresh from backend
-    const hasRunning = entries.some((e) => e.status === "running");
-    if (hasRunning) {
-      // Poll for updates from backend (status changes)
+    // Check if any queries are still running in history OR if indicator shows active queries
+    // The indicator tracks both sync and async queries, but only async queries appear in history
+    const hasRunningInHistory = entries.some((e) => e.status === "running");
+    const hasActiveInIndicator = hasActiveQueries();
+
+    if (hasRunningInHistory || hasActiveInIndicator) {
+      // Poll for updates from backend (new queries or status changes)
       refreshHistoryQuietly();
     }
     // Update durations without full re-render
