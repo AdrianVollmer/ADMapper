@@ -6,6 +6,20 @@ use crate::query::parser::{BinaryOperator, Expression, Literal, UnaryOperator};
 
 use super::Binding;
 
+// =============================================================================
+// Configuration Constants
+// =============================================================================
+
+/// Maximum compiled size for user-provided regex patterns (in bytes).
+///
+/// This limit prevents denial-of-service attacks from pathological regex
+/// patterns that could cause excessive memory usage or catastrophic
+/// backtracking during compilation.
+///
+/// 256KB is generous for most legitimate use cases while providing protection
+/// against malicious patterns.
+const REGEX_SIZE_LIMIT: usize = 256 * 1024;
+
 /// Filter bindings by WHERE clause predicate.
 pub fn filter_bindings_by_where(
     bindings: Vec<Binding>,
@@ -135,7 +149,11 @@ fn evaluate_binary_op_with_bindings(
         BinaryOperator::RegexMatch => match (&left_val, &right_val) {
             (PropertyValue::Null, _) | (_, PropertyValue::Null) => Ok(PropertyValue::Null),
             (PropertyValue::String(text), PropertyValue::String(pattern)) => {
-                match regex::Regex::new(pattern) {
+                // Use RegexBuilder with size limit to prevent DoS from pathological patterns
+                match regex::RegexBuilder::new(pattern)
+                    .size_limit(REGEX_SIZE_LIMIT)
+                    .build()
+                {
                     Ok(re) => Ok(PropertyValue::Bool(re.is_match(text))),
                     Err(e) => Err(Error::Cypher(format!("Invalid regex: {}", e))),
                 }

@@ -136,25 +136,21 @@ A full `QueryOptions` struct would require changing function signatures througho
 
 ---
 
-### 9. Regex DoS Potential
+### 9. ~~Regex DoS Potential~~ ✅ FIXED
 
-**Location:** `executor.rs:1594-1603`
+**Location:** `executor/eval.rs:147-158`
 
-User-provided regex patterns are compiled without limits:
+~~User-provided regex patterns were compiled without limits, allowing DoS via pathological patterns.~~
+
+**Fixed:**
+- Added `REGEX_SIZE_LIMIT = 256KB` constant with documentation
+- Changed `regex::Regex::new()` to use `RegexBuilder` with `size_limit()`
+- Patterns that would compile to >256KB now fail with an error instead of consuming unbounded memory
+
 ```rust
-BinaryOperator::RegexMatch => match (&left_val, &right_val) {
-    (PropertyValue::String(text), PropertyValue::String(pattern)) => {
-        match regex::Regex::new(pattern) {  // No timeout or complexity limit
-            Ok(re) => Ok(PropertyValue::Bool(re.is_match(text))),
-```
-
-Pathological regex patterns (e.g., `(a+)+$`) can cause catastrophic backtracking.
-
-**Recommendation:** Use `regex::RegexBuilder` with `size_limit`:
-```rust
-let re = regex::RegexBuilder::new(pattern)
-    .size_limit(1024 * 1024)  // 1MB compiled size limit
-    .build()?;
+regex::RegexBuilder::new(pattern)
+    .size_limit(REGEX_SIZE_LIMIT)
+    .build()
 ```
 
 ---
