@@ -19,7 +19,7 @@ import { openRunQuery } from "./run-query";
 import { openManageQueries } from "./manage-queries";
 import { getRecentConnections, clearConnectionHistory } from "./connection-history";
 import { escapeHtml } from "../utils/html";
-import { openSettings } from "./settings";
+import { openSettings, toggleTheme } from "./settings";
 
 /** Action name constants for type-safe dispatch */
 export const Actions = {
@@ -38,6 +38,7 @@ export const Actions = {
   ADD_NODE: "add-node",
   ADD_EDGE: "add-edge",
   // View menu
+  TOGGLE_THEME: "toggle-theme",
   TOGGLE_SIDEBARS: "toggle-sidebars",
   TOGGLE_NAV_SIDEBAR: "toggle-nav-sidebar",
   TOGGLE_DETAIL_SIDEBAR: "toggle-detail-sidebar",
@@ -101,6 +102,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "add-node": () => openAddNode(),
   "add-edge": () => openAddEdge(),
   // View menu
+  "toggle-theme": () => toggleTheme(),
   "toggle-sidebars": () => toggleSidebars(),
   "toggle-nav-sidebar": () => toggleNavSidebar(),
   "toggle-detail-sidebar": () => toggleDetailSidebar(),

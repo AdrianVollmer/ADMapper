@@ -30,6 +30,7 @@ const shortcuts: ShortcutDef[] = [
   { key: "f", ctrl: true, action: "find", label: "Find", category: "Edit" },
 
   // View menu
+  { key: "t", ctrl: true, action: "toggle-theme", label: "Toggle Theme", category: "View" },
   { key: "\\", ctrl: true, action: "toggle-sidebars", label: "Toggle Sidebars", category: "View" },
   { key: "b", ctrl: true, action: "toggle-nav-sidebar", label: "Toggle Navigation", category: "View" },
   { key: "d", ctrl: true, action: "toggle-detail-sidebar", label: "Toggle Details", category: "View" },

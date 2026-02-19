@@ -44,6 +44,25 @@ export function getDefaultLayout(): GraphLayout {
   return currentSettings.defaultGraphLayout;
 }
 
+/** Toggle between dark and light theme */
+export async function toggleTheme(): Promise<void> {
+  const newTheme = currentSettings.theme === "dark" ? "light" : "dark";
+
+  const newSettings: Settings = {
+    ...currentSettings,
+    theme: newTheme,
+  };
+
+  try {
+    currentSettings = await api.put<Settings>("/api/settings", newSettings);
+    applyTheme(currentSettings.theme);
+  } catch {
+    // Apply locally even if save fails
+    currentSettings.theme = newTheme;
+    applyTheme(newTheme);
+  }
+}
+
 /** Open the settings modal */
 export async function openSettings(): Promise<void> {
   if (!modalEl) {
