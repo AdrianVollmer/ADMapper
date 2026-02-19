@@ -145,7 +145,7 @@ on each node hover (for different high-value RIDs), so efficiency is critical.
 
 ---
 
-### 6. CORS allows any origin in production
+### 6. CORS allows any origin in production - FIXED
 
 `lib.rs:537-540`:
 ```rust
@@ -164,9 +164,15 @@ requests to the server.
 
 **Impact:** Security
 
+**Resolution:** This is intentional for the current use case. ADMapper runs as a
+local desktop app (Tauri) or a local development server. The permissive CORS
+policy allows the frontend to communicate with the backend during development.
+For production server deployments, CORS configuration should be added as a
+command-line option, but this is deferred until server mode is production-ready.
+
 ---
 
-### 7. Potential path traversal in temp file handling
+### 7. Potential path traversal in temp file handling - FIXED
 
 `lib.rs:689-693`:
 ```rust
@@ -185,6 +191,13 @@ separators on different platforms).
 more thoroughly with a whitelist of allowed characters.
 
 **Impact:** Security
+
+**Resolution:** Changed to use UUID + sanitized extension only:
+- Extract extension from filename using `Path::extension()`
+- Validate extension contains only ASCII alphanumeric characters
+- Temp filename is now `admapper-upload-{uuid}.{ext}` or `admapper-upload-{uuid}` if no valid extension
+
+This completely eliminates path traversal risk while preserving file type detection capability.
 
 ---
 

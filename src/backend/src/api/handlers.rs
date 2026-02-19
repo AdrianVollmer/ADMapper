@@ -166,10 +166,17 @@ pub async fn import_bloodhound(
         let filename = field.file_name().unwrap_or("unknown").to_string();
 
         // Create temp file path with unique ID
+        // Use only UUID + sanitized extension to prevent path traversal attacks
+        let extension = std::path::Path::new(&filename)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .filter(|ext| ext.chars().all(|c| c.is_ascii_alphanumeric()))
+            .map(|ext| format!(".{}", ext))
+            .unwrap_or_default();
         let temp_path = std::env::temp_dir().join(format!(
-            "admapper-upload-{}-{}",
+            "admapper-upload-{}{}",
             uuid::Uuid::new_v4(),
-            filename.replace(std::path::MAIN_SEPARATOR, "_")
+            extension
         ));
 
         // Create and write to temp file
