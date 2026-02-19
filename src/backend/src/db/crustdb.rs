@@ -997,6 +997,36 @@ impl CrustDatabase {
         Ok(edges)
     }
 
+    /// Find membership in a group with matching SID suffix using graph traversal.
+    pub fn find_membership_by_sid_suffix(
+        &self,
+        node_id: &str,
+        sid_suffix: &str,
+    ) -> Result<Option<String>> {
+        let id_escaped = node_id.replace('\'', "''");
+        let suffix_escaped = sid_suffix.replace('\'', "''");
+
+        // Use variable-length path to find transitive MemberOf membership
+        let query = format!(
+            "MATCH (n {{object_id: '{}'}})-[:MemberOf*1..20]->(g) \
+             WHERE g.object_id ENDS WITH '{}' \
+             RETURN g.object_id LIMIT 1",
+            id_escaped, suffix_escaped
+        );
+
+        let result = self.execute(&query)?;
+
+        if let Some(first_row) = result.rows.first() {
+            if let Some(value) = first_row.values.get("g.object_id") {
+                if let crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) = value {
+                    return Ok(Some(s.clone()));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Run a custom Cypher query.
     pub fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
         debug!(query = %query, "Running custom Cypher query");
@@ -1413,6 +1443,14 @@ impl DatabaseBackend for CrustDatabase {
         }
 
         Ok((incoming, outgoing, admin_to, member_of, members))
+    }
+
+    fn find_membership_by_sid_suffix(
+        &self,
+        node_id: &str,
+        sid_suffix: &str,
+    ) -> Result<Option<String>> {
+        CrustDatabase::find_membership_by_sid_suffix(self, node_id, sid_suffix)
     }
 
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {

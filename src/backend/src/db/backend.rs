@@ -224,11 +224,24 @@ pub trait DatabaseBackend: Send + Sync {
 
     /// Find the first group matching a SID suffix that the node is a member of.
     /// Returns the group's object_id if found.
+    ///
+    /// # Performance Warning
+    /// The default implementation loads ALL nodes and ALL edges into memory.
+    /// For large graphs (50k+ nodes, 200k+ edges), this is severely inefficient.
+    /// Called multiple times on node hover, this can freeze the UI.
+    /// All backends should override this with an efficient graph traversal query.
     fn find_membership_by_sid_suffix(
         &self,
         node_id: &str,
         sid_suffix: &str,
     ) -> Result<Option<String>> {
+        // WARNING: This default implementation is O(n+m) where n = nodes, m = edges.
+        // Backends should override with efficient graph traversal queries.
+        tracing::warn!(
+            node_id = %node_id,
+            sid_suffix = %sid_suffix,
+            "Using inefficient default find_membership_by_sid_suffix - backend should override"
+        );
         let all_nodes = self.get_all_nodes()?;
         let all_edges = self.get_all_edges()?;
 

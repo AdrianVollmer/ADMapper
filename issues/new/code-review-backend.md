@@ -121,7 +121,7 @@ encouraging backend implementers to override it.
 
 ---
 
-### 5. `find_membership_by_sid_suffix` is O(n*m)
+### 5. `find_membership_by_sid_suffix` is O(n*m) - FIXED
 
 Lines 214-269 in `backend.rs` load ALL nodes and ALL edges, then do linear
 scans. Called from `node_status` handler which may be triggered on hover.
@@ -133,6 +133,15 @@ For a dataset with 50k nodes and 200k edges, this could freeze the UI.
 - Or use a graph query with pattern matching
 
 **Impact:** Performance (critical)
+
+**Resolution:** Added efficient `find_membership_by_sid_suffix` implementations to all backends:
+- **kuzu**: Variable-length path query with `ALL(rel IN e WHERE rel.edge_type = 'MemberOf')` filter
+- **neo4j/falkordb**: Variable-length path `(n)-[:MemberOf*1..20]->(g)` with `ENDS WITH` filter
+- **cozo**: Recursive Datalog query with `reachable[target]` rule for transitive closure
+- **crustdb**: Variable-length path Cypher query with `ENDS WITH` filter
+
+Added warning log to the default trait implementation. This method is called up to 8 times
+on each node hover (for different high-value RIDs), so efficiency is critical.
 
 ---
 

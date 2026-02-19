@@ -945,6 +945,41 @@ impl GraphDatabase {
         Ok((incoming, outgoing, admin_to, member_of, members))
     }
 
+    /// Find membership in a group with matching SID suffix using recursive Datalog query.
+    pub fn find_membership_by_sid_suffix(
+        &self,
+        node_id: &str,
+        sid_suffix: &str,
+    ) -> Result<Option<String>> {
+        let id_escaped = node_id.replace('\'', "''");
+        let suffix_escaped = sid_suffix.replace('\'', "''");
+
+        // Use recursive Datalog query to find transitive MemberOf membership
+        // reachable[target] := direct MemberOf from source, or transitive through intermediate
+        let query = format!(
+            "reachable[target] := *edges{{source: '{}', target, edge_type}}, edge_type = 'MemberOf'
+             reachable[target] := reachable[intermediate], *edges{{source: intermediate, target, edge_type}}, edge_type = 'MemberOf'
+             ?[target] := reachable[target], ends_with(target, '{}')
+             :limit 1",
+            id_escaped, suffix_escaped
+        );
+
+        let result = self
+            .db
+            .run_script(&query, Default::default(), ScriptMutability::Immutable)?;
+        let json = result.into_json();
+
+        if let Some(rows) = json["rows"].as_array() {
+            if let Some(first_row) = rows.first() {
+                if let Some(group_id) = first_row.get(0).and_then(|v| v.as_str()) {
+                    return Ok(Some(group_id.to_string()));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Run a custom CozoDB query and extract nodes/edges from results.
     /// The query should return rows with columns that can be matched to node IDs.
     pub fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
@@ -1269,6 +1304,14 @@ impl DatabaseBackend for GraphDatabase {
 
     fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
         GraphDatabase::get_node_edge_counts(self, node_id)
+    }
+
+    fn find_membership_by_sid_suffix(
+        &self,
+        node_id: &str,
+        sid_suffix: &str,
+    ) -> Result<Option<String>> {
+        GraphDatabase::find_membership_by_sid_suffix(self, node_id, sid_suffix)
     }
 
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {

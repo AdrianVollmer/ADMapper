@@ -1014,6 +1014,69 @@ impl KuzuDatabase {
         Ok((incoming, outgoing, admin_to, member_of, members))
     }
 
+    /// Find membership in a group with matching SID suffix using graph traversal.
+    pub fn find_membership_by_sid_suffix(
+        &self,
+        node_id: &str,
+        sid_suffix: &str,
+    ) -> Result<Option<String>> {
+        let conn = self.conn()?;
+        let id_escaped = node_id.replace('\'', "''");
+        let suffix_escaped = sid_suffix.replace('\'', "''");
+
+        // Find the node type for the source node
+        let node_types = [
+            "User",
+            "Computer",
+            "Group",
+            "Domain",
+            "OU",
+            "GPO",
+            "Container",
+        ];
+        let mut found_type: Option<&str> = None;
+
+        for node_type in &node_types {
+            let check_query = format!(
+                "MATCH (n:{} {{object_id: '{}'}}) RETURN n.object_id LIMIT 1",
+                node_type, id_escaped
+            );
+            let result = conn.query(&check_query)?;
+            if !result.to_string().lines().nth(1).unwrap_or("").is_empty() {
+                found_type = Some(node_type);
+                break;
+            }
+        }
+
+        let source_type = match found_type {
+            Some(t) => t,
+            None => return Ok(None), // Node not found
+        };
+
+        // Use variable-length path to find transitive membership
+        // KuzuDB uses Edge with edge_type property for relationships
+        let query = format!(
+            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge* 1..20]->(g:Group) \
+             WHERE ALL(rel IN e WHERE rel.edge_type = 'MemberOf') \
+             AND g.object_id ENDS WITH '{}' \
+             RETURN g.object_id LIMIT 1",
+            source_type, id_escaped, suffix_escaped
+        );
+
+        let result = conn.query(&query)?;
+        let result_str = result.to_string();
+
+        // Check if we have any results (skip header line)
+        if let Some(line) = result_str.lines().nth(1) {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed.to_string()));
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Run a custom Cypher query.
     pub fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
         debug!(query = %query, "Running custom Cypher query");
@@ -1439,6 +1502,14 @@ impl DatabaseBackend for KuzuDatabase {
 
     fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
         KuzuDatabase::get_node_edge_counts(self, node_id)
+    }
+
+    fn find_membership_by_sid_suffix(
+        &self,
+        node_id: &str,
+        sid_suffix: &str,
+    ) -> Result<Option<String>> {
+        KuzuDatabase::find_membership_by_sid_suffix(self, node_id, sid_suffix)
     }
 
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {

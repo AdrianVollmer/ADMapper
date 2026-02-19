@@ -912,6 +912,33 @@ impl DatabaseBackend for FalkorDbDatabase {
         }
     }
 
+    fn find_membership_by_sid_suffix(
+        &self,
+        node_id: &str,
+        sid_suffix: &str,
+    ) -> Result<Option<String>> {
+        let id_escaped = node_id.replace('\'', "\\'");
+        let suffix_escaped = sid_suffix.replace('\'', "\\'");
+
+        // Use variable-length path to find transitive MemberOf membership
+        let cypher = format!(
+            "MATCH (n {{objectid: '{}'}})-[:MemberOf*1..20]->(g) \
+             WHERE g.objectid ENDS WITH '{}' \
+             RETURN g.objectid LIMIT 1",
+            id_escaped, suffix_escaped
+        );
+
+        let rows = self.execute_query(&cypher)?;
+
+        if let Some(row) = rows.first() {
+            if let Some(group_id) = row.first().and_then(|v| v.as_str()) {
+                return Ok(Some(group_id.to_string()));
+            }
+        }
+
+        Ok(None)
+    }
+
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));

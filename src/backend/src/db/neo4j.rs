@@ -750,6 +750,31 @@ impl DatabaseBackend for Neo4jDatabase {
         }
     }
 
+    fn find_membership_by_sid_suffix(
+        &self,
+        node_id: &str,
+        sid_suffix: &str,
+    ) -> Result<Option<String>> {
+        // Use variable-length path to find transitive MemberOf membership
+        let q = query(
+            "MATCH (n {objectid: $id})-[:MemberOf*1..20]->(g) \
+             WHERE g.objectid ENDS WITH $suffix \
+             RETURN g.objectid LIMIT 1",
+        )
+        .param("id", node_id.to_string())
+        .param("suffix", sid_suffix.to_string());
+
+        let rows = self.execute_query(q)?;
+
+        if let Some(row) = rows.first() {
+            if let Ok(group_id) = row.get::<String>("g.objectid") {
+                return Ok(Some(group_id));
+            }
+        }
+
+        Ok(None)
+    }
+
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));
