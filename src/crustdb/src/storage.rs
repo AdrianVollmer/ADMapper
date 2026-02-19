@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
 
 /// Current schema version.
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 /// Validate a property name to prevent JSON path injection.
 ///
@@ -104,7 +104,7 @@ impl SqliteStorage {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
-            INSERT INTO meta (key, value) VALUES ('schema_version', '2');
+            INSERT INTO meta (key, value) VALUES ('schema_version', '3');
 
             -- Normalized node labels
             CREATE TABLE node_labels (
@@ -165,6 +165,32 @@ impl SqliteStorage {
                 error TEXT
             );
             CREATE INDEX idx_query_history_timestamp ON query_history(timestamp DESC);
+
+            -- Query cache table
+            CREATE TABLE query_cache (
+                query_hash TEXT PRIMARY KEY,
+                query_ast TEXT NOT NULL,
+                result BLOB NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+
+            -- Invalidation triggers (clear all cache on any data change)
+            CREATE TRIGGER cache_invalidate_nodes_insert AFTER INSERT ON nodes
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER cache_invalidate_nodes_update AFTER UPDATE ON nodes
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER cache_invalidate_nodes_delete AFTER DELETE ON nodes
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER cache_invalidate_edges_insert AFTER INSERT ON edges
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER cache_invalidate_edges_update AFTER UPDATE ON edges
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER cache_invalidate_edges_delete AFTER DELETE ON edges
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER cache_invalidate_labels_insert AFTER INSERT ON node_label_map
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER cache_invalidate_labels_delete AFTER DELETE ON node_label_map
+                BEGIN DELETE FROM query_cache; END;
             "#,
         )?;
         Ok(())
@@ -174,6 +200,9 @@ impl SqliteStorage {
     fn migrate(&self, old_version: i32) -> Result<()> {
         if old_version < 2 {
             self.migrate_v1_to_v2()?;
+        }
+        if old_version < 3 {
+            self.migrate_v2_to_v3()?;
         }
         Ok(())
     }
@@ -198,6 +227,43 @@ impl SqliteStorage {
 
             -- Update schema version
             UPDATE meta SET value = '2' WHERE key = 'schema_version';
+            "#,
+        )?;
+        Ok(())
+    }
+
+    /// Migration from v2 to v3: Add query cache table and invalidation triggers.
+    fn migrate_v2_to_v3(&self) -> Result<()> {
+        self.conn.execute_batch(
+            r#"
+            -- Query cache table
+            CREATE TABLE IF NOT EXISTS query_cache (
+                query_hash TEXT PRIMARY KEY,
+                query_ast TEXT NOT NULL,
+                result BLOB NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+
+            -- Invalidation triggers (clear all cache on any data change)
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_nodes_insert AFTER INSERT ON nodes
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_nodes_update AFTER UPDATE ON nodes
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_nodes_delete AFTER DELETE ON nodes
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_edges_insert AFTER INSERT ON edges
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_edges_update AFTER UPDATE ON edges
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_edges_delete AFTER DELETE ON edges
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_labels_insert AFTER INSERT ON node_label_map
+                BEGIN DELETE FROM query_cache; END;
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_labels_delete AFTER DELETE ON node_label_map
+                BEGIN DELETE FROM query_cache; END;
+
+            -- Update schema version
+            UPDATE meta SET value = '3' WHERE key = 'schema_version';
             "#,
         )?;
         Ok(())
@@ -1110,6 +1176,73 @@ impl SqliteStorage {
         self.conn.execute("DELETE FROM query_history", [])?;
         Ok(())
     }
+
+    // ========================================================================
+    // Query Cache Methods
+    // ========================================================================
+
+    /// Get a cached query result by hash.
+    pub fn get_cached_result(&self, query_hash: &str) -> Result<Option<Vec<u8>>> {
+        let result: Option<Vec<u8>> = self
+            .conn
+            .query_row(
+                "SELECT result FROM query_cache WHERE query_hash = ?1",
+                params![query_hash],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(result)
+    }
+
+    /// Store a query result in the cache.
+    pub fn cache_result(&self, query_hash: &str, ast_json: &str, result: &[u8]) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        self.conn.execute(
+            "INSERT OR REPLACE INTO query_cache (query_hash, query_ast, result, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![query_hash, ast_json, result, now],
+        )?;
+        Ok(())
+    }
+
+    /// Clear the query cache manually.
+    pub fn clear_query_cache(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM query_cache", [])?;
+        Ok(())
+    }
+
+    /// Get cache statistics (entry count, total size).
+    pub fn cache_stats(&self) -> Result<CacheStats> {
+        let entry_count: usize = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM query_cache", [], |row| row.get(0))?;
+
+        let total_size_bytes: usize = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(SUM(LENGTH(result)), 0) FROM query_cache",
+                [],
+                |row| row.get(0),
+            )?;
+
+        Ok(CacheStats {
+            entry_count,
+            total_size_bytes,
+        })
+    }
+}
+
+/// Cache statistics.
+#[derive(Debug, Clone)]
+pub struct CacheStats {
+    /// Number of cached entries.
+    pub entry_count: usize,
+    /// Total size of cached results in bytes.
+    pub total_size_bytes: usize,
 }
 
 #[cfg(test)]

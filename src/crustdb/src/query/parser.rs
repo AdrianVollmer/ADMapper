@@ -8,6 +8,7 @@ use crate::error::{Error, Result};
 use pest::iterators::{Pair, Pairs};
 use pest::Parser;
 use pest_derive::Parser;
+use serde::{Deserialize, Serialize};
 
 /// Pest parser for Cypher queries.
 #[derive(Parser)]
@@ -15,7 +16,7 @@ use pest_derive::Parser;
 pub struct CypherParser;
 
 /// A parsed Cypher statement.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     /// MATCH ... RETURN query
     Match(MatchClause),
@@ -47,7 +48,7 @@ impl Statement {
 }
 
 /// MATCH clause AST.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchClause {
     pub pattern: Pattern,
     pub where_clause: Option<WhereClause>,
@@ -57,13 +58,13 @@ pub struct MatchClause {
 }
 
 /// CREATE clause AST.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateClause {
     pub pattern: Pattern,
 }
 
 /// MERGE clause AST.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeClause {
     pub pattern: Pattern,
     pub on_create: Option<SetClause>,
@@ -71,20 +72,20 @@ pub struct MergeClause {
 }
 
 /// DELETE clause AST.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteClause {
     pub detach: bool,
     pub expressions: Vec<Expression>,
 }
 
 /// SET clause AST.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetClause {
     pub items: Vec<SetItem>,
 }
 
 /// A single SET item.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SetItem {
     Property {
         variable: String,
@@ -98,13 +99,13 @@ pub enum SetItem {
 }
 
 /// WHERE clause AST.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WhereClause {
     pub predicate: Expression,
 }
 
 /// RETURN clause AST.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReturnClause {
     pub distinct: bool,
     pub items: Vec<ReturnItem>,
@@ -114,21 +115,21 @@ pub struct ReturnClause {
 }
 
 /// A single RETURN item.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReturnItem {
     pub expression: Expression,
     pub alias: Option<String>,
 }
 
 /// ORDER BY item.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderByItem {
     pub expression: Expression,
     pub descending: bool,
 }
 
 /// A graph pattern (nodes and relationships).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pattern {
     pub elements: Vec<PatternElement>,
     /// Path variable name for `p = (a)-[*]->(b)` syntax.
@@ -138,14 +139,14 @@ pub struct Pattern {
 }
 
 /// An element in a pattern.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PatternElement {
     Node(NodePattern),
     Relationship(RelationshipPattern),
 }
 
 /// A node pattern like (n:Label {prop: value}).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodePattern {
     pub variable: Option<String>,
     /// Labels to match. Each inner Vec is OR'd (alternatives), outer Vec is AND'd.
@@ -155,7 +156,7 @@ pub struct NodePattern {
 }
 
 /// Quantifier for relationship patterns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RelQuantifier {
     /// One or more (+)
     OneOrMore,
@@ -164,7 +165,7 @@ pub enum RelQuantifier {
 }
 
 /// A relationship pattern like -[r:TYPE]->
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelationshipPattern {
     pub variable: Option<String>,
     pub types: Vec<String>,
@@ -176,7 +177,7 @@ pub struct RelationshipPattern {
 }
 
 /// Relationship direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
     Outgoing, // ->
     Incoming, // <-
@@ -184,7 +185,7 @@ pub enum Direction {
 }
 
 /// Variable-length relationship specification.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LengthSpec {
     pub min: Option<u32>,
     pub max: Option<u32>,
@@ -199,7 +200,7 @@ type RelationshipDetail = (
 );
 
 /// An expression in the query.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expression {
     /// Literal value
     Literal(Literal),
@@ -238,7 +239,7 @@ pub enum Expression {
 }
 
 /// A literal value.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Literal {
     Null,
     Boolean(bool),
@@ -248,7 +249,7 @@ pub enum Literal {
 }
 
 /// Binary operators.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BinaryOperator {
     // Comparison
     Eq,
@@ -279,7 +280,7 @@ pub enum BinaryOperator {
 }
 
 /// Unary operators.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UnaryOperator {
     Not,
     Neg,

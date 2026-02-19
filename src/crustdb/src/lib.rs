@@ -33,9 +33,13 @@ pub use error::{Error, Result};
 pub use graph::{Edge, Node, PropertyValue};
 pub use query::{QueryResult, QueryStats, ResultValue, Row};
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Mutex;
 use storage::SqliteStorage;
+
+pub use storage::CacheStats;
 
 /// Main database handle.
 ///
@@ -43,6 +47,8 @@ use storage::SqliteStorage;
 /// a connection pool in the future.
 pub struct Database {
     storage: Mutex<SqliteStorage>,
+    /// Whether query caching is enabled (disabled by default).
+    caching_enabled: bool,
 }
 
 impl Database {
@@ -51,6 +57,7 @@ impl Database {
         let storage = SqliteStorage::open(path)?;
         Ok(Self {
             storage: Mutex::new(storage),
+            caching_enabled: false,
         })
     }
 
@@ -59,7 +66,40 @@ impl Database {
         let storage = SqliteStorage::in_memory()?;
         Ok(Self {
             storage: Mutex::new(storage),
+            caching_enabled: false,
         })
+    }
+
+    /// Enable or disable query caching.
+    ///
+    /// When enabled, read-only query results are cached and subsequent
+    /// executions of the same query will return cached results. The cache
+    /// is automatically invalidated when data is modified.
+    pub fn set_caching(&mut self, enabled: bool) {
+        self.caching_enabled = enabled;
+    }
+
+    /// Check if caching is enabled.
+    pub fn caching_enabled(&self) -> bool {
+        self.caching_enabled
+    }
+
+    /// Clear the query cache.
+    pub fn clear_cache(&self) -> Result<()> {
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.clear_query_cache()
+    }
+
+    /// Get cache statistics.
+    pub fn cache_stats(&self) -> Result<CacheStats> {
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.cache_stats()
     }
 
     /// Execute a Cypher query.
@@ -69,7 +109,30 @@ impl Database {
             .storage
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        query::executor::execute(&statement, &storage)
+
+        // Only cache read-only queries when caching is enabled
+        if self.caching_enabled && statement.is_read_only() {
+            let ast_json = serde_json::to_string(&statement)
+                .map_err(|e| Error::Internal(format!("Failed to serialize AST: {}", e)))?;
+            let query_hash = compute_hash(&ast_json);
+
+            // Check cache
+            if let Some(cached_bytes) = storage.get_cached_result(&query_hash)? {
+                if let Ok(cached_result) = serde_json::from_slice(&cached_bytes) {
+                    return Ok(cached_result);
+                }
+                // If deserialization fails, fall through and execute normally
+            }
+
+            // Execute and cache
+            let result = query::executor::execute(&statement, &storage)?;
+            let result_bytes = serde_json::to_vec(&result)
+                .map_err(|e| Error::Internal(format!("Failed to serialize result: {}", e)))?;
+            storage.cache_result(&query_hash, &ast_json, &result_bytes)?;
+            Ok(result)
+        } else {
+            query::executor::execute(&statement, &storage)
+        }
     }
 
     /// Get database statistics.
@@ -257,6 +320,13 @@ impl Database {
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.clear_query_history()
     }
+}
+
+/// Compute a hash of the given string for use as a cache key.
+fn compute_hash(s: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    s.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 /// A row from the query history.
@@ -603,5 +673,177 @@ mod tests {
         db.clear_query_history().unwrap();
         let (_, total) = db.get_query_history(10, 0).unwrap();
         assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn test_caching_disabled_by_default() {
+        let db = Database::in_memory().unwrap();
+        assert!(!db.caching_enabled());
+
+        // Execute a query - should not be cached
+        db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+        db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+
+        // Cache should be empty
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 0);
+    }
+
+    #[test]
+    fn test_query_caching_basic() {
+        let mut db = Database::in_memory().unwrap();
+        db.set_caching(true);
+        assert!(db.caching_enabled());
+
+        // Create some data
+        db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+        db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+
+        // Execute a read-only query
+        let result1 = db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result1.rows.len(), 2);
+
+        // Check cache has one entry
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 1);
+
+        // Execute the same query again - should hit cache
+        let result2 = db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result2.rows.len(), 2);
+
+        // Cache should still have one entry (not doubled)
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 1);
+
+        // Results should be equivalent
+        assert_eq!(result1.columns, result2.columns);
+        assert_eq!(result1.rows.len(), result2.rows.len());
+    }
+
+    #[test]
+    fn test_cache_invalidation_on_insert() {
+        let mut db = Database::in_memory().unwrap();
+        db.set_caching(true);
+
+        // Create initial data
+        db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+
+        // Execute a query - it will be cached
+        let result1 = db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result1.rows.len(), 1);
+
+        // Cache should have an entry
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 1);
+
+        // Insert new data - should invalidate cache
+        db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+
+        // Cache should be cleared by trigger
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 0);
+
+        // Execute query again - should get fresh result
+        let result2 = db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result2.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_cache_invalidation_on_update() {
+        let mut db = Database::in_memory().unwrap();
+        db.set_caching(true);
+
+        // Create initial data
+        db.execute("CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
+
+        // Execute a query - it will be cached
+        let result1 = db.execute("MATCH (n:Person) RETURN n.age").unwrap();
+        assert_eq!(result1.rows.len(), 1);
+
+        // Cache should have an entry
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 1);
+
+        // Update data - should invalidate cache
+        db.execute("MATCH (n:Person {name: 'Alice'}) SET n.age = 31").unwrap();
+
+        // Cache should be cleared by trigger
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 0);
+    }
+
+    #[test]
+    fn test_cache_invalidation_on_delete() {
+        let mut db = Database::in_memory().unwrap();
+        db.set_caching(true);
+
+        // Create initial data
+        db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+        db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+
+        // Execute a query - it will be cached
+        let result1 = db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result1.rows.len(), 2);
+
+        // Cache should have an entry
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 1);
+
+        // Delete data - should invalidate cache
+        db.execute("MATCH (n:Person {name: 'Bob'}) DELETE n").unwrap();
+
+        // Cache should be cleared by trigger
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 0);
+
+        // Execute query again - should get fresh result
+        let result2 = db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result2.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_write_queries_not_cached() {
+        let mut db = Database::in_memory().unwrap();
+        db.set_caching(true);
+
+        // CREATE is not cached
+        db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 0);
+
+        // MATCH with SET is not cached (not read-only)
+        db.execute("MATCH (n:Person {name: 'Alice'}) SET n.age = 30").unwrap();
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 0);
+
+        // MATCH with DELETE is not cached
+        db.execute("CREATE (n:Temp {x: 1})").unwrap();
+        db.execute("MATCH (n:Temp) DELETE n").unwrap();
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 0);
+
+        // But pure MATCH RETURN is cached
+        db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 1);
+    }
+
+    #[test]
+    fn test_clear_cache() {
+        let mut db = Database::in_memory().unwrap();
+        db.set_caching(true);
+
+        // Create data and cache a query
+        db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+        db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 1);
+
+        // Manually clear cache
+        db.clear_cache().unwrap();
+
+        let stats = db.cache_stats().unwrap();
+        assert_eq!(stats.entry_count, 0);
     }
 }
