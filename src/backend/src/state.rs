@@ -3,6 +3,7 @@
 use crate::api::types::{QueryActivity, QueryProgress};
 use crate::db::{DatabaseBackend, DatabaseType, DatabaseUrl};
 use crate::import::ImportProgress;
+use crate::settings;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -243,8 +244,9 @@ impl AppState {
             #[cfg(feature = "crustdb")]
             DatabaseType::CrustDB => {
                 let path = parsed.path.ok_or("Missing path for CrustDB")?;
-                let db =
-                    CrustDatabase::new(&path).map_err(|e: crate::db::DbError| e.to_string())?;
+                let app_settings = settings::load();
+                let db = CrustDatabase::new(&path, app_settings.query_caching)
+                    .map_err(|e: crate::db::DbError| e.to_string())?;
                 Arc::new(db)
             }
             #[cfg(not(feature = "crustdb"))]

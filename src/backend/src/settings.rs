@@ -14,6 +14,13 @@ pub struct Settings {
     pub theme: String,
     /// Default graph layout: "force", "hierarchical", "grid", or "circular"
     pub default_graph_layout: String,
+    /// Whether to enable query caching for CrustDB (default: true)
+    #[serde(default = "default_query_caching")]
+    pub query_caching: bool,
+}
+
+fn default_query_caching() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -21,6 +28,7 @@ impl Default for Settings {
         Self {
             theme: "dark".to_string(),
             default_graph_layout: "force".to_string(),
+            query_caching: true,
         }
     }
 }
@@ -81,6 +89,7 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.theme, "dark");
         assert_eq!(settings.default_graph_layout, "force");
+        assert!(settings.query_caching);
     }
 
     #[test]
@@ -88,14 +97,26 @@ mod tests {
         let settings = Settings {
             theme: "light".to_string(),
             default_graph_layout: "hierarchical".to_string(),
+            query_caching: false,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
         assert!(json.contains("\"theme\":\"light\""));
         assert!(json.contains("\"defaultGraphLayout\":\"hierarchical\""));
+        assert!(json.contains("\"queryCaching\":false"));
 
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.theme, "light");
         assert_eq!(parsed.default_graph_layout, "hierarchical");
+        assert!(!parsed.query_caching);
+    }
+
+    #[test]
+    fn test_settings_backwards_compatibility() {
+        // Old settings files without query_caching should still parse
+        let json = r#"{"theme":"dark","defaultGraphLayout":"force"}"#;
+        let parsed: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.theme, "dark");
+        assert!(parsed.query_caching); // Default to true
     }
 }

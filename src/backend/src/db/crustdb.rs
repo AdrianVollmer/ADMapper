@@ -25,11 +25,15 @@ pub struct CrustDatabase {
 
 impl CrustDatabase {
     /// Create or open a database at the given path.
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+    ///
+    /// If `enable_caching` is true, query results for read-only queries will be cached
+    /// and automatically invalidated when data changes.
+    pub fn new<P: AsRef<Path>>(path: P, enable_caching: bool) -> Result<Self> {
         let path_str = path.as_ref().to_string_lossy().to_string();
-        info!(path = %path_str, "Opening CrustDB");
+        info!(path = %path_str, caching = %enable_caching, "Opening CrustDB");
 
-        let db = Database::open(&path_str).map_err(|e| DbError::Database(e.to_string()))?;
+        let mut db = Database::open(&path_str).map_err(|e| DbError::Database(e.to_string()))?;
+        db.set_caching(enable_caching);
 
         let instance = Self { db: Arc::new(db) };
         instance.init_schema()?;
@@ -41,7 +45,8 @@ impl CrustDatabase {
     #[cfg(test)]
     pub fn in_memory() -> Result<Self> {
         debug!("Creating in-memory CrustDB");
-        let db = Database::in_memory().map_err(|e| DbError::Database(e.to_string()))?;
+        let mut db = Database::in_memory().map_err(|e| DbError::Database(e.to_string()))?;
+        db.set_caching(true); // Enable caching by default for tests too
 
         let instance = Self { db: Arc::new(db) };
         instance.init_schema()?;
