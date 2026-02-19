@@ -2,8 +2,8 @@
 
 use clap::Parser;
 use crustdb::{Database, ResultValue};
-use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
 use std::fs;
 use std::process;
 

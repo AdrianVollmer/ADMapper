@@ -1,0 +1,1394 @@
+//! API route handlers.
+
+use crate::api::types::{
+    AddEdgeRequest, AddHistoryRequest, AddNodeRequest, ApiError, ConnectRequest, DatabaseStatus,
+    HistoryParams, NodeCounts, NodeStatus, PathParams, PathResponse, PathStep, PathsToDaEntry,
+    PathsToDaParams, PathsToDaResponse, QueryActivity, QueryHistoryEntry, QueryHistoryResponse,
+    QueryProgress, QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
+};
+use crate::db::{DbEdge, DbError, DbNode, QueryLanguage};
+use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
+use crate::import::{BloodHoundImporter, ImportProgress};
+use crate::state::{AppState, ImportJob, RunningQuery};
+use axum::{
+    extract::{Multipart, Path, Query, State},
+    http::StatusCode,
+    response::{
+        sse::{Event, Sse},
+        Json,
+    },
+};
+use parking_lot::RwLock;
+use serde_json::{json, Value as JsonValue};
+use std::convert::Infallible;
+use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, instrument, warn};
+
+// ============================================================================
+// Health Check
+// ============================================================================
+
+pub async fn health_check() -> Json<JsonValue> {
+    Json(json!({"status": "ok"}))
+}
+
+// ============================================================================
+// Database Connection Endpoints
+// ============================================================================
+
+/// Get current database connection status.
+pub async fn database_status(State(state): State<AppState>) -> Json<DatabaseStatus> {
+    let connected = state.is_connected();
+    let database_type = state.database_type().map(|t| t.name().to_string());
+    Json(DatabaseStatus {
+        connected,
+        database_type,
+    })
+}
+
+/// Get list of supported database types based on compiled features.
+#[allow(unused_mut)]
+pub async fn database_supported() -> Json<Vec<SupportedDatabase>> {
+    let mut supported = Vec::new();
+
+    #[cfg(feature = "kuzu")]
+    supported.push(SupportedDatabase {
+        id: "kuzu",
+        name: "KuzuDB",
+        connection_type: "file",
+    });
+
+    #[cfg(feature = "cozo")]
+    supported.push(SupportedDatabase {
+        id: "cozo",
+        name: "CozoDB",
+        connection_type: "file",
+    });
+
+    #[cfg(feature = "crustdb")]
+    supported.push(SupportedDatabase {
+        id: "crustdb",
+        name: "CrustDB",
+        connection_type: "file",
+    });
+
+    #[cfg(feature = "neo4j")]
+    supported.push(SupportedDatabase {
+        id: "neo4j",
+        name: "Neo4j",
+        connection_type: "network",
+    });
+
+    #[cfg(feature = "falkordb")]
+    supported.push(SupportedDatabase {
+        id: "falkordb",
+        name: "FalkorDB",
+        connection_type: "network",
+    });
+
+    Json(supported)
+}
+
+/// Connect to a database.
+pub async fn database_connect(
+    State(state): State<AppState>,
+    Json(body): Json<ConnectRequest>,
+) -> Result<Json<DatabaseStatus>, ApiError> {
+    info!(url = %body.url, "Connecting to database");
+
+    state.connect(&body.url).map_err(ApiError::BadRequest)?;
+
+    let database_type = state.database_type().map(|t| t.name().to_string());
+    Ok(Json(DatabaseStatus {
+        connected: true,
+        database_type,
+    }))
+}
+
+/// Disconnect from the current database.
+pub async fn database_disconnect(State(state): State<AppState>) -> StatusCode {
+    state.disconnect();
+    StatusCode::NO_CONTENT
+}
+
+// ============================================================================
+// Import Endpoints
+// ============================================================================
+
+/// Handle BloodHound data import via multipart upload.
+#[instrument(skip(state, multipart))]
+pub async fn import_bloodhound(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<JsonValue>, ApiError> {
+    let job_id = uuid::Uuid::new_v4().to_string();
+    info!(job_id = %job_id, "Starting import job");
+
+    // Create broadcast channel for progress updates
+    let (tx, _) = broadcast::channel::<ImportProgress>(100);
+    let job = Arc::new(ImportJob {
+        channel: tx.clone(),
+        final_state: RwLock::new(None),
+    });
+    state.import_jobs.insert(job_id.clone(), job.clone());
+
+    // Stream uploaded files to temp files to avoid holding large files in memory
+    let mut files: Vec<(String, std::path::PathBuf)> = Vec::new();
+
+    while let Some(mut field) = multipart.next_field().await.map_err(|e| {
+        error!(error = %e, "Multipart read error");
+        ApiError::BadRequest(format!("Multipart error: {e}"))
+    })? {
+        let filename = field.file_name().unwrap_or("unknown").to_string();
+
+        // Create temp file path with unique ID
+        let temp_path = std::env::temp_dir().join(format!(
+            "admapper-upload-{}-{}",
+            uuid::Uuid::new_v4(),
+            filename.replace(std::path::MAIN_SEPARATOR, "_")
+        ));
+
+        // Create and write to temp file
+        let mut async_file = tokio::fs::File::create(&temp_path).await.map_err(|e| {
+            error!(error = %e, path = %temp_path.display(), "Failed to create temp file");
+            ApiError::Internal(format!("Temp file error: {e}"))
+        })?;
+        let mut total_bytes = 0usize;
+
+        // Stream chunks to temp file
+        while let Some(chunk) = field.chunk().await.map_err(|e| {
+            error!(error = %e, filename = %filename, "Failed to read chunk");
+            ApiError::BadRequest(format!("Read error: {e}"))
+        })? {
+            total_bytes += chunk.len();
+            async_file.write_all(&chunk).await.map_err(|e| {
+                error!(error = %e, filename = %filename, "Failed to write chunk");
+                ApiError::Internal(format!("Write error: {e}"))
+            })?;
+        }
+
+        async_file.flush().await.map_err(|e| {
+            error!(error = %e, filename = %filename, "Failed to flush temp file");
+            ApiError::Internal(format!("Flush error: {e}"))
+        })?;
+
+        debug!(filename = %filename, size = total_bytes, path = %temp_path.display(), "Received file");
+        files.push((filename, temp_path));
+    }
+
+    if files.is_empty() {
+        warn!("Import request with no files");
+        return Err(ApiError::BadRequest("No files uploaded".to_string()));
+    }
+
+    info!(file_count = files.len(), "Processing uploaded files");
+
+    let db = state.require_db()?;
+    let job_id_clone = job_id.clone();
+    let import_jobs = state.import_jobs.clone();
+    let job_for_task = job.clone();
+
+    // Spawn import task
+    tokio::task::spawn_blocking(move || {
+        let mut importer = BloodHoundImporter::new(db, tx);
+
+        for (filename, temp_path) in &files {
+            info!(filename = %filename, path = %temp_path.display(), "Importing file");
+            let result = if filename.ends_with(".zip") {
+                // Open temp file for reading
+                match std::fs::File::open(temp_path) {
+                    Ok(file) => importer.import_zip(file, &job_id_clone),
+                    Err(e) => {
+                        error!(error = %e, path = %temp_path.display(), "Failed to open temp file");
+                        Err(format!("Failed to open temp file: {e}"))
+                    }
+                }
+            } else if filename.ends_with(".json") {
+                importer.import_json_file(temp_path, &job_id_clone)
+            } else {
+                warn!(filename = %filename, "Unsupported file type");
+                Err(format!("Unsupported file type: {filename}"))
+            };
+
+            match &result {
+                Ok(progress) => {
+                    info!(
+                        filename = %filename,
+                        nodes = progress.nodes_imported,
+                        edges = progress.edges_imported,
+                        "File imported successfully"
+                    );
+                    // Write final_state immediately to avoid race with SSE subscribers
+                    // who might connect after broadcast but before loop finishes
+                    *job_for_task.final_state.write() = Some(progress.clone());
+                }
+                Err(e) => {
+                    error!(filename = %filename, error = %e, "Import failed");
+                }
+            }
+        }
+
+        // Clean up temp files
+        for (filename, temp_path) in files {
+            if let Err(e) = std::fs::remove_file(&temp_path) {
+                debug!(filename = %filename, error = %e, "Failed to remove temp file (may already be cleaned up)");
+            }
+        }
+
+        debug!(job_id = %job_id_clone, "Import job complete, cleanup scheduled");
+        // Clean up job after a delay
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        import_jobs.remove(&job_id_clone);
+    });
+
+    Ok(Json(json!({
+        "job_id": job_id,
+        "status": "started"
+    })))
+}
+
+/// SSE endpoint for import progress updates.
+pub async fn import_progress(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    use futures::future::Either;
+
+    let job = state
+        .import_jobs
+        .get(&job_id)
+        .map(|r| r.value().clone())
+        .ok_or_else(|| ApiError::NotFound("Job not found".to_string()))?;
+
+    // Check if import already completed (late subscriber)
+    let final_state = job.final_state.read().clone();
+    if let Some(progress) = final_state {
+        debug!(job_id = %job_id, "Sending cached final state to late subscriber");
+        let data = serde_json::to_string(&progress).unwrap_or_default();
+        let stream = Either::Left(tokio_stream::once(Ok(Event::default().data(data))));
+        return Ok(Sse::new(stream));
+    }
+
+    // Subscribe to live updates
+    let rx = job.channel.subscribe();
+    let stream = Either::Right(BroadcastStream::new(rx).filter_map(|result| {
+        result.ok().map(|progress| {
+            let data = serde_json::to_string(&progress).unwrap_or_default();
+            Ok(Event::default().data(data))
+        })
+    }));
+
+    Ok(Sse::new(stream))
+}
+
+// ============================================================================
+// Graph Statistics Endpoints
+// ============================================================================
+
+/// Get graph statistics.
+#[instrument(skip(state))]
+pub async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue>, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let (node_count, edge_count) = tokio::task::spawn_blocking(move || db.get_stats())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    debug!(
+        nodes = node_count,
+        edges = edge_count,
+        "Graph stats retrieved"
+    );
+    Ok(Json(json!({
+        "nodes": node_count,
+        "edges": edge_count
+    })))
+}
+
+/// Get detailed graph statistics including counts by type.
+#[instrument(skip(state))]
+pub async fn graph_detailed_stats(
+    State(state): State<AppState>,
+) -> Result<Json<crate::db::DetailedStats>, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let stats = tokio::task::spawn_blocking(move || db.get_detailed_stats())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    debug!(
+        nodes = stats.total_nodes,
+        edges = stats.total_edges,
+        users = stats.users,
+        computers = stats.computers,
+        "Detailed stats retrieved"
+    );
+    Ok(Json(stats))
+}
+
+/// Clear all graph data from the database.
+#[instrument(skip(state))]
+pub async fn graph_clear(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    tokio::task::spawn_blocking(move || db.clear())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    info!("Database cleared");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ============================================================================
+// Graph Node/Edge Endpoints
+// ============================================================================
+
+/// Get all graph nodes.
+pub async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<GraphNode>>, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let nodes = tokio::task::spawn_blocking(move || db.get_all_nodes())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
+    Ok(Json(result))
+}
+
+/// Get all graph edges.
+pub async fn graph_edges(State(state): State<AppState>) -> Result<Json<Vec<GraphEdge>>, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let edges = tokio::task::spawn_blocking(move || db.get_all_edges())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    let result: Vec<GraphEdge> = edges.into_iter().map(GraphEdge::from).collect();
+    Ok(Json(result))
+}
+
+/// Get full graph (nodes and edges).
+pub async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB calls in spawn_blocking to not block the async runtime
+    let (nodes, edges) = tokio::task::spawn_blocking(move || {
+        let nodes = db.get_all_nodes()?;
+        let edges = db.get_all_edges()?;
+        Ok::<_, crate::db::DbError>((nodes, edges))
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    let result = FullGraph {
+        nodes: nodes.into_iter().map(GraphNode::from).collect(),
+        edges: edges.into_iter().map(GraphEdge::from).collect(),
+    };
+
+    Ok(Json(result))
+}
+
+/// Search nodes by label (for autocomplete).
+#[instrument(skip(state))]
+pub async fn graph_search(
+    State(state): State<AppState>,
+    Query(params): Query<SearchParams>,
+) -> Result<Json<Vec<GraphNode>>, ApiError> {
+    if params.q.len() < 2 {
+        return Ok(Json(Vec::new()));
+    }
+
+    let db = state.require_db()?;
+
+    // Track query activity
+    state.start_sync_query();
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let query = params.q.clone();
+    let limit = params.limit;
+    let nodes_result = tokio::task::spawn_blocking(move || db.search_nodes(&query, limit))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
+
+    state.end_sync_query();
+
+    let nodes = nodes_result?;
+    let result: Vec<GraphNode> = nodes.into_iter().map(GraphNode::from).collect();
+
+    debug!(query = %params.q, results = result.len(), "Search complete");
+    Ok(Json(result))
+}
+
+/// Get connection counts for a node.
+/// Returns counts for incoming, outgoing, admin permissions, memberOf, and members.
+#[instrument(skip(state))]
+pub async fn node_counts(
+    State(state): State<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<NodeCounts>, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let node_id_clone = node_id.clone();
+    let (incoming, outgoing, admin_to, member_of, members) =
+        tokio::task::spawn_blocking(move || db.get_node_edge_counts(&node_id_clone))
+            .await
+            .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    debug!(
+        node_id = %node_id,
+        incoming = incoming,
+        outgoing = outgoing,
+        admin_to = admin_to,
+        member_of = member_of,
+        members = members,
+        "Node counts retrieved"
+    );
+
+    Ok(Json(NodeCounts {
+        incoming,
+        outgoing,
+        admin_to,
+        member_of,
+        members,
+    }))
+}
+
+/// Get connections for a node in a specific direction.
+/// Returns the full graph (nodes and edges) for rendering.
+#[instrument(skip(state))]
+pub async fn node_connections(
+    State(state): State<AppState>,
+    Path((node_id, direction)): Path<(String, String)>,
+) -> Result<Json<FullGraph>, ApiError> {
+    let db = state.require_db()?;
+    info!(node_id = %node_id, direction = %direction, "Loading node connections");
+
+    // Track query activity
+    state.start_sync_query();
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let node_id_clone = node_id.clone();
+    let direction_clone = direction.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        db.get_node_connections(&node_id_clone, &direction_clone)
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
+
+    state.end_sync_query();
+
+    let (nodes, edges) = result?;
+
+    Ok(Json(FullGraph {
+        nodes: nodes.into_iter().map(GraphNode::from).collect(),
+        edges: edges.into_iter().map(GraphEdge::from).collect(),
+    }))
+}
+
+/// Get security status for a node.
+/// Checks group memberships and paths to high-value targets.
+#[instrument(skip(state))]
+pub async fn node_status(
+    State(state): State<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<NodeStatus>, ApiError> {
+    let db = state.require_db()?;
+    info!(node_id = %node_id, "Checking node security status");
+
+    // Run all blocking DB calls in spawn_blocking to not block the async runtime
+    let node_id_clone = node_id.clone();
+    let status = tokio::task::spawn_blocking(move || {
+        // Get the node to check its properties
+        let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
+        let node = nodes.first();
+
+        // Check owned status from properties
+        let owned = node
+            .and_then(|n| {
+                let props = &n.properties;
+                props.get("owned").or(props.get("Owned")).and_then(|v| {
+                    v.as_bool()
+                        .or_else(|| v.as_i64().map(|i| i == 1))
+                        .or_else(|| v.as_str().map(|s| s == "true"))
+                })
+            })
+            .unwrap_or(false);
+
+        // Check high value from properties
+        let high_value_prop = node
+            .and_then(|n| {
+                let props = &n.properties;
+                props
+                    .get("highvalue")
+                    .or(props.get("HighValue"))
+                    .or(props.get("highValue"))
+                    .and_then(|v| {
+                        v.as_bool()
+                            .or_else(|| v.as_i64().map(|i| i == 1))
+                            .or_else(|| v.as_str().map(|s| s == "true"))
+                    })
+            })
+            .unwrap_or(false);
+
+        // Check group memberships using graph traversal
+        let is_enterprise_admin = db
+            .find_membership_by_sid_suffix(&node_id_clone, "-519")?
+            .is_some();
+        let is_domain_admin = db
+            .find_membership_by_sid_suffix(&node_id_clone, "-512")?
+            .is_some();
+
+        // High-value RIDs to check membership for
+        let high_value_rids = ["-512", "-519", "-518", "-516", "-498", "-544"];
+        let is_high_value_member = high_value_rids.iter().any(|rid| {
+            db.find_membership_by_sid_suffix(&node_id_clone, rid)
+                .unwrap_or(None)
+                .is_some()
+        });
+
+        let is_high_value = high_value_prop || is_high_value_member;
+
+        // Check for paths to high-value targets (only if not already high value)
+        let (has_path_to_high_value, path_length) =
+            if is_enterprise_admin || is_domain_admin || is_high_value {
+                (false, None)
+            } else {
+                // Use the existing paths-to-DA logic to check for attack paths
+                let paths = db.find_paths_to_domain_admins(&[])?;
+                let path_info = paths.iter().find(|(id, _, _, _)| id == &node_id_clone);
+                match path_info {
+                    Some((_, _, _, hops)) => (true, Some(*hops)),
+                    None => (false, None),
+                }
+            };
+
+        Ok::<_, crate::db::DbError>(NodeStatus {
+            owned,
+            is_enterprise_admin,
+            is_domain_admin,
+            is_high_value,
+            has_path_to_high_value,
+            path_length,
+        })
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    Ok(Json(status))
+}
+
+// ============================================================================
+// Path Finding Endpoints
+// ============================================================================
+
+/// Find shortest path between two nodes.
+/// Accepts either object IDs or labels as identifiers.
+#[instrument(skip(state))]
+pub async fn graph_path(
+    State(state): State<AppState>,
+    Query(params): Query<PathParams>,
+) -> Result<Json<PathResponse>, ApiError> {
+    let db = state.require_db()?;
+
+    // Track query activity
+    state.start_sync_query();
+
+    // Run all blocking DB work in spawn_blocking
+    let from_param = params.from.clone();
+    let to_param = params.to.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        // Resolve identifiers to object IDs (supports both IDs and labels)
+        let from_id = match db.resolve_node_identifier(&from_param)? {
+            Some(id) => id,
+            None => return Err(DbError::Database(format!("Node not found: {}", from_param))),
+        };
+
+        let to_id = match db.resolve_node_identifier(&to_param)? {
+            Some(id) => id,
+            None => return Err(DbError::Database(format!("Node not found: {}", to_param))),
+        };
+
+        let path_result = db.shortest_path(&from_id, &to_id)?;
+
+        match path_result {
+            None => {
+                debug!(from = %from_id, to = %to_id, "No path found");
+                Ok(PathResponse {
+                    found: false,
+                    path: Vec::new(),
+                    graph: FullGraph {
+                        nodes: Vec::new(),
+                        edges: Vec::new(),
+                    },
+                })
+            }
+            Some(path) => {
+                // Get node IDs from path
+                let node_ids: Vec<String> = path.iter().map(|(id, _)| id.clone()).collect();
+
+                // Get full node data
+                let nodes = db.get_nodes_by_ids(&node_ids)?;
+
+                // Build node lookup
+                let node_map: std::collections::HashMap<String, DbNode> = nodes
+                    .into_iter()
+                    .map(|node| (node.id.clone(), node))
+                    .collect();
+
+                // Build path steps
+                let path_steps: Vec<PathStep> = path
+                    .iter()
+                    .map(|(id, edge_type)| {
+                        let node = node_map.get(id).cloned().unwrap_or_else(|| DbNode {
+                            id: id.clone(),
+                            label: id.clone(),
+                            node_type: "Unknown".to_string(),
+                            properties: JsonValue::Null,
+                        });
+                        PathStep {
+                            node: GraphNode::from(node),
+                            edge_type: edge_type.clone(),
+                        }
+                    })
+                    .collect();
+
+                // Get edges between path nodes
+                let edges = db.get_edges_between(&node_ids)?;
+
+                let graph = FullGraph {
+                    nodes: path_steps.iter().map(|s| s.node.clone()).collect(),
+                    edges: edges.into_iter().map(GraphEdge::from).collect(),
+                };
+
+                debug!(
+                    from = %from_param,
+                    to = %to_param,
+                    path_len = path_steps.len(),
+                    "Path found"
+                );
+
+                Ok(PathResponse {
+                    found: true,
+                    path: path_steps,
+                    graph,
+                })
+            }
+        }
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))?;
+
+    state.end_sync_query();
+
+    Ok(Json(result?))
+}
+
+/// Find all users with paths to Domain Admins.
+#[instrument(skip(state))]
+pub async fn paths_to_domain_admins(
+    State(state): State<AppState>,
+    Query(params): Query<PathsToDaParams>,
+) -> Result<Json<PathsToDaResponse>, ApiError> {
+    // Parse excluded edge types
+    let exclude_types: Vec<String> = if params.exclude.is_empty() {
+        Vec::new()
+    } else {
+        params
+            .exclude
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    debug!(exclude = ?exclude_types, "Finding paths to Domain Admins");
+
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let results =
+        tokio::task::spawn_blocking(move || db.find_paths_to_domain_admins(&exclude_types))
+            .await
+            .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    let entries: Vec<PathsToDaEntry> = results
+        .into_iter()
+        .map(|(id, node_type, label, hops)| PathsToDaEntry {
+            id,
+            node_type,
+            label,
+            hops,
+        })
+        .collect();
+
+    let count = entries.len();
+    info!(count = count, "Found users with paths to Domain Admins");
+
+    Ok(Json(PathsToDaResponse { count, entries }))
+}
+
+// ============================================================================
+// Graph Insights Endpoints
+// ============================================================================
+
+/// Get security insights from the graph.
+#[instrument(skip(state))]
+pub async fn graph_insights(
+    State(state): State<AppState>,
+) -> Result<Json<crate::db::SecurityInsights>, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let insights = tokio::task::spawn_blocking(move || db.get_security_insights())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    info!(
+        effective_das = insights.effective_da_count,
+        real_das = insights.real_da_count,
+        total_users = insights.total_users,
+        "Security insights computed"
+    );
+    Ok(Json(insights))
+}
+
+/// Get all distinct edge types in the database.
+#[instrument(skip(state))]
+pub async fn graph_edge_types(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<String>>, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let types = tokio::task::spawn_blocking(move || db.get_edge_types())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    debug!(count = types.len(), "Edge types retrieved");
+    Ok(Json(types))
+}
+
+/// Get all distinct node types in the database.
+#[instrument(skip(state))]
+pub async fn graph_node_types(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<String>>, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let types = tokio::task::spawn_blocking(move || db.get_node_types())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    debug!(count = types.len(), "Node types retrieved");
+    Ok(Json(types))
+}
+
+// ============================================================================
+// Node/Edge Mutation Endpoints
+// ============================================================================
+
+/// Add a new node to the graph.
+#[instrument(skip(state, body))]
+pub async fn add_node(
+    State(state): State<AppState>,
+    Json(body): Json<AddNodeRequest>,
+) -> Result<Json<GraphNode>, ApiError> {
+    // Validate inputs
+    if body.id.is_empty() {
+        return Err(ApiError::BadRequest("Node ID is required".to_string()));
+    }
+    if body.label.is_empty() {
+        return Err(ApiError::BadRequest("Node label is required".to_string()));
+    }
+    if body.node_type.is_empty() {
+        return Err(ApiError::BadRequest("Node type is required".to_string()));
+    }
+
+    let node = DbNode {
+        id: body.id.clone(),
+        label: body.label.clone(),
+        node_type: body.node_type.clone(),
+        properties: if body.properties.is_null() {
+            serde_json::json!({})
+        } else {
+            body.properties
+        },
+    };
+
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    tokio::task::spawn_blocking(move || db.insert_node(node))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    info!(id = %body.id, label = %body.label, node_type = %body.node_type, "Node added");
+
+    Ok(Json(GraphNode {
+        id: body.id,
+        label: body.label,
+        node_type: body.node_type,
+        properties: serde_json::json!({}),
+    }))
+}
+
+/// Add a new edge to the graph.
+#[instrument(skip(state, body))]
+pub async fn add_edge(
+    State(state): State<AppState>,
+    Json(body): Json<AddEdgeRequest>,
+) -> Result<Json<GraphEdge>, ApiError> {
+    // Validate inputs
+    if body.source.is_empty() {
+        return Err(ApiError::BadRequest(
+            "Source node ID is required".to_string(),
+        ));
+    }
+    if body.target.is_empty() {
+        return Err(ApiError::BadRequest(
+            "Target node ID is required".to_string(),
+        ));
+    }
+    if body.edge_type.is_empty() {
+        return Err(ApiError::BadRequest("Edge type is required".to_string()));
+    }
+
+    let edge = DbEdge {
+        source: body.source.clone(),
+        target: body.target.clone(),
+        edge_type: body.edge_type.clone(),
+        properties: if body.properties.is_null() {
+            serde_json::json!({})
+        } else {
+            body.properties
+        },
+        ..Default::default()
+    };
+
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    tokio::task::spawn_blocking(move || db.insert_edge(edge))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    info!(
+        source = %body.source,
+        target = %body.target,
+        edge_type = %body.edge_type,
+        "Edge added"
+    );
+
+    Ok(Json(GraphEdge {
+        source: body.source,
+        target: body.target,
+        edge_type: body.edge_type,
+    }))
+}
+
+// ============================================================================
+// Query Execution Endpoints
+// ============================================================================
+
+/// Execute a custom query asynchronously.
+/// Returns immediately with a query_id. Subscribe to /api/query/progress/:id for updates.
+#[instrument(skip(state, body))]
+pub async fn graph_query(
+    State(state): State<AppState>,
+    Json(body): Json<QueryRequest>,
+) -> Result<Json<QueryStartResponse>, ApiError> {
+    let db = state.require_db()?;
+    info!(query = %body.query, "Starting async query");
+
+    // Generate query ID and setup tracking
+    let query_id = uuid::Uuid::new_v4().to_string();
+    let cancel_token = CancellationToken::new();
+    let (progress_tx, _) = broadcast::channel::<QueryProgress>(16);
+
+    let started_at = std::time::Instant::now();
+    let started_at_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let running_query = Arc::new(RunningQuery {
+        query_id: query_id.clone(),
+        query: body.query.clone(),
+        started_at,
+        started_at_unix,
+        cancel_token: cancel_token.clone(),
+        progress_tx: progress_tx.clone(),
+        final_state: RwLock::new(None),
+        completed_at: RwLock::new(None),
+    });
+
+    state
+        .running_queries
+        .insert(query_id.clone(), running_query.clone());
+
+    // Broadcast query activity update (new query started)
+    state.broadcast_query_activity();
+
+    // Broadcast initial "running" status
+    let initial_progress = QueryProgress {
+        query_id: query_id.clone(),
+        status: QueryStatus::Running,
+        started_at: started_at_unix,
+        duration_ms: None,
+        result_count: None,
+        error: None,
+        results: None,
+        graph: None,
+    };
+    let _ = progress_tx.send(initial_progress);
+
+    // Add query to history with "running" status
+    let timestamp = started_at_unix;
+    if let Err(e) = db.add_query_history(
+        &query_id,
+        &body.query, // Use query text as name
+        &body.query,
+        timestamp,
+        None,
+        "running",
+        started_at_unix,
+        None,
+        None,
+    ) {
+        warn!(error = %e, "Failed to add query to history");
+    }
+
+    // Spawn the query execution
+    let query_id_clone = query_id.clone();
+    let query_text = body.query.clone();
+    let extract_graph = body.extract_graph;
+    let language = body.language.clone();
+    let running_queries = state.running_queries.clone();
+    let query_activity_tx = state.query_activity_tx.clone();
+    let running_query_for_task = running_query.clone();
+
+    tokio::task::spawn_blocking(move || {
+        // Helper to update query status in history
+        let update_history = |status: &str,
+                              duration_ms: Option<u64>,
+                              result_count: Option<i64>,
+                              error: Option<&str>| {
+            if let Err(e) =
+                db.update_query_status(&query_id_clone, status, duration_ms, result_count, error)
+            {
+                warn!(error = %e, "Failed to update query history status");
+            }
+        };
+
+        // Check if cancelled before starting
+        if cancel_token.is_cancelled() {
+            let duration_ms = started_at.elapsed().as_millis() as u64;
+            update_history("aborted", Some(duration_ms), None, None);
+            let progress = QueryProgress {
+                query_id: query_id_clone.clone(),
+                status: QueryStatus::Aborted,
+                started_at: started_at_unix,
+                duration_ms: Some(duration_ms),
+                result_count: None,
+                error: None,
+                results: None,
+                graph: None,
+            };
+            let _ = progress_tx.send(progress.clone());
+            *running_query_for_task.final_state.write() = Some(progress);
+            *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
+            let _ = query_activity_tx.send(QueryActivity {
+                active: running_queries.len().saturating_sub(1),
+            });
+            return;
+        }
+
+        // Execute the query
+        let result = if let Some(lang_str) = &language {
+            QueryLanguage::from_str(lang_str)
+                .map(|lang| db.run_query_with_language(&query_text, lang))
+                .unwrap_or_else(|| {
+                    Err(DbError::Database(format!("Unknown language: {}", lang_str)))
+                })
+        } else {
+            db.run_custom_query(&query_text)
+        };
+
+        // Check if cancelled after query completion
+        if cancel_token.is_cancelled() {
+            let duration_ms = started_at.elapsed().as_millis() as u64;
+            update_history("aborted", Some(duration_ms), None, None);
+            let progress = QueryProgress {
+                query_id: query_id_clone.clone(),
+                status: QueryStatus::Aborted,
+                started_at: started_at_unix,
+                duration_ms: Some(duration_ms),
+                result_count: None,
+                error: None,
+                results: None,
+                graph: None,
+            };
+            let _ = progress_tx.send(progress.clone());
+            *running_query_for_task.final_state.write() = Some(progress);
+            *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
+            let _ = query_activity_tx.send(QueryActivity {
+                active: running_queries.len().saturating_sub(1),
+            });
+            return;
+        }
+
+        let duration_ms = started_at.elapsed().as_millis() as u64;
+
+        let progress = match result {
+            Ok(results) => {
+                // Count results
+                let result_count = results
+                    .get("rows")
+                    .and_then(|r| r.as_array())
+                    .map(|arr| arr.len() as i64);
+
+                // Try to extract graph if requested
+                let graph = if extract_graph {
+                    extract_graph_from_results(&results, &db).ok().flatten()
+                } else {
+                    None
+                };
+
+                debug!(
+                    query_id = %query_id_clone,
+                    duration_ms = duration_ms,
+                    result_count = ?result_count,
+                    has_graph = graph.is_some(),
+                    "Query completed"
+                );
+
+                // Update history with completed status
+                update_history("completed", Some(duration_ms), result_count, None);
+
+                QueryProgress {
+                    query_id: query_id_clone.clone(),
+                    status: QueryStatus::Completed,
+                    started_at: started_at_unix,
+                    duration_ms: Some(duration_ms),
+                    result_count,
+                    error: None,
+                    results: Some(results),
+                    graph,
+                }
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                error!(query_id = %query_id_clone, error = %error_msg, "Query failed");
+
+                // Update history with failed status
+                update_history("failed", Some(duration_ms), None, Some(&error_msg));
+
+                QueryProgress {
+                    query_id: query_id_clone.clone(),
+                    status: QueryStatus::Failed,
+                    started_at: started_at_unix,
+                    duration_ms: Some(duration_ms),
+                    result_count: None,
+                    error: Some(error_msg),
+                    results: None,
+                    graph: None,
+                }
+            }
+        };
+
+        // Broadcast final status
+        let _ = progress_tx.send(progress.clone());
+        *running_query_for_task.final_state.write() = Some(progress);
+
+        // Mark the query as completed with a timestamp for TTL-based cleanup.
+        // The query stays in running_queries so late subscribers can get the result.
+        // A background task will clean up queries that have been completed for >2 minutes.
+        *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
+
+        // Broadcast activity update (query no longer "running" for UI purposes)
+        let _ = query_activity_tx.send(QueryActivity {
+            active: running_queries.len().saturating_sub(1),
+        });
+    });
+
+    Ok(Json(QueryStartResponse { query_id }))
+}
+
+/// SSE endpoint for query progress updates.
+pub async fn query_progress(
+    State(state): State<AppState>,
+    Path(query_id): Path<String>,
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    use futures::future::Either;
+
+    let query = state
+        .running_queries
+        .get(&query_id)
+        .map(|r| r.value().clone())
+        .ok_or_else(|| ApiError::NotFound("Query not found".to_string()))?;
+
+    // Check if query already completed (late subscriber)
+    let final_state = query.final_state.read().clone();
+    if let Some(progress) = final_state {
+        debug!(query_id = %query_id, "Sending cached final state to late subscriber");
+        let data = serde_json::to_string(&progress).unwrap_or_default();
+        let stream = Either::Left(tokio_stream::once(Ok(Event::default().data(data))));
+        return Ok(Sse::new(stream));
+    }
+
+    // Subscribe to live updates
+    let rx = query.progress_tx.subscribe();
+    let stream = Either::Right(BroadcastStream::new(rx).filter_map(|result| {
+        result.ok().map(|progress| {
+            let data = serde_json::to_string(&progress).unwrap_or_default();
+            Ok(Event::default().data(data))
+        })
+    }));
+
+    Ok(Sse::new(stream))
+}
+
+/// Abort a running query.
+#[instrument(skip(state))]
+pub async fn query_abort(
+    State(state): State<AppState>,
+    Path(query_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let query = state
+        .running_queries
+        .get(&query_id)
+        .map(|r| r.value().clone())
+        .ok_or_else(|| ApiError::NotFound("Query not found".to_string()))?;
+
+    info!(query_id = %query_id, "Aborting query");
+
+    // Cancel the token - this will signal the query to abort
+    query.cancel_token.cancel();
+
+    let duration_ms = query.started_at.elapsed().as_millis() as u64;
+
+    // Update query history with aborted status
+    if let Some(db) = state.db() {
+        if let Err(e) = db.update_query_status(&query_id, "aborted", Some(duration_ms), None, None)
+        {
+            warn!(error = %e, "Failed to update query history status on abort");
+        }
+    }
+
+    // Broadcast aborted status
+    let progress = QueryProgress {
+        query_id: query_id.clone(),
+        status: QueryStatus::Aborted,
+        started_at: query.started_at_unix,
+        duration_ms: Some(duration_ms),
+        result_count: None,
+        error: None,
+        results: None,
+        graph: None,
+    };
+    let _ = query.progress_tx.send(progress.clone());
+    *query.final_state.write() = Some(progress);
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// SSE endpoint for query activity updates.
+/// Broadcasts when the number of active queries changes.
+pub async fn query_activity(
+    State(state): State<AppState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let active = state.active_query_count();
+    debug!(active = active, "Query activity SSE connection opened");
+
+    // Subscribe to updates first
+    let rx = state.query_activity_tx.subscribe();
+
+    // Create a stream that first sends current state, then updates
+    let initial = QueryActivity { active };
+    let initial_data = serde_json::to_string(&initial).unwrap_or_default();
+
+    let stream = async_stream::stream! {
+        // Send initial state
+        yield Ok(Event::default().data(initial_data));
+
+        // Then stream updates
+        let mut stream = BroadcastStream::new(rx);
+        while let Some(result) = stream.next().await {
+            if let Ok(activity) = result {
+                let data = serde_json::to_string(&activity).unwrap_or_default();
+                yield Ok(Event::default().data(data));
+            }
+        }
+    };
+
+    // Use keep-alive to prevent connection timeout
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("keep-alive"),
+    )
+}
+
+// ============================================================================
+// Query History Endpoints
+// ============================================================================
+
+/// Get query history with pagination.
+#[instrument(skip(state))]
+pub async fn get_query_history(
+    State(state): State<AppState>,
+    Query(params): Query<HistoryParams>,
+) -> Result<Json<QueryHistoryResponse>, ApiError> {
+    let db = state.require_db()?;
+    let page = params.page.max(1);
+    let per_page = params.per_page.clamp(1, 100);
+    let offset = (page - 1) * per_page;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let (history, total) =
+        tokio::task::spawn_blocking(move || db.get_query_history(per_page, offset))
+            .await
+            .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    let entries: Vec<QueryHistoryEntry> = history
+        .into_iter()
+        .map(
+            |(id, name, query, timestamp, result_count, status, started_at, duration_ms, error)| {
+                let status = match status.as_str() {
+                    "running" => QueryStatus::Running,
+                    "completed" => QueryStatus::Completed,
+                    "failed" => QueryStatus::Failed,
+                    "aborted" => QueryStatus::Aborted,
+                    _ => QueryStatus::Completed, // Default fallback
+                };
+                QueryHistoryEntry {
+                    id,
+                    name,
+                    query,
+                    timestamp,
+                    result_count,
+                    status,
+                    started_at,
+                    duration_ms,
+                    error,
+                }
+            },
+        )
+        .collect();
+
+    debug!(
+        total = total,
+        page = page,
+        per_page = per_page,
+        "Query history retrieved"
+    );
+    Ok(Json(QueryHistoryResponse {
+        entries,
+        total,
+        page,
+        per_page,
+    }))
+}
+
+/// Add a query to history.
+#[instrument(skip(state, body))]
+pub async fn add_query_history(
+    State(state): State<AppState>,
+    Json(body): Json<AddHistoryRequest>,
+) -> Result<Json<QueryHistoryEntry>, ApiError> {
+    let db = state.require_db()?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let started_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let status_str = body.status.as_deref().unwrap_or("completed");
+    let status = match status_str {
+        "running" => QueryStatus::Running,
+        "failed" => QueryStatus::Failed,
+        "aborted" => QueryStatus::Aborted,
+        _ => QueryStatus::Completed,
+    };
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let id_clone = id.clone();
+    let name = body.name.clone();
+    let query = body.query.clone();
+    let result_count = body.result_count;
+    let duration_ms = body.duration_ms;
+    let error = body.error.clone();
+    let status_str_owned = status_str.to_string();
+    tokio::task::spawn_blocking(move || {
+        db.add_query_history(
+            &id_clone,
+            &name,
+            &query,
+            started_at,
+            result_count,
+            &status_str_owned,
+            started_at,
+            duration_ms,
+            error.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    info!(id = %id, name = %body.name, "Query added to history");
+    Ok(Json(QueryHistoryEntry {
+        id,
+        name: body.name,
+        query: body.query,
+        timestamp: started_at,
+        result_count: body.result_count,
+        status,
+        started_at,
+        duration_ms: body.duration_ms,
+        error: body.error,
+    }))
+}
+
+/// Delete a query from history.
+#[instrument(skip(state))]
+pub async fn delete_query_history(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    let id_clone = id.clone();
+    tokio::task::spawn_blocking(move || db.delete_query_history(&id_clone))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    info!(id = %id, "Query deleted from history");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Clear all query history.
+#[instrument(skip(state))]
+pub async fn clear_query_history(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
+    let db = state.require_db()?;
+
+    // Run blocking DB call in spawn_blocking to not block the async runtime
+    tokio::task::spawn_blocking(move || db.clear_query_history())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+
+    info!("Query history cleared");
+    Ok(StatusCode::NO_CONTENT)
+}

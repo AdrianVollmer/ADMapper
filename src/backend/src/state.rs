@@ -1,0 +1,273 @@
+//! Application state management.
+
+use crate::api::types::{QueryActivity, QueryProgress};
+use crate::db::{DatabaseBackend, DatabaseType, DatabaseUrl};
+use crate::import::ImportProgress;
+use dashmap::DashMap;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, info};
+
+#[cfg(feature = "cozo")]
+use crate::db::CozoDatabase;
+#[cfg(feature = "crustdb")]
+use crate::db::CrustDatabase;
+#[cfg(feature = "falkordb")]
+use crate::db::FalkorDbDatabase;
+#[cfg(feature = "kuzu")]
+use crate::db::KuzuDatabase;
+#[cfg(feature = "neo4j")]
+use crate::db::Neo4jDatabase;
+
+// ============================================================================
+// Running Query State
+// ============================================================================
+
+/// State for a running query.
+pub struct RunningQuery {
+    pub query_id: String,
+    pub query: String,
+    pub started_at: std::time::Instant,
+    pub started_at_unix: i64,
+    pub cancel_token: CancellationToken,
+    pub progress_tx: broadcast::Sender<QueryProgress>,
+    pub final_state: RwLock<Option<QueryProgress>>,
+    /// When the query completed (for TTL-based cleanup).
+    pub completed_at: RwLock<Option<std::time::Instant>>,
+}
+
+// ============================================================================
+// Import Job State
+// ============================================================================
+
+/// Import job state: channel for live updates + optional final state for late subscribers.
+pub struct ImportJob {
+    pub channel: broadcast::Sender<ImportProgress>,
+    pub final_state: RwLock<Option<ImportProgress>>,
+}
+
+// ============================================================================
+// Database Connection State
+// ============================================================================
+
+/// Database connection state.
+struct DatabaseConnection {
+    backend: Arc<dyn DatabaseBackend>,
+    db_type: DatabaseType,
+}
+
+// ============================================================================
+// Application State
+// ============================================================================
+
+/// Application state shared across requests.
+#[derive(Clone)]
+pub struct AppState {
+    /// Current database connection (if any).
+    connection: Arc<RwLock<Option<DatabaseConnection>>>,
+    /// Active import jobs and their progress channels.
+    pub import_jobs: Arc<DashMap<String, Arc<ImportJob>>>,
+    /// Active running queries for tracking and cancellation.
+    pub running_queries: Arc<DashMap<String, Arc<RunningQuery>>>,
+    /// Counter for synchronous queries (path finding, connections, etc.)
+    sync_query_count: Arc<std::sync::atomic::AtomicUsize>,
+    /// Broadcast channel for query activity updates.
+    pub query_activity_tx: broadcast::Sender<QueryActivity>,
+}
+
+impl AppState {
+    /// Create a new AppState without a database connection.
+    pub fn new_disconnected() -> Self {
+        let (query_activity_tx, _) = broadcast::channel(16);
+        Self {
+            connection: Arc::new(RwLock::new(None)),
+            import_jobs: Arc::new(DashMap::new()),
+            running_queries: Arc::new(DashMap::new()),
+            sync_query_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            query_activity_tx,
+        }
+    }
+
+    /// Create a new AppState with an initial database connection.
+    pub fn new_connected(backend: Arc<dyn DatabaseBackend>, db_type: DatabaseType) -> Self {
+        let (query_activity_tx, _) = broadcast::channel(16);
+        Self {
+            connection: Arc::new(RwLock::new(Some(DatabaseConnection { backend, db_type }))),
+            import_jobs: Arc::new(DashMap::new()),
+            running_queries: Arc::new(DashMap::new()),
+            sync_query_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            query_activity_tx,
+        }
+    }
+
+    /// Get total active query count (async + sync).
+    /// Only counts queries that haven't completed yet.
+    pub fn active_query_count(&self) -> usize {
+        let async_count = self
+            .running_queries
+            .iter()
+            .filter(|entry| entry.value().completed_at.read().is_none())
+            .count();
+        async_count
+            + self
+                .sync_query_count
+                .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Broadcast query activity update.
+    pub fn broadcast_query_activity(&self) {
+        let active = self.active_query_count();
+        let _ = self.query_activity_tx.send(QueryActivity { active });
+    }
+
+    /// Increment sync query count and broadcast.
+    pub fn start_sync_query(&self) {
+        self.sync_query_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.broadcast_query_activity();
+    }
+
+    /// Decrement sync query count and broadcast.
+    pub fn end_sync_query(&self) {
+        self.sync_query_count
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        self.broadcast_query_activity();
+    }
+
+    /// Spawn a background task to clean up completed queries after TTL expires.
+    /// Queries that have been completed for more than 2 minutes are removed.
+    pub fn spawn_query_cleanup_task(&self) {
+        let running_queries = self.running_queries.clone();
+        const CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+        const QUERY_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(CLEANUP_INTERVAL).await;
+
+                let now = std::time::Instant::now();
+                let mut to_remove = Vec::new();
+
+                // Find queries that have been completed for longer than TTL
+                for entry in running_queries.iter() {
+                    if let Some(completed_at) = *entry.value().completed_at.read() {
+                        if now.duration_since(completed_at) > QUERY_TTL {
+                            to_remove.push(entry.key().clone());
+                        }
+                    }
+                }
+
+                // Remove expired queries
+                for query_id in to_remove {
+                    running_queries.remove(&query_id);
+                    debug!(query_id = %query_id, "Cleaned up expired query");
+                }
+            }
+        });
+    }
+
+    /// Check if connected to a database.
+    pub fn is_connected(&self) -> bool {
+        self.connection.read().is_some()
+    }
+
+    /// Get the current database type if connected.
+    pub fn database_type(&self) -> Option<DatabaseType> {
+        self.connection.read().as_ref().map(|c| c.db_type)
+    }
+
+    /// Get a reference to the database backend if connected.
+    pub fn db(&self) -> Option<Arc<dyn DatabaseBackend>> {
+        self.connection.read().as_ref().map(|c| c.backend.clone())
+    }
+
+    /// Connect to a database using a URL.
+    #[allow(unused_variables, unreachable_code)]
+    pub fn connect(&self, url: &str) -> Result<DatabaseType, String> {
+        let parsed = DatabaseUrl::parse(url).map_err(|e| e.to_string())?;
+
+        let backend: Arc<dyn DatabaseBackend> = match parsed.db_type {
+            #[cfg(feature = "kuzu")]
+            DatabaseType::KuzuDB => {
+                let path = parsed.path.ok_or("Missing path for KuzuDB")?;
+                let db = KuzuDatabase::new(&path).map_err(|e| e.to_string())?;
+                Arc::new(db)
+            }
+            #[cfg(not(feature = "kuzu"))]
+            DatabaseType::KuzuDB => {
+                return Err("KuzuDB support not compiled in.".to_string());
+            }
+            #[cfg(feature = "cozo")]
+            DatabaseType::CozoDB => {
+                let path = parsed.path.ok_or("Missing path for CozoDB")?;
+                let db = CozoDatabase::new(&path).map_err(|e| e.to_string())?;
+                Arc::new(db)
+            }
+            #[cfg(not(feature = "cozo"))]
+            DatabaseType::CozoDB => {
+                return Err("CozoDB support not compiled in.".to_string());
+            }
+            #[cfg(feature = "neo4j")]
+            DatabaseType::Neo4j => {
+                let host = parsed.host.ok_or("Missing host for Neo4j")?;
+                let port = parsed.port.unwrap_or(7687);
+                let db = Neo4jDatabase::new(
+                    &host,
+                    port,
+                    parsed.username,
+                    parsed.password,
+                    parsed.database,
+                )
+                .map_err(|e| e.to_string())?;
+                Arc::new(db)
+            }
+            #[cfg(not(feature = "neo4j"))]
+            DatabaseType::Neo4j => {
+                return Err("Neo4j support not compiled in.".to_string());
+            }
+            #[cfg(feature = "falkordb")]
+            DatabaseType::FalkorDB => {
+                let host = parsed.host.ok_or("Missing host for FalkorDB")?;
+                let port = parsed.port.unwrap_or(6379);
+                let db = FalkorDbDatabase::new(&host, port, parsed.username, parsed.password)
+                    .map_err(|e| e.to_string())?;
+                Arc::new(db)
+            }
+            #[cfg(not(feature = "falkordb"))]
+            DatabaseType::FalkorDB => {
+                return Err("FalkorDB support not compiled in.".to_string());
+            }
+            #[cfg(feature = "crustdb")]
+            DatabaseType::CrustDB => {
+                let path = parsed.path.ok_or("Missing path for CrustDB")?;
+                let db =
+                    CrustDatabase::new(&path).map_err(|e: crate::db::DbError| e.to_string())?;
+                Arc::new(db)
+            }
+            #[cfg(not(feature = "crustdb"))]
+            DatabaseType::CrustDB => {
+                return Err(
+                    "CrustDB support not compiled in. See Cargo.toml for instructions.".to_string(),
+                );
+            }
+        };
+
+        let db_type = parsed.db_type;
+        *self.connection.write() = Some(DatabaseConnection { backend, db_type });
+        info!(database_type = %db_type.name(), "Connected to database");
+        Ok(db_type)
+    }
+
+    /// Disconnect from the current database.
+    pub fn disconnect(&self) {
+        *self.connection.write() = None;
+        info!("Disconnected from database");
+    }
+
+    /// Get the database, returning an error if not connected.
+    pub fn require_db(&self) -> Result<Arc<dyn DatabaseBackend>, crate::api::types::ApiError> {
+        self.db().ok_or(crate::api::types::ApiError::NotConnected)
+    }
+}

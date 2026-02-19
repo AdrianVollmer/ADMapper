@@ -30,6 +30,7 @@ impl QueryLanguage {
 ///
 /// This allows the application to work with multiple database backends
 /// (Neo4j, FalkorDB, CozoDB, KuzuDB) through a unified interface.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub trait DatabaseBackend: Send + Sync {
     /// Get the name of this database backend.
     fn name(&self) -> &'static str;

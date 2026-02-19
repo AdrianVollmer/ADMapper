@@ -16,7 +16,7 @@ particularly around code organization and repeated patterns.
 
 ## Top 10 Issues
 
-### 1. `lib.rs` is too long (2420 lines)
+### 1. `lib.rs` is too long (2420 lines) - FIXED
 
 The main library file contains API handlers, types, state management, SSE
 streaming, and graph extraction logic all mixed together.
@@ -28,6 +28,14 @@ streaming, and graph extraction logic all mixed together.
 - `graph.rs` - FullGraph, extract_graph_from_results, etc.
 
 **Impact:** Maintainability
+
+**Resolution:** Split `lib.rs` (2420 lines) into:
+- `lib.rs` (182 lines) - module declarations, router setup, run_service
+- `api/mod.rs` - module exports
+- `api/types.rs` (306 lines) - all request/response types and ApiError
+- `api/handlers.rs` (1362 lines) - all route handlers
+- `state.rs` (273 lines) - AppState, RunningQuery, ImportJob
+- `graph.rs` (346 lines) - GraphNode, GraphEdge, FullGraph, extraction functions
 
 ---
 

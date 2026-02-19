@@ -963,7 +963,9 @@ impl CrustDatabase {
     }
 
     /// Convert CrustDB properties to JSON.
-    fn props_to_json(props: &std::collections::HashMap<String, crustdb::PropertyValue>) -> JsonValue {
+    fn props_to_json(
+        props: &std::collections::HashMap<String, crustdb::PropertyValue>,
+    ) -> JsonValue {
         let map: serde_json::Map<String, JsonValue> = props
             .iter()
             .map(|(k, v)| (k.clone(), Self::property_value_to_json(v)))
