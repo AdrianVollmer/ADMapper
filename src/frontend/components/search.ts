@@ -13,7 +13,7 @@ import type { ADNodeType, ADEdgeType, RawADGraph } from "../graph/types";
 import { escapeHtml } from "../utils/html";
 import { api, ApiClientError } from "../api/client";
 import type { SearchResult, PathResponse } from "../api/types";
-import { addToHistory } from "./query-history";
+// Query history is now managed by the backend for path finding
 
 /** DOM element references */
 interface SearchElements {
@@ -381,8 +381,6 @@ async function findPath(): Promise<void> {
   // Get node IDs from state or fall back to input values
   const startId = state.pathStartNodeId || pathStartInput.value.trim();
   const endId = state.pathEndNodeId || pathEndInput.value.trim();
-  const startLabel = pathStartInput.value.trim();
-  const endLabel = pathEndInput.value.trim();
 
   if (!startId || !endId) {
     showPathError("Please enter both start and end nodes");
@@ -405,8 +403,7 @@ async function findPath(): Promise<void> {
 
     if (!data.found) {
       showPathError("No path found between these nodes");
-      // Add to history even when no path found
-      addToHistory(`Path: ${startLabel} → ${endLabel}`, `find_path(${startId}, ${endId})`, 0);
+      // Query history is managed by the backend
       return;
     }
 
@@ -436,8 +433,7 @@ async function findPath(): Promise<void> {
         }
       });
 
-      // Add to query history
-      addToHistory(`Path: ${startLabel} → ${endLabel}`, `find_path(${startId}, ${endId})`, data.path.length);
+      // Query history is managed by the backend
     }
   } catch (err) {
     console.error("Path finding error:", err);

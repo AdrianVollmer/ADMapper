@@ -409,14 +409,10 @@ pub async fn graph_search(
     }
 
     let db = state.require_db()?;
-    state.start_sync_query();
 
     let query = params.q.clone();
     let limit = params.limit;
-    let nodes_result = run_db(db, move |db| db.search_nodes(&query, limit)).await;
-
-    state.end_sync_query();
-    let nodes: Vec<DbNode> = nodes_result?;
+    let nodes: Vec<DbNode> = run_db(db, move |db| db.search_nodes(&query, limit)).await?;
 
     debug!(query = %params.q, results = nodes.len(), "Search complete");
     Ok(Json(nodes))
@@ -463,16 +459,12 @@ pub async fn node_connections(
     let db = state.require_db()?;
     info!(node_id = %node_id, direction = %direction, "Loading node connections");
 
-    state.start_sync_query();
     let node_id_clone = node_id.clone();
     let direction_clone = direction.clone();
-    let result = run_db(db, move |db| {
+    let (nodes, edges): (Vec<DbNode>, Vec<DbEdge>) = run_db(db, move |db| {
         db.get_node_connections(&node_id_clone, &direction_clone)
     })
-    .await;
-    state.end_sync_query();
-
-    let (nodes, edges): (Vec<DbNode>, Vec<DbEdge>) = result?;
+    .await?;
 
     Ok(Json(FullGraph {
         nodes,
@@ -490,84 +482,160 @@ pub async fn node_status(
     let db = state.require_db()?;
     info!(node_id = %node_id, "Checking node security status");
 
+    // First pass: quick checks (properties and group memberships)
     let node_id_clone = node_id.clone();
-    let status = run_db(db, move |db| {
-        // Get the node to check its properties
-        let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
-        let node = nodes.first();
+    let db_for_quick = db.clone();
+    let quick_status: (bool, bool, bool, bool, bool) =
+        run_db(db_for_quick, move |db| {
+            // Get the node to check its properties
+            let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
+            let node = nodes.first();
 
-        // Check owned status from properties
-        let owned = node
-            .and_then(|n| {
-                let props = &n.properties;
-                props.get("owned").or(props.get("Owned")).and_then(|v| {
-                    v.as_bool()
-                        .or_else(|| v.as_i64().map(|i| i == 1))
-                        .or_else(|| v.as_str().map(|s| s == "true"))
-                })
-            })
-            .unwrap_or(false);
-
-        // Check high value from properties
-        let high_value_prop = node
-            .and_then(|n| {
-                let props = &n.properties;
-                props
-                    .get("highvalue")
-                    .or(props.get("HighValue"))
-                    .or(props.get("highValue"))
-                    .and_then(|v| {
+            // Check owned status from properties
+            let owned = node
+                .and_then(|n| {
+                    let props = &n.properties;
+                    props.get("owned").or(props.get("Owned")).and_then(|v| {
                         v.as_bool()
                             .or_else(|| v.as_i64().map(|i| i == 1))
                             .or_else(|| v.as_str().map(|s| s == "true"))
                     })
-            })
-            .unwrap_or(false);
+                })
+                .unwrap_or(false);
 
-        // Check group memberships using graph traversal
-        let is_enterprise_admin = db
-            .find_membership_by_sid_suffix(&node_id_clone, "-519")?
-            .is_some();
-        let is_domain_admin = db
-            .find_membership_by_sid_suffix(&node_id_clone, "-512")?
-            .is_some();
+            // Check high value from properties
+            let high_value_prop = node
+                .and_then(|n| {
+                    let props = &n.properties;
+                    props
+                        .get("highvalue")
+                        .or(props.get("HighValue"))
+                        .or(props.get("highValue"))
+                        .and_then(|v| {
+                            v.as_bool()
+                                .or_else(|| v.as_i64().map(|i| i == 1))
+                                .or_else(|| v.as_str().map(|s| s == "true"))
+                        })
+                })
+                .unwrap_or(false);
 
-        // High-value RIDs to check membership for
-        let high_value_rids = ["-512", "-519", "-518", "-516", "-498", "-544"];
-        let is_high_value_member = high_value_rids.iter().any(|rid| {
-            db.find_membership_by_sid_suffix(&node_id_clone, rid)
-                .unwrap_or(None)
-                .is_some()
-        });
+            // Check group memberships using graph traversal
+            let is_enterprise_admin = db
+                .find_membership_by_sid_suffix(&node_id_clone, "-519")?
+                .is_some();
+            let is_domain_admin = db
+                .find_membership_by_sid_suffix(&node_id_clone, "-512")?
+                .is_some();
 
-        let is_high_value = high_value_prop || is_high_value_member;
+            // High-value RIDs to check membership for
+            let high_value_rids = ["-512", "-519", "-518", "-516", "-498", "-544"];
+            let is_high_value_member = high_value_rids.iter().any(|rid| {
+                db.find_membership_by_sid_suffix(&node_id_clone, rid)
+                    .unwrap_or(None)
+                    .is_some()
+            });
 
-        // Check for paths to high-value targets (only if not already high value)
-        let (has_path_to_high_value, path_length) =
-            if is_enterprise_admin || is_domain_admin || is_high_value {
-                (false, None)
-            } else {
-                // Use the existing paths-to-DA logic to check for attack paths
-                let paths = db.find_paths_to_domain_admins(&[])?;
-                let path_info = paths.iter().find(|(id, _, _, _)| id == &node_id_clone);
-                match path_info {
-                    Some((_, _, _, hops)) => (true, Some(*hops)),
-                    None => (false, None),
-                }
-            };
+            let is_high_value = high_value_prop || is_high_value_member;
 
-        Ok(NodeStatus {
+            Ok((owned, is_enterprise_admin, is_domain_admin, is_high_value, high_value_prop))
+        })
+        .await?;
+
+    let (owned, is_enterprise_admin, is_domain_admin, is_high_value, _high_value_prop) = quick_status;
+
+    // If already high value, no need to check paths
+    if is_enterprise_admin || is_domain_admin || is_high_value {
+        return Ok(Json(NodeStatus {
             owned,
             is_enterprise_admin,
             is_domain_admin,
             is_high_value,
-            has_path_to_high_value,
-            path_length,
-        })
-    })
-    .await?;
+            has_path_to_high_value: false,
+            path_length: None,
+        }));
+    }
 
-    Ok(Json(status))
+    // Second pass: path finding (expensive, with query tracking)
+    let query_id = uuid::Uuid::new_v4().to_string();
+    let started_at = std::time::Instant::now();
+    let started_at_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let query_name = format!("Path check: {}", node_id);
+    let query_text = format!("FIND_PATH_TO_HIGH_VALUE({})", node_id);
+
+    // Add to history with "running" status
+    if let Err(e) = db.add_query_history(
+        &query_id,
+        &query_name,
+        &query_text,
+        started_at_unix,
+        None,
+        "running",
+        started_at_unix,
+        None,
+        None,
+    ) {
+        warn!(error = %e, "Failed to add path check to history");
+    }
+
+    state.start_sync_query();
+
+    let node_id_clone2 = node_id.clone();
+    let db_for_path = db.clone();
+    let path_result: Result<(bool, Option<usize>), ApiError> = run_db(db_for_path, move |db| {
+        let paths = db.find_paths_to_domain_admins(&[])?;
+        let path_info = paths.iter().find(|(id, _, _, _)| id == &node_id_clone2);
+        match path_info {
+            Some((_, _, _, hops)) => Ok((true, Some(*hops))),
+            None => Ok((false, None)),
+        }
+    })
+    .await;
+
+    state.end_sync_query();
+
+    let duration_ms = started_at.elapsed().as_millis() as u64;
+
+    match &path_result {
+        Ok((has_path, path_len)) => {
+            let result_count: Option<i64> = if *has_path {
+                path_len.map(|l| l as i64)
+            } else {
+                Some(0)
+            };
+            if let Err(e) =
+                db.update_query_status(&query_id, "completed", Some(duration_ms), result_count, None)
+            {
+                warn!(error = %e, "Failed to update path check history");
+            }
+        }
+        Err(e) => {
+            let error_str = e.to_string();
+            if let Err(e2) = db.update_query_status(
+                &query_id,
+                "failed",
+                Some(duration_ms),
+                None,
+                Some(&error_str),
+            ) {
+                warn!(error = %e2, "Failed to update path check history");
+            }
+        }
+    }
+
+    let (has_path_to_high_value, path_length) = path_result?;
+
+    Ok(Json(NodeStatus {
+        owned,
+        is_enterprise_admin,
+        is_domain_admin,
+        is_high_value,
+        has_path_to_high_value,
+        path_length,
+    }))
 }
 
 // ============================================================================
@@ -582,11 +650,39 @@ pub async fn graph_path(
     Query(params): Query<PathParams>,
 ) -> Result<Json<PathResponse>, ApiError> {
     let db = state.require_db()?;
+
+    // Generate query ID and track in history
+    let query_id = uuid::Uuid::new_v4().to_string();
+    let started_at = std::time::Instant::now();
+    let started_at_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let query_name = format!("Path: {} → {}", params.from, params.to);
+    let query_text = format!("SHORTEST_PATH({}, {})", params.from, params.to);
+
+    // Add to history with "running" status
+    if let Err(e) = db.add_query_history(
+        &query_id,
+        &query_name,
+        &query_text,
+        started_at_unix,
+        None,
+        "running",
+        started_at_unix,
+        None,
+        None,
+    ) {
+        warn!(error = %e, "Failed to add path query to history");
+    }
+
     state.start_sync_query();
 
     let from_param = params.from.clone();
     let to_param = params.to.clone();
-    let result = run_db(db, move |db| {
+    let db_for_query = db.clone();
+    let result = run_db(db_for_query, move |db| {
         // Resolve identifiers to object IDs (supports both IDs and labels)
         let from_id = match db.resolve_node_identifier(&from_param)? {
             Some(id) => id,
@@ -668,6 +764,36 @@ pub async fn graph_path(
     .await;
 
     state.end_sync_query();
+
+    let duration_ms = started_at.elapsed().as_millis() as u64;
+
+    match &result {
+        Ok(response) => {
+            let result_count = if response.found {
+                Some(response.path.len() as i64)
+            } else {
+                Some(0)
+            };
+            if let Err(e) =
+                db.update_query_status(&query_id, "completed", Some(duration_ms), result_count, None)
+            {
+                warn!(error = %e, "Failed to update path query history");
+            }
+        }
+        Err(e) => {
+            let error_str = e.to_string();
+            if let Err(e2) = db.update_query_status(
+                &query_id,
+                "failed",
+                Some(duration_ms),
+                None,
+                Some(&error_str),
+            ) {
+                warn!(error = %e2, "Failed to update path query history");
+            }
+        }
+    }
+
     Ok(Json(result?))
 }
 
