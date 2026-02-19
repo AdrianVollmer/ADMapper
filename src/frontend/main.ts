@@ -60,24 +60,3 @@ if (document.readyState === "loading") {
 } else {
   init();
 }
-
-// Global modal functions for inline onclick handlers
-function showPlaceholderModal(): void {
-  const modal = document.getElementById("placeholder-modal");
-  if (modal) modal.hidden = false;
-}
-
-function hidePlaceholderModal(): void {
-  const modal = document.getElementById("placeholder-modal");
-  if (modal) modal.hidden = true;
-}
-
-// Expose modal functions to window for inline onclick handlers
-declare global {
-  interface Window {
-    showPlaceholderModal: () => void;
-    hidePlaceholderModal: () => void;
-  }
-}
-window.showPlaceholderModal = showPlaceholderModal;
-window.hidePlaceholderModal = hidePlaceholderModal;

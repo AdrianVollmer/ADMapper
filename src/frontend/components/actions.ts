@@ -62,6 +62,9 @@ export const Actions = {
   KEYBOARD_SHORTCUTS: "keyboard-shortcuts",
   CHECK_UPDATES: "check-updates",
   ABOUT: "about",
+  // Modals
+  SHOW_PLACEHOLDER_MODAL: "show-placeholder-modal",
+  HIDE_PLACEHOLDER_MODAL: "hide-placeholder-modal",
 } as const;
 
 /** Static action type derived from the Actions const */
@@ -139,6 +142,15 @@ const actionHandlers: Record<StaticAction, () => void> = {
   },
   about: () => {
     // TODO: About dialog
+  },
+  // Modals
+  "show-placeholder-modal": () => {
+    const modal = document.getElementById("placeholder-modal");
+    if (modal) modal.hidden = false;
+  },
+  "hide-placeholder-modal": () => {
+    const modal = document.getElementById("placeholder-modal");
+    if (modal) modal.hidden = true;
   },
 };
 

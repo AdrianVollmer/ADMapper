@@ -143,7 +143,7 @@ navigation difficult.
 - `db-connect/kuzu.ts`, `db-connect/neo4j.ts`, etc.
 - `queries/built-in.ts`, `queries/custom.ts`
 
-### 7. Mixing inline onclick handlers with addEventListener
+### 7. ~~Mixing inline onclick handlers with addEventListener~~ DONE
 
 **Files:** `index.html:568,600`, `sidebars.ts:783`, `main.ts:75-83`
 

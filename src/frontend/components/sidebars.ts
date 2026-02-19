@@ -780,7 +780,7 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
         <span class="placeholder-title">Placeholder Node</span>
         <span class="placeholder-desc">
           This node was auto-created as a placeholder.
-          <button class="placeholder-learn-more" onclick="showPlaceholderModal()">Learn more</button>
+          <button class="placeholder-learn-more" data-action="show-placeholder-modal">Learn more</button>
         </span>
       </div>
     </div>
