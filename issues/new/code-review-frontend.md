@@ -63,7 +63,7 @@ exists and handles all cases correctly.
 **Fix:** Use `escapeHtml()` consistently everywhere dynamic content is inserted
 into HTML.
 
-### 3. Large switch statement in actions.ts
+### 3. ~~Large switch statement in actions.ts~~ DONE
 
 **File:** `components/actions.ts:23-201`
 

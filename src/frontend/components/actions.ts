@@ -73,185 +73,88 @@ export type RecentConnectionAction = `recent-connection-${number}`;
 /** All valid action types */
 export type Action = StaticAction | RecentConnectionAction;
 
+/** Action handlers lookup table */
+const actionHandlers: Record<StaticAction, () => void> = {
+  // File menu
+  "connect-db": () => openDbConnect(),
+  "disconnect-db": () => disconnectDb(),
+  "clear-recent-connections": () => clearRecentConnectionsMenu(),
+  "export-png": () => exportPNG(),
+  "export-svg": () => exportSVG(),
+  "export-json": () => exportJSON(),
+  settings: () => {
+    // TODO: Settings dialog
+  },
+  quit: () => {
+    if ("__TAURI__" in window) {
+      // @ts-expect-error Tauri global
+      window.__TAURI__.process.exit(0);
+    }
+  },
+  // Edit menu
+  "select-all": () => {
+    // TODO: Select all nodes
+  },
+  find: () => document.getElementById("node-search")?.focus(),
+  "add-node": () => openAddNode(),
+  "add-edge": () => openAddEdge(),
+  // View menu
+  "toggle-sidebars": () => toggleSidebars(),
+  "toggle-nav-sidebar": () => toggleNavSidebar(),
+  "toggle-detail-sidebar": () => toggleDetailSidebar(),
+  "zoom-in": () => getRenderer()?.sigma.getCamera().animatedZoom({ duration: 200 }),
+  "zoom-out": () => getRenderer()?.sigma.getCamera().animatedUnzoom({ duration: 200 }),
+  "zoom-reset": () => getRenderer()?.resetCamera(),
+  "fit-graph": () => getRenderer()?.resetCamera(),
+  fullscreen: () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      document.documentElement.requestFullscreen();
+    }
+  },
+  "toggle-label-visibility": () => {
+    const modeName = toggleLabelVisibility();
+    // Import dynamically to avoid circular dependency
+    import("../utils/notifications").then(({ showInfo }) => {
+      showInfo(modeName);
+    });
+  },
+  // Tools menu
+  "import-bloodhound": () => triggerBloodHoundImport(),
+  "run-query": () => openRunQuery(),
+  "manage-queries": () => openManageQueries(),
+  "query-history": () => openQueryHistory(),
+  "history-back": () => goBackInHistory(),
+  "manage-db": () => openDbManager(),
+  insights: () => openInsights(),
+  "layout-graph": () => relayoutGraph(),
+  "layout-force": () => setLayout("force"),
+  "layout-hierarchical": () => setLayout("hierarchical"),
+  // Help menu
+  documentation: () => window.open("https://github.com/admapper/admapper", "_blank"),
+  "keyboard-shortcuts": () => showKeyboardShortcuts(),
+  "check-updates": () => {
+    // TODO: Update checker
+  },
+  about: () => {
+    // TODO: About dialog
+  },
+};
+
 /** Dispatch an action by name */
 export function dispatchAction(action: Action): void {
-  switch (action) {
-    // File menu
-    case "connect-db":
-      openDbConnect();
-      break;
+  // Handle dynamic recent connection actions
+  if (action.startsWith("recent-connection-")) {
+    handleRecentConnection(action);
+    return;
+  }
 
-    case "disconnect-db":
-      disconnectDb();
-      break;
-
-    case "clear-recent-connections":
-      clearRecentConnectionsMenu();
-      break;
-
-    case "export-png":
-      exportPNG();
-      break;
-
-    case "export-svg":
-      exportSVG();
-      break;
-
-    case "export-json":
-      exportJSON();
-      break;
-
-    case "settings":
-      console.log("Action: settings");
-      // TODO: Settings dialog
-      break;
-
-    case "quit":
-      console.log("Action: quit");
-      // In Tauri, we'd call tauri.exit()
-      if ("__TAURI__" in window) {
-        // @ts-expect-error Tauri global
-        window.__TAURI__.process.exit(0);
-      }
-      break;
-
-    // Edit menu
-    case "select-all":
-      console.log("Action: select-all");
-      // TODO: Select all nodes
-      break;
-
-    case "find":
-      console.log("Action: find");
-      // Focus the search input
-      document.getElementById("node-search")?.focus();
-      break;
-
-    case "add-node":
-      openAddNode();
-      break;
-
-    case "add-edge":
-      openAddEdge();
-      break;
-
-    // View menu
-    case "toggle-sidebars":
-      toggleSidebars();
-      break;
-
-    case "toggle-nav-sidebar":
-      toggleNavSidebar();
-      break;
-
-    case "toggle-detail-sidebar":
-      toggleDetailSidebar();
-      break;
-
-    case "zoom-in": {
-      const renderer = getRenderer();
-      renderer?.sigma.getCamera().animatedZoom({ duration: 200 });
-      break;
-    }
-
-    case "zoom-out": {
-      const renderer = getRenderer();
-      renderer?.sigma.getCamera().animatedUnzoom({ duration: 200 });
-      break;
-    }
-
-    case "zoom-reset":
-    case "fit-graph": {
-      const renderer = getRenderer();
-      renderer?.resetCamera();
-      break;
-    }
-
-    case "fullscreen":
-      if (document.fullscreenElement) {
-        document.exitFullscreen();
-      } else {
-        document.documentElement.requestFullscreen();
-      }
-      break;
-
-    case "toggle-label-visibility": {
-      const modeName = toggleLabelVisibility();
-      // Import dynamically to avoid circular dependency
-      import("../utils/notifications").then(({ showInfo }) => {
-        showInfo(modeName);
-      });
-      break;
-    }
-
-    // Tools menu
-    case "import-bloodhound":
-      triggerBloodHoundImport();
-      break;
-
-    case "run-query":
-      openRunQuery();
-      break;
-
-    case "manage-queries":
-      openManageQueries();
-      break;
-
-    case "query-history":
-      openQueryHistory();
-      break;
-
-    case "history-back":
-      goBackInHistory();
-      break;
-
-    case "manage-db":
-      openDbManager();
-      break;
-
-    case "insights":
-      openInsights();
-      break;
-
-    case "layout-graph":
-      relayoutGraph();
-      break;
-
-    case "layout-force":
-      setLayout("force");
-      break;
-
-    case "layout-hierarchical":
-      setLayout("hierarchical");
-      break;
-
-    // Help menu
-    case "documentation":
-      console.log("Action: documentation");
-      window.open("https://github.com/admapper/admapper", "_blank");
-      break;
-
-    case "keyboard-shortcuts":
-      showKeyboardShortcuts();
-      break;
-
-    case "check-updates":
-      console.log("Action: check-updates");
-      // TODO: Update checker
-      break;
-
-    case "about":
-      console.log("Action: about");
-      // TODO: About dialog
-      break;
-
-    default:
-      // Handle dynamic recent connection actions
-      if (action.startsWith("recent-connection-")) {
-        handleRecentConnection(action);
-      } else {
-        console.log(`Unknown action: ${action}`);
-      }
+  const handler = actionHandlers[action];
+  if (handler) {
+    handler();
+  } else {
+    console.log(`Unknown action: ${action}`);
   }
 }
 
