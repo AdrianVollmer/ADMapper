@@ -965,11 +965,10 @@ pub async fn graph_query(
 
         // Execute the query
         let result = if let Some(lang_str) = &language {
-            QueryLanguage::from_str(lang_str)
-                .map(|lang| db.run_query_with_language(&query_text, lang))
-                .unwrap_or_else(|| {
-                    Err(DbError::Database(format!("Unknown language: {}", lang_str)))
-                })
+            lang_str
+                .parse::<QueryLanguage>()
+                .map_err(DbError::Database)
+                .and_then(|lang| db.run_query_with_language(&query_text, lang))
         } else {
             db.run_custom_query(&query_text)
         };

@@ -22,7 +22,6 @@ struct BloodHoundMeta {
     #[serde(rename = "type")]
     data_type: String,
     #[serde(default)]
-    #[allow(dead_code)]
     version: Option<i32>,
 }
 
@@ -183,28 +182,32 @@ impl BloodHoundImporter {
         })?;
 
         // Infer data type from metadata or first entity
-        let data_type = file
-            .meta
-            .as_ref()
-            .map(|m| m.data_type.clone())
-            .unwrap_or_else(|| {
-                // Try to infer type from first entity (parse just the first one)
-                if let Some(first_raw) = file.data.first() {
-                    if let Ok(first) = serde_json::from_str::<JsonValue>(first_raw.get()) {
-                        if first.get("Members").is_some() {
-                            return "groups".to_string();
-                        } else if first.get("Sessions").is_some()
-                            || first.get("LocalGroups").is_some()
-                        {
-                            return "computers".to_string();
-                        }
+        let (data_type, version) = if let Some(meta) = &file.meta {
+            (meta.data_type.clone(), meta.version)
+        } else {
+            // Try to infer type from first entity (parse just the first one)
+            let inferred = if let Some(first_raw) = file.data.first() {
+                if let Ok(first) = serde_json::from_str::<JsonValue>(first_raw.get()) {
+                    if first.get("Members").is_some() {
+                        "groups".to_string()
+                    } else if first.get("Sessions").is_some() || first.get("LocalGroups").is_some()
+                    {
+                        "computers".to_string()
+                    } else {
+                        "users".to_string()
                     }
+                } else {
+                    "users".to_string()
                 }
+            } else {
                 "users".to_string()
-            });
+            };
+            (inferred, None)
+        };
 
         info!(
             entity_type = %data_type,
+            version = ?version,
             count = file.data.len(),
             "Importing entities"
         );
@@ -668,13 +671,14 @@ impl BloodHoundImporter {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cozo"))]
 mod tests {
     use super::*;
+    use crate::db::cozo::GraphDatabase;
 
     #[test]
     fn test_ace_to_edge_type() {
-        let db = GraphDatabase::in_memory().unwrap();
+        let db = Arc::new(GraphDatabase::in_memory().unwrap());
         let (tx, _) = broadcast::channel(1);
         let importer = BloodHoundImporter::new(db, tx);
 
@@ -685,7 +689,7 @@ mod tests {
 
     #[test]
     fn test_local_group_to_edge_type() {
-        let db = GraphDatabase::in_memory().unwrap();
+        let db = Arc::new(GraphDatabase::in_memory().unwrap());
         let (tx, _) = broadcast::channel(1);
         let importer = BloodHoundImporter::new(db, tx);
 
@@ -701,7 +705,7 @@ mod tests {
 
     /// Helper to create an importer for testing
     fn test_importer() -> BloodHoundImporter {
-        let db = GraphDatabase::in_memory().unwrap();
+        let db = Arc::new(GraphDatabase::in_memory().unwrap());
         let (tx, _) = broadcast::channel(100);
         BloodHoundImporter::new(db, tx)
     }

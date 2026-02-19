@@ -428,10 +428,10 @@ impl GraphDatabase {
                 .filter(|n| {
                     if id_pattern.starts_with('-') {
                         // Suffix match
-                        n.id.ends_with(id_pattern)
+                        n.id.ends_with(*id_pattern)
                     } else {
                         // Exact match
-                        n.id == id_pattern
+                        n.id == *id_pattern
                     }
                 })
                 .map(|n| n.id.as_str())

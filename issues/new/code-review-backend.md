@@ -286,11 +286,15 @@ reducing duplication and ensuring consistency.
 - Proper use of `tracing` for structured logging
 - Broadcast channels for SSE are implemented correctly
 
-### Minor issues not in top 10:
+### Minor issues not in top 10: - FIXED
+
 - `BloodHoundFile` test references `GraphDatabase::in_memory()` which doesn't
-  exist (tests may not compile with certain feature flags)
-- Some `#[allow(dead_code)]` markers could be removed by using the fields
-- `QueryLanguage::from_str` should implement the `FromStr` trait instead
+  exist (tests may not compile with certain feature flags) - **FIXED**: Added
+  `#[cfg(all(test, feature = "cozo"))]` and proper import for `GraphDatabase`
+- Some `#[allow(dead_code)]` markers could be removed by using the fields -
+  **FIXED**: Used `version` field in logging, added doc comment to `fail()` method
+- `QueryLanguage::from_str` should implement the `FromStr` trait instead -
+  **FIXED**: Implemented `FromStr` trait with proper error type
 
 ---
 

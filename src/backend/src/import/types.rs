@@ -63,7 +63,11 @@ impl ImportProgress {
         self.current_file = None;
     }
 
-    #[allow(dead_code)]
+    /// Mark the import as failed with an error message.
+    ///
+    /// Note: Currently errors during individual file imports are logged but
+    /// don't fail the entire import. This method exists for future use when
+    /// stricter error handling may be needed.
     pub fn fail(&mut self, error: String) {
         self.status = ImportStatus::Failed;
         self.error = Some(error);

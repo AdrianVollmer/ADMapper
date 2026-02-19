@@ -3,6 +3,7 @@
 //! Defines the common interface that all database backends must implement.
 
 use serde_json::Value as JsonValue;
+use std::str::FromStr;
 
 use super::types::{
     DbEdge, DbError, DbNode, DetailedStats, QueryHistoryRow, Result, SecurityInsights,
@@ -17,13 +18,14 @@ pub enum QueryLanguage {
     Datalog,
 }
 
-impl QueryLanguage {
-    /// Parse from string representation.
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for QueryLanguage {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "cypher" => Some(QueryLanguage::Cypher),
-            "datalog" => Some(QueryLanguage::Datalog),
-            _ => None,
+            "cypher" => Ok(QueryLanguage::Cypher),
+            "datalog" => Ok(QueryLanguage::Datalog),
+            other => Err(format!("Unknown query language: {}", other)),
         }
     }
 }
