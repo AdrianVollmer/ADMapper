@@ -208,7 +208,7 @@ export function cycleLayout(): string {
   const layouts: LayoutType[] = ["force", "hierarchical", "grid", "circular"];
   const currentIndex = layouts.indexOf(currentLayout);
   const nextIndex = (currentIndex + 1) % layouts.length;
-  currentLayout = layouts[nextIndex];
+  currentLayout = layouts[nextIndex]!;
   relayoutGraph();
   updateLayoutIndicator();
   return currentLayout.charAt(0).toUpperCase() + currentLayout.slice(1);

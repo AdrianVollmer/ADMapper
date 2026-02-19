@@ -189,7 +189,7 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
   // Initialize positions based on order in layer
   for (const [, nodes] of layerGroups.entries()) {
     for (let i = 0; i < nodes.length; i++) {
-      nodePositions.set(nodes[i], i);
+      nodePositions.set(nodes[i]!, i);
     }
   }
 
@@ -202,7 +202,7 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
       reorderByBarycenter(graph, nodes, nodePositions, "in");
       // Update positions after reordering
       for (let i = 0; i < nodes.length; i++) {
-        nodePositions.set(nodes[i], i);
+        nodePositions.set(nodes[i]!, i);
       }
     }
 
@@ -212,7 +212,7 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
       reorderByBarycenter(graph, nodes, nodePositions, "out");
       // Update positions after reordering
       for (let i = 0; i < nodes.length; i++) {
-        nodePositions.set(nodes[i], i);
+        nodePositions.set(nodes[i]!, i);
       }
     }
   }
@@ -349,12 +349,12 @@ function adjustToNeighborCentroid(
   for (let iter = 0; iter < 10; iter++) {
     let changed = false;
     for (let i = 0; i < positions.length - 1; i++) {
-      const gap = positions[i + 1] - positions[i];
+      const gap = positions[i + 1]! - positions[i]!;
       if (gap < minSpacing) {
         // Push apart symmetrically
         const overlap = minSpacing - gap;
-        positions[i] -= overlap / 2;
-        positions[i + 1] += overlap / 2;
+        positions[i]! -= overlap / 2;
+        positions[i + 1]! += overlap / 2;
         changed = true;
       }
     }
@@ -363,7 +363,7 @@ function adjustToNeighborCentroid(
 
   // Apply positions
   for (let i = 0; i < nodeData.length; i++) {
-    graph.setNodeAttribute(nodeData[i].node, coordAttr, positions[i]);
+    graph.setNodeAttribute(nodeData[i]!.node, coordAttr, positions[i]!);
   }
 }
 
@@ -448,7 +448,7 @@ function applyCircularLayout(graph: ADGraphType, options: CircularSettings = {})
 
   if (singleCenterNode) {
     // Center node has no angle (it's at origin)
-    nodeAngles.set(sinks[0], 0);
+    nodeAngles.set(sinks[0]!, 0);
 
     // Assign initial angles to other layers
     for (let layer = 1; layer <= maxLayer; layer++) {
@@ -504,7 +504,7 @@ function assignAngles(nodes: string[], nodeAngles: Map<string, number>): void {
   const startAngle = -Math.PI / 2;
 
   for (let i = 0; i < nodes.length; i++) {
-    nodeAngles.set(nodes[i], startAngle + i * angleStep);
+    nodeAngles.set(nodes[i]!, startAngle + i * angleStep);
   }
 }
 
@@ -517,7 +517,8 @@ function reorderByAngularBarycenter(
   angles: Map<string, number>,
   nodeLayers: Map<string, number>
 ): void {
-  const currentLayer = nodeLayers.get(nodes[0]) ?? 0;
+  if (nodes.length === 0) return;
+  const currentLayer = nodeLayers.get(nodes[0]!) ?? 0;
 
   // Compute angular barycenter for each node based on children (nodes in inner layers)
   const barycenters: { node: string; angle: number; hasChildren: boolean }[] = [];
