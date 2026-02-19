@@ -79,7 +79,7 @@ const actionHandlers: Record<string, () => void> = {
 };
 ```
 
-### 4. Module-level state scattered across components
+### 4. ~~Module-level state scattered across components~~ DONE
 
 **Files:** `search.ts`, `import.ts`, `db-connect.ts`, `queries.ts`
 

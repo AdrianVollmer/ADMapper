@@ -15,69 +15,113 @@ import { api, ApiClientError } from "../api/client";
 import type { SearchResult, PathResponse } from "../api/types";
 import { addToHistory } from "./query-history";
 
-let nodeSearchInput: HTMLInputElement | null = null;
-let nodeSearchResults: HTMLElement | null = null;
-let pathStartInput: HTMLInputElement | null = null;
-let pathStartResults: HTMLElement | null = null;
-let pathEndInput: HTMLInputElement | null = null;
-let pathEndResults: HTMLElement | null = null;
-let pathResultsEl: HTMLElement | null = null;
-let findPathBtn: HTMLElement | null = null;
+/** DOM element references */
+interface SearchElements {
+  nodeSearchInput: HTMLInputElement | null;
+  nodeSearchResults: HTMLElement | null;
+  pathStartInput: HTMLInputElement | null;
+  pathStartResults: HTMLElement | null;
+  pathEndInput: HTMLInputElement | null;
+  pathEndResults: HTMLElement | null;
+  pathResultsEl: HTMLElement | null;
+  findPathBtn: HTMLElement | null;
+}
 
-/** Debounce timeout for search */
-let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+/** Component state */
+interface SearchState {
+  debounceTimer: ReturnType<typeof setTimeout> | null;
+  inputToResults: Map<HTMLInputElement, HTMLElement>;
+}
+
+const elements: SearchElements = {
+  nodeSearchInput: null,
+  nodeSearchResults: null,
+  pathStartInput: null,
+  pathStartResults: null,
+  pathEndInput: null,
+  pathEndResults: null,
+  pathResultsEl: null,
+  findPathBtn: null,
+};
+
+const state: SearchState = {
+  debounceTimer: null,
+  inputToResults: new Map(),
+};
+
 const SEARCH_DEBOUNCE_MS = 200;
 
-/** Map inputs to their result containers for positioning */
-const inputToResults = new Map<HTMLInputElement, HTMLElement>();
+/** Reset component state (for testing) */
+export function resetSearchState(): void {
+  if (state.debounceTimer) {
+    clearTimeout(state.debounceTimer);
+  }
+  state.debounceTimer = null;
+  state.inputToResults.clear();
+  for (const key of Object.keys(elements) as (keyof SearchElements)[]) {
+    elements[key] = null;
+  }
+}
 
 /** Initialize search functionality */
 export function initSearch(): void {
-  nodeSearchInput = document.getElementById("node-search") as HTMLInputElement;
-  pathStartInput = document.getElementById("path-start") as HTMLInputElement;
-  pathEndInput = document.getElementById("path-end") as HTMLInputElement;
-  pathResultsEl = document.getElementById("path-results");
-  findPathBtn = document.getElementById("find-path-btn");
+  elements.nodeSearchInput = document.getElementById("node-search") as HTMLInputElement;
+  elements.pathStartInput = document.getElementById("path-start") as HTMLInputElement;
+  elements.pathEndInput = document.getElementById("path-end") as HTMLInputElement;
+  elements.pathResultsEl = document.getElementById("path-results");
+  elements.findPathBtn = document.getElementById("find-path-btn");
 
   // Create/move result containers to body (portal pattern)
-  nodeSearchResults = createResultsContainer(nodeSearchInput, "node-search-results");
-  pathStartResults = createResultsContainer(pathStartInput, "path-start-results");
-  pathEndResults = createResultsContainer(pathEndInput, "path-end-results");
+  elements.nodeSearchResults = createResultsContainer(elements.nodeSearchInput, "node-search-results");
+  elements.pathStartResults = createResultsContainer(elements.pathStartInput, "path-start-results");
+  elements.pathEndResults = createResultsContainer(elements.pathEndInput, "path-end-results");
 
   // Register input-to-results mappings for positioning
-  if (nodeSearchInput && nodeSearchResults) {
-    inputToResults.set(nodeSearchInput, nodeSearchResults);
+  if (elements.nodeSearchInput && elements.nodeSearchResults) {
+    state.inputToResults.set(elements.nodeSearchInput, elements.nodeSearchResults);
   }
-  if (pathStartInput && pathStartResults) {
-    inputToResults.set(pathStartInput, pathStartResults);
+  if (elements.pathStartInput && elements.pathStartResults) {
+    state.inputToResults.set(elements.pathStartInput, elements.pathStartResults);
   }
-  if (pathEndInput && pathEndResults) {
-    inputToResults.set(pathEndInput, pathEndResults);
-  }
-
-  if (nodeSearchInput) {
-    nodeSearchInput.addEventListener("input", () => handleSearch(nodeSearchInput!, nodeSearchResults!, "node"));
-    nodeSearchInput.addEventListener("keydown", (e) => handleSearchKeydown(e, nodeSearchResults!, "node"));
-    nodeSearchInput.addEventListener("blur", () => hideResultsDelayed(nodeSearchResults!));
+  if (elements.pathEndInput && elements.pathEndResults) {
+    state.inputToResults.set(elements.pathEndInput, elements.pathEndResults);
   }
 
-  if (pathStartInput && pathStartResults) {
-    pathStartInput.addEventListener("input", () => handleSearch(pathStartInput!, pathStartResults!, "path-start"));
-    pathStartInput.addEventListener("keydown", (e) => handleSearchKeydown(e, pathStartResults!, "path-start"));
-    pathStartInput.addEventListener("blur", () => hideResultsDelayed(pathStartResults!));
+  if (elements.nodeSearchInput) {
+    elements.nodeSearchInput.addEventListener("input", () =>
+      handleSearch(elements.nodeSearchInput!, elements.nodeSearchResults!, "node")
+    );
+    elements.nodeSearchInput.addEventListener("keydown", (e) =>
+      handleSearchKeydown(e, elements.nodeSearchResults!, "node")
+    );
+    elements.nodeSearchInput.addEventListener("blur", () => hideResultsDelayed(elements.nodeSearchResults!));
   }
 
-  if (pathEndInput && pathEndResults) {
-    pathEndInput.addEventListener("input", () => handleSearch(pathEndInput!, pathEndResults!, "path-end"));
-    pathEndInput.addEventListener("keydown", (e) => handleSearchKeydown(e, pathEndResults!, "path-end"));
-    pathEndInput.addEventListener("blur", () => hideResultsDelayed(pathEndResults!));
+  if (elements.pathStartInput && elements.pathStartResults) {
+    elements.pathStartInput.addEventListener("input", () =>
+      handleSearch(elements.pathStartInput!, elements.pathStartResults!, "path-start")
+    );
+    elements.pathStartInput.addEventListener("keydown", (e) =>
+      handleSearchKeydown(e, elements.pathStartResults!, "path-start")
+    );
+    elements.pathStartInput.addEventListener("blur", () => hideResultsDelayed(elements.pathStartResults!));
+  }
+
+  if (elements.pathEndInput && elements.pathEndResults) {
+    elements.pathEndInput.addEventListener("input", () =>
+      handleSearch(elements.pathEndInput!, elements.pathEndResults!, "path-end")
+    );
+    elements.pathEndInput.addEventListener("keydown", (e) =>
+      handleSearchKeydown(e, elements.pathEndResults!, "path-end")
+    );
+    elements.pathEndInput.addEventListener("blur", () => hideResultsDelayed(elements.pathEndResults!));
   }
 
   // Reposition popovers on window resize
   window.addEventListener("resize", repositionAllPopovers);
 
-  if (findPathBtn) {
-    findPathBtn.addEventListener("click", findPath);
+  if (elements.findPathBtn) {
+    elements.findPathBtn.addEventListener("click", findPath);
   }
 
   // Click handler for search results
@@ -119,7 +163,7 @@ function positionPopover(input: HTMLInputElement, resultsEl: HTMLElement): void 
 
 /** Reposition all visible popovers */
 function repositionAllPopovers(): void {
-  for (const [input, results] of inputToResults) {
+  for (const [input, results] of state.inputToResults) {
     if (!results.hidden) {
       positionPopover(input, results);
     }
@@ -136,11 +180,11 @@ function handleSearch(input: HTMLInputElement, resultsEl: HTMLElement, context: 
   }
 
   // Debounce the search
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer);
+  if (state.debounceTimer) {
+    clearTimeout(state.debounceTimer);
   }
 
-  searchDebounceTimer = setTimeout(() => {
+  state.debounceTimer = setTimeout(() => {
     performSearch(input, query, resultsEl, context);
   }, SEARCH_DEBOUNCE_MS);
 }
@@ -245,21 +289,21 @@ function handleResultSelection(resultItem: HTMLElement, context: string): void {
   switch (context) {
     case "node":
       loadSingleNode(nodeId, nodeLabel || nodeId, nodeType);
-      clearSearch(nodeSearchInput, nodeSearchResults);
+      clearSearch(elements.nodeSearchInput, elements.nodeSearchResults);
       break;
     case "path-start":
-      if (pathStartInput) {
-        pathStartInput.value = nodeLabel || "";
-        pathStartInput.setAttribute("data-node-id", nodeId);
+      if (elements.pathStartInput) {
+        elements.pathStartInput.value = nodeLabel || "";
+        elements.pathStartInput.setAttribute("data-node-id", nodeId);
       }
-      clearSearch(null, pathStartResults);
+      clearSearch(null, elements.pathStartResults);
       break;
     case "path-end":
-      if (pathEndInput) {
-        pathEndInput.value = nodeLabel || "";
-        pathEndInput.setAttribute("data-node-id", nodeId);
+      if (elements.pathEndInput) {
+        elements.pathEndInput.value = nodeLabel || "";
+        elements.pathEndInput.setAttribute("data-node-id", nodeId);
       }
-      clearSearch(null, pathEndResults);
+      clearSearch(null, elements.pathEndResults);
       break;
   }
 }
@@ -304,6 +348,7 @@ function loadSingleNode(nodeId: string, label: string, nodeType: string): void {
 
 /** Find path between start and end nodes using the API */
 async function findPath(): Promise<void> {
+  const { pathStartInput, pathEndInput, pathResultsEl, findPathBtn } = elements;
   if (!pathStartInput || !pathEndInput || !pathResultsEl || !findPathBtn) return;
 
   // Get node IDs from data attributes or fall back to input values
@@ -378,36 +423,36 @@ async function findPath(): Promise<void> {
 
 /** Set the Find Path button loading state */
 function setButtonLoading(loading: boolean): void {
-  if (!findPathBtn) return;
+  if (!elements.findPathBtn) return;
 
   if (loading) {
-    findPathBtn.setAttribute("disabled", "true");
-    findPathBtn.classList.add("flex", "items-center", "justify-center", "gap-2");
-    findPathBtn.innerHTML = '<span class="spinner-sm"></span>Finding...';
+    elements.findPathBtn.setAttribute("disabled", "true");
+    elements.findPathBtn.classList.add("flex", "items-center", "justify-center", "gap-2");
+    elements.findPathBtn.innerHTML = '<span class="spinner-sm"></span>Finding...';
   } else {
-    findPathBtn.removeAttribute("disabled");
-    findPathBtn.classList.remove("flex", "items-center", "justify-center", "gap-2");
-    findPathBtn.textContent = "Find Shortest Path";
+    elements.findPathBtn.removeAttribute("disabled");
+    elements.findPathBtn.classList.remove("flex", "items-center", "justify-center", "gap-2");
+    elements.findPathBtn.textContent = "Find Shortest Path";
   }
 }
 
 /** Show path error */
 function showPathError(message: string): void {
-  if (!pathResultsEl) return;
-  pathResultsEl.innerHTML = `<div class="path-error">${escapeHtml(message)}</div>`;
-  pathResultsEl.hidden = false;
+  if (!elements.pathResultsEl) return;
+  elements.pathResultsEl.innerHTML = `<div class="path-error">${escapeHtml(message)}</div>`;
+  elements.pathResultsEl.hidden = false;
 }
 
 /** Set path start node from external source */
 export function setPathStart(nodeId: string, label: string): void {
-  if (pathStartInput) {
-    pathStartInput.value = label || nodeId;
+  if (elements.pathStartInput) {
+    elements.pathStartInput.value = label || nodeId;
   }
 }
 
 /** Set path end node from external source */
 export function setPathEnd(nodeId: string, label: string): void {
-  if (pathEndInput) {
-    pathEndInput.value = label || nodeId;
+  if (elements.pathEndInput) {
+    elements.pathEndInput.value = label || nodeId;
   }
 }
