@@ -1446,16 +1446,17 @@
            animate-[slideIn_0.2s_ease-out];
   }
 
+  /* Use explicit colors - @apply classes get purged since they're only used dynamically */
   .toast-success {
-    @apply bg-green-500;
+    background-color: #22c55e;
   }
 
   .toast-error {
-    @apply bg-red-500;
+    background-color: #ef4444;
   }
 
   .toast-info {
-    @apply bg-blue-500;
+    background-color: #3b82f6;
   }
 
   .toast-exit {

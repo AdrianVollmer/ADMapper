@@ -3,6 +3,12 @@ export default {
   content: [
     "./src/frontend/**/*.{html,js,ts,jsx,tsx}",
   ],
+  // Preserve classes used dynamically in JS (e.g., toast-${type})
+  safelist: [
+    "toast-success",
+    "toast-error",
+    "toast-info",
+  ],
   theme: {
     extend: {
       colors: {
