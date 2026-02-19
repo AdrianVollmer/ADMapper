@@ -15,7 +15,7 @@ const escapeMap: Record<string, string> = {
  * Uses string replacement for efficiency (no DOM allocation).
  */
 export function escapeHtml(str: string): string {
-  return str.replace(/[&<>"']/g, (c) => escapeMap[c]);
+  return str.replace(/[&<>"']/g, (c) => escapeMap[c]!);
 }
 
 /**

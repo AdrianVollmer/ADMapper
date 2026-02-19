@@ -54,6 +54,8 @@ export default [
         CustomEvent: "readonly",
         requestAnimationFrame: "readonly",
         RequestInit: "readonly",
+        AbortSignal: "readonly",
+        AbortController: "readonly",
       },
     },
     plugins: {

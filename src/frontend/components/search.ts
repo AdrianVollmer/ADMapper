@@ -32,6 +32,8 @@ interface SearchState {
   debounceTimer: ReturnType<typeof setTimeout> | null;
   searchAbortController: AbortController | null;
   inputToResults: Map<HTMLInputElement, HTMLElement>;
+  pathStartNodeId: string | null;
+  pathEndNodeId: string | null;
 }
 
 const elements: SearchElements = {
@@ -49,6 +51,8 @@ const state: SearchState = {
   debounceTimer: null,
   searchAbortController: null,
   inputToResults: new Map(),
+  pathStartNodeId: null,
+  pathEndNodeId: null,
 };
 
 const SEARCH_DEBOUNCE_MS = 200;
@@ -64,6 +68,8 @@ export function resetSearchState(): void {
   state.debounceTimer = null;
   state.searchAbortController = null;
   state.inputToResults.clear();
+  state.pathStartNodeId = null;
+  state.pathEndNodeId = null;
   for (const key of Object.keys(elements) as (keyof SearchElements)[]) {
     elements[key] = null;
   }
@@ -315,14 +321,14 @@ function handleResultSelection(resultItem: HTMLElement, context: string): void {
     case "path-start":
       if (elements.pathStartInput) {
         elements.pathStartInput.value = nodeLabel || "";
-        elements.pathStartInput.setAttribute("data-node-id", nodeId);
+        state.pathStartNodeId = nodeId;
       }
       clearSearch(null, elements.pathStartResults);
       break;
     case "path-end":
       if (elements.pathEndInput) {
         elements.pathEndInput.value = nodeLabel || "";
-        elements.pathEndInput.setAttribute("data-node-id", nodeId);
+        state.pathEndNodeId = nodeId;
       }
       clearSearch(null, elements.pathEndResults);
       break;
@@ -372,9 +378,9 @@ async function findPath(): Promise<void> {
   const { pathStartInput, pathEndInput, pathResultsEl, findPathBtn } = elements;
   if (!pathStartInput || !pathEndInput || !pathResultsEl || !findPathBtn) return;
 
-  // Get node IDs from data attributes or fall back to input values
-  const startId = pathStartInput.getAttribute("data-node-id") || pathStartInput.value.trim();
-  const endId = pathEndInput.getAttribute("data-node-id") || pathEndInput.value.trim();
+  // Get node IDs from state or fall back to input values
+  const startId = state.pathStartNodeId || pathStartInput.value.trim();
+  const endId = state.pathEndNodeId || pathEndInput.value.trim();
   const startLabel = pathStartInput.value.trim();
   const endLabel = pathEndInput.value.trim();
 
@@ -466,6 +472,7 @@ function showPathError(message: string): void {
 
 /** Set path start node from external source */
 export function setPathStart(nodeId: string, label: string): void {
+  state.pathStartNodeId = nodeId;
   if (elements.pathStartInput) {
     elements.pathStartInput.value = label || nodeId;
   }
@@ -473,6 +480,7 @@ export function setPathStart(nodeId: string, label: string): void {
 
 /** Set path end node from external source */
 export function setPathEnd(nodeId: string, label: string): void {
+  state.pathEndNodeId = nodeId;
   if (elements.pathEndInput) {
     elements.pathEndInput.value = label || nodeId;
   }

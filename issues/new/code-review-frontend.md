@@ -221,7 +221,7 @@ routes to components based on `data-*` attributes.
 
 **Minor issues not in top 10:**
 - TODO comments indicate unfinished features (settings, about, updates)
-- CSS-in-JS in `notifications.ts` should move to stylesheets
-- No debounce utility - reimplemented in `search.ts`
-- `pathStartInput.setAttribute("data-node-id", nodeId)` stores state in DOM
-  attributes instead of JS variables
+- ~~CSS-in-JS in `notifications.ts` should move to stylesheets~~ DONE
+- ~~No debounce utility - reimplemented in `search.ts`~~ DONE (created utils/debounce.ts)
+- ~~`pathStartInput.setAttribute("data-node-id", nodeId)` stores state in DOM
+  attributes instead of JS variables~~ DONE

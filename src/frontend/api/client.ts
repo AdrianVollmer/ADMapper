@@ -40,7 +40,7 @@ export class ApiClient {
    * @throws {ApiClientError} If the request fails or response is not OK
    */
   async get<T>(url: string, signal?: AbortSignal): Promise<T> {
-    const response = await fetch(url, { signal });
+    const response = await fetch(url, { signal: signal ?? null });
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
@@ -62,7 +62,7 @@ export class ApiClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal,
+      signal: signal ?? null,
     });
 
     if (!response.ok) {
@@ -84,7 +84,7 @@ export class ApiClient {
     const init: RequestInit = {
       method: "POST",
       headers: body ? { "Content-Type": "application/json" } : {},
-      signal,
+      signal: signal ?? null,
     };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
@@ -104,7 +104,7 @@ export class ApiClient {
    * @throws {ApiClientError} If the request fails or response is not OK
    */
   async delete(url: string, signal?: AbortSignal): Promise<void> {
-    const response = await fetch(url, { method: "DELETE", signal });
+    const response = await fetch(url, { method: "DELETE", signal: signal ?? null });
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
@@ -128,7 +128,7 @@ export class ApiClient {
     const response = await fetch(url, {
       method: "POST",
       body: formData,
-      signal,
+      signal: signal ?? null,
     });
 
     if (!response.ok) {

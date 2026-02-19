@@ -1431,3 +1431,56 @@
            text-blue-500 focus:ring-blue-500 focus:ring-offset-0 focus:ring-offset-gray-800;
   }
 }
+
+/* ============================================
+   Toast Notifications
+   ============================================ */
+@layer components {
+  #toast-container {
+    @apply fixed bottom-5 right-5 z-[10000] flex flex-col gap-2 pointer-events-none;
+  }
+
+  .toast {
+    @apply px-4 py-3 rounded-md text-white text-sm max-w-[400px]
+           pointer-events-auto shadow-lg cursor-pointer
+           animate-[slideIn_0.2s_ease-out];
+  }
+
+  .toast-success {
+    @apply bg-green-500;
+  }
+
+  .toast-error {
+    @apply bg-red-500;
+  }
+
+  .toast-info {
+    @apply bg-blue-500;
+  }
+
+  .toast-exit {
+    @apply animate-[slideOut_0.2s_ease-in_forwards];
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}

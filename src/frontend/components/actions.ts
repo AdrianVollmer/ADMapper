@@ -162,7 +162,8 @@ export function dispatchAction(action: Action): void {
     return;
   }
 
-  const handler = actionHandlers[action];
+  // After filtering out RecentConnectionAction, action is StaticAction
+  const handler = actionHandlers[action as StaticAction];
   if (handler) {
     handler();
   } else {
