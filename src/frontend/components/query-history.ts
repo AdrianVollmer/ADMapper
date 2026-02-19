@@ -103,9 +103,68 @@ export function closeQueryHistory(): void {
 function startDurationUpdates(): void {
   stopDurationUpdates();
   durationInterval = setInterval(() => {
-    // Re-render to update durations
-    renderModal();
+    // Check if any queries are still running - if so, refresh from backend
+    const hasRunning = entries.some((e) => e.status === "running");
+    if (hasRunning) {
+      // Poll for updates from backend (status changes)
+      refreshHistoryQuietly();
+    }
+    // Update durations without full re-render
+    updateDurationsInPlace();
   }, 1000);
+}
+
+/** Refresh history from backend without resetting scroll position */
+async function refreshHistoryQuietly(): Promise<void> {
+  try {
+    const data = await api.get<QueryHistoryResponse>(
+      `/api/query-history?page=${pagination.page}&per_page=${pagination.perPage}`
+    );
+    // Check if any status changed
+    const statusChanged = data.entries.some((newEntry) => {
+      const oldEntry = entries.find((e) => e.id === newEntry.id);
+      return oldEntry && oldEntry.status !== newEntry.status;
+    });
+    if (statusChanged || data.entries.length !== entries.length) {
+      entries = data.entries;
+      pagination.total = data.total;
+      // Full re-render needed for status changes, but preserve scroll
+      renderModalPreservingScroll();
+    }
+  } catch {
+    // Silently ignore refresh errors
+  }
+}
+
+/** Update live durations in place without full re-render */
+function updateDurationsInPlace(): void {
+  for (const entry of entries) {
+    if (entry.status !== "running") continue;
+
+    // Update duration display in list view
+    const durationEl = document.querySelector(`[data-id="${entry.id}"] .query-history-duration`);
+    if (durationEl) {
+      durationEl.textContent = formatDuration(getLiveDuration(entry));
+    }
+  }
+
+  // Update detail view duration if showing a running query
+  if (selectedEntry && selectedEntry.status === "running") {
+    const detailDuration = document.querySelector(".detail-value");
+    if (detailDuration) {
+      detailDuration.textContent = formatDuration(getLiveDuration(selectedEntry));
+    }
+  }
+}
+
+/** Render modal while preserving scroll position */
+function renderModalPreservingScroll(): void {
+  const body = document.getElementById("query-history-body");
+  const scrollTop = body?.scrollTop ?? 0;
+  renderModal();
+  if (body) {
+    body.scrollTop = scrollTop;
+  }
 }
 
 /** Stop live duration updates */
