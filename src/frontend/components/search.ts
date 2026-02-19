@@ -129,9 +129,6 @@ export function initSearch(): void {
   if (elements.findPathBtn) {
     elements.findPathBtn.addEventListener("click", findPath);
   }
-
-  // Click handler for search results
-  document.addEventListener("click", handleResultClick);
 }
 
 /** Create a results container as a portal in document.body */
@@ -286,14 +283,20 @@ function navigateResults(resultsEl: HTMLElement, direction: number): void {
   items[index]?.classList.add("focused");
 }
 
-/** Handle click on search results */
-function handleResultClick(e: Event): void {
+/**
+ * Handle clicks for search results.
+ * Called from the central document click handler in main.ts.
+ * Returns true if the click was handled.
+ */
+export function handleSearchClicks(e: MouseEvent): boolean {
   const target = e.target as HTMLElement;
   const resultItem = target.closest(".search-result-item") as HTMLElement;
   if (resultItem) {
     const context = resultItem.getAttribute("data-context") || "node";
     handleResultSelection(resultItem, context);
+    return true;
   }
+  return false;
 }
 
 /** Handle selection of a search result */

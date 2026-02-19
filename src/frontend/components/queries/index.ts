@@ -52,9 +52,6 @@ export function initQueries(): void {
 
   // Render the tree
   renderQueryTree();
-
-  // Handle clicks on the tree
-  document.addEventListener("click", handleTreeClick);
 }
 
 /** Load custom queries from localStorage */
@@ -223,14 +220,17 @@ function highlightMatch(text: string, filter: string): string {
   return `${before}<mark class="query-highlight">${match}</mark>${after}`;
 }
 
-/** Handle clicks on the tree */
-function handleTreeClick(e: Event): void {
+/**
+ * Handle clicks on the query tree.
+ * Called from the central document click handler in main.ts.
+ * Returns true if the click was handled.
+ */
+export function handleQueryTreeClicks(e: MouseEvent): boolean {
   const target = e.target as HTMLElement;
 
   // Toggle category
   const categoryHeader = target.closest('[data-action="toggle-category"]') as HTMLElement;
   if (categoryHeader) {
-    e.stopPropagation();
     const categoryId = categoryHeader.getAttribute("data-category-id");
     if (categoryId) {
       if (expandedCategories.has(categoryId)) {
@@ -240,19 +240,20 @@ function handleTreeClick(e: Event): void {
       }
       renderQueryTree();
     }
-    return;
+    return true;
   }
 
   // Run query (use unique action name to avoid conflict with global action dispatcher)
   const queryItem = target.closest('[data-action="execute-sidebar-query"]') as HTMLElement;
   if (queryItem) {
-    e.stopPropagation();
     const queryId = queryItem.getAttribute("data-query-id");
     if (queryId) {
       runQuery(queryId);
     }
-    return;
+    return true;
   }
+
+  return false;
 }
 
 /** Find a query by ID */

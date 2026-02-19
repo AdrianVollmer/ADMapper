@@ -28,18 +28,24 @@ export function initGraph(): void {
   }
   // Note: In production, the placeholder is shown via updateGraphForConnectionState()
   // which is called after the connection status is fetched from the server
+}
 
-  // Handle toolbar actions - delegate to central action dispatcher
-  document.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    const button = target.closest("[data-action]") as HTMLElement;
-    if (!button) return;
+/**
+ * Handle clicks for graph-related actions.
+ * Called from the central document click handler in main.ts.
+ * Returns true if the click was handled.
+ */
+export function handleGraphClicks(e: MouseEvent): boolean {
+  const target = e.target as HTMLElement;
+  const button = target.closest("[data-action]") as HTMLElement;
+  if (!button) return false;
 
-    const action = button.getAttribute("data-action");
-    if (action) {
-      dispatchAction(action as Action);
-    }
-  });
+  const action = button.getAttribute("data-action");
+  if (action) {
+    dispatchAction(action as Action);
+    return true;
+  }
+  return false;
 }
 
 /** Update the graph view based on connection state */

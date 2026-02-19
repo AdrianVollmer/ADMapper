@@ -49,15 +49,20 @@ export function initMenuBar(): void {
     }
   });
 
-  // Close menus when clicking outside
-  document.addEventListener("click", (e) => {
-    if (activeMenu && !menubar.contains(e.target as Node)) {
-      closeAllMenus();
-    }
-  });
-
   // Keyboard navigation
   menubar.addEventListener("keydown", handleMenuKeydown);
+}
+
+/**
+ * Handle clicks outside the menubar to close open menus.
+ * Called from the central document click handler in main.ts.
+ * This doesn't return a value since it should always allow other handlers to run.
+ */
+export function handleMenubarOutsideClick(e: MouseEvent): void {
+  const menubar = document.getElementById("menubar");
+  if (activeMenu && menubar && !menubar.contains(e.target as Node)) {
+    closeAllMenus();
+  }
 }
 
 /** Toggle a menu open/closed */

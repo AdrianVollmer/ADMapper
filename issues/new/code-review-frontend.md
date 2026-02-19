@@ -191,7 +191,7 @@ These could be logged to console or sent to error tracking.
 **Fix:** Pass credentials separately from the URL, or redact passwords in any
 logging. The backend should handle credentials securely.
 
-### 10. Multiple document-level event listeners
+### 10. ~~Multiple document-level event listeners~~ DONE
 
 **Files:** `sidebars.ts:287-356`, `search.ts:84`, `menubar.ts`
 

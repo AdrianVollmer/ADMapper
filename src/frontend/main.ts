@@ -4,13 +4,13 @@
  * Initializes the application UI: menu bar, sidebars, and graph visualization.
  */
 
-import { initMenuBar } from "./components/menubar";
-import { initSidebars } from "./components/sidebars";
-import { initGraph } from "./components/graph-view";
+import { initMenuBar, handleMenubarOutsideClick } from "./components/menubar";
+import { initSidebars, handleSidebarClicks } from "./components/sidebars";
+import { initGraph, handleGraphClicks } from "./components/graph-view";
 import { initKeyboardShortcuts } from "./components/keyboard";
 import { initImport } from "./components/import";
-import { initSearch } from "./components/search";
-import { initQueries } from "./components/queries";
+import { initSearch, handleSearchClicks } from "./components/search";
+import { initQueries, handleQueryTreeClicks } from "./components/queries";
 import { initQueryHistory } from "./components/query-history";
 import { initDbManager } from "./components/db-manager";
 import { initDbConnect } from "./components/db-connect";
@@ -35,8 +35,22 @@ export const appState: AppState = {
   databaseType: null,
 };
 
+/**
+ * Centralized document click handler.
+ * Routes clicks to component handlers, reducing the number of document-level listeners.
+ */
+function handleDocumentClick(e: MouseEvent): void {
+  // Each handler can return true to stop further processing
+  if (handleSidebarClicks(e)) return;
+  if (handleGraphClicks(e)) return;
+  if (handleSearchClicks(e)) return;
+  if (handleQueryTreeClicks(e)) return;
+  handleMenubarOutsideClick(e);
+}
+
 /** Initialize the application */
 function init(): void {
+  // Initialize components (they no longer add document click listeners)
   initMenuBar();
   initSidebars();
   initGraph();
@@ -50,6 +64,9 @@ function init(): void {
   initRunQuery();
   initManageQueries();
   initQueryActivity();
+
+  // Single consolidated document click handler
+  document.addEventListener("click", handleDocumentClick);
 
   console.log("ADMapper initialized");
 }

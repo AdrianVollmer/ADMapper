@@ -283,77 +283,83 @@ function renderIndicator(type: keyof typeof USER_INDICATORS): string {
 
 /** Initialize sidebars */
 export function initSidebars(): void {
-  // Set up toggle buttons
-  document.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    const button = target.closest("[data-action]") as HTMLElement;
-    if (!button) return;
+  // Sidebars are now initialized without document-level click handlers.
+  // Click handling is consolidated in main.ts via handleSidebarClicks().
+}
 
-    const action = button.getAttribute("data-action");
+/**
+ * Consolidated click handler for sidebar-related clicks.
+ * Called from the central document click handler in main.ts.
+ * Returns true if the click was handled and should stop propagation.
+ */
+export function handleSidebarClicks(e: MouseEvent): boolean {
+  const target = e.target as HTMLElement;
+
+  // Handle toggle sidebar actions
+  const actionButton = target.closest("[data-action]") as HTMLElement;
+  if (actionButton) {
+    const action = actionButton.getAttribute("data-action");
     if (action === "toggle-nav-sidebar") {
       toggleNavSidebar();
+      return true;
     } else if (action === "toggle-detail-sidebar") {
       toggleDetailSidebar();
+      return true;
     }
-  });
+  }
 
-  // Set up click-to-copy for property values
-  document.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    const valueEl = target.closest(".detail-prop-value") as HTMLElement;
-    if (!valueEl) return;
-
+  // Handle click-to-copy for property values
+  const valueEl = target.closest(".detail-prop-value") as HTMLElement;
+  if (valueEl) {
     const text = valueEl.getAttribute("data-value") || valueEl.textContent || "";
     copyToClipboard(text, valueEl);
-  });
+    return true;
+  }
 
-  // Set up overflow menu toggle
-  document.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    const trigger = target.closest(".overflow-trigger") as HTMLElement;
+  // Handle overflow menu toggle
+  const trigger = target.closest(".overflow-trigger") as HTMLElement;
 
-    // Close any open overflow menus when clicking elsewhere
-    const allDropdowns = document.querySelectorAll(".overflow-dropdown:not([hidden])");
-    for (const dropdown of allDropdowns) {
-      if (!trigger || !dropdown.previousElementSibling?.contains(trigger)) {
+  // Close any open overflow menus when clicking elsewhere
+  const allDropdowns = document.querySelectorAll(".overflow-dropdown:not([hidden])");
+  for (const dropdown of allDropdowns) {
+    if (!trigger || !dropdown.previousElementSibling?.contains(trigger)) {
+      dropdown.setAttribute("hidden", "");
+      dropdown.previousElementSibling?.setAttribute("aria-expanded", "false");
+    }
+  }
+
+  if (trigger) {
+    const dropdown = trigger.nextElementSibling as HTMLElement;
+    if (dropdown?.classList.contains("overflow-dropdown")) {
+      const isHidden = dropdown.hasAttribute("hidden");
+      if (isHidden) {
+        dropdown.removeAttribute("hidden");
+        trigger.setAttribute("aria-expanded", "true");
+      } else {
         dropdown.setAttribute("hidden", "");
-        dropdown.previousElementSibling?.setAttribute("aria-expanded", "false");
+        trigger.setAttribute("aria-expanded", "false");
       }
     }
+    return true;
+  }
 
-    if (trigger) {
-      const dropdown = trigger.nextElementSibling as HTMLElement;
-      if (dropdown?.classList.contains("overflow-dropdown")) {
-        const isHidden = dropdown.hasAttribute("hidden");
-        if (isHidden) {
-          dropdown.removeAttribute("hidden");
-          trigger.setAttribute("aria-expanded", "true");
-        } else {
-          dropdown.setAttribute("hidden", "");
-          trigger.setAttribute("aria-expanded", "false");
-        }
-      }
-    }
-  });
-
-  // Set up detail panel action handlers
-  document.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    const button = target.closest(".detail-action-btn, .overflow-item") as HTMLElement;
-    if (!button || button.classList.contains("overflow-trigger")) return;
-
+  // Handle detail panel action buttons
+  const button = target.closest(".detail-action-btn, .overflow-item") as HTMLElement;
+  if (button && !button.classList.contains("overflow-trigger")) {
     const action = button.getAttribute("data-action");
     const nodeId = button.getAttribute("data-node-id");
-    if (!action || !nodeId) return;
-
-    // Close overflow menu if clicking an overflow item
-    const dropdown = button.closest(".overflow-dropdown");
-    if (dropdown) {
-      dropdown.setAttribute("hidden", "");
+    if (action && nodeId) {
+      // Close overflow menu if clicking an overflow item
+      const dropdown = button.closest(".overflow-dropdown");
+      if (dropdown) {
+        dropdown.setAttribute("hidden", "");
+      }
+      handleDetailAction(action, nodeId);
+      return true;
     }
+  }
 
-    handleDetailAction(action, nodeId);
-  });
+  return false;
 }
 
 /** Handle detail panel actions */
