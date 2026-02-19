@@ -1085,7 +1085,10 @@ pub async fn graph_query(
             *running_query_for_task.final_state.write() = Some(progress);
             *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
             let _ = query_activity_tx.send(QueryActivity {
-                active: running_queries.len().saturating_sub(1),
+                active: running_queries
+                    .iter()
+                    .filter(|e| e.value().completed_at.read().is_none())
+                    .count(),
             });
             return;
         }
@@ -1118,7 +1121,10 @@ pub async fn graph_query(
             *running_query_for_task.final_state.write() = Some(progress);
             *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
             let _ = query_activity_tx.send(QueryActivity {
-                active: running_queries.len().saturating_sub(1),
+                active: running_queries
+                    .iter()
+                    .filter(|e| e.value().completed_at.read().is_none())
+                    .count(),
             });
             return;
         }
@@ -1193,7 +1199,10 @@ pub async fn graph_query(
 
         // Broadcast activity update (query no longer "running" for UI purposes)
         let _ = query_activity_tx.send(QueryActivity {
-            active: running_queries.len().saturating_sub(1),
+            active: running_queries
+                    .iter()
+                    .filter(|e| e.value().completed_at.read().is_none())
+                    .count(),
         });
     });
 
