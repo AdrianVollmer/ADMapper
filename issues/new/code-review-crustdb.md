@@ -155,29 +155,19 @@ regex::RegexBuilder::new(pattern)
 
 ---
 
-### 10. Tight Coupling in PathConstraints
+### 10. ~~Tight Coupling in PathConstraints~~ ✅ FIXED
 
-**Location:** `executor.rs:35-139`
+**Location:** `executor/mod.rs:97-220`
 
-The `extract_path_constraints` function assumes specific variable names (`source_var`, `target_var`) and requires callers to know which variables represent path endpoints:
+~~The `extract_path_constraints` function assumed specific "source" and "target" variable names, coupling constraint extraction to shortest path execution.~~
 
-```rust
-fn extract_path_constraints(
-    predicate: &Expression,
-    source_var: &str,  // Caller must know these
-    target_var: &str,
-) -> PathConstraints
-```
+**Fixed:** Refactored into a layered design:
 
-This tightly couples constraint extraction to the shortest path execution flow.
+1. **Generic layer:** `extract_variable_constraints(predicate)` extracts constraints for *all* variables found in equality predicates, returning `VariableConstraints` (a `HashMap<String, PropertyConstraints>`)
 
-**Recommendation:** Make constraint extraction generic over variable roles:
-```rust
-fn extract_property_constraints(
-    predicate: &Expression,
-    variable_roles: &HashMap<&str, ConstraintRole>,
-) -> HashMap<String, PropertyConstraints>
-```
+2. **Specialized layer:** `PathConstraints::from_variable_constraints()` adapts the generic result for the shortest path use case
+
+This allows constraint extraction to be reused for other pattern types (e.g., predicate pushdown for single-node scans) without modification.
 
 ---
 

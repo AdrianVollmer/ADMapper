@@ -91,44 +91,61 @@ impl Default for Binding {
 }
 
 // =============================================================================
-// Predicate Pushdown for Shortest Path
+// Predicate Pushdown
 // =============================================================================
 
+/// Property constraints for a single variable (property name -> allowed values).
+pub type PropertyConstraints = HashMap<String, Vec<PropertyValue>>;
+
+/// Constraints extracted from WHERE clause, keyed by variable name.
+///
+/// This generic structure can be used for any pattern type, not just shortest paths.
+/// Each variable maps to its property constraints extracted from equality predicates.
+pub type VariableConstraints = HashMap<String, PropertyConstraints>;
+
 /// Constraints extracted from WHERE clause for shortest path optimization.
-/// When we know specific source/target property values, BFS can filter nodes early.
+///
+/// This is a convenience wrapper around `VariableConstraints` for the common
+/// case of source/target path endpoints.
 #[derive(Debug, Default)]
 pub struct PathConstraints {
     /// Property constraints for source nodes (e.g., `src.name = 'A'` -> ("name", ["A"])).
-    pub source_props: HashMap<String, Vec<PropertyValue>>,
+    pub source_props: PropertyConstraints,
     /// Property constraints for target nodes (e.g., `dst.name = 'B'` -> ("name", ["B"])).
-    pub target_props: HashMap<String, Vec<PropertyValue>>,
+    pub target_props: PropertyConstraints,
 }
 
-/// Extract source/target property constraints from a WHERE clause predicate.
+impl PathConstraints {
+    /// Create PathConstraints from generic VariableConstraints.
+    pub fn from_variable_constraints(
+        constraints: VariableConstraints,
+        source_var: &str,
+        target_var: &str,
+    ) -> Self {
+        Self {
+            source_props: constraints.get(source_var).cloned().unwrap_or_default(),
+            target_props: constraints.get(target_var).cloned().unwrap_or_default(),
+        }
+    }
+}
+
+/// Extract property constraints from a WHERE clause predicate.
+///
+/// Returns constraints for all variables found in equality predicates.
+/// This is a generic extraction that doesn't assume any specific variable roles.
 ///
 /// Looks for patterns like:
-/// - `src.id = 5` (integer)
-/// - `dst.name = 'Alice'` (string)
-/// - `src.id = 5 AND dst.name = 'Bob'` (combined)
-fn extract_path_constraints(
-    predicate: &Expression,
-    source_var: &str,
-    target_var: &str,
-) -> PathConstraints {
-    let mut constraints = PathConstraints::default();
-
-    extract_constraints_recursive(predicate, source_var, target_var, &mut constraints);
-
+/// - `n.id = 5` (integer)
+/// - `n.name = 'Alice'` (string)
+/// - `a.id = 5 AND b.name = 'Bob'` (combined)
+pub fn extract_variable_constraints(predicate: &Expression) -> VariableConstraints {
+    let mut constraints = VariableConstraints::new();
+    extract_constraints_recursive(predicate, &mut constraints);
     constraints
 }
 
 /// Recursively extract constraints from AND-combined predicates.
-fn extract_constraints_recursive(
-    expr: &Expression,
-    source_var: &str,
-    target_var: &str,
-    constraints: &mut PathConstraints,
-) {
+fn extract_constraints_recursive(expr: &Expression, constraints: &mut VariableConstraints) {
     match expr {
         // Handle AND: recurse into both sides
         Expression::BinaryOp {
@@ -136,8 +153,8 @@ fn extract_constraints_recursive(
             op: BinaryOperator::And,
             right,
         } => {
-            extract_constraints_recursive(left, source_var, target_var, constraints);
-            extract_constraints_recursive(right, source_var, target_var, constraints);
+            extract_constraints_recursive(left, constraints);
+            extract_constraints_recursive(right, constraints);
         }
 
         // Handle equality: var.prop = value
@@ -148,9 +165,9 @@ fn extract_constraints_recursive(
         } => {
             // Try both orderings: `var.id = 5` and `5 = var.id`
             if let Some((var, prop, value)) = extract_property_equals(left, right) {
-                add_property_constraint(var, prop, value, source_var, target_var, constraints);
+                add_property_constraint(var, prop, value, constraints);
             } else if let Some((var, prop, value)) = extract_property_equals(right, left) {
-                add_property_constraint(var, prop, value, source_var, target_var, constraints);
+                add_property_constraint(var, prop, value, constraints);
             }
         }
 
@@ -192,28 +209,19 @@ fn extract_property_equals<'a>(
     None
 }
 
-/// Add a property constraint if the variable matches source or target.
+/// Add a property constraint for a variable.
 fn add_property_constraint(
     var: &str,
     prop: &str,
     value: PropertyValue,
-    source_var: &str,
-    target_var: &str,
-    constraints: &mut PathConstraints,
+    constraints: &mut VariableConstraints,
 ) {
-    if var == source_var {
-        constraints
-            .source_props
-            .entry(prop.to_string())
-            .or_default()
-            .push(value);
-    } else if var == target_var {
-        constraints
-            .target_props
-            .entry(prop.to_string())
-            .or_default()
-            .push(value);
-    }
+    constraints
+        .entry(var.to_string())
+        .or_default()
+        .entry(prop.to_string())
+        .or_default()
+        .push(value);
 }
 
 // =============================================================================
@@ -417,7 +425,9 @@ fn execute_match(
         let constraints = if let Some(ref where_clause) = match_clause.where_clause {
             // Get source/target variable names from pattern
             let (source_var, target_var) = get_path_endpoint_vars(pattern);
-            extract_path_constraints(&where_clause.predicate, &source_var, &target_var)
+            // Extract generic variable constraints, then specialize for path endpoints
+            let var_constraints = extract_variable_constraints(&where_clause.predicate);
+            PathConstraints::from_variable_constraints(var_constraints, &source_var, &target_var)
         } else {
             PathConstraints::default()
         };
