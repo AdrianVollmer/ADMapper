@@ -2,12 +2,12 @@
 
 use crate::error::{Error, Result};
 use crate::graph::{Edge, Node, PropertyValue};
-use crate::DatabaseStats;
+use crate::{DatabaseStats, QueryHistoryRow};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
 
 /// Current schema version.
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 /// Validate a property name to prevent JSON path injection.
 ///
@@ -104,7 +104,7 @@ impl SqliteStorage {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
-            INSERT INTO meta (key, value) VALUES ('schema_version', '1');
+            INSERT INTO meta (key, value) VALUES ('schema_version', '2');
 
             -- Normalized node labels
             CREATE TABLE node_labels (
@@ -151,14 +151,55 @@ impl SqliteStorage {
             CREATE INDEX idx_edges_type ON edges(type_id);
             CREATE INDEX idx_edges_source_type ON edges(source_id, type_id);
             CREATE INDEX idx_edges_target_type ON edges(target_id, type_id);
+
+            -- Query history table for storing executed queries
+            CREATE TABLE query_history (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                query TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                result_count INTEGER,
+                status TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                duration_ms INTEGER,
+                error TEXT
+            );
+            CREATE INDEX idx_query_history_timestamp ON query_history(timestamp DESC);
             "#,
         )?;
         Ok(())
     }
 
     /// Run migrations from old_version to current.
-    fn migrate(&self, _old_version: i32) -> Result<()> {
-        // Future migrations go here
+    fn migrate(&self, old_version: i32) -> Result<()> {
+        if old_version < 2 {
+            self.migrate_v1_to_v2()?;
+        }
+        Ok(())
+    }
+
+    /// Migration from v1 to v2: Add query_history table.
+    fn migrate_v1_to_v2(&self) -> Result<()> {
+        self.conn.execute_batch(
+            r#"
+            -- Query history table for storing executed queries
+            CREATE TABLE IF NOT EXISTS query_history (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                query TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                result_count INTEGER,
+                status TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                duration_ms INTEGER,
+                error TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_query_history_timestamp ON query_history(timestamp DESC);
+
+            -- Update schema version
+            UPDATE meta SET value = '2' WHERE key = 'schema_version';
+            "#,
+        )?;
         Ok(())
     }
 
@@ -965,6 +1006,110 @@ impl SqliteStorage {
 
         Ok(counts)
     }
+
+    // ========================================================================
+    // Query History Methods
+    // ========================================================================
+
+    /// Add a query to the history.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_query_history(
+        &self,
+        id: &str,
+        name: &str,
+        query: &str,
+        timestamp: i64,
+        result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO query_history
+             (id, name, query, timestamp, result_count, status, started_at, duration_ms, error)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                name,
+                query,
+                timestamp,
+                result_count,
+                status,
+                started_at,
+                duration_ms.map(|d| d as i64),
+                error
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Update the status of a query in history.
+    pub fn update_query_status(
+        &self,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE query_history
+             SET status = ?2, duration_ms = ?3, result_count = ?4, error = ?5
+             WHERE id = ?1",
+            params![id, status, duration_ms.map(|d| d as i64), result_count, error],
+        )?;
+        Ok(())
+    }
+
+    /// Get query history with pagination.
+    /// Returns (rows, total_count).
+    pub fn get_query_history(&self, limit: usize, offset: usize) -> Result<(Vec<QueryHistoryRow>, usize)> {
+        // Get total count
+        let total: usize = self.conn.query_row(
+            "SELECT COUNT(*) FROM query_history",
+            [],
+            |row| row.get(0),
+        )?;
+
+        // Get paginated results
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, query, timestamp, result_count, status, started_at, duration_ms, error
+             FROM query_history
+             ORDER BY timestamp DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+
+        let rows = stmt.query_map(params![limit as i64, offset as i64], |row| {
+            Ok(QueryHistoryRow {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                query: row.get(2)?,
+                timestamp: row.get(3)?,
+                result_count: row.get(4)?,
+                status: row.get(5)?,
+                started_at: row.get(6)?,
+                duration_ms: row.get::<_, Option<i64>>(7)?.map(|d| d as u64),
+                error: row.get(8)?,
+            })
+        })?;
+
+        let history: Vec<QueryHistoryRow> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok((history, total))
+    }
+
+    /// Delete a query from history.
+    pub fn delete_query_history(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM query_history WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Clear all query history.
+    pub fn clear_query_history(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM query_history", [])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1254,5 +1399,80 @@ mod tests {
         assert!(storage.build_property_index("object_id").is_ok());
         assert!(storage.build_property_index("").is_err());
         assert!(storage.build_property_index("name'--").is_err());
+    }
+
+    #[test]
+    fn test_query_history_crud() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Add a query
+        storage
+            .add_query_history(
+                "q1",
+                "Test Query",
+                "MATCH (n) RETURN n",
+                1700000000,
+                Some(10),
+                "completed",
+                1700000000,
+                Some(100),
+                None,
+            )
+            .unwrap();
+
+        // Get query history
+        let (rows, total) = storage.get_query_history(10, 0).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "q1");
+        assert_eq!(rows[0].name, "Test Query");
+        assert_eq!(rows[0].query, "MATCH (n) RETURN n");
+        assert_eq!(rows[0].result_count, Some(10));
+        assert_eq!(rows[0].status, "completed");
+        assert_eq!(rows[0].duration_ms, Some(100));
+
+        // Add another query
+        storage
+            .add_query_history(
+                "q2",
+                "Failed Query",
+                "INVALID",
+                1700000001,
+                None,
+                "error",
+                1700000001,
+                Some(50),
+                Some("Parse error"),
+            )
+            .unwrap();
+
+        let (rows, total) = storage.get_query_history(10, 0).unwrap();
+        assert_eq!(total, 2);
+        // Should be ordered by timestamp DESC
+        assert_eq!(rows[0].id, "q2");
+        assert_eq!(rows[1].id, "q1");
+
+        // Update status
+        storage
+            .update_query_status("q2", "completed", Some(200), Some(5), None)
+            .unwrap();
+
+        let (rows, _) = storage.get_query_history(10, 0).unwrap();
+        let q2 = rows.iter().find(|r| r.id == "q2").unwrap();
+        assert_eq!(q2.status, "completed");
+        assert_eq!(q2.duration_ms, Some(200));
+        assert_eq!(q2.result_count, Some(5));
+
+        // Delete one query
+        storage.delete_query_history("q1").unwrap();
+        let (rows, total) = storage.get_query_history(10, 0).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(rows[0].id, "q2");
+
+        // Clear all
+        storage.clear_query_history().unwrap();
+        let (rows, total) = storage.get_query_history(10, 0).unwrap();
+        assert_eq!(total, 0);
+        assert!(rows.is_empty());
     }
 }

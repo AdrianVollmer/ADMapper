@@ -178,6 +178,99 @@ impl Database {
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.get_label_counts()
     }
+
+    // ========================================================================
+    // Query History Methods
+    // ========================================================================
+
+    /// Add a query to the history.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_query_history(
+        &self,
+        id: &str,
+        name: &str,
+        query: &str,
+        timestamp: i64,
+        result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.add_query_history(
+            id,
+            name,
+            query,
+            timestamp,
+            result_count,
+            status,
+            started_at,
+            duration_ms,
+            error,
+        )
+    }
+
+    /// Update the status of a query in history.
+    pub fn update_query_status(
+        &self,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.update_query_status(id, status, duration_ms, result_count, error)
+    }
+
+    /// Get query history with pagination.
+    /// Returns (rows, total_count).
+    pub fn get_query_history(&self, limit: usize, offset: usize) -> Result<(Vec<QueryHistoryRow>, usize)> {
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.get_query_history(limit, offset)
+    }
+
+    /// Delete a query from history.
+    pub fn delete_query_history(&self, id: &str) -> Result<()> {
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.delete_query_history(id)
+    }
+
+    /// Clear all query history.
+    pub fn clear_query_history(&self) -> Result<()> {
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.clear_query_history()
+    }
+}
+
+/// A row from the query history.
+#[derive(Debug, Clone)]
+pub struct QueryHistoryRow {
+    pub id: String,
+    pub name: String,
+    pub query: String,
+    pub timestamp: i64,
+    pub result_count: Option<i64>,
+    pub status: String,
+    pub started_at: i64,
+    pub duration_ms: Option<u64>,
+    pub error: Option<String>,
 }
 
 /// Database statistics.
@@ -450,5 +543,65 @@ mod tests {
             }
             other => panic!("Expected integer, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_query_history_api() {
+        let db = Database::in_memory().unwrap();
+
+        // Add a query to history
+        db.add_query_history(
+            "test-id-1",
+            "Test Query",
+            "MATCH (n) RETURN n",
+            1700000000,
+            Some(42),
+            "completed",
+            1700000000,
+            Some(150),
+            None,
+        )
+        .unwrap();
+
+        // Get query history
+        let (rows, total) = db.get_query_history(10, 0).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "test-id-1");
+        assert_eq!(rows[0].name, "Test Query");
+        assert_eq!(rows[0].result_count, Some(42));
+        assert_eq!(rows[0].duration_ms, Some(150));
+
+        // Update status
+        db.update_query_status("test-id-1", "archived", Some(200), Some(50), None)
+            .unwrap();
+
+        let (rows, _) = db.get_query_history(10, 0).unwrap();
+        assert_eq!(rows[0].status, "archived");
+        assert_eq!(rows[0].duration_ms, Some(200));
+        assert_eq!(rows[0].result_count, Some(50));
+
+        // Delete query
+        db.delete_query_history("test-id-1").unwrap();
+        let (rows, total) = db.get_query_history(10, 0).unwrap();
+        assert_eq!(total, 0);
+        assert!(rows.is_empty());
+
+        // Add another and clear all
+        db.add_query_history(
+            "test-id-2",
+            "Another",
+            "MATCH (n) RETURN n",
+            1700000001,
+            None,
+            "pending",
+            1700000001,
+            None,
+            None,
+        )
+        .unwrap();
+        db.clear_query_history().unwrap();
+        let (_, total) = db.get_query_history(10, 0).unwrap();
+        assert_eq!(total, 0);
     }
 }

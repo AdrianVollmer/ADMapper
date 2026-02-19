@@ -1249,50 +1249,88 @@ impl CrustDatabase {
         false
     }
 
-    // Query history methods (stub implementation - CrustDB doesn't persist history)
+    // Query history methods - delegates to CrustDB's SQLite storage
+    #[allow(clippy::too_many_arguments)]
     pub fn add_query_history(
         &self,
-        _id: &str,
-        _name: &str,
-        _query: &str,
-        _timestamp: i64,
-        _result_count: Option<i64>,
-        _status: &str,
-        _started_at: i64,
-        _duration_ms: Option<u64>,
-        _error: Option<&str>,
+        id: &str,
+        name: &str,
+        query: &str,
+        timestamp: i64,
+        result_count: Option<i64>,
+        status: &str,
+        started_at: i64,
+        duration_ms: Option<u64>,
+        error: Option<&str>,
     ) -> Result<()> {
-        // CrustDB doesn't persist query history yet
-        Ok(())
+        self.db
+            .add_query_history(
+                id,
+                name,
+                query,
+                timestamp,
+                result_count,
+                status,
+                started_at,
+                duration_ms,
+                error,
+            )
+            .map_err(|e| DbError::Database(e.to_string()))
     }
 
     pub fn update_query_status(
         &self,
-        _id: &str,
-        _status: &str,
-        _duration_ms: Option<u64>,
-        _result_count: Option<i64>,
-        _error: Option<&str>,
+        id: &str,
+        status: &str,
+        duration_ms: Option<u64>,
+        result_count: Option<i64>,
+        error: Option<&str>,
     ) -> Result<()> {
-        Ok(())
+        self.db
+            .update_query_status(id, status, duration_ms, result_count, error)
+            .map_err(|e| DbError::Database(e.to_string()))
     }
 
     #[allow(clippy::type_complexity)]
     pub fn get_query_history(
         &self,
-        _limit: usize,
-        _offset: usize,
+        limit: usize,
+        offset: usize,
     ) -> Result<(Vec<QueryHistoryRow>, usize)> {
-        // Return empty list - CrustDB doesn't persist history
-        Ok((Vec::new(), 0))
+        let (rows, total) = self
+            .db
+            .get_query_history(limit, offset)
+            .map_err(|e| DbError::Database(e.to_string()))?;
+
+        // Convert crustdb::QueryHistoryRow to backend QueryHistoryRow
+        let converted: Vec<QueryHistoryRow> = rows
+            .into_iter()
+            .map(|r| QueryHistoryRow {
+                id: r.id,
+                name: r.name,
+                query: r.query,
+                timestamp: r.timestamp,
+                result_count: r.result_count,
+                status: r.status,
+                started_at: r.started_at,
+                duration_ms: r.duration_ms,
+                error: r.error,
+            })
+            .collect();
+
+        Ok((converted, total))
     }
 
-    pub fn delete_query_history(&self, _id: &str) -> Result<()> {
-        Ok(())
+    pub fn delete_query_history(&self, id: &str) -> Result<()> {
+        self.db
+            .delete_query_history(id)
+            .map_err(|e| DbError::Database(e.to_string()))
     }
 
     pub fn clear_query_history(&self) -> Result<()> {
-        Ok(())
+        self.db
+            .clear_query_history()
+            .map_err(|e| DbError::Database(e.to_string()))
     }
 }
 
