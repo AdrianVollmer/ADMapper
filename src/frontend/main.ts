@@ -41,10 +41,11 @@ export const appState: AppState = {
  */
 function handleDocumentClick(e: MouseEvent): void {
   // Each handler can return true to stop further processing
+  // Order matters: more specific handlers (sidebar, query tree, search) before generic graph handler
   if (handleSidebarClicks(e)) return;
-  if (handleGraphClicks(e)) return;
-  if (handleSearchClicks(e)) return;
   if (handleQueryTreeClicks(e)) return;
+  if (handleSearchClicks(e)) return;
+  if (handleGraphClicks(e)) return;
   handleMenubarOutsideClick(e);
 }
 
