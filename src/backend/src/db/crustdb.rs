@@ -11,7 +11,7 @@ use tracing::{debug, info};
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
     DbEdge, DbError, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result,
-    SecurityInsights,
+    SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// A graph database backed by CrustDB.
@@ -1153,7 +1153,7 @@ impl CrustDatabase {
         // Find DA groups (SID ends with -512)
         let da_groups: Vec<&str> = nodes
             .iter()
-            .filter(|n| n.id.ends_with("-512"))
+            .filter(|n| n.id.ends_with(DOMAIN_ADMIN_SID_SUFFIX))
             .map(|n| n.id.as_str())
             .collect();
 
@@ -1176,7 +1176,6 @@ impl CrustDatabase {
                 real_das.push((user.id.clone(), user.label.clone()));
             }
         }
-        let real_da_count = real_das.len();
 
         // Build full adjacency for effective DA paths
         let mut full_adj: std::collections::HashMap<String, Vec<(String, String)>> =
@@ -1195,43 +1194,23 @@ impl CrustDatabase {
                 effective_das.push((user.id.clone(), user.label.clone(), hops));
             }
         }
-        let effective_da_count = effective_das.len();
 
-        let da_ratio = if real_da_count > 0 {
-            effective_da_count as f64 / real_da_count as f64
-        } else {
-            0.0
-        };
-        let effective_da_percentage = if total_users > 0 {
-            (effective_da_count as f64 / total_users as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        // Simplified reachability (placeholder)
-        let reachability = vec![
-            ReachabilityInsight {
-                principal_name: "Everyone".to_string(),
+        // Simplified reachability (placeholder - returns all principals with 0 count)
+        let reachability: Vec<ReachabilityInsight> = WELL_KNOWN_PRINCIPALS
+            .iter()
+            .map(|(name, _)| ReachabilityInsight {
+                principal_name: name.to_string(),
                 principal_id: None,
                 reachable_count: 0,
-            },
-            ReachabilityInsight {
-                principal_name: "Authenticated Users".to_string(),
-                principal_id: None,
-                reachable_count: 0,
-            },
-        ];
+            })
+            .collect();
 
-        Ok(SecurityInsights {
-            effective_da_count,
-            real_da_count,
-            da_ratio,
+        Ok(SecurityInsights::from_counts(
             total_users,
-            effective_da_percentage,
-            reachability,
-            effective_das,
             real_das,
-        })
+            effective_das,
+            reachability,
+        ))
     }
 
     /// Check if a node is transitively member of any target via MemberOf.

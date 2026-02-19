@@ -11,6 +11,7 @@ use tracing::{debug, info, trace};
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
     DbEdge, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights,
+    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// A graph database backed by CozoDB with SQLite storage.
@@ -351,7 +352,10 @@ impl GraphDatabase {
         let total_users = nodes.iter().filter(|n| n.node_type == "User").count();
 
         // Find Domain Admins groups (SID ending in -512)
-        let da_nodes: Vec<&DbNode> = nodes.iter().filter(|n| n.id.ends_with("-512")).collect();
+        let da_nodes: Vec<&DbNode> = nodes
+            .iter()
+            .filter(|n| n.id.ends_with(DOMAIN_ADMIN_SID_SUFFIX))
+            .collect();
 
         // Find "real" DAs - users who are direct or transitive members of DA
         // Build adjacency for MemberOf edges only
@@ -398,35 +402,12 @@ impl GraphDatabase {
             }
         }
 
-        let real_da_count = real_das.len();
-
         // Find "effective" DAs - users with any path to DA (already implemented)
         let effective_results = self.find_paths_to_domain_admins(&[])?;
-        let effective_da_count = effective_results.len();
         let effective_das: Vec<(String, String, usize)> = effective_results
             .into_iter()
             .map(|(id, _node_type, label, hops)| (id, label, hops))
             .collect();
-
-        // Compute ratio and percentage
-        let da_ratio = if real_da_count > 0 {
-            effective_da_count as f64 / real_da_count as f64
-        } else {
-            0.0
-        };
-        let effective_da_percentage = if total_users > 0 {
-            (effective_da_count as f64 / total_users as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        // Compute reachability from well-known principals
-        let well_known_principals = [
-            ("Everyone", "S-1-1-0"),
-            ("Authenticated Users", "S-1-5-11"),
-            ("Domain Users", "-513"),     // SID suffix
-            ("Domain Computers", "-515"), // SID suffix
-        ];
 
         // Build forward adjacency for reachability (all edge types)
         let mut forward_adj: std::collections::HashMap<String, Vec<String>> =
@@ -438,8 +419,9 @@ impl GraphDatabase {
                 .push(edge.target.clone());
         }
 
+        // Compute reachability from well-known principals
         let mut reachability = Vec::new();
-        for (name, id_pattern) in well_known_principals {
+        for (name, id_pattern) in WELL_KNOWN_PRINCIPALS {
             // Find the principal node(s)
             let principal_ids: Vec<&str> = nodes
                 .iter()
@@ -494,22 +476,18 @@ impl GraphDatabase {
         }
 
         debug!(
-            effective_das = effective_da_count,
-            real_das = real_da_count,
+            effective_das = effective_das.len(),
+            real_das = real_das.len(),
             total_users = total_users,
             "Security insights computed"
         );
 
-        Ok(SecurityInsights {
-            effective_da_count,
-            real_da_count,
-            da_ratio,
+        Ok(SecurityInsights::from_counts(
             total_users,
-            effective_da_percentage,
-            reachability,
-            effective_das,
             real_das,
-        })
+            effective_das,
+            reachability,
+        ))
     }
 
     /// Get all nodes (for graph rendering).

@@ -12,6 +12,7 @@ use tracing::{debug, info};
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
     DbEdge, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights,
+    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// Neo4j database backend.
@@ -424,11 +425,13 @@ impl DatabaseBackend for Neo4jDatabase {
             .unwrap_or(0) as usize;
 
         // Find real DAs (direct MemberOf path to DA groups)
-        let real_da_rows = self.execute_query(query(
+        let real_da_query = format!(
             "MATCH (u:User)-[:MemberOf*1..]->(g:Group) \
-             WHERE g.objectid ENDS WITH '-512' \
+             WHERE g.objectid ENDS WITH '{}' \
              RETURN DISTINCT u.objectid AS id, u.name AS name",
-        ))?;
+            DOMAIN_ADMIN_SID_SUFFIX
+        );
+        let real_da_rows = self.execute_query(query(&real_da_query))?;
 
         let real_das: Vec<(String, String)> = real_da_rows
             .iter()
@@ -438,14 +441,15 @@ impl DatabaseBackend for Neo4jDatabase {
                 Some((id, name))
             })
             .collect();
-        let real_da_count = real_das.len();
 
         // Find effective DAs (any path to DA groups)
-        let effective_da_rows = self.execute_query(query(
+        let effective_da_query = format!(
             "MATCH p = (u:User)-[*1..10]->(g:Group) \
-             WHERE g.objectid ENDS WITH '-512' \
+             WHERE g.objectid ENDS WITH '{}' \
              RETURN DISTINCT u.objectid AS id, u.name AS name, min(length(p)) AS hops",
-        ))?;
+            DOMAIN_ADMIN_SID_SUFFIX
+        );
+        let effective_da_rows = self.execute_query(query(&effective_da_query))?;
 
         let effective_das: Vec<(String, String, usize)> = effective_da_rows
             .iter()
@@ -456,30 +460,10 @@ impl DatabaseBackend for Neo4jDatabase {
                 Some((id, name, hops))
             })
             .collect();
-        let effective_da_count = effective_das.len();
-
-        let da_ratio = if real_da_count > 0 {
-            effective_da_count as f64 / real_da_count as f64
-        } else {
-            0.0
-        };
-
-        let effective_da_percentage = if total_users > 0 {
-            (effective_da_count as f64 / total_users as f64) * 100.0
-        } else {
-            0.0
-        };
 
         // Compute reachability from well-known principals
-        let well_known = [
-            ("Everyone", "S-1-1-0"),
-            ("Authenticated Users", "S-1-5-11"),
-            ("Domain Users", "-513"),
-            ("Domain Computers", "-515"),
-        ];
-
         let mut reachability = Vec::new();
-        for (name, pattern) in well_known {
+        for (name, pattern) in WELL_KNOWN_PRINCIPALS {
             let q = if pattern.starts_with('-') {
                 query(&format!(
                     "MATCH (p) WHERE p.objectid ENDS WITH '{}' \
@@ -513,16 +497,12 @@ impl DatabaseBackend for Neo4jDatabase {
             });
         }
 
-        Ok(SecurityInsights {
-            effective_da_count,
-            real_da_count,
-            da_ratio,
+        Ok(SecurityInsights::from_counts(
             total_users,
-            effective_da_percentage,
-            reachability,
-            effective_das,
             real_das,
-        })
+            effective_das,
+            reachability,
+        ))
     }
 
     fn get_all_nodes(&self) -> Result<Vec<DbNode>> {

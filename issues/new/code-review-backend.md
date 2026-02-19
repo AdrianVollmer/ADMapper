@@ -241,7 +241,7 @@ the `node_type` field, eliminating the duplicate type.
 
 ---
 
-### 10. No abstraction for common query patterns across backends
+### 10. No abstraction for common query patterns across backends - PARTIALLY ADDRESSED
 
 Each database backend implements similar logic for:
 - Query history (add, update, get, delete, clear)
@@ -257,6 +257,23 @@ This leads to ~1000-1500 lines per backend with significant overlap.
 - BFS/path-finding algorithms that work on any adjacency representation
 
 **Impact:** Maintainability, reduced bug surface
+
+**Resolution:**
+Extracted shared constants and helper to `db/types.rs`:
+- `WELL_KNOWN_PRINCIPALS` constant - list of principals for reachability checks
+- `DOMAIN_ADMIN_SID_SUFFIX` constant - SID suffix for Domain Admins (-512)
+- `SecurityInsights::from_counts()` helper - computes ratios/percentages from raw counts
+
+Updated all backends (kuzu, neo4j, falkordb, cozo, crustdb) to use these shared constants,
+reducing duplication and ensuring consistency.
+
+**Deferred:**
+- Full query history abstraction not implemented. Neo4j/FalkorDB don't need persistent
+  history per user requirements. File-based backends (kuzu, cozo, crustdb) each use their
+  native storage which is appropriate.
+- BFS/path-finding abstraction not implemented. Each backend uses different query languages
+  (Cypher variants, Datalog) with different result parsing, making abstraction complex
+  without significant benefit.
 
 ---
 

@@ -51,6 +51,21 @@ pub struct ReachabilityInsight {
     pub reachable_count: usize,
 }
 
+/// Well-known principals to check for reachability in security insights.
+///
+/// Format: (display_name, SID_pattern)
+/// - Patterns starting with '-' are domain-relative SID suffixes
+/// - Other patterns are exact well-known SIDs
+pub const WELL_KNOWN_PRINCIPALS: &[(&str, &str)] = &[
+    ("Everyone", "S-1-1-0"),
+    ("Authenticated Users", "S-1-5-11"),
+    ("Domain Users", "-513"),
+    ("Domain Computers", "-515"),
+];
+
+/// SID suffix for Domain Admins group.
+pub const DOMAIN_ADMIN_SID_SUFFIX: &str = "-512";
+
 /// Security insights computed from the graph.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct SecurityInsights {
@@ -70,6 +85,44 @@ pub struct SecurityInsights {
     pub effective_das: Vec<(String, String, usize)>,
     /// Users who are members of Domain Admins (for export)
     pub real_das: Vec<(String, String)>,
+}
+
+impl SecurityInsights {
+    /// Create SecurityInsights with computed ratios from raw counts.
+    ///
+    /// This helper reduces duplication across backend implementations.
+    pub fn from_counts(
+        total_users: usize,
+        real_das: Vec<(String, String)>,
+        effective_das: Vec<(String, String, usize)>,
+        reachability: Vec<ReachabilityInsight>,
+    ) -> Self {
+        let real_da_count = real_das.len();
+        let effective_da_count = effective_das.len();
+
+        let da_ratio = if real_da_count > 0 {
+            effective_da_count as f64 / real_da_count as f64
+        } else {
+            0.0
+        };
+
+        let effective_da_percentage = if total_users > 0 {
+            (effective_da_count as f64 / total_users as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        Self {
+            effective_da_count,
+            real_da_count,
+            da_ratio,
+            total_users,
+            effective_da_percentage,
+            reachability,
+            effective_das,
+            real_das,
+        }
+    }
 }
 
 /// A row from the query history table.

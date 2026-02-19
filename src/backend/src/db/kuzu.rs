@@ -11,6 +11,7 @@ use tracing::{debug, info, trace};
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
     DbEdge, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights,
+    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// A graph database backed by KuzuDB.
@@ -1122,53 +1123,32 @@ impl KuzuDatabase {
         let user_result = conn.query("MATCH (n:User) RETURN count(n)")?;
         let total_users = self.extract_count(&user_result);
 
-        // Find "real" DAs - users who are members of DA groups (SID ends with -512)
+        // Find "real" DAs - users who are members of DA groups
         // Using typed tables: User -> Group path with MemberOf edges
-        let real_da_query = "
-            MATCH p = (u:User)-[:Edge*1..10]->(da:Group)
-            WHERE da.object_id ENDS WITH '-512'
-            AND ALL(e IN relationships(p) WHERE e.edge_type = 'MemberOf')
-            RETURN DISTINCT u.object_id, u.label
-        ";
-        let real_da_result = conn.query(real_da_query)?;
+        let real_da_query = format!(
+            "MATCH p = (u:User)-[:Edge*1..10]->(da:Group) \
+             WHERE da.object_id ENDS WITH '{}' \
+             AND ALL(e IN relationships(p) WHERE e.edge_type = 'MemberOf') \
+             RETURN DISTINCT u.object_id, u.label",
+            DOMAIN_ADMIN_SID_SUFFIX
+        );
+        let real_da_result = conn.query(&real_da_query)?;
         let real_das: Vec<(String, String)> = self.parse_id_label_pairs(&real_da_result);
-        let real_da_count = real_das.len();
 
-        // Find "effective" DAs - users with any path to DA group (SID -512)
-        let effective_da_query = "
-            MATCH p = (u:User)-[:Edge*1..10]->(da:Group)
-            WHERE da.object_id ENDS WITH '-512'
-            RETURN DISTINCT u.object_id, u.label, min(length(p)) as hops
-        ";
-        let effective_result = conn.query(effective_da_query)?;
+        // Find "effective" DAs - users with any path to DA group
+        let effective_da_query = format!(
+            "MATCH p = (u:User)-[:Edge*1..10]->(da:Group) \
+             WHERE da.object_id ENDS WITH '{}' \
+             RETURN DISTINCT u.object_id, u.label, min(length(p)) as hops",
+            DOMAIN_ADMIN_SID_SUFFIX
+        );
+        let effective_result = conn.query(&effective_da_query)?;
         let effective_das: Vec<(String, String, usize)> =
             self.parse_effective_das(&effective_result);
-        let effective_da_count = effective_das.len();
-
-        // Compute ratio and percentage
-        let da_ratio = if real_da_count > 0 {
-            effective_da_count as f64 / real_da_count as f64
-        } else {
-            0.0
-        };
-        let effective_da_percentage = if total_users > 0 {
-            (effective_da_count as f64 / total_users as f64) * 100.0
-        } else {
-            0.0
-        };
 
         // Compute reachability from well-known principals (all are Groups)
-        // SIDs: S-1-1-0 = Everyone, S-1-5-11 = Authenticated Users
-        // -513 = Domain Users, -515 = Domain Computers
-        let well_known_principals = [
-            ("Everyone", "S-1-1-0"),
-            ("Authenticated Users", "S-1-5-11"),
-            ("Domain Users", "-513"),
-            ("Domain Computers", "-515"),
-        ];
-
         let mut reachability = Vec::new();
-        for (name, id_pattern) in well_known_principals {
+        for (name, id_pattern) in WELL_KNOWN_PRINCIPALS {
             let (principal_id, reachable_count) = if id_pattern.starts_with('-') {
                 // Suffix match - these are domain-relative SIDs (Groups)
                 let query = format!(
@@ -1229,22 +1209,18 @@ impl KuzuDatabase {
         }
 
         debug!(
-            effective_das = effective_da_count,
-            real_das = real_da_count,
+            effective_das = effective_das.len(),
+            real_das = real_das.len(),
             total_users = total_users,
             "Security insights computed"
         );
 
-        Ok(SecurityInsights {
-            effective_da_count,
-            real_da_count,
-            da_ratio,
+        Ok(SecurityInsights::from_counts(
             total_users,
-            effective_da_percentage,
-            reachability,
-            effective_das,
             real_das,
-        })
+            effective_das,
+            reachability,
+        ))
     }
 
     /// Parse ID/label pairs from query result.
