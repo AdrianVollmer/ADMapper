@@ -577,20 +577,45 @@ impl SqliteStorage {
     /// Find edges by type.
     pub fn find_edges_by_type(&self, edge_type: &str) -> Result<Vec<Edge>> {
         let mut stmt = self.conn.prepare(
-            "SELECT e.id FROM edges e
+            "SELECT e.id, e.source_id, e.target_id, et.name, e.properties
+             FROM edges e
              JOIN edge_types et ON e.type_id = et.id
              WHERE et.name = ?1",
         )?;
 
-        let edge_ids: Vec<i64> = stmt
-            .query_map(params![edge_type], |row| row.get(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        self.collect_edges_from_stmt(&mut stmt, params![edge_type])
+    }
 
-        let mut edges = Vec::with_capacity(edge_ids.len());
-        for id in edge_ids {
-            if let Some(edge) = self.get_edge(id)? {
-                edges.push(edge);
-            }
+    /// Helper: collect edges from a prepared statement that returns
+    /// (id, source_id, target_id, edge_type, properties).
+    fn collect_edges_from_stmt<P: rusqlite::Params>(
+        &self,
+        stmt: &mut rusqlite::Statement,
+        params: P,
+    ) -> Result<Vec<Edge>> {
+        let rows = stmt.query_map(params, |row| {
+            let id: i64 = row.get(0)?;
+            let source: i64 = row.get(1)?;
+            let target: i64 = row.get(2)?;
+            let edge_type: String = row.get(3)?;
+            let properties_json: String = row.get(4)?;
+            Ok((id, source, target, edge_type, properties_json))
+        })?;
+
+        let mut edges = Vec::new();
+        for row_result in rows {
+            let (id, source, target, edge_type, properties_json) = row_result?;
+
+            let properties: std::collections::HashMap<String, PropertyValue> =
+                serde_json::from_str(&properties_json)?;
+
+            edges.push(Edge {
+                id,
+                source,
+                target,
+                edge_type,
+                properties,
+            });
         }
 
         Ok(edges)
@@ -735,42 +760,26 @@ impl SqliteStorage {
 
     /// Find outgoing edges from a node.
     pub fn find_outgoing_edges(&self, node_id: i64) -> Result<Vec<Edge>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id FROM edges WHERE source_id = ?1")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT e.id, e.source_id, e.target_id, et.name, e.properties
+             FROM edges e
+             JOIN edge_types et ON e.type_id = et.id
+             WHERE e.source_id = ?1",
+        )?;
 
-        let edge_ids: Vec<i64> = stmt
-            .query_map(params![node_id], |row| row.get(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        let mut edges = Vec::with_capacity(edge_ids.len());
-        for id in edge_ids {
-            if let Some(edge) = self.get_edge(id)? {
-                edges.push(edge);
-            }
-        }
-
-        Ok(edges)
+        self.collect_edges_from_stmt(&mut stmt, params![node_id])
     }
 
     /// Find incoming edges to a node.
     pub fn find_incoming_edges(&self, node_id: i64) -> Result<Vec<Edge>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id FROM edges WHERE target_id = ?1")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT e.id, e.source_id, e.target_id, et.name, e.properties
+             FROM edges e
+             JOIN edge_types et ON e.type_id = et.id
+             WHERE e.target_id = ?1",
+        )?;
 
-        let edge_ids: Vec<i64> = stmt
-            .query_map(params![node_id], |row| row.get(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        let mut edges = Vec::with_capacity(edge_ids.len());
-        for id in edge_ids {
-            if let Some(edge) = self.get_edge(id)? {
-                edges.push(edge);
-            }
-        }
-
-        Ok(edges)
+        self.collect_edges_from_stmt(&mut stmt, params![node_id])
     }
 
     /// Count outgoing edges from a node.

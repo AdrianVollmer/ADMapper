@@ -35,23 +35,13 @@ The executor handles too many concerns: pattern matching, expression evaluation,
 
 ---
 
-### 2. N+1 Query Pattern in Edge Retrieval
+### 2. ~~N+1 Query Pattern in Edge Retrieval~~ ✅ FIXED
 
 **Location:** `storage.rs:577-597`, `storage.rs:737-774`
 
-Functions like `find_edges_by_type`, `find_outgoing_edges`, and `find_incoming_edges` first query edge IDs, then call `get_edge()` for each ID separately. This causes N+1 queries.
+~~Functions like `find_edges_by_type`, `find_outgoing_edges`, and `find_incoming_edges` first query edge IDs, then call `get_edge()` for each ID separately. This causes N+1 queries.~~
 
-```rust
-// Current: N+1 queries
-let edge_ids: Vec<i64> = stmt.query_map(...)?;
-for id in edge_ids {
-    if let Some(edge) = self.get_edge(id)? {  // N additional queries
-        edges.push(edge);
-    }
-}
-```
-
-**Recommendation:** Fetch edges with their data in a single query using a JOIN, similar to how `collect_nodes_from_stmt` handles nodes.
+**Fixed:** Added `collect_edges_from_stmt` helper function that fetches all edge data in a single query using JOINs, matching the pattern used by `collect_nodes_from_stmt`. All three functions (`find_edges_by_type`, `find_outgoing_edges`, `find_incoming_edges`) now use this helper.
 
 ---
 

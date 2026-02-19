@@ -65,20 +65,29 @@ impl Database {
     /// Execute a Cypher query.
     pub fn execute(&self, query: &str) -> Result<QueryResult> {
         let statement = query::parser::parse(query)?;
-        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
         query::executor::execute(&statement, &storage)
     }
 
     /// Get database statistics.
     pub fn stats(&self) -> Result<DatabaseStats> {
-        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
         storage.stats()
     }
 
     /// Clear all data from the database.
     /// This is much faster than using Cypher DELETE queries.
     pub fn clear(&self) -> Result<()> {
-        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
         storage.clear()
     }
 
@@ -93,7 +102,10 @@ impl Database {
         &self,
         nodes: &[(Vec<String>, serde_json::Value)],
     ) -> Result<Vec<i64>> {
-        let mut storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        let mut storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
         storage.insert_nodes_batch(nodes)
     }
 
@@ -107,7 +119,10 @@ impl Database {
         &self,
         edges: &[(i64, i64, String, serde_json::Value)],
     ) -> Result<Vec<i64>> {
-        let mut storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        let mut storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
         storage.insert_edges_batch(edges)
     }
 
@@ -115,7 +130,10 @@ impl Database {
     ///
     /// Searches for nodes where the JSON properties contain the specified key-value pair.
     pub fn find_node_by_property(&self, property: &str, value: &str) -> Result<Option<i64>> {
-        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
         storage.find_node_by_property(property, value)
     }
 
@@ -127,7 +145,10 @@ impl Database {
         &self,
         property: &str,
     ) -> Result<std::collections::HashMap<String, i64>> {
-        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
         storage.build_property_index(property)
     }
 
@@ -139,7 +160,10 @@ impl Database {
         &self,
         object_id: &str,
     ) -> Result<Vec<(String, String, String)>> {
-        let storage = self.storage.lock().map_err(|e| Error::Internal(e.to_string()))?;
+        let storage = self
+            .storage
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
         storage.get_node_edges_by_object_id(object_id)
     }
 }
