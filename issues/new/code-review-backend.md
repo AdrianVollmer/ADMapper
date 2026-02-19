@@ -201,7 +201,7 @@ This completely eliminates path traversal risk while preserving file type detect
 
 ---
 
-### 8. Neo4j+s/bolt+s SSL schemes are parsed but not used
+### 8. Neo4j+s/bolt+s SSL schemes are parsed but not used - FIXED
 
 `url.rs:116` recognizes SSL schemes like `neo4j+s` and `bolt+ssc`, but the
 parsed URL doesn't capture whether SSL was requested. The Neo4j backend
@@ -211,6 +211,13 @@ may not be establishing secure connections when users expect it.
 through to the Neo4j driver configuration.
 
 **Impact:** Security (credentials sent in cleartext)
+
+**Resolution:**
+- Added `use_ssl: bool` field to `DatabaseUrl` struct
+- Parser sets `use_ssl = true` when scheme ends with `+s` or `+ssc`
+- `Neo4jDatabase::new()` now accepts `use_ssl` parameter
+- When `use_ssl` is true, connection URI uses `neo4j+s://` protocol
+- Updated tests to verify SSL flag is set correctly for different schemes
 
 ---
 

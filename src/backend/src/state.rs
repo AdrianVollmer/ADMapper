@@ -219,6 +219,7 @@ impl AppState {
                     parsed.username,
                     parsed.password,
                     parsed.database,
+                    parsed.use_ssl,
                 )
                 .map_err(|e| e.to_string())?;
                 Arc::new(db)

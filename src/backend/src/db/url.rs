@@ -78,6 +78,8 @@ pub struct DatabaseUrl {
     pub path: Option<PathBuf>,
     /// Database name (for Neo4j).
     pub database: Option<String>,
+    /// Whether SSL/TLS should be used (for Neo4j +s/+ssc schemes).
+    pub use_ssl: bool,
 }
 
 /// Error type for URL parsing.
@@ -111,6 +113,9 @@ impl DatabaseUrl {
             .ok_or_else(|| ParseError::InvalidFormat("Missing :// separator".to_string()))?;
 
         let scheme_lower = scheme.to_lowercase();
+
+        // Check for SSL schemes (+s = SSL, +ssc = SSL with self-signed cert)
+        let use_ssl = scheme_lower.ends_with("+s") || scheme_lower.ends_with("+ssc");
 
         let db_type = match scheme_lower.as_str() {
             "neo4j" | "bolt" | "neo4j+s" | "bolt+s" | "neo4j+ssc" | "bolt+ssc" => {
@@ -146,15 +151,20 @@ impl DatabaseUrl {
                 password: None,
                 path: Some(path),
                 database: None,
+                use_ssl: false, // File-based databases don't use SSL
             })
         } else {
             // Network database: parse host, port, auth
-            Self::parse_network_url(db_type, rest)
+            Self::parse_network_url(db_type, rest, use_ssl)
         }
     }
 
     /// Parse network database URL components.
-    fn parse_network_url(db_type: DatabaseType, url_part: &str) -> Result<Self, ParseError> {
+    fn parse_network_url(
+        db_type: DatabaseType,
+        url_part: &str,
+        use_ssl: bool,
+    ) -> Result<Self, ParseError> {
         let mut username = None;
         let mut password = None;
         let host;
@@ -220,6 +230,7 @@ impl DatabaseUrl {
             password,
             path: None,
             database,
+            use_ssl,
         })
     }
 }
@@ -325,15 +336,30 @@ mod tests {
 
     #[test]
     fn test_parse_neo4j_ssl_scheme() {
-        // SSL schemes are accepted (for future use)
         let url = DatabaseUrl::parse("neo4j+s://localhost:7687").unwrap();
         assert_eq!(url.db_type, DatabaseType::Neo4j);
         assert_eq!(url.host, Some("localhost".to_string()));
+        assert!(url.use_ssl);
     }
 
     #[test]
     fn test_parse_bolt_ssl_scheme() {
         let url = DatabaseUrl::parse("bolt+s://localhost:7687").unwrap();
         assert_eq!(url.db_type, DatabaseType::Neo4j);
+        assert!(url.use_ssl);
+    }
+
+    #[test]
+    fn test_parse_neo4j_ssc_scheme() {
+        let url = DatabaseUrl::parse("neo4j+ssc://localhost:7687").unwrap();
+        assert_eq!(url.db_type, DatabaseType::Neo4j);
+        assert!(url.use_ssl);
+    }
+
+    #[test]
+    fn test_parse_neo4j_no_ssl() {
+        let url = DatabaseUrl::parse("neo4j://localhost:7687").unwrap();
+        assert_eq!(url.db_type, DatabaseType::Neo4j);
+        assert!(!url.use_ssl);
     }
 }

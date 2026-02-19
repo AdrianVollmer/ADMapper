@@ -28,12 +28,17 @@ impl Neo4jDatabase {
         username: Option<String>,
         password: Option<String>,
         _database: Option<String>,
+        use_ssl: bool,
     ) -> Result<Self> {
-        let uri = format!("{}:{}", host, port);
+        let uri = if use_ssl {
+            format!("neo4j+s://{}:{}", host, port)
+        } else {
+            format!("{}:{}", host, port)
+        };
         let user = username.unwrap_or_else(|| "neo4j".to_string());
         let pass = password.unwrap_or_else(|| "neo4j".to_string());
 
-        info!(uri = %uri, user = %user, "Connecting to Neo4j");
+        info!(uri = %uri, user = %user, use_ssl = %use_ssl, "Connecting to Neo4j");
 
         // Get the current tokio runtime handle
         let handle = Handle::current();
