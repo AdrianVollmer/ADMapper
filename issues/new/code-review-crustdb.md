@@ -59,21 +59,15 @@ Note: The `unwrap_or(0)` in `get_schema_version()` (line 63) is intentional - it
 
 ---
 
-### 4. SQL/JSON Path Injection Risk
+### 4. ~~SQL/JSON Path Injection Risk~~ ✅ FIXED
 
-**Location:** `storage.rs:342-347`, `storage.rs:362-366`
+**Location:** `storage.rs:364-377`, `storage.rs:382-397`
 
-Property names are interpolated into SQL queries with only single-quote escaping:
-```rust
-let query = format!(
-    "SELECT id FROM nodes WHERE json_extract(properties, '$.{}') = ?1 LIMIT 1",
-    property.replace('\'', "''")
-);
-```
+~~Property names are interpolated into SQL queries with only single-quote escaping, allowing potential injection.~~
 
-A property name like `')--` or containing special JSON path characters could cause unexpected behavior.
+**Fixed:** Added `validate_property_name()` function that ensures property names contain only alphanumeric characters and underscores. Both `find_node_by_property` and `build_property_index` now call this validation before constructing queries. Malicious property names like `')--`, `name.path`, or `name$` are rejected with an `InvalidProperty` error.
 
-**Recommendation:** Validate property names against a whitelist pattern (alphanumeric + underscore only) or use parameterized JSON extraction.
+Added test `test_property_name_validation` to verify the validation rejects injection attempts.
 
 ---
 

@@ -1,6 +1,6 @@
 //! SQLite storage backend for the graph database.
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::graph::{Edge, Node, PropertyValue};
 use crate::DatabaseStats;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -8,6 +8,28 @@ use std::path::Path;
 
 /// Current schema version.
 const SCHEMA_VERSION: i32 = 1;
+
+/// Validate a property name to prevent JSON path injection.
+///
+/// Property names must contain only alphanumeric characters and underscores,
+/// and must not be empty. This prevents injection attacks in JSON path expressions.
+fn validate_property_name(property: &str) -> Result<()> {
+    if property.is_empty() {
+        return Err(Error::InvalidProperty(
+            "Property name cannot be empty".to_string(),
+        ));
+    }
+    if !property
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(Error::InvalidProperty(format!(
+            "Property name '{}' contains invalid characters (only alphanumeric and underscore allowed)",
+            property
+        )));
+    }
+    Ok(())
+}
 
 /// SQLite-based storage backend.
 pub struct SqliteStorage {
@@ -339,11 +361,13 @@ impl SqliteStorage {
     /// Find a node ID by a property value.
     ///
     /// Searches for nodes where the JSON properties contain the specified key-value pair.
+    /// Property names must contain only alphanumeric characters and underscores.
     pub fn find_node_by_property(&self, property: &str, value: &str) -> Result<Option<i64>> {
-        // Use JSON extraction to find matching node
+        validate_property_name(property)?;
+
         let query = format!(
             "SELECT id FROM nodes WHERE json_extract(properties, '$.{}') = ?1 LIMIT 1",
-            property.replace('\'', "''")
+            property
         );
         let result: Option<i64> = self
             .conn
@@ -355,14 +379,16 @@ impl SqliteStorage {
     /// Build an index of property values to node IDs for efficient batch lookups.
     ///
     /// Returns a HashMap from property value to node ID.
+    /// Property names must contain only alphanumeric characters and underscores.
     pub fn build_property_index(
         &self,
         property: &str,
     ) -> Result<std::collections::HashMap<String, i64>> {
+        validate_property_name(property)?;
+
         let query = format!(
             "SELECT id, json_extract(properties, '$.{}') FROM nodes WHERE json_extract(properties, '$.{}') IS NOT NULL",
-            property.replace('\'', "''"),
-            property.replace('\'', "''")
+            property, property
         );
         let mut stmt = self.conn.prepare(&query)?;
         let mut index = std::collections::HashMap::new();
@@ -1155,5 +1181,34 @@ mod tests {
 
         let types = storage.get_all_edge_types().unwrap();
         assert_eq!(types, vec!["ACTED_IN", "DIRECTED"]);
+    }
+
+    #[test]
+    fn test_property_name_validation() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create a node with a valid property
+        let props = serde_json::json!({"object_id": "test123"});
+        storage
+            .insert_node(&["Test".to_string()], &props)
+            .unwrap();
+
+        // Valid property names should work
+        assert!(storage.find_node_by_property("object_id", "test123").is_ok());
+        assert!(storage.find_node_by_property("valid_name", "value").is_ok());
+        assert!(storage.find_node_by_property("name123", "value").is_ok());
+
+        // Invalid property names should be rejected
+        assert!(storage.find_node_by_property("", "value").is_err());
+        assert!(storage.find_node_by_property("name.path", "value").is_err());
+        assert!(storage.find_node_by_property("name'--", "value").is_err());
+        assert!(storage.find_node_by_property("name)", "value").is_err());
+        assert!(storage.find_node_by_property("name$", "value").is_err());
+        assert!(storage.find_node_by_property("name space", "value").is_err());
+
+        // Same validation for build_property_index
+        assert!(storage.build_property_index("object_id").is_ok());
+        assert!(storage.build_property_index("").is_err());
+        assert!(storage.build_property_index("name'--").is_err());
     }
 }
