@@ -856,6 +856,95 @@ impl GraphDatabase {
         Ok((nodes, filtered_edges))
     }
 
+    /// Get edge counts for a node efficiently using targeted queries.
+    pub fn get_node_edge_counts(
+        &self,
+        node_id: &str,
+    ) -> Result<(usize, usize, usize, usize, usize)> {
+        // Count incoming edges
+        let incoming_query = format!(
+            "?[count(source)] := *edges{{source, target, edge_type}}, target = '{}'",
+            node_id.replace('\'', "''")
+        );
+        let incoming_result = self.db.run_script(
+            &incoming_query,
+            Default::default(),
+            ScriptMutability::Immutable,
+        )?;
+        let incoming = incoming_result.into_json()["rows"]
+            .get(0)
+            .and_then(|r| r.get(0))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        // Count outgoing edges
+        let outgoing_query = format!(
+            "?[count(target)] := *edges{{source, target, edge_type}}, source = '{}'",
+            node_id.replace('\'', "''")
+        );
+        let outgoing_result = self.db.run_script(
+            &outgoing_query,
+            Default::default(),
+            ScriptMutability::Immutable,
+        )?;
+        let outgoing = outgoing_result.into_json()["rows"]
+            .get(0)
+            .and_then(|r| r.get(0))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        // Count admin_to (outgoing admin edges)
+        let admin_query = format!(
+            "?[count(target)] := *edges{{source, target, edge_type}}, source = '{}', \
+             edge_type in ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']",
+            node_id.replace('\'', "''")
+        );
+        let admin_result = self.db.run_script(
+            &admin_query,
+            Default::default(),
+            ScriptMutability::Immutable,
+        )?;
+        let admin_to = admin_result.into_json()["rows"]
+            .get(0)
+            .and_then(|r| r.get(0))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        // Count member_of (outgoing MemberOf edges)
+        let memberof_query = format!(
+            "?[count(target)] := *edges{{source, target, edge_type}}, source = '{}', edge_type = 'MemberOf'",
+            node_id.replace('\'', "''")
+        );
+        let memberof_result = self.db.run_script(
+            &memberof_query,
+            Default::default(),
+            ScriptMutability::Immutable,
+        )?;
+        let member_of = memberof_result.into_json()["rows"]
+            .get(0)
+            .and_then(|r| r.get(0))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        // Count members (incoming MemberOf edges)
+        let members_query = format!(
+            "?[count(source)] := *edges{{source, target, edge_type}}, target = '{}', edge_type = 'MemberOf'",
+            node_id.replace('\'', "''")
+        );
+        let members_result = self.db.run_script(
+            &members_query,
+            Default::default(),
+            ScriptMutability::Immutable,
+        )?;
+        let members = members_result.into_json()["rows"]
+            .get(0)
+            .and_then(|r| r.get(0))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        Ok((incoming, outgoing, admin_to, member_of, members))
+    }
+
     /// Run a custom CozoDB query and extract nodes/edges from results.
     /// The query should return rows with columns that can be matched to node IDs.
     pub fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
@@ -1176,6 +1265,10 @@ impl DatabaseBackend for GraphDatabase {
         direction: &str,
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
         GraphDatabase::get_node_connections(self, node_id, direction)
+    }
+
+    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+        GraphDatabase::get_node_edge_counts(self, node_id)
     }
 
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {

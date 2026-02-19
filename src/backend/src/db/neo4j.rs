@@ -719,6 +719,37 @@ impl DatabaseBackend for Neo4jDatabase {
         Ok((nodes, edges))
     }
 
+    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+        // Use a single query with multiple counts for efficiency
+        let q = query(
+            "MATCH (n {objectid: $id})
+             OPTIONAL MATCH (n)<-[in]-()
+             OPTIONAL MATCH (n)-[out]->()
+             OPTIONAL MATCH (n)-[admin]->() WHERE type(admin) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']
+             OPTIONAL MATCH (n)-[mo:MemberOf]->()
+             OPTIONAL MATCH (n)<-[mem:MemberOf]-()
+             RETURN count(DISTINCT in) AS incoming,
+                    count(DISTINCT out) AS outgoing,
+                    count(DISTINCT admin) AS admin_to,
+                    count(DISTINCT mo) AS member_of,
+                    count(DISTINCT mem) AS members"
+        )
+        .param("id", node_id.to_string());
+
+        let rows = self.execute_query(q)?;
+
+        if let Some(row) = rows.first() {
+            let incoming = row.get::<i64>("incoming").unwrap_or(0) as usize;
+            let outgoing = row.get::<i64>("outgoing").unwrap_or(0) as usize;
+            let admin_to = row.get::<i64>("admin_to").unwrap_or(0) as usize;
+            let member_of = row.get::<i64>("member_of").unwrap_or(0) as usize;
+            let members = row.get::<i64>("members").unwrap_or(0) as usize;
+            Ok((incoming, outgoing, admin_to, member_of, members))
+        } else {
+            Ok((0, 0, 0, 0, 0))
+        }
+    }
+
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));

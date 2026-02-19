@@ -95,7 +95,7 @@ handler to use the struct. Updated related tests in cozo.rs to use struct field 
 
 ---
 
-### 4. Default `get_node_edge_counts` loads ALL edges
+### 4. Default `get_node_edge_counts` loads ALL edges - FIXED
 
 The default implementation in `backend.rs:127-169` loads every edge in the
 database into memory just to count connections for a single node.
@@ -108,6 +108,16 @@ For large graphs (100k+ edges), this is a severe performance problem.
   with a warning
 
 **Impact:** Performance (critical for large datasets)
+
+**Resolution:** Added efficient `get_node_edge_counts` implementations to all backends:
+- **kuzu**: Uses targeted Cypher queries with `count()` for each edge category
+- **neo4j**: Single Cypher query with `OPTIONAL MATCH` and `count(DISTINCT)` for all 5 counts
+- **falkordb**: Same single-query approach as neo4j
+- **cozo**: Datalog queries with `count()` aggregation for each edge category
+- **crustdb**: Already had efficient implementation using `get_node_edges_by_object_id`
+
+Added warning log to the default trait implementation to flag when it's being used,
+encouraging backend implementers to override it.
 
 ---
 

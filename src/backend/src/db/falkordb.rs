@@ -879,6 +879,39 @@ impl DatabaseBackend for FalkorDbDatabase {
         Ok((nodes, edges))
     }
 
+    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+        let id_escaped = node_id.replace('\'', "\\'");
+
+        // Use a single query with multiple counts for efficiency
+        let cypher = format!(
+            "MATCH (n {{objectid: '{}'}})
+             OPTIONAL MATCH (n)<-[in]-()
+             OPTIONAL MATCH (n)-[out]->()
+             OPTIONAL MATCH (n)-[admin]->() WHERE type(admin) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']
+             OPTIONAL MATCH (n)-[mo:MemberOf]->()
+             OPTIONAL MATCH (n)<-[mem:MemberOf]-()
+             RETURN count(DISTINCT in) AS incoming,
+                    count(DISTINCT out) AS outgoing,
+                    count(DISTINCT admin) AS admin_to,
+                    count(DISTINCT mo) AS member_of,
+                    count(DISTINCT mem) AS members",
+            id_escaped
+        );
+
+        let rows = self.execute_query(&cypher)?;
+
+        if let Some(row) = rows.first() {
+            let incoming = row.get(0).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
+            let outgoing = row.get(1).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
+            let admin_to = row.get(2).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
+            let member_of = row.get(3).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
+            let members = row.get(4).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
+            Ok((incoming, outgoing, admin_to, member_of, members))
+        } else {
+            Ok((0, 0, 0, 0, 0))
+        }
+    }
+
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));

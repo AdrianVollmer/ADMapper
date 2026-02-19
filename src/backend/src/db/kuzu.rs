@@ -931,6 +931,89 @@ impl KuzuDatabase {
         Ok((nodes, filtered_edges))
     }
 
+    /// Get edge counts for a node efficiently using targeted queries.
+    pub fn get_node_edge_counts(
+        &self,
+        node_id: &str,
+    ) -> Result<(usize, usize, usize, usize, usize)> {
+        let conn = self.conn()?;
+        let id_escaped = node_id.replace('\'', "''");
+
+        // Find which node type contains this node
+        let node_types = [
+            "User",
+            "Computer",
+            "Group",
+            "Domain",
+            "OU",
+            "GPO",
+            "Container",
+        ];
+        let mut found_type: Option<&str> = None;
+
+        for node_type in &node_types {
+            let check_query = format!(
+                "MATCH (n:{} {{object_id: '{}'}}) RETURN n.object_id LIMIT 1",
+                node_type, id_escaped
+            );
+            let result = conn.query(&check_query)?;
+            if !result
+                .to_string()
+                .lines()
+                .skip(1)
+                .next()
+                .unwrap_or("")
+                .is_empty()
+            {
+                found_type = Some(node_type);
+                break;
+            }
+        }
+
+        let node_type = match found_type {
+            Some(t) => t,
+            None => return Ok((0, 0, 0, 0, 0)), // Node not found
+        };
+
+        // Count incoming edges
+        let incoming_query = format!(
+            "MATCH (n:{} {{object_id: '{}'}})<-[e:Edge]-() RETURN count(e)",
+            node_type, id_escaped
+        );
+        let incoming = self.extract_count(&conn.query(&incoming_query)?);
+
+        // Count outgoing edges
+        let outgoing_query = format!(
+            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge]->() RETURN count(e)",
+            node_type, id_escaped
+        );
+        let outgoing = self.extract_count(&conn.query(&outgoing_query)?);
+
+        // Count admin_to (outgoing admin edges)
+        let admin_types = "'AdminTo','GenericAll','GenericWrite','Owns','WriteDacl','WriteOwner','AllExtendedRights','ForceChangePassword','AddMember'";
+        let admin_query = format!(
+            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge]->() WHERE e.edge_type IN [{}] RETURN count(e)",
+            node_type, id_escaped, admin_types
+        );
+        let admin_to = self.extract_count(&conn.query(&admin_query)?);
+
+        // Count member_of (outgoing MemberOf edges)
+        let memberof_query = format!(
+            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge]->() WHERE e.edge_type = 'MemberOf' RETURN count(e)",
+            node_type, id_escaped
+        );
+        let member_of = self.extract_count(&conn.query(&memberof_query)?);
+
+        // Count members (incoming MemberOf edges)
+        let members_query = format!(
+            "MATCH (n:{} {{object_id: '{}'}})<-[e:Edge]-() WHERE e.edge_type = 'MemberOf' RETURN count(e)",
+            node_type, id_escaped
+        );
+        let members = self.extract_count(&conn.query(&members_query)?);
+
+        Ok((incoming, outgoing, admin_to, member_of, members))
+    }
+
     /// Run a custom Cypher query.
     pub fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
         debug!(query = %query, "Running custom Cypher query");
@@ -1352,6 +1435,10 @@ impl DatabaseBackend for KuzuDatabase {
         direction: &str,
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
         KuzuDatabase::get_node_connections(self, node_id, direction)
+    }
+
+    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+        KuzuDatabase::get_node_edge_counts(self, node_id)
     }
 
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {

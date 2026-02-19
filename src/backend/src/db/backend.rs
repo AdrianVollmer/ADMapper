@@ -126,8 +126,18 @@ pub trait DatabaseBackend: Send + Sync {
 
     /// Get edge counts for a node (for badge display).
     /// Returns (incoming, outgoing, admin_to, member_of, members).
-    /// Default implementation loads all edges; backends should override for efficiency.
+    ///
+    /// # Performance Warning
+    /// The default implementation loads ALL edges into memory and scans them linearly.
+    /// For large graphs (100k+ edges), this is severely inefficient.
+    /// All backends should override this method with an efficient indexed query.
     fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+        // WARNING: This default implementation is O(n) where n = total edges.
+        // Backends should override with efficient indexed queries.
+        tracing::warn!(
+            node_id = %node_id,
+            "Using inefficient default get_node_edge_counts - backend should override"
+        );
         let all_edges = self.get_all_edges()?;
 
         let admin_types: std::collections::HashSet<&str> = [
