@@ -18,6 +18,7 @@ import { openDbConnect, disconnectDb, connectToUrl } from "./db-connect";
 import { openRunQuery } from "./run-query";
 import { openManageQueries } from "./manage-queries";
 import { getRecentConnections, clearConnectionHistory } from "./connection-history";
+import { escapeHtml } from "../utils/html";
 
 /** Action name constants for type-safe dispatch */
 export const Actions = {
@@ -286,7 +287,7 @@ export async function updateRecentConnectionsMenu(): Promise<void> {
 
   let html = "";
   for (const [index, conn] of connections.entries()) {
-    const escapedName = conn.displayName.replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    const escapedName = escapeHtml(conn.displayName);
     html += `
       <button class="menu-option" data-action="recent-connection-${index}" role="menuitem">
         <span>${escapedName}</span>

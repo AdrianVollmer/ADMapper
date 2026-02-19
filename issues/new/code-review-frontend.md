@@ -47,7 +47,7 @@ const Actions = {
 type Action = (typeof Actions)[keyof typeof Actions];
 ```
 
-### 2. Inconsistent XSS escaping in dynamic HTML
+### 2. ~~Inconsistent XSS escaping in dynamic HTML~~ DONE
 
 **File:** `components/actions.ts:236-251`
 
