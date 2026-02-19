@@ -9,7 +9,9 @@ use std::sync::Arc;
 use tracing::{debug, info, trace};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
-use super::types::{DbEdge, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights};
+use super::types::{
+    DbEdge, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights,
+};
 
 /// A graph database backed by KuzuDB.
 #[derive(Clone)]
@@ -1192,25 +1194,11 @@ impl KuzuDatabase {
         Ok(())
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn get_query_history(
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(
-        Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )>,
-        usize,
-    )> {
+    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
         let conn = self.conn()?;
 
         // Get total count
@@ -1243,17 +1231,17 @@ impl KuzuDatabase {
                 } else {
                     Some(parts[8].to_string())
                 };
-                history.push((
-                    parts[0].to_string(),
-                    parts[1].to_string(),
-                    parts[2].to_string(),
+                history.push(QueryHistoryRow {
+                    id: parts[0].to_string(),
+                    name: parts[1].to_string(),
+                    query: parts[2].to_string(),
                     timestamp,
                     result_count,
                     status,
                     started_at,
                     duration_ms,
                     error,
-                ));
+                });
             }
         }
 
@@ -1422,20 +1410,7 @@ impl DatabaseBackend for KuzuDatabase {
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(
-        Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )>,
-        usize,
-    )> {
+    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
         KuzuDatabase::get_query_history(self, limit, offset)
     }
 

@@ -23,7 +23,9 @@ pub mod url;
 
 // Re-export common types
 pub use backend::{DatabaseBackend, QueryLanguage};
-pub use types::{DbEdge, DbError, DbNode, DetailedStats, Result, SecurityInsights};
+pub use types::{
+    DbEdge, DbError, DbNode, DetailedStats, QueryHistoryRow, Result, SecurityInsights,
+};
 pub use url::{DatabaseType, DatabaseUrl};
 
 // Re-export database implementations

@@ -9,7 +9,9 @@ use std::sync::Arc;
 use tracing::{debug, info, trace};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
-use super::types::{DbEdge, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights};
+use super::types::{
+    DbEdge, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights,
+};
 
 /// A graph database backed by CozoDB with SQLite storage.
 #[derive(Clone)]
@@ -996,20 +998,7 @@ impl GraphDatabase {
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(
-        Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )>,
-        usize,
-    )> {
+    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
         debug!(limit = limit, offset = offset, "Getting query history");
 
         // Get total count
@@ -1058,17 +1047,17 @@ impl GraphDatabase {
                     let result_count = row.get(4).and_then(|v| v.as_i64());
                     let duration_ms = row.get(7).and_then(|v| v.as_u64());
                     let error = row.get(8).and_then(|v| v.as_str()).map(String::from);
-                    history.push((
-                        id.to_string(),
-                        name.to_string(),
-                        query.to_string(),
+                    history.push(QueryHistoryRow {
+                        id: id.to_string(),
+                        name: name.to_string(),
+                        query: query.to_string(),
                         timestamp,
                         result_count,
-                        status.to_string(),
+                        status: status.to_string(),
                         started_at,
                         duration_ms,
                         error,
-                    ));
+                    });
                 }
             }
         }
@@ -1245,20 +1234,7 @@ impl DatabaseBackend for GraphDatabase {
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(
-        Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )>,
-        usize,
-    )> {
+    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
         GraphDatabase::get_query_history(self, limit, offset)
     }
 
@@ -1649,7 +1625,7 @@ mod tests {
         db.delete_query_history("id1").unwrap();
         let (history, total) = db.get_query_history(10, 0).unwrap();
         assert_eq!(total, 1);
-        assert_eq!(history[0].0, "id2");
+        assert_eq!(history[0].id, "id2");
 
         // Clear all
         db.clear_query_history().unwrap();
@@ -1702,9 +1678,9 @@ mod tests {
 
         // Should be ordered by timestamp descending (newest first)
         let (history, _) = db.get_query_history(10, 0).unwrap();
-        assert_eq!(history[0].0, "newest");
-        assert_eq!(history[1].0, "middle");
-        assert_eq!(history[2].0, "oldest");
+        assert_eq!(history[0].id, "newest");
+        assert_eq!(history[1].id, "middle");
+        assert_eq!(history[2].id, "oldest");
     }
 
     #[test]
@@ -1731,21 +1707,21 @@ mod tests {
         let (page1, total) = db.get_query_history(2, 0).unwrap();
         assert_eq!(total, 5);
         assert_eq!(page1.len(), 2);
-        assert_eq!(page1[0].0, "id4"); // newest
-        assert_eq!(page1[1].0, "id3");
+        assert_eq!(page1[0].id, "id4"); // newest
+        assert_eq!(page1[1].id, "id3");
 
         // Page 2 (limit 2, offset 2)
         let (page2, total) = db.get_query_history(2, 2).unwrap();
         assert_eq!(total, 5);
         assert_eq!(page2.len(), 2);
-        assert_eq!(page2[0].0, "id2");
-        assert_eq!(page2[1].0, "id1");
+        assert_eq!(page2[0].id, "id2");
+        assert_eq!(page2[1].id, "id1");
 
         // Page 3 (limit 2, offset 4)
         let (page3, total) = db.get_query_history(2, 4).unwrap();
         assert_eq!(total, 5);
         assert_eq!(page3.len(), 1);
-        assert_eq!(page3[0].0, "id0"); // oldest
+        assert_eq!(page3[0].id, "id0"); // oldest
     }
 
     #[test]
@@ -1768,8 +1744,8 @@ mod tests {
 
         // Verify it's running
         let (history, _) = db.get_query_history(10, 0).unwrap();
-        assert_eq!(history[0].5, "running");
-        assert!(history[0].7.is_none()); // no duration yet
+        assert_eq!(history[0].status, "running");
+        assert!(history[0].duration_ms.is_none()); // no duration yet
 
         // Update to completed
         db.update_query_status("id1", "completed", Some(150), Some(42), None)
@@ -1777,9 +1753,9 @@ mod tests {
 
         // Verify update
         let (history, _) = db.get_query_history(10, 0).unwrap();
-        assert_eq!(history[0].5, "completed");
-        assert_eq!(history[0].7, Some(150)); // duration
-        assert_eq!(history[0].4, Some(42)); // result_count
+        assert_eq!(history[0].status, "completed");
+        assert_eq!(history[0].duration_ms, Some(150)); // duration
+        assert_eq!(history[0].result_count, Some(42)); // result_count
     }
 
     // ========================================================================

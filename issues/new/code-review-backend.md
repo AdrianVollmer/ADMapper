@@ -74,7 +74,7 @@ intentionally different as they spawn long-running tasks with complex state mana
 
 ---
 
-### 3. Query history uses a 9-tuple return type
+### 3. Query history uses a 9-tuple return type - FIXED
 
 `get_query_history` returns:
 ```rust
@@ -86,6 +86,12 @@ This is error-prone and hard to read.
 **Recommendation:** Define a `QueryHistoryRow` struct in `db/types.rs`.
 
 **Impact:** Readability, type safety
+
+**Resolution:** Added `QueryHistoryRow` struct in `db/types.rs` with named fields:
+- `id`, `name`, `query`, `timestamp`, `result_count`, `status`, `started_at`, `duration_ms`, `error`
+
+Updated all backend implementations (kuzu, cozo, neo4j, falkordb, crustdb) and the `get_query_history`
+handler to use the struct. Updated related tests in cozo.rs to use struct field access.
 
 ---
 

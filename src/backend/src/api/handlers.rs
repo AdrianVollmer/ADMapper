@@ -1204,28 +1204,26 @@ pub async fn get_query_history(
 
     let entries: Vec<QueryHistoryEntry> = history
         .into_iter()
-        .map(
-            |(id, name, query, timestamp, result_count, status, started_at, duration_ms, error)| {
-                let status = match status.as_str() {
-                    "running" => QueryStatus::Running,
-                    "completed" => QueryStatus::Completed,
-                    "failed" => QueryStatus::Failed,
-                    "aborted" => QueryStatus::Aborted,
-                    _ => QueryStatus::Completed, // Default fallback
-                };
-                QueryHistoryEntry {
-                    id,
-                    name,
-                    query,
-                    timestamp,
-                    result_count,
-                    status,
-                    started_at,
-                    duration_ms,
-                    error,
-                }
-            },
-        )
+        .map(|row| {
+            let status = match row.status.as_str() {
+                "running" => QueryStatus::Running,
+                "completed" => QueryStatus::Completed,
+                "failed" => QueryStatus::Failed,
+                "aborted" => QueryStatus::Aborted,
+                _ => QueryStatus::Completed, // Default fallback
+            };
+            QueryHistoryEntry {
+                id: row.id,
+                name: row.name,
+                query: row.query,
+                timestamp: row.timestamp,
+                result_count: row.result_count,
+                status,
+                started_at: row.started_at,
+                duration_ms: row.duration_ms,
+                error: row.error,
+            }
+        })
         .collect();
 
     debug!(

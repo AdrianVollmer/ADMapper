@@ -10,7 +10,8 @@ use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
+    DbEdge, DbError, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result,
+    SecurityInsights,
 };
 
 /// A graph database backed by CrustDB.
@@ -1266,20 +1267,7 @@ impl CrustDatabase {
         &self,
         _limit: usize,
         _offset: usize,
-    ) -> Result<(
-        Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )>,
-        usize,
-    )> {
+    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
         // Return empty list - CrustDB doesn't persist history
         Ok((Vec::new(), 0))
     }
@@ -1483,20 +1471,7 @@ impl DatabaseBackend for CrustDatabase {
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(
-        Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )>,
-        usize,
-    )> {
+    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
         CrustDatabase::get_query_history(self, limit, offset)
     }
 

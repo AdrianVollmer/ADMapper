@@ -4,7 +4,9 @@
 
 use serde_json::Value as JsonValue;
 
-use super::types::{DbEdge, DbError, DbNode, DetailedStats, Result, SecurityInsights};
+use super::types::{
+    DbEdge, DbError, DbNode, DetailedStats, QueryHistoryRow, Result, SecurityInsights,
+};
 
 /// Query language supported by a database backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -332,26 +334,12 @@ pub trait DatabaseBackend: Send + Sync {
     ) -> Result<()>;
 
     /// Get query history with pagination.
-    /// Returns: (id, name, query, timestamp, result_count, status, started_at, duration_ms, error)
-    #[allow(clippy::type_complexity)]
+    /// Returns: (history_rows, total_count)
     fn get_query_history(
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(
-        Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )>,
-        usize,
-    )>;
+    ) -> Result<(Vec<QueryHistoryRow>, usize)>;
 
     /// Delete a query from history.
     fn delete_query_history(&self, id: &str) -> Result<()>;

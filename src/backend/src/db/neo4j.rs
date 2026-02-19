@@ -10,7 +10,9 @@ use tokio::runtime::Handle;
 use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
-use super::types::{DbEdge, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights};
+use super::types::{
+    DbEdge, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights,
+};
 
 /// Neo4j database backend.
 pub struct Neo4jDatabase {
@@ -929,20 +931,7 @@ impl DatabaseBackend for Neo4jDatabase {
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(
-        Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )>,
-        usize,
-    )> {
+    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
         // Get total count
         let count_rows =
             self.execute_query(query("MATCH (h:QueryHistory) RETURN count(h) AS count"))?;
@@ -964,42 +953,32 @@ impl DatabaseBackend for Neo4jDatabase {
 
         let rows = self.execute_query(q)?;
 
-        let history: Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )> = rows
+        let history: Vec<QueryHistoryRow> = rows
             .iter()
             .filter_map(|r| {
                 let id = r.get::<String>("id").ok()?;
                 let name = r.get::<String>("name").ok()?;
                 let query = r.get::<String>("query").ok()?;
-                let ts = r.get::<i64>("ts").ok()?;
-                let cnt = r.get::<i64>("cnt").ok();
+                let timestamp = r.get::<i64>("ts").ok()?;
+                let result_count = r.get::<i64>("cnt").ok();
                 let status = r
                     .get::<String>("status")
                     .ok()
                     .unwrap_or_else(|| "completed".to_string());
-                let started_at = r.get::<i64>("started_at").ok().unwrap_or(ts);
+                let started_at = r.get::<i64>("started_at").ok().unwrap_or(timestamp);
                 let duration_ms = r.get::<i64>("duration_ms").ok().map(|d| d as u64);
                 let error = r.get::<String>("error").ok().filter(|e| !e.is_empty());
-                Some((
+                Some(QueryHistoryRow {
                     id,
                     name,
                     query,
-                    ts,
-                    cnt,
+                    timestamp,
+                    result_count,
                     status,
                     started_at,
                     duration_ms,
                     error,
-                ))
+                })
             })
             .collect();
 

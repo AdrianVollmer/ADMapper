@@ -11,7 +11,8 @@ use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
+    DbEdge, DbError, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result,
+    SecurityInsights,
 };
 
 /// FalkorDB database backend.
@@ -1049,20 +1050,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         &self,
         limit: usize,
         offset: usize,
-    ) -> Result<(
-        Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )>,
-        usize,
-    )> {
+    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
         // Get total count
         let count_rows = self.execute_query("MATCH (h:QueryHistory) RETURN count(h) AS count")?;
         let total = count_rows
@@ -1083,47 +1071,37 @@ impl DatabaseBackend for FalkorDbDatabase {
 
         let rows = self.execute_query(&cypher)?;
 
-        let history: Vec<(
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-            String,
-            i64,
-            Option<u64>,
-            Option<String>,
-        )> = rows
+        let history: Vec<QueryHistoryRow> = rows
             .iter()
             .filter_map(|r| {
                 let id = r.get(0)?.as_str()?.to_string();
                 let name = r.get(1)?.as_str()?.to_string();
                 let query = r.get(2)?.as_str()?.to_string();
-                let ts = r.get(3)?.as_i64()?;
-                let cnt = r.get(4).and_then(|v| v.as_i64());
+                let timestamp = r.get(3)?.as_i64()?;
+                let result_count = r.get(4).and_then(|v| v.as_i64());
                 let status = r
                     .get(5)
                     .and_then(|v| v.as_str())
                     .unwrap_or("completed")
                     .to_string();
-                let started_at = r.get(6).and_then(|v| v.as_i64()).unwrap_or(ts);
+                let started_at = r.get(6).and_then(|v| v.as_i64()).unwrap_or(timestamp);
                 let duration_ms = r.get(7).and_then(|v| v.as_u64());
                 let error = r
                     .get(8)
                     .and_then(|v| v.as_str())
                     .filter(|e| !e.is_empty())
                     .map(String::from);
-                Some((
+                Some(QueryHistoryRow {
                     id,
                     name,
                     query,
-                    ts,
-                    cnt,
+                    timestamp,
+                    result_count,
                     status,
                     started_at,
                     duration_ms,
                     error,
-                ))
+                })
             })
             .collect();
 

@@ -67,6 +67,20 @@ pub struct SecurityInsights {
     pub real_das: Vec<(String, String)>,
 }
 
+/// A row from the query history table.
+#[derive(Clone, Debug)]
+pub struct QueryHistoryRow {
+    pub id: String,
+    pub name: String,
+    pub query: String,
+    pub timestamp: i64,
+    pub result_count: Option<i64>,
+    pub status: String,
+    pub started_at: i64,
+    pub duration_ms: Option<u64>,
+    pub error: Option<String>,
+}
+
 /// Database error type.
 #[derive(Error, Debug)]
 pub enum DbError {
