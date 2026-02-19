@@ -215,7 +215,7 @@ export function cycleLayout(): string {
 }
 
 /** Update UI to show current layout */
-function updateLayoutIndicator(): void {
+export function updateLayoutIndicator(): void {
   // Update radio-style menu checkmarks
   for (const el of document.querySelectorAll("[data-action^='layout-']")) {
     const action = el.getAttribute("data-action");

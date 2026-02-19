@@ -5,6 +5,7 @@
  */
 
 import { dispatchAction, updateRecentConnectionsMenu, type Action } from "./actions";
+import { updateLayoutIndicator } from "./graph-view";
 
 let activeMenu: HTMLElement | null = null;
 
@@ -85,10 +86,12 @@ function openMenu(menuItem: HTMLElement): void {
     dropdown.removeAttribute("hidden");
     activeMenu = menuItem;
 
-    // Update recent connections when File menu is opened
+    // Update dynamic menu content when menus are opened
     const menuName = menuItem.getAttribute("data-menu");
     if (menuName === "file") {
       updateRecentConnectionsMenu();
+    } else if (menuName === "tools") {
+      updateLayoutIndicator();
     }
 
     // Focus first option
