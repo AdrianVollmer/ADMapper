@@ -217,7 +217,7 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
     }
   }
 
-  // Step 5: Assign final coordinates
+  // Step 5: Assign initial coordinates based on order
   for (const [layer, nodes] of layerGroups.entries()) {
     const layerHeight = nodes.length * nodeSpacing!;
     const startY = -layerHeight / 2;
@@ -232,6 +232,21 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
         graph.setNodeAttribute(nodeId, "x", startY + i * nodeSpacing!);
         graph.setNodeAttribute(nodeId, "y", layer * layerSpacing!);
       }
+    }
+  }
+
+  // Step 6: Coordinate adjustment - position parents at center of gravity of children
+  // Only forward pass: center each layer's nodes on their incoming neighbors (children)
+  // We don't do backward pass because it would pull children toward parents,
+  // disrupting spacing when multiple children share one parent.
+  const coordAttr = direction === "left-to-right" ? "y" : "x";
+  const coordIterations = 4;
+
+  for (let iter = 0; iter < coordIterations; iter++) {
+    // Forward pass only: adjust nodes to center on their predecessors
+    for (let layer = 1; layer <= maxLayer; layer++) {
+      const nodes = layerGroups.get(layer) ?? [];
+      adjustToNeighborCentroid(graph, nodes, coordAttr, "in", nodeSpacing!);
     }
   }
 }
@@ -288,6 +303,67 @@ function reorderByBarycenter(
   nodes.length = 0;
   for (const { node } of barycenters) {
     nodes.push(node);
+  }
+}
+
+/**
+ * Adjust node coordinates to center them on their neighbors' centroid.
+ * Places each node at its ideal position, then resolves overlaps symmetrically.
+ */
+function adjustToNeighborCentroid(
+  graph: ADGraphType,
+  nodes: string[],
+  coordAttr: "x" | "y",
+  direction: "in" | "out",
+  minSpacing: number
+): void {
+  if (nodes.length === 0) return;
+
+  // Compute ideal coordinate for each node (centroid of neighbors)
+  const nodeData: { node: string; ideal: number }[] = [];
+
+  for (const node of nodes) {
+    const current = graph.getNodeAttribute(node, coordAttr) as number;
+    const neighbors =
+      direction === "in" ? Array.from(graph.inNeighborEntries(node)) : Array.from(graph.outNeighborEntries(node));
+
+    if (neighbors.length > 0) {
+      let sum = 0;
+      for (const { neighbor } of neighbors) {
+        sum += graph.getNodeAttribute(neighbor, coordAttr) as number;
+      }
+      const ideal = sum / neighbors.length;
+      nodeData.push({ node, ideal });
+    } else {
+      nodeData.push({ node, ideal: current });
+    }
+  }
+
+  // Sort by ideal position
+  nodeData.sort((a, b) => a.ideal - b.ideal);
+
+  // Place nodes at ideal positions, then resolve overlaps
+  const positions = nodeData.map((d) => d.ideal);
+
+  // Resolve overlaps: push nodes apart symmetrically when they're too close
+  for (let iter = 0; iter < 10; iter++) {
+    let changed = false;
+    for (let i = 0; i < positions.length - 1; i++) {
+      const gap = positions[i + 1] - positions[i];
+      if (gap < minSpacing) {
+        // Push apart symmetrically
+        const overlap = minSpacing - gap;
+        positions[i] -= overlap / 2;
+        positions[i + 1] += overlap / 2;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  // Apply positions
+  for (let i = 0; i < nodeData.length; i++) {
+    graph.setNodeAttribute(nodeData[i].node, coordAttr, positions[i]);
   }
 }
 
