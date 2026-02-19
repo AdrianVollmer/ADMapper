@@ -61,13 +61,13 @@ function updateQueryIndicator(running: boolean): void {
 
   if (running) {
     indicator.classList.add("running");
-    indicator.title = `${activeQueryCount} query${activeQueryCount === 1 ? "" : "ies"} running...`;
+    indicator.title = `${activeQueryCount} query${activeQueryCount === 1 ? "" : "ies"} running - Click for history`;
     // Apply inline styles as fallback for CSS
     if (staticSvg) staticSvg.style.display = "none";
     if (animatedSvg) animatedSvg.style.display = "block";
   } else {
     indicator.classList.remove("running");
-    indicator.title = "No query running";
+    indicator.title = "Query History";
     // Reset inline styles
     if (staticSvg) staticSvg.style.display = "";
     if (animatedSvg) animatedSvg.style.display = "";
