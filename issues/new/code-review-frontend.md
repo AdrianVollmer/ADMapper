@@ -127,7 +127,7 @@ export function escapeHtml(str: string): string {
 }
 ```
 
-### 6. Large files exceed 500 lines
+### 6. ~~Large files exceed 500 lines~~ DONE (queries.ts split)
 
 **Files:**
 - `sidebars.ts` (929 lines) - combines detail panel, node properties, actions,
