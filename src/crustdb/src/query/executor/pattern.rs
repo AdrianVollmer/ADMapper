@@ -11,6 +11,21 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::{Binding, Path, PathConstraints};
 
+// =============================================================================
+// Configuration Constants
+// =============================================================================
+
+/// Default maximum path length for unbounded traversals.
+///
+/// Used when queries specify open-ended patterns like `(a)-[:REL*]->(b)` or
+/// `(a)-[:REL]-+(b)` without an explicit upper bound. This prevents infinite
+/// loops and memory exhaustion on cyclic or very deep graphs.
+///
+/// The value 10000 allows traversing reasonably large graphs while providing
+/// a safety limit. For queries that need deeper traversal, use explicit bounds
+/// like `(a)-[:REL*1..50000]->(b)`.
+pub const DEFAULT_MAX_PATH_DEPTH: usize = 10000;
+
 /// State for BFS traversal with path tracking.
 #[derive(Clone)]
 struct TraversalState {
@@ -169,20 +184,18 @@ pub fn execute_shortest_path_pattern(
     let path_var = pattern.path_variable.as_deref();
 
     // Determine min/max hops based on quantifier
-    // Use a high default max to allow traversing large graphs
-    const DEFAULT_MAX_HOPS: usize = 10000;
     let (min_hops, max_hops) = match &rel_pattern.quantifier {
-        Some(RelQuantifier::OneOrMore) => (1usize, DEFAULT_MAX_HOPS),
-        Some(RelQuantifier::ZeroOrMore) => (0usize, DEFAULT_MAX_HOPS),
+        Some(RelQuantifier::OneOrMore) => (1usize, DEFAULT_MAX_PATH_DEPTH),
+        Some(RelQuantifier::ZeroOrMore) => (0usize, DEFAULT_MAX_PATH_DEPTH),
         None => {
             // Check if there's a length spec
             if let Some(ref len) = rel_pattern.length {
                 (
                     len.min.unwrap_or(1) as usize,
-                    len.max.unwrap_or(DEFAULT_MAX_HOPS as u32) as usize,
+                    len.max.unwrap_or(DEFAULT_MAX_PATH_DEPTH as u32) as usize,
                 )
             } else {
-                (1, DEFAULT_MAX_HOPS) // Default: one or more
+                (1, DEFAULT_MAX_PATH_DEPTH) // Default: one or more
             }
         }
     };
@@ -740,7 +753,7 @@ pub fn execute_variable_length_pattern(
         .ok_or_else(|| Error::Cypher("Variable-length pattern requires length spec".into()))?;
 
     let min_depth = length_spec.min.unwrap_or(1) as usize;
-    let max_depth = length_spec.max.unwrap_or(100) as usize;
+    let max_depth = length_spec.max.unwrap_or(DEFAULT_MAX_PATH_DEPTH as u32) as usize;
 
     // Scan source nodes
     let source_nodes = scan_nodes(source_pattern, storage)?;

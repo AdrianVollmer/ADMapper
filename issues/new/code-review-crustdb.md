@@ -120,24 +120,19 @@ This removes ~30 lines of duplicate SQL while maintaining the same public API.
 
 ---
 
-### 8. Magic Constant DEFAULT_MAX_HOPS
+### 8. ~~Magic Constant DEFAULT_MAX_HOPS~~ ✅ FIXED
 
-**Location:** `executor.rs:692`
+**Location:** `executor/pattern.rs:14-25`
 
-```rust
-const DEFAULT_MAX_HOPS: usize = 10000;
-```
+~~Hardcoded value for shortest path traversal buried inside a function with no documentation.~~
 
-This hardcoded value for shortest path traversal could cause memory exhaustion on dense graphs with no user control.
+**Fixed:**
+- Created documented module-level constant `DEFAULT_MAX_PATH_DEPTH = 10000`
+- Added comprehensive documentation explaining its purpose and how to override
+- Consolidated the inconsistent `100` default in variable-length patterns to use the same constant
+- Constant is now `pub` so it's visible in documentation and could be referenced externally
 
-**Recommendation:** Make configurable via query hints or database settings:
-```rust
-// Could be part of a QueryOptions struct
-pub struct QueryOptions {
-    pub max_path_hops: usize,
-    pub timeout_ms: Option<u64>,
-}
-```
+A full `QueryOptions` struct would require changing function signatures throughout the executor; this is a reasonable intermediate step that makes the limit discoverable and documented.
 
 ---
 
