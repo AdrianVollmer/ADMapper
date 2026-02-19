@@ -569,35 +569,12 @@ impl SqliteStorage {
 
     /// Scan all nodes in the database.
     pub fn scan_all_nodes(&self) -> Result<Vec<Node>> {
-        // Fetch all nodes with their labels in a single query using GROUP_CONCAT
-        let mut stmt = self.conn.prepare(
-            "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
-             FROM nodes n
-             LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
-             LEFT JOIN node_labels nl ON nlm.label_id = nl.id
-             GROUP BY n.id",
-        )?;
-
-        self.collect_nodes_from_stmt(&mut stmt, [])
+        self.get_all_nodes_limit(None)
     }
 
     /// Find nodes by label.
     pub fn find_nodes_by_label(&self, label: &str) -> Result<Vec<Node>> {
-        // Single query: find nodes with the label, then get ALL their labels
-        let mut stmt = self.conn.prepare(
-            "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
-             FROM nodes n
-             JOIN node_label_map nlm ON n.id = nlm.node_id
-             JOIN node_labels nl ON nlm.label_id = nl.id
-             WHERE n.id IN (
-                 SELECT DISTINCT nlm2.node_id FROM node_label_map nlm2
-                 JOIN node_labels nl2 ON nlm2.label_id = nl2.id
-                 WHERE nl2.name = ?1
-             )
-             GROUP BY n.id",
-        )?;
-
-        self.collect_nodes_from_stmt(&mut stmt, params![label])
+        self.find_nodes_by_label_limit(label, None)
     }
 
     /// Find edges by type.

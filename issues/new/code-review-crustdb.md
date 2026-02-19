@@ -71,22 +71,18 @@ Added test `test_property_name_validation` to verify the validation rejects inje
 
 ---
 
-### 5. Query Planner is a Dead Stub
+### 5. Query Planner is a Dead Stub ⏸️ DEFERRED
 
 **Location:** `src/crustdb/src/query/planner.rs`
 
-The planner defines a complete operator hierarchy (`PlanOperator`, `FilterPredicate`, etc.) but `plan()` returns `PlanOperator::Empty`:
+The planner defines a complete operator hierarchy (`PlanOperator`, `FilterPredicate`, etc.) but `plan()` returns `PlanOperator::Empty`. Meanwhile, optimization logic is scattered ad-hoc throughout the executor (`try_optimized_count`, `get_pushable_limit`, `extract_path_constraints`).
 
-```rust
-pub fn plan(statement: &Statement) -> Result<QueryPlan> {
-    let _ = statement;
-    Ok(QueryPlan { root: PlanOperator::Empty })
-}
-```
+**Decision:** Defer to proper implementation rather than deleting. The planner stub has good abstractions and aligns with M9 (Query Optimization) in the roadmap. Implementing it properly would:
+- Consolidate scattered optimization logic into structured planner passes
+- Make the executor a simple plan interpreter
+- Enable future optimizations (cost-based join ordering, index selection)
 
-This dead code adds 200+ lines without providing value. All "optimization" happens ad-hoc in the executor.
-
-**Recommendation:** Either implement the planner or remove the dead code. If keeping as a placeholder, reduce to minimal types needed for future work.
+**See:** `issues/new/query-planner-implementation.md` for detailed implementation plan.
 
 ---
 
@@ -110,16 +106,17 @@ Then use `storage.read()` for queries and `storage.write()` for mutations.
 
 ---
 
-### 7. Duplicated Scan Logic with/without Limit
+### 7. ~~Duplicated Scan Logic with/without Limit~~ ✅ FIXED
 
-**Location:** `storage.rs:559-675`, `storage.rs:677-700`
+**Location:** `storage.rs:571-601` (was duplicated)
 
-`find_nodes_by_label` and `find_nodes_by_label_limit` contain similar but not identical SQL. Same for `scan_all_nodes` vs `get_all_nodes_limit`. This violates DRY.
+~~`find_nodes_by_label` and `find_nodes_by_label_limit` contain similar but not identical SQL. Same for `scan_all_nodes` vs `get_all_nodes_limit`.~~
 
-**Recommendation:** Consolidate into single functions with an `Option<u64>` limit parameter:
-```rust
-pub fn find_nodes_by_label(&self, label: &str, limit: Option<u64>) -> Result<Vec<Node>>
-```
+**Fixed:** Made the simple functions delegate to their `_limit` counterparts:
+- `scan_all_nodes()` now calls `get_all_nodes_limit(None)`
+- `find_nodes_by_label(label)` now calls `find_nodes_by_label_limit(label, None)`
+
+This removes ~30 lines of duplicate SQL while maintaining the same public API.
 
 ---
 
