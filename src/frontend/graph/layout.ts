@@ -155,31 +155,70 @@ function applyForceLayout(graph: ADGraphType, options: LayoutOptions): void {
  * Apply hierarchical layout with edges flowing left-to-right.
  *
  * Computes layers based on longest path from source nodes (nodes with no incoming edges).
- * Handles cycles by using the first-visit layer assignment.
+ * Uses barycenter heuristic to position parents at the vertical center of their children.
  */
 function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettings = {}): void {
   const settings = { ...DEFAULT_HIERARCHICAL_SETTINGS, ...options };
   const { layerSpacing, nodeSpacing, direction } = settings;
 
   // Step 1: Compute layer for each node (longest path from roots)
-  const layers = computeNodeLayers(graph);
+  const nodeLayers = computeNodeLayers(graph);
 
   // Step 2: Group nodes by layer
   const layerGroups = new Map<number, string[]>();
-  for (const [nodeId, layer] of layers.entries()) {
+  let maxLayer = 0;
+  for (const [nodeId, layer] of nodeLayers.entries()) {
     const group = layerGroups.get(layer) ?? [];
     group.push(nodeId);
     layerGroups.set(layer, group);
+    maxLayer = Math.max(maxLayer, layer);
   }
 
-  // Step 3: Assign positions
-  for (const [layer, nodes] of layerGroups.entries()) {
-    // Sort nodes in each layer for consistent ordering (by out-degree, then by id)
+  // Step 3: Initial ordering - sort by out-degree for first pass
+  for (const nodes of layerGroups.values()) {
     nodes.sort((a, b) => {
       const degDiff = graph.outDegree(b) - graph.outDegree(a);
       return degDiff !== 0 ? degDiff : a.localeCompare(b);
     });
+  }
 
+  // Step 4: Barycenter iterations to minimize edge crossings
+  // Position nodes at the barycenter (average position) of their neighbors
+  const nodePositions = new Map<string, number>();
+
+  // Initialize positions based on order in layer
+  for (const [, nodes] of layerGroups.entries()) {
+    for (let i = 0; i < nodes.length; i++) {
+      nodePositions.set(nodes[i], i);
+    }
+  }
+
+  // Run barycenter iterations
+  const iterations = 4;
+  for (let iter = 0; iter < iterations; iter++) {
+    // Forward pass: position based on predecessors (incoming neighbors)
+    for (let layer = 1; layer <= maxLayer; layer++) {
+      const nodes = layerGroups.get(layer) ?? [];
+      reorderByBarycenter(graph, nodes, nodePositions, "in");
+      // Update positions after reordering
+      for (let i = 0; i < nodes.length; i++) {
+        nodePositions.set(nodes[i], i);
+      }
+    }
+
+    // Backward pass: position based on successors (outgoing neighbors)
+    for (let layer = maxLayer - 1; layer >= 0; layer--) {
+      const nodes = layerGroups.get(layer) ?? [];
+      reorderByBarycenter(graph, nodes, nodePositions, "out");
+      // Update positions after reordering
+      for (let i = 0; i < nodes.length; i++) {
+        nodePositions.set(nodes[i], i);
+      }
+    }
+  }
+
+  // Step 5: Assign final coordinates
+  for (const [layer, nodes] of layerGroups.entries()) {
     const layerHeight = nodes.length * nodeSpacing!;
     const startY = -layerHeight / 2;
 
@@ -194,6 +233,61 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
         graph.setNodeAttribute(nodeId, "y", layer * layerSpacing!);
       }
     }
+  }
+}
+
+/**
+ * Reorder nodes in a layer based on barycenter of their neighbors.
+ * This positions nodes at the average position of their connected neighbors.
+ */
+function reorderByBarycenter(
+  graph: ADGraphType,
+  nodes: string[],
+  positions: Map<string, number>,
+  direction: "in" | "out"
+): void {
+  // Compute barycenter for each node
+  const barycenters: { node: string; barycenter: number; hasNeighbors: boolean }[] = [];
+
+  for (const node of nodes) {
+    let sum = 0;
+    let count = 0;
+
+    const neighbors =
+      direction === "in" ? Array.from(graph.inNeighborEntries(node)) : Array.from(graph.outNeighborEntries(node));
+
+    for (const { neighbor } of neighbors) {
+      const pos = positions.get(neighbor);
+      if (pos !== undefined) {
+        sum += pos;
+        count++;
+      }
+    }
+
+    if (count > 0) {
+      barycenters.push({ node, barycenter: sum / count, hasNeighbors: true });
+    } else {
+      // Keep original position for nodes with no neighbors in that direction
+      barycenters.push({ node, barycenter: positions.get(node) ?? 0, hasNeighbors: false });
+    }
+  }
+
+  // Sort by barycenter, keeping nodes without neighbors in their relative positions
+  barycenters.sort((a, b) => {
+    // Nodes with neighbors should be positioned by their barycenter
+    // Nodes without neighbors maintain relative order
+    if (a.hasNeighbors && b.hasNeighbors) {
+      return a.barycenter - b.barycenter;
+    }
+    if (a.hasNeighbors) return -1;
+    if (b.hasNeighbors) return 1;
+    return a.barycenter - b.barycenter;
+  });
+
+  // Update the nodes array in place
+  nodes.length = 0;
+  for (const { node } of barycenters) {
+    nodes.push(node);
   }
 }
 
@@ -242,26 +336,26 @@ function applyGridLayout(graph: ADGraphType, options: GridSettings = {}): void {
  * Sinks (nodes with no outgoing edges) are at the center or innermost ring.
  * If there's exactly one sink, it's placed at the center.
  * Otherwise, sinks form the first ring around an empty center.
- * Higher-depth nodes (those that feed into sinks) form outer rings.
+ * Higher-depth nodes form outer rings, positioned at angular centroid of their children.
  */
 function applyCircularLayout(graph: ADGraphType, options: CircularSettings = {}): void {
   const settings = { ...DEFAULT_CIRCULAR_SETTINGS, ...options };
   const { ringSpacing, minRadius } = settings;
 
   // Compute layers from sinks (reverse of hierarchical)
-  const layers = computeSinkBasedLayers(graph);
+  const nodeLayers = computeSinkBasedLayers(graph);
 
   // Group nodes by layer
   const layerGroups = new Map<number, string[]>();
   let maxLayer = 0;
-  for (const [nodeId, layer] of layers.entries()) {
+  for (const [nodeId, layer] of nodeLayers.entries()) {
     const group = layerGroups.get(layer) ?? [];
     group.push(nodeId);
     layerGroups.set(layer, group);
     maxLayer = Math.max(maxLayer, layer);
   }
 
-  // Sort nodes within each layer for consistent ordering
+  // Initial ordering - sort by degree for first pass
   for (const nodes of layerGroups.values()) {
     nodes.sort((a, b) => {
       const degDiff = graph.degree(b) - graph.degree(a);
@@ -273,46 +367,154 @@ function applyCircularLayout(graph: ADGraphType, options: CircularSettings = {})
   const sinks = layerGroups.get(0) ?? [];
   const singleCenterNode = sinks.length === 1;
 
-  // Place nodes on concentric circles
+  // Assign initial angles to all nodes
+  const nodeAngles = new Map<string, number>();
+
   if (singleCenterNode) {
-    // Place the single sink at center
+    // Center node has no angle (it's at origin)
+    nodeAngles.set(sinks[0], 0);
+
+    // Assign initial angles to other layers
+    for (let layer = 1; layer <= maxLayer; layer++) {
+      const nodes = layerGroups.get(layer) ?? [];
+      assignAngles(nodes, nodeAngles);
+    }
+  } else {
+    // Assign initial angles to all layers
+    for (let layer = 0; layer <= maxLayer; layer++) {
+      const nodes = layerGroups.get(layer) ?? [];
+      assignAngles(nodes, nodeAngles);
+    }
+  }
+
+  // Barycenter iterations: position outer nodes at angular centroid of their children
+  const iterations = 4;
+  for (let iter = 0; iter < iterations; iter++) {
+    // Work from outer layers inward - position parents based on children
+    for (let layer = maxLayer; layer >= (singleCenterNode ? 1 : 0); layer--) {
+      const nodes = layerGroups.get(layer) ?? [];
+      reorderByAngularBarycenter(graph, nodes, nodeAngles, nodeLayers);
+      // Reassign angles after reordering
+      assignAngles(nodes, nodeAngles);
+    }
+  }
+
+  // Place nodes at final positions
+  if (singleCenterNode) {
     graph.setNodeAttribute(sinks[0], "x", 0);
     graph.setNodeAttribute(sinks[0], "y", 0);
 
-    // Place other layers in rings starting from minRadius
     for (let layer = 1; layer <= maxLayer; layer++) {
       const nodes = layerGroups.get(layer) ?? [];
       if (nodes.length === 0) continue;
-
       const radius = minRadius! + (layer - 1) * ringSpacing!;
-      placeNodesOnCircle(graph, nodes, radius);
+      placeNodesOnCircleWithAngles(graph, nodes, radius, nodeAngles);
     }
   } else {
-    // No center node - sinks form the first ring
     for (let layer = 0; layer <= maxLayer; layer++) {
       const nodes = layerGroups.get(layer) ?? [];
       if (nodes.length === 0) continue;
-
       const radius = minRadius! + layer * ringSpacing!;
-      placeNodesOnCircle(graph, nodes, radius);
+      placeNodesOnCircleWithAngles(graph, nodes, radius, nodeAngles);
     }
   }
 }
 
 /**
- * Place nodes evenly distributed on a circle.
+ * Assign evenly distributed angles to nodes.
  */
-function placeNodesOnCircle(graph: ADGraphType, nodes: string[], radius: number): void {
+function assignAngles(nodes: string[], nodeAngles: Map<string, number>): void {
   const angleStep = (2 * Math.PI) / nodes.length;
-  // Start from top (-PI/2) and go clockwise
   const startAngle = -Math.PI / 2;
 
   for (let i = 0; i < nodes.length; i++) {
-    const angle = startAngle + i * angleStep;
+    nodeAngles.set(nodes[i], startAngle + i * angleStep);
+  }
+}
+
+/**
+ * Reorder nodes based on angular barycenter of their children (outgoing neighbors in inner layers).
+ */
+function reorderByAngularBarycenter(
+  graph: ADGraphType,
+  nodes: string[],
+  angles: Map<string, number>,
+  nodeLayers: Map<string, number>
+): void {
+  const currentLayer = nodeLayers.get(nodes[0]) ?? 0;
+
+  // Compute angular barycenter for each node based on children (nodes in inner layers)
+  const barycenters: { node: string; angle: number; hasChildren: boolean }[] = [];
+
+  for (const node of nodes) {
+    const childAngles: number[] = [];
+
+    // Get outgoing neighbors that are in inner layers (closer to center)
+    graph.forEachOutNeighbor(node, (neighbor) => {
+      const neighborLayer = nodeLayers.get(neighbor) ?? 0;
+      if (neighborLayer < currentLayer) {
+        const angle = angles.get(neighbor);
+        if (angle !== undefined) {
+          childAngles.push(angle);
+        }
+      }
+    });
+
+    if (childAngles.length > 0) {
+      // Compute circular mean angle
+      const meanAngle = circularMean(childAngles);
+      barycenters.push({ node, angle: meanAngle, hasChildren: true });
+    } else {
+      // Keep original angle for nodes without children
+      barycenters.push({ node, angle: angles.get(node) ?? 0, hasChildren: false });
+    }
+  }
+
+  // Sort by angle
+  barycenters.sort((a, b) => {
+    // Normalize angles to [0, 2π) for sorting
+    const angleA = ((a.angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const angleB = ((b.angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    return angleA - angleB;
+  });
+
+  // Update the nodes array in place
+  nodes.length = 0;
+  for (const { node } of barycenters) {
+    nodes.push(node);
+  }
+}
+
+/**
+ * Compute circular mean of angles.
+ */
+function circularMean(angles: number[]): number {
+  let sinSum = 0;
+  let cosSum = 0;
+
+  for (const angle of angles) {
+    sinSum += Math.sin(angle);
+    cosSum += Math.cos(angle);
+  }
+
+  return Math.atan2(sinSum / angles.length, cosSum / angles.length);
+}
+
+/**
+ * Place nodes on a circle using precomputed angles.
+ */
+function placeNodesOnCircleWithAngles(
+  graph: ADGraphType,
+  nodes: string[],
+  radius: number,
+  angles: Map<string, number>
+): void {
+  for (const node of nodes) {
+    const angle = angles.get(node) ?? 0;
     const x = radius * Math.cos(angle);
     const y = radius * Math.sin(angle);
-    graph.setNodeAttribute(nodes[i], "x", x);
-    graph.setNodeAttribute(nodes[i], "y", y);
+    graph.setNodeAttribute(node, "x", x);
+    graph.setNodeAttribute(node, "y", y);
   }
 }
 
