@@ -160,7 +160,7 @@ While most use addEventListener. This creates:
 **Fix:** Use `data-action` attributes consistently and handle all events via
 delegation in `actions.ts`.
 
-### 8. No request cancellation in API client
+### 8. ~~No request cancellation in API client~~ DONE
 
 **File:** `api/client.ts`
 

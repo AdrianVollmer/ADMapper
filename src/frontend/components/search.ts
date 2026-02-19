@@ -30,6 +30,7 @@ interface SearchElements {
 /** Component state */
 interface SearchState {
   debounceTimer: ReturnType<typeof setTimeout> | null;
+  searchAbortController: AbortController | null;
   inputToResults: Map<HTMLInputElement, HTMLElement>;
 }
 
@@ -46,6 +47,7 @@ const elements: SearchElements = {
 
 const state: SearchState = {
   debounceTimer: null,
+  searchAbortController: null,
   inputToResults: new Map(),
 };
 
@@ -56,7 +58,11 @@ export function resetSearchState(): void {
   if (state.debounceTimer) {
     clearTimeout(state.debounceTimer);
   }
+  if (state.searchAbortController) {
+    state.searchAbortController.abort();
+  }
   state.debounceTimer = null;
+  state.searchAbortController = null;
   state.inputToResults.clear();
   for (const key of Object.keys(elements) as (keyof SearchElements)[]) {
     elements[key] = null;
@@ -179,13 +185,20 @@ function handleSearch(input: HTMLInputElement, resultsEl: HTMLElement, context: 
     return;
   }
 
+  // Cancel any in-flight search request
+  if (state.searchAbortController) {
+    state.searchAbortController.abort();
+  }
+
   // Debounce the search
   if (state.debounceTimer) {
     clearTimeout(state.debounceTimer);
   }
 
   state.debounceTimer = setTimeout(() => {
-    performSearch(input, query, resultsEl, context);
+    // Create a new abort controller for this search
+    state.searchAbortController = new AbortController();
+    performSearch(input, query, resultsEl, context, state.searchAbortController.signal);
   }, SEARCH_DEBOUNCE_MS);
 }
 
@@ -194,10 +207,11 @@ async function performSearch(
   input: HTMLInputElement,
   query: string,
   resultsEl: HTMLElement,
-  context: string
+  context: string,
+  signal: AbortSignal
 ): Promise<void> {
   try {
-    const results = await api.get<SearchResult[]>(`/api/graph/search?q=${encodeURIComponent(query)}&limit=10`);
+    const results = await api.get<SearchResult[]>(`/api/graph/search?q=${encodeURIComponent(query)}&limit=10`, signal);
 
     if (results.length === 0) {
       resultsEl.innerHTML = '<div class="search-no-results">No nodes found</div>';
@@ -222,6 +236,10 @@ async function performSearch(
     positionPopover(input, resultsEl);
     resultsEl.hidden = false;
   } catch (err) {
+    // Ignore aborted requests - they're expected when user types quickly
+    if (err instanceof Error && err.name === "AbortError") {
+      return;
+    }
     console.error("Search error:", err);
     resultsEl.hidden = true;
   }

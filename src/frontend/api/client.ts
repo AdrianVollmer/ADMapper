@@ -30,14 +30,17 @@ export class ApiClientError extends Error {
 /**
  * Centralized API client for making HTTP requests.
  * All methods throw ApiClientError on failure.
+ * All methods accept an optional AbortSignal for request cancellation.
  */
 export class ApiClient {
   /**
    * Make a GET request and parse JSON response.
+   * @param url - The URL to fetch
+   * @param signal - Optional AbortSignal for cancellation
    * @throws {ApiClientError} If the request fails or response is not OK
    */
-  async get<T>(url: string): Promise<T> {
-    const response = await fetch(url);
+  async get<T>(url: string, signal?: AbortSignal): Promise<T> {
+    const response = await fetch(url, { signal });
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
@@ -49,13 +52,17 @@ export class ApiClient {
 
   /**
    * Make a POST request with JSON body.
+   * @param url - The URL to post to
+   * @param body - The request body (will be JSON stringified)
+   * @param signal - Optional AbortSignal for cancellation
    * @throws {ApiClientError} If the request fails or response is not OK
    */
-  async post<T>(url: string, body: unknown): Promise<T> {
+  async post<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!response.ok) {
@@ -68,12 +75,16 @@ export class ApiClient {
 
   /**
    * Make a POST request with JSON body, expecting no content response.
+   * @param url - The URL to post to
+   * @param body - Optional request body (will be JSON stringified)
+   * @param signal - Optional AbortSignal for cancellation
    * @throws {ApiClientError} If the request fails or response is not OK
    */
-  async postNoContent(url: string, body?: unknown): Promise<void> {
+  async postNoContent(url: string, body?: unknown, signal?: AbortSignal): Promise<void> {
     const init: RequestInit = {
       method: "POST",
       headers: body ? { "Content-Type": "application/json" } : {},
+      signal,
     };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
@@ -88,10 +99,12 @@ export class ApiClient {
 
   /**
    * Make a DELETE request.
+   * @param url - The URL to delete
+   * @param signal - Optional AbortSignal for cancellation
    * @throws {ApiClientError} If the request fails or response is not OK
    */
-  async delete(url: string): Promise<void> {
-    const response = await fetch(url, { method: "DELETE" });
+  async delete(url: string, signal?: AbortSignal): Promise<void> {
+    const response = await fetch(url, { method: "DELETE", signal });
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
@@ -101,9 +114,12 @@ export class ApiClient {
 
   /**
    * Upload files using multipart form data.
+   * @param url - The URL to upload to
+   * @param files - The files to upload
+   * @param signal - Optional AbortSignal for cancellation
    * @throws {ApiClientError} If the request fails or response is not OK
    */
-  async uploadFiles<T>(url: string, files: FileList | File[]): Promise<T> {
+  async uploadFiles<T>(url: string, files: FileList | File[], signal?: AbortSignal): Promise<T> {
     const formData = new FormData();
     for (const file of files) {
       formData.append("files", file);
@@ -112,6 +128,7 @@ export class ApiClient {
     const response = await fetch(url, {
       method: "POST",
       body: formData,
+      signal,
     });
 
     if (!response.ok) {
