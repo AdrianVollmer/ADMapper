@@ -1,0 +1,223 @@
+# Backend Code Review
+
+This document summarizes findings from a code review of `src/backend/`.
+
+## Overall Assessment
+
+**AI slop factor: Low.** The code is well-structured, uses idiomatic Rust patterns,
+has thoughtful error handling, and shows evidence of deliberate architectural
+decisions. It does not exhibit telltale signs of LLM-generated code (e.g.,
+over-commented obvious logic, pointless abstractions, inconsistent style).
+
+The codebase is reasonably clean but has accumulated some technical debt,
+particularly around code organization and repeated patterns.
+
+---
+
+## Top 10 Issues
+
+### 1. `lib.rs` is too long (2420 lines)
+
+The main library file contains API handlers, types, state management, SSE
+streaming, and graph extraction logic all mixed together.
+
+**Recommendation:** Split into modules:
+- `api/handlers.rs` - Route handlers
+- `api/types.rs` - Request/response types
+- `state.rs` - AppState and RunningQuery
+- `graph.rs` - FullGraph, extract_graph_from_results, etc.
+
+**Impact:** Maintainability
+
+---
+
+### 2. Repeated `spawn_blocking` boilerplate
+
+Nearly every API handler repeats the same pattern:
+
+```rust
+tokio::task::spawn_blocking(move || db.some_method())
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {}", e)))??;
+```
+
+This appears ~25 times throughout the codebase.
+
+**Recommendation:** Create a helper:
+```rust
+async fn run_db<T, F>(db: Arc<dyn DatabaseBackend>, f: F) -> Result<T, ApiError>
+where
+    F: FnOnce(&dyn DatabaseBackend) -> db::Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || f(db.as_ref()))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {e}")))?
+        .map_err(Into::into)
+}
+```
+
+**Impact:** DRY principle, maintainability
+
+---
+
+### 3. Query history uses a 9-tuple return type
+
+`get_query_history` returns:
+```rust
+Vec<(String, String, String, i64, Option<i64>, String, i64, Option<u64>, Option<String>)>
+```
+
+This is error-prone and hard to read.
+
+**Recommendation:** Define a `QueryHistoryRow` struct in `db/types.rs`.
+
+**Impact:** Readability, type safety
+
+---
+
+### 4. Default `get_node_edge_counts` loads ALL edges
+
+The default implementation in `backend.rs:127-169` loads every edge in the
+database into memory just to count connections for a single node.
+
+For large graphs (100k+ edges), this is a severe performance problem.
+
+**Recommendation:**
+- Each backend should override this with an efficient indexed query
+- Consider adding a `#[deprecated]` or `#[doc(hidden)]` to the default impl
+  with a warning
+
+**Impact:** Performance (critical for large datasets)
+
+---
+
+### 5. `find_membership_by_sid_suffix` is O(n*m)
+
+Lines 214-269 in `backend.rs` load ALL nodes and ALL edges, then do linear
+scans. Called from `node_status` handler which may be triggered on hover.
+
+For a dataset with 50k nodes and 200k edges, this could freeze the UI.
+
+**Recommendation:**
+- Backends should index nodes by SID suffix
+- Or use a graph query with pattern matching
+
+**Impact:** Performance (critical)
+
+---
+
+### 6. CORS allows any origin in production
+
+`lib.rs:537-540`:
+```rust
+let cors = CorsLayer::new()
+    .allow_origin(Any)
+    .allow_methods(Any)
+    .allow_headers(Any);
+```
+
+This disables CORS protections entirely, allowing any website to make API
+requests to the server.
+
+**Recommendation:**
+- In headless/server mode, require explicit allowed origins via config
+- Or at minimum restrict to same-origin by default
+
+**Impact:** Security
+
+---
+
+### 7. Potential path traversal in temp file handling
+
+`lib.rs:689-693`:
+```rust
+let temp_path = std::env::temp_dir().join(format!(
+    "admapper-upload-{}-{}",
+    uuid::Uuid::new_v4(),
+    filename.replace(std::path::MAIN_SEPARATOR, "_")
+));
+```
+
+The filename comes from user input. While MAIN_SEPARATOR is replaced,
+the logic may not handle all edge cases (e.g., `..` sequences or other
+separators on different platforms).
+
+**Recommendation:** Use only the UUID for the temp filename, or sanitize
+more thoroughly with a whitelist of allowed characters.
+
+**Impact:** Security
+
+---
+
+### 8. Neo4j+s/bolt+s SSL schemes are parsed but not used
+
+`url.rs:116` recognizes SSL schemes like `neo4j+s` and `bolt+ssc`, but the
+parsed URL doesn't capture whether SSL was requested. The Neo4j backend
+may not be establishing secure connections when users expect it.
+
+**Recommendation:** Add `use_ssl: bool` field to `DatabaseUrl` and wire it
+through to the Neo4j driver configuration.
+
+**Impact:** Security (credentials sent in cleartext)
+
+---
+
+### 9. Duplicate types: `GraphNode` vs `DbNode`
+
+`GraphNode` (lib.rs:888-895) and `DbNode` (types.rs:7-13) have identical fields.
+The conversion is just `From` impl that copies fields 1:1.
+
+**Recommendation:** Use `DbNode` directly with `#[serde(rename = "type")]` on
+the `node_type` field, eliminating the duplicate type.
+
+**Impact:** DRY principle
+
+---
+
+### 10. No abstraction for common query patterns across backends
+
+Each database backend implements similar logic for:
+- Query history (add, update, get, delete, clear)
+- Security insights calculation
+- Path finding
+- Stats aggregation
+
+This leads to ~1000-1500 lines per backend with significant overlap.
+
+**Recommendation:** Consider a macro or common helper module for:
+- SQL query history operations (Neo4j/FalkorDB could delegate to a SQLite
+  sidecar)
+- BFS/path-finding algorithms that work on any adjacency representation
+
+**Impact:** Maintainability, reduced bug surface
+
+---
+
+## Additional Observations
+
+### Positive patterns observed:
+- Good use of `thiserror` for error types
+- Feature flags for optional backends work well
+- Test coverage in `bloodhound.rs` is thorough
+- Proper use of `tracing` for structured logging
+- Broadcast channels for SSE are implemented correctly
+
+### Minor issues not in top 10:
+- `BloodHoundFile` test references `GraphDatabase::in_memory()` which doesn't
+  exist (tests may not compile with certain feature flags)
+- Some `#[allow(dead_code)]` markers could be removed by using the fields
+- `QueryLanguage::from_str` should implement the `FromStr` trait instead
+
+---
+
+## Summary
+
+The backend is solidly written but would benefit from:
+1. Module restructuring for `lib.rs`
+2. Performance fixes for the default trait implementations
+3. Security hardening for CORS and file handling
+4. Reducing duplication through helpers/macros
+
+Priority should be given to issues 4 and 5 (performance) and issues 6-8
+(security) before any production deployment.
