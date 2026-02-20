@@ -371,6 +371,7 @@ impl CrustDatabase {
     }
 
     /// Extract count from a query result.
+    #[allow(dead_code)]
     fn extract_count(&self, result: &crustdb::QueryResult) -> usize {
         result
             .rows
@@ -735,12 +736,7 @@ impl CrustDatabase {
         let mut results = Vec::new();
         for user in users {
             if let Some(hops) = self.bfs_to_targets(&user.id, &da_groups, &adj) {
-                results.push((
-                    user.id.clone(),
-                    user.label.clone(),
-                    user.name.clone(),
-                    hops,
-                ));
+                results.push((user.id.clone(), user.label.clone(), user.name.clone(), hops));
             }
         }
 
@@ -1028,12 +1024,12 @@ impl CrustDatabase {
 
         let result = self.execute(&query)?;
 
-        if let Some(first_row) = result.rows.first() {
-            if let Some(value) = first_row.values.get("g.object_id") {
-                if let crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) = value {
-                    return Ok(Some(s.clone()));
-                }
-            }
+        if let Some(crustdb::ResultValue::Property(crustdb::PropertyValue::String(s))) = result
+            .rows
+            .first()
+            .and_then(|row| row.values.get("g.object_id"))
+        {
+            return Ok(Some(s.clone()));
         }
 
         Ok(None)
@@ -1055,7 +1051,7 @@ impl CrustDatabase {
                     .map(|col| {
                         row.values
                             .get(col)
-                            .map(|v| Self::result_value_to_json(v))
+                            .map(Self::result_value_to_json)
                             .unwrap_or(JsonValue::Null)
                     })
                     .collect()

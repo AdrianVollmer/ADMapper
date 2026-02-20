@@ -28,7 +28,7 @@ pub fn execute_plan(plan: &QueryPlan, storage: &SqliteStorage) -> Result<QueryRe
 
     // Convert to QueryResult
     let result = match execution_result {
-        ExecutionResult::Bindings(bindings) => {
+        ExecutionResult::Bindings(_bindings) => {
             // No RETURN clause - empty result
             QueryResult {
                 columns: Vec::new(),
@@ -36,7 +36,11 @@ pub fn execute_plan(plan: &QueryPlan, storage: &SqliteStorage) -> Result<QueryRe
                 stats,
             }
         }
-        ExecutionResult::Rows { columns, rows } => QueryResult { columns, rows, stats },
+        ExecutionResult::Rows { columns, rows } => QueryResult {
+            columns,
+            rows,
+            stats,
+        },
     };
 
     let mut result = result;
@@ -47,7 +51,10 @@ pub fn execute_plan(plan: &QueryPlan, storage: &SqliteStorage) -> Result<QueryRe
 /// Internal execution result - either bindings (for intermediate steps) or final rows.
 enum ExecutionResult {
     Bindings(Vec<Binding>),
-    Rows { columns: Vec<String>, rows: Vec<Row> },
+    Rows {
+        columns: Vec<String>,
+        rows: Vec<Row>,
+    },
 }
 
 // =============================================================================
@@ -201,7 +208,10 @@ fn execute_operator(
                 }
                 ExecutionResult::Rows { columns, rows } => {
                     let skipped: Vec<_> = rows.into_iter().skip(*count as usize).collect();
-                    Ok(ExecutionResult::Rows { columns, rows: skipped })
+                    Ok(ExecutionResult::Rows {
+                        columns,
+                        rows: skipped,
+                    })
                 }
             }
         }
@@ -234,9 +244,7 @@ fn execute_operator(
             Ok(ExecutionResult::Bindings(bindings))
         }
 
-        PlanOperator::EdgeScan { .. } => {
-            Err(Error::Cypher("EdgeScan not implemented".into()))
-        }
+        PlanOperator::EdgeScan { .. } => Err(Error::Cypher("EdgeScan not implemented".into())),
     }
 }
 
@@ -330,6 +338,7 @@ fn execute_node_scan(
 // Expand Operators
 // =============================================================================
 
+#[allow(clippy::too_many_arguments)]
 fn execute_expand(
     bindings: Vec<Binding>,
     source_variable: &str,
@@ -360,13 +369,14 @@ fn execute_expand(
             };
 
             // Check target labels
-            if !target_labels.is_empty()
-                && !target_labels.iter().any(|l| target_node.has_label(l))
+            if !target_labels.is_empty() && !target_labels.iter().any(|l| target_node.has_label(l))
             {
                 continue;
             }
 
-            let mut new_binding = binding.clone().with_node(target_variable, target_node.clone());
+            let mut new_binding = binding
+                .clone()
+                .with_node(target_variable, target_node.clone());
 
             if let Some(rv) = rel_variable {
                 new_binding = new_binding.with_edge(rv, edge.clone());
@@ -390,6 +400,7 @@ fn execute_expand(
     Ok(ExecutionResult::Bindings(result))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_variable_length_expand(
     bindings: Vec<Binding>,
     source_variable: &str,
@@ -430,9 +441,8 @@ fn execute_variable_length_expand(
                     if matches_labels && !found_targets.contains(&current_id) {
                         found_targets.insert(current_id);
 
-                        let mut new_binding = binding
-                            .clone()
-                            .with_node(target_variable, target_node);
+                        let mut new_binding =
+                            binding.clone().with_node(target_variable, target_node);
 
                         if let Some(pv) = path_variable {
                             // Build full path
@@ -491,6 +501,7 @@ fn execute_variable_length_expand(
     Ok(ExecutionResult::Bindings(result))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_shortest_path(
     bindings: Vec<Binding>,
     source_variable: &str,
@@ -501,7 +512,7 @@ fn execute_shortest_path(
     direction: ExpandDirection,
     min_hops: u32,
     max_hops: u32,
-    k: u32,
+    _k: u32,
     storage: &SqliteStorage,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
@@ -530,7 +541,7 @@ fn execute_shortest_path(
         // operator after us might eliminate some paths. Truncation to k happens at the end.
         let mut visited: HashSet<i64> = HashSet::new();
         let mut found_paths: Vec<(Node, Vec<i64>, Vec<i64>)> = Vec::new();
-        let mut shortest_found: Option<u32> = None;
+        let _shortest_found: Option<u32> = None;
 
         let mut queue: VecDeque<(i64, Vec<i64>, Vec<i64>)> = VecDeque::new();
         queue.push_back((source_node.id, vec![source_node.id], Vec::new()));
@@ -587,9 +598,7 @@ fn execute_shortest_path(
 
         // Convert found paths to bindings
         for (target_node, path_node_ids, path_edge_ids) in found_paths {
-            let mut new_binding = binding
-                .clone()
-                .with_node(target_variable, target_node);
+            let mut new_binding = binding.clone().with_node(target_variable, target_node);
 
             if let Some(pv) = path_variable {
                 let mut nodes = Vec::new();
@@ -618,7 +627,11 @@ fn execute_shortest_path(
 // Helper Functions for Traversal
 // =============================================================================
 
-fn get_edges(node_id: i64, direction: ExpandDirection, storage: &SqliteStorage) -> Result<Vec<Edge>> {
+fn get_edges(
+    node_id: i64,
+    direction: ExpandDirection,
+    storage: &SqliteStorage,
+) -> Result<Vec<Edge>> {
     match direction {
         ExpandDirection::Outgoing => storage.find_outgoing_edges(node_id),
         ExpandDirection::Incoming => storage.find_incoming_edges(node_id),
@@ -890,7 +903,10 @@ fn property_to_eval_value(prop: Option<&PropertyValue>) -> EvalValue {
         Some(PropertyValue::Float(f)) => EvalValue::Float(*f),
         Some(PropertyValue::String(s)) => EvalValue::String(s.clone()),
         Some(PropertyValue::List(items)) => {
-            let values: Vec<EvalValue> = items.iter().map(|p| property_to_eval_value(Some(p))).collect();
+            let values: Vec<EvalValue> = items
+                .iter()
+                .map(|p| property_to_eval_value(Some(p)))
+                .collect();
             EvalValue::List(values)
         }
         Some(PropertyValue::Map(_)) => {
@@ -1104,7 +1120,9 @@ fn compute_aggregate(func: &AggregateFunction, bindings: &[Binding]) -> Result<R
                 }
             }
             if count > 0 {
-                Ok(ResultValue::Property(PropertyValue::Float(sum / count as f64)))
+                Ok(ResultValue::Property(PropertyValue::Float(
+                    sum / count as f64,
+                )))
             } else {
                 Ok(ResultValue::Property(PropertyValue::Null))
             }
@@ -1215,12 +1233,12 @@ fn execute_create(
 
     // Create edges using variable name lookup
     for create_edge in edges {
-        let source_id = var_to_id
-            .get(&create_edge.source)
-            .ok_or_else(|| Error::Cypher(format!("Unknown source variable: {}", create_edge.source)))?;
-        let target_id = var_to_id
-            .get(&create_edge.target)
-            .ok_or_else(|| Error::Cypher(format!("Unknown target variable: {}", create_edge.target)))?;
+        let source_id = var_to_id.get(&create_edge.source).ok_or_else(|| {
+            Error::Cypher(format!("Unknown source variable: {}", create_edge.source))
+        })?;
+        let target_id = var_to_id.get(&create_edge.target).ok_or_else(|| {
+            Error::Cypher(format!("Unknown target variable: {}", create_edge.target))
+        })?;
         let props = plan_properties_to_json(&create_edge.properties)?;
 
         storage.insert_edge(*source_id, *target_id, &create_edge.edge_type, &props)?;
@@ -1367,9 +1385,7 @@ fn eval_to_property_value(v: EvalValue) -> PropertyValue {
     }
 }
 
-fn plan_properties_to_json(
-    props: &[(String, PlanExpr)],
-) -> Result<serde_json::Value> {
+fn plan_properties_to_json(props: &[(String, PlanExpr)]) -> Result<serde_json::Value> {
     let mut map = serde_json::Map::new();
     for (key, expr) in props {
         let value = match expr {
@@ -1377,11 +1393,9 @@ fn plan_properties_to_json(
                 PlanLiteral::Null => serde_json::Value::Null,
                 PlanLiteral::Bool(b) => serde_json::Value::Bool(*b),
                 PlanLiteral::Int(i) => serde_json::Value::Number((*i).into()),
-                PlanLiteral::Float(f) => {
-                    serde_json::Number::from_f64(*f)
-                        .map(serde_json::Value::Number)
-                        .unwrap_or(serde_json::Value::Null)
-                }
+                PlanLiteral::Float(f) => serde_json::Number::from_f64(*f)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::Null),
                 PlanLiteral::String(s) => serde_json::Value::String(s.clone()),
             },
             _ => {

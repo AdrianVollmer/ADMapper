@@ -72,7 +72,7 @@ pub async fn database_status(State(state): State<AppState>) -> Json<DatabaseStat
 }
 
 /// Get list of supported database types based on compiled features.
-#[allow(unused_mut)]
+#[allow(unused_mut, clippy::vec_init_then_push)]
 pub async fn database_supported() -> Json<Vec<SupportedDatabase>> {
     let mut supported = Vec::new();
 

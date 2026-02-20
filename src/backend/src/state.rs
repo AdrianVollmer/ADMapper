@@ -3,6 +3,7 @@
 use crate::api::types::{QueryActivity, QueryProgress};
 use crate::db::{DatabaseBackend, DatabaseType, DatabaseUrl};
 use crate::import::ImportProgress;
+#[cfg(feature = "crustdb")]
 use crate::settings;
 use dashmap::DashMap;
 use parking_lot::RwLock;

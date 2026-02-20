@@ -85,7 +85,7 @@ pub fn is_multi_hop_pattern(pattern: &Pattern) -> bool {
         return false;
     }
     // Must have odd number of elements (alternating node-rel-node...)
-    if pattern.elements.len() % 2 == 0 {
+    if pattern.elements.len().is_multiple_of(2) {
         return false;
     }
     // Check alternating pattern: node, rel, node, rel, node, ...
@@ -299,6 +299,7 @@ pub fn execute_shortest_path_pattern(
             }
 
             // Check if we reached a target node at valid depth
+            #[allow(clippy::collapsible_if)]
             if current_depth >= min_hops && target_ids.contains(&state.node_id) {
                 if state.node_id != source_node.id || current_depth > 0 {
                     // Valid path found

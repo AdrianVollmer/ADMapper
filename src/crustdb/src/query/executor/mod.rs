@@ -20,19 +20,25 @@ use crate::storage::SqliteStorage;
 use std::collections::HashMap;
 
 // Re-exports for submodules (some kept for backwards compatibility)
+#[allow(unused_imports)]
 pub use aggregate::{evaluate_aggregate, has_aggregate_functions, is_aggregate_function};
+#[allow(unused_imports)]
 pub use create::execute_create;
+#[allow(unused_imports)]
 pub use eval::{
     evaluate_expression_with_bindings, evaluate_function_call_with_bindings,
     filter_bindings_by_where, literal_to_property_value,
 };
+#[allow(unused_imports)]
 pub use mutation::{execute_delete, execute_set};
+#[allow(unused_imports)]
 pub use pattern::{
     execute_multi_hop_pattern, execute_shortest_path_pattern, execute_single_hop_pattern,
     execute_single_node_pattern, execute_variable_length_pattern, get_path_endpoint_vars,
     is_multi_hop_pattern, is_shortest_path_pattern, is_single_hop_pattern, is_single_node_pattern,
     is_variable_length_pattern,
 };
+#[allow(unused_imports)]
 pub use result::{build_match_result_from_bindings, evaluate_return_item_with_bindings};
 
 // =============================================================================
@@ -151,7 +157,6 @@ pub fn execute(statement: &Statement, storage: &SqliteStorage) -> Result<QueryRe
     // Execute the plan
     plan_exec::execute_plan(&optimized_plan, storage)
 }
-
 
 // =============================================================================
 // Tests

@@ -161,22 +161,67 @@ impl From<Direction> for ExpandDirection {
 /// Filter predicate in execution plan.
 #[derive(Debug, Clone)]
 pub enum FilterPredicate {
-    Eq { left: PlanExpr, right: PlanExpr },
-    Ne { left: PlanExpr, right: PlanExpr },
-    Lt { left: PlanExpr, right: PlanExpr },
-    Le { left: PlanExpr, right: PlanExpr },
-    Gt { left: PlanExpr, right: PlanExpr },
-    Ge { left: PlanExpr, right: PlanExpr },
-    And { left: Box<FilterPredicate>, right: Box<FilterPredicate> },
-    Or { left: Box<FilterPredicate>, right: Box<FilterPredicate> },
-    Not { inner: Box<FilterPredicate> },
-    IsNull { expr: PlanExpr },
-    IsNotNull { expr: PlanExpr },
-    StartsWith { expr: PlanExpr, prefix: String },
-    EndsWith { expr: PlanExpr, suffix: String },
-    Contains { expr: PlanExpr, substring: String },
-    Regex { expr: PlanExpr, pattern: String },
-    HasLabel { variable: String, label: String },
+    Eq {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    Ne {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    Lt {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    Le {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    Gt {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    Ge {
+        left: PlanExpr,
+        right: PlanExpr,
+    },
+    And {
+        left: Box<FilterPredicate>,
+        right: Box<FilterPredicate>,
+    },
+    Or {
+        left: Box<FilterPredicate>,
+        right: Box<FilterPredicate>,
+    },
+    Not {
+        inner: Box<FilterPredicate>,
+    },
+    IsNull {
+        expr: PlanExpr,
+    },
+    IsNotNull {
+        expr: PlanExpr,
+    },
+    StartsWith {
+        expr: PlanExpr,
+        prefix: String,
+    },
+    EndsWith {
+        expr: PlanExpr,
+        suffix: String,
+    },
+    Contains {
+        expr: PlanExpr,
+        substring: String,
+    },
+    Regex {
+        expr: PlanExpr,
+        pattern: String,
+    },
+    HasLabel {
+        variable: String,
+        label: String,
+    },
     /// Always true (for optimized-away predicates).
     True,
 }
@@ -336,9 +381,8 @@ fn plan_create(create: &super::parser::CreateClause) -> Result<PlanOperator> {
 
                 // Only create a node if it has labels/properties (declaration) or hasn't been declared yet
                 // A node pattern like `(charlie)` appearing after `(charlie:Person {...})` is a reference
-                let is_reference = labels.is_empty()
-                    && properties.is_empty()
-                    && declared_vars.contains(&var);
+                let is_reference =
+                    labels.is_empty() && properties.is_empty() && declared_vars.contains(&var);
 
                 if !is_reference {
                     nodes.push(CreateNode {
@@ -353,9 +397,9 @@ fn plan_create(create: &super::parser::CreateClause) -> Result<PlanOperator> {
             }
             PatternElement::Relationship(rp) => {
                 // Store the relationship to be completed when we see the next node
-                let source_var = prev_node_var.clone().ok_or_else(|| {
-                    Error::Cypher("Relationship must follow a node".into())
-                })?;
+                let source_var = prev_node_var
+                    .clone()
+                    .ok_or_else(|| Error::Cypher("Relationship must follow a node".into()))?;
                 pending_rel = Some((rp.clone(), source_var));
             }
         }
@@ -442,7 +486,10 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         _ => return Err(Error::Cypher("Pattern must start with a node".into())),
     };
 
-    let variable = first_node.variable.clone().unwrap_or_else(|| "_n0".to_string());
+    let variable = first_node
+        .variable
+        .clone()
+        .unwrap_or_else(|| "_n0".to_string());
     let label_groups: Vec<Vec<String>> = first_node.labels.clone();
 
     let mut plan = PlanOperator::NodeScan {
@@ -478,7 +525,11 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         // Expect target node
         let target_node = match pattern.elements.get(elem_idx) {
             Some(PatternElement::Node(np)) => np,
-            _ => return Err(Error::Cypher("Expected target node after relationship".into())),
+            _ => {
+                return Err(Error::Cypher(
+                    "Expected target node after relationship".into(),
+                ))
+            }
         };
 
         elem_idx += 1;
@@ -541,7 +592,9 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
 fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
     // SHORTEST requires exactly node-rel-node
     if pattern.elements.len() != 3 {
-        return Err(Error::Cypher("SHORTEST requires (a)-[r]->(b) pattern".into()));
+        return Err(Error::Cypher(
+            "SHORTEST requires (a)-[r]->(b) pattern".into(),
+        ));
     }
 
     let source_node = match &pattern.elements[0] {
@@ -559,17 +612,22 @@ fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         _ => return Err(Error::Cypher("Expected target node".into())),
     };
 
-    let source_var = source_node.variable.clone().unwrap_or_else(|| "_src".to_string());
-    let target_var = target_node.variable.clone().unwrap_or_else(|| "_tgt".to_string());
+    let source_var = source_node
+        .variable
+        .clone()
+        .unwrap_or_else(|| "_src".to_string());
+    let target_var = target_node
+        .variable
+        .clone()
+        .unwrap_or_else(|| "_tgt".to_string());
     let source_label_groups: Vec<Vec<String>> = source_node.labels.clone();
     let target_labels: Vec<String> = target_node.labels.iter().flatten().cloned().collect();
 
     // Determine hop bounds
     let (min_hops, max_hops) = if let Some(ref length) = rel.length {
         (length.min.unwrap_or(1), length.max.unwrap_or(100))
-    } else if rel.quantifier.is_some() {
-        (1, 100) // + or * quantifier
     } else {
+        // Default or quantifier (+ or *): variable length up to 100 hops
         (1, 100)
     };
 
@@ -742,7 +800,9 @@ fn plan_expression(expr: &Expression) -> Result<PlanExpr> {
                     property: property.clone(),
                 })
             } else {
-                Err(Error::Cypher("Complex property access not supported".into()))
+                Err(Error::Cypher(
+                    "Complex property access not supported".into(),
+                ))
             }
         }
         Expression::FunctionCall { name, args } => {
@@ -771,83 +831,81 @@ fn plan_expression(expr: &Expression) -> Result<PlanExpr> {
 /// Convert expression to filter predicate.
 fn plan_expression_as_predicate(expr: &Expression) -> Result<FilterPredicate> {
     match expr {
-        Expression::BinaryOp { left, op, right } => {
-            match op {
-                BinaryOperator::And => Ok(FilterPredicate::And {
-                    left: Box::new(plan_expression_as_predicate(left)?),
-                    right: Box::new(plan_expression_as_predicate(right)?),
-                }),
-                BinaryOperator::Or => Ok(FilterPredicate::Or {
-                    left: Box::new(plan_expression_as_predicate(left)?),
-                    right: Box::new(plan_expression_as_predicate(right)?),
-                }),
-                BinaryOperator::Eq => Ok(FilterPredicate::Eq {
-                    left: plan_expression(left)?,
-                    right: plan_expression(right)?,
-                }),
-                BinaryOperator::Ne => Ok(FilterPredicate::Ne {
-                    left: plan_expression(left)?,
-                    right: plan_expression(right)?,
-                }),
-                BinaryOperator::Lt => Ok(FilterPredicate::Lt {
-                    left: plan_expression(left)?,
-                    right: plan_expression(right)?,
-                }),
-                BinaryOperator::Le => Ok(FilterPredicate::Le {
-                    left: plan_expression(left)?,
-                    right: plan_expression(right)?,
-                }),
-                BinaryOperator::Gt => Ok(FilterPredicate::Gt {
-                    left: plan_expression(left)?,
-                    right: plan_expression(right)?,
-                }),
-                BinaryOperator::Ge => Ok(FilterPredicate::Ge {
-                    left: plan_expression(left)?,
-                    right: plan_expression(right)?,
-                }),
-                BinaryOperator::StartsWith => {
-                    if let Expression::Literal(Literal::String(s)) = right.as_ref() {
-                        Ok(FilterPredicate::StartsWith {
-                            expr: plan_expression(left)?,
-                            prefix: s.clone(),
-                        })
-                    } else {
-                        Err(Error::Cypher("STARTS WITH requires string literal".into()))
-                    }
+        Expression::BinaryOp { left, op, right } => match op {
+            BinaryOperator::And => Ok(FilterPredicate::And {
+                left: Box::new(plan_expression_as_predicate(left)?),
+                right: Box::new(plan_expression_as_predicate(right)?),
+            }),
+            BinaryOperator::Or => Ok(FilterPredicate::Or {
+                left: Box::new(plan_expression_as_predicate(left)?),
+                right: Box::new(plan_expression_as_predicate(right)?),
+            }),
+            BinaryOperator::Eq => Ok(FilterPredicate::Eq {
+                left: plan_expression(left)?,
+                right: plan_expression(right)?,
+            }),
+            BinaryOperator::Ne => Ok(FilterPredicate::Ne {
+                left: plan_expression(left)?,
+                right: plan_expression(right)?,
+            }),
+            BinaryOperator::Lt => Ok(FilterPredicate::Lt {
+                left: plan_expression(left)?,
+                right: plan_expression(right)?,
+            }),
+            BinaryOperator::Le => Ok(FilterPredicate::Le {
+                left: plan_expression(left)?,
+                right: plan_expression(right)?,
+            }),
+            BinaryOperator::Gt => Ok(FilterPredicate::Gt {
+                left: plan_expression(left)?,
+                right: plan_expression(right)?,
+            }),
+            BinaryOperator::Ge => Ok(FilterPredicate::Ge {
+                left: plan_expression(left)?,
+                right: plan_expression(right)?,
+            }),
+            BinaryOperator::StartsWith => {
+                if let Expression::Literal(Literal::String(s)) = right.as_ref() {
+                    Ok(FilterPredicate::StartsWith {
+                        expr: plan_expression(left)?,
+                        prefix: s.clone(),
+                    })
+                } else {
+                    Err(Error::Cypher("STARTS WITH requires string literal".into()))
                 }
-                BinaryOperator::EndsWith => {
-                    if let Expression::Literal(Literal::String(s)) = right.as_ref() {
-                        Ok(FilterPredicate::EndsWith {
-                            expr: plan_expression(left)?,
-                            suffix: s.clone(),
-                        })
-                    } else {
-                        Err(Error::Cypher("ENDS WITH requires string literal".into()))
-                    }
-                }
-                BinaryOperator::Contains => {
-                    if let Expression::Literal(Literal::String(s)) = right.as_ref() {
-                        Ok(FilterPredicate::Contains {
-                            expr: plan_expression(left)?,
-                            substring: s.clone(),
-                        })
-                    } else {
-                        Err(Error::Cypher("CONTAINS requires string literal".into()))
-                    }
-                }
-                BinaryOperator::RegexMatch => {
-                    if let Expression::Literal(Literal::String(s)) = right.as_ref() {
-                        Ok(FilterPredicate::Regex {
-                            expr: plan_expression(left)?,
-                            pattern: s.clone(),
-                        })
-                    } else {
-                        Err(Error::Cypher("=~ requires string literal pattern".into()))
-                    }
-                }
-                _ => Err(Error::Cypher(format!("Operator {:?} not supported", op))),
             }
-        }
+            BinaryOperator::EndsWith => {
+                if let Expression::Literal(Literal::String(s)) = right.as_ref() {
+                    Ok(FilterPredicate::EndsWith {
+                        expr: plan_expression(left)?,
+                        suffix: s.clone(),
+                    })
+                } else {
+                    Err(Error::Cypher("ENDS WITH requires string literal".into()))
+                }
+            }
+            BinaryOperator::Contains => {
+                if let Expression::Literal(Literal::String(s)) = right.as_ref() {
+                    Ok(FilterPredicate::Contains {
+                        expr: plan_expression(left)?,
+                        substring: s.clone(),
+                    })
+                } else {
+                    Err(Error::Cypher("CONTAINS requires string literal".into()))
+                }
+            }
+            BinaryOperator::RegexMatch => {
+                if let Expression::Literal(Literal::String(s)) = right.as_ref() {
+                    Ok(FilterPredicate::Regex {
+                        expr: plan_expression(left)?,
+                        pattern: s.clone(),
+                    })
+                } else {
+                    Err(Error::Cypher("=~ requires string literal pattern".into()))
+                }
+            }
+            _ => Err(Error::Cypher(format!("Operator {:?} not supported", op))),
+        },
         Expression::UnaryOp { op, operand } => match op {
             super::parser::UnaryOperator::Not => Ok(FilterPredicate::Not {
                 inner: Box::new(plan_expression_as_predicate(operand)?),
@@ -940,7 +998,10 @@ fn is_aggregate_expression(expr: &Expression) -> bool {
     match expr {
         Expression::FunctionCall { name, .. } => {
             let upper = name.to_uppercase();
-            matches!(upper.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "COLLECT")
+            matches!(
+                upper.as_str(),
+                "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "COLLECT"
+            )
         }
         _ => false,
     }
@@ -984,7 +1045,9 @@ fn try_extract_aggregate(expr: &Expression) -> Result<Option<AggregateFunction>>
             }
             "COLLECT" => {
                 if args.len() != 1 {
-                    return Err(Error::Cypher("COLLECT requires exactly one argument".into()));
+                    return Err(Error::Cypher(
+                        "COLLECT requires exactly one argument".into(),
+                    ));
                 }
                 Ok(Some(AggregateFunction::Collect(plan_expression(&args[0])?)))
             }
@@ -1230,7 +1293,11 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             variables,
             detach,
         },
-        PlanOperator::Create { source, nodes, edges } => PlanOperator::Create {
+        PlanOperator::Create {
+            source,
+            nodes,
+            edges,
+        } => PlanOperator::Create {
             source: source.map(|s| Box::new(optimize_operator(*s))),
             nodes,
             edges,

@@ -4,6 +4,9 @@
 //! - SQLite storage backend
 //! - Cypher query language support
 //! - Property graph model
+
+// Allow dead code for public API methods that may not be used within the crate itself
+#![allow(dead_code)]
 //!
 //! # Example
 //!
@@ -368,7 +371,11 @@ impl Database {
 
     /// Get query history with pagination.
     /// Returns (rows, total_count).
-    pub fn get_query_history(&self, limit: usize, offset: usize) -> Result<(Vec<QueryHistoryRow>, usize)> {
+    pub fn get_query_history(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
         let storage = self
             .write_conn
             .lock()
@@ -827,7 +834,8 @@ mod tests {
         db.set_caching(true);
 
         // Create initial data
-        db.execute("CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
+        db.execute("CREATE (n:Person {name: 'Alice', age: 30})")
+            .unwrap();
 
         // Execute a query - it will be cached
         let result1 = db.execute("MATCH (n:Person) RETURN n.age").unwrap();
@@ -838,7 +846,8 @@ mod tests {
         assert_eq!(stats.entry_count, 1);
 
         // Update data - should invalidate cache
-        db.execute("MATCH (n:Person {name: 'Alice'}) SET n.age = 31").unwrap();
+        db.execute("MATCH (n:Person {name: 'Alice'}) SET n.age = 31")
+            .unwrap();
 
         // Cache should be cleared by trigger
         let stats = db.cache_stats().unwrap();
@@ -863,7 +872,8 @@ mod tests {
         assert_eq!(stats.entry_count, 1);
 
         // Delete data - should invalidate cache
-        db.execute("MATCH (n:Person {name: 'Bob'}) DELETE n").unwrap();
+        db.execute("MATCH (n:Person {name: 'Bob'}) DELETE n")
+            .unwrap();
 
         // Cache should be cleared by trigger
         let stats = db.cache_stats().unwrap();
@@ -885,7 +895,8 @@ mod tests {
         assert_eq!(stats.entry_count, 0);
 
         // MATCH with SET is not cached (not read-only)
-        db.execute("MATCH (n:Person {name: 'Alice'}) SET n.age = 30").unwrap();
+        db.execute("MATCH (n:Person {name: 'Alice'}) SET n.age = 30")
+            .unwrap();
         let stats = db.cache_stats().unwrap();
         assert_eq!(stats.entry_count, 0);
 
@@ -931,9 +942,12 @@ mod tests {
         let db = Arc::new(Database::open(&db_path).unwrap());
 
         // Create some test data
-        db.execute("CREATE (n:Person {name: 'Alice', id: 1})").unwrap();
-        db.execute("CREATE (n:Person {name: 'Bob', id: 2})").unwrap();
-        db.execute("CREATE (n:Person {name: 'Charlie', id: 3})").unwrap();
+        db.execute("CREATE (n:Person {name: 'Alice', id: 1})")
+            .unwrap();
+        db.execute("CREATE (n:Person {name: 'Bob', id: 2})")
+            .unwrap();
+        db.execute("CREATE (n:Person {name: 'Charlie', id: 3})")
+            .unwrap();
 
         // Spawn multiple threads to read concurrently
         let handles: Vec<_> = (0..8)
