@@ -134,13 +134,13 @@ pub fn load_falkordb(graph: &GeneratedGraph, graph_name: &str) -> Result<(), Str
     // Batch insert nodes using UNWIND
     let batch_size = 1000;
     for chunk in graph.nodes.chunks(batch_size) {
-        let nodes_json: Vec<_> = chunk
+        let nodes_json: Vec<serde_json::Value> = chunk
             .iter()
             .enumerate()
-            .map(|(i, (_, props))| {
+            .map(|(i, (_, props)): (usize, &(Vec<String>, serde_json::Value))| {
                 serde_json::json!({
-                    "id": props.get("id").and_then(|v| v.as_i64()).unwrap_or(i as i64),
-                    "value": props.get("value").and_then(|v| v.as_i64()).unwrap_or(0)
+                    "id": props.get("id").and_then(serde_json::Value::as_i64).unwrap_or(i as i64),
+                    "value": props.get("value").and_then(serde_json::Value::as_i64).unwrap_or(0)
                 })
             })
             .collect();
@@ -154,22 +154,20 @@ pub fn load_falkordb(graph: &GeneratedGraph, graph_name: &str) -> Result<(), Str
 
     // Batch insert edges
     for chunk in graph.edges.chunks(batch_size) {
-        let edges_json: Vec<_> = chunk
-            .iter()
-            .map(|(src, tgt, _, _)| {
-                let src_id = graph.nodes[*src]
-                    .1
-                    .get("id")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(*src as i64);
-                let tgt_id = graph.nodes[*tgt]
-                    .1
-                    .get("id")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(*tgt as i64);
-                serde_json::json!({"src": src_id, "tgt": tgt_id})
-            })
-            .collect();
+        let mut edges_json: Vec<serde_json::Value> = Vec::with_capacity(chunk.len());
+        for (src, tgt, _, _) in chunk {
+            let src_id = graph.nodes[*src]
+                .1
+                .get("id")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(*src as i64);
+            let tgt_id = graph.nodes[*tgt]
+                .1
+                .get("id")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(*tgt as i64);
+            edges_json.push(serde_json::json!({"src": src_id, "tgt": tgt_id}));
+        }
 
         let query = format!(
             "UNWIND {} AS e MATCH (a:Node {{id: e.src}}), (b:Node {{id: e.tgt}}) CREATE (a)-[:EDGE]->(b)",
@@ -265,13 +263,13 @@ pub fn load_neo4j(graph: &GeneratedGraph) -> Result<(), String> {
     // Batch insert nodes
     let batch_size = 1000;
     for chunk in graph.nodes.chunks(batch_size) {
-        let nodes_json: Vec<_> = chunk
+        let nodes_json: Vec<serde_json::Value> = chunk
             .iter()
             .enumerate()
-            .map(|(i, (_, props))| {
+            .map(|(i, (_, props)): (usize, &(Vec<String>, serde_json::Value))| {
                 serde_json::json!({
-                    "id": props.get("id").and_then(|v| v.as_i64()).unwrap_or(i as i64),
-                    "value": props.get("value").and_then(|v| v.as_i64()).unwrap_or(0)
+                    "id": props.get("id").and_then(serde_json::Value::as_i64).unwrap_or(i as i64),
+                    "value": props.get("value").and_then(serde_json::Value::as_i64).unwrap_or(0)
                 })
             })
             .collect();
@@ -288,22 +286,20 @@ pub fn load_neo4j(graph: &GeneratedGraph) -> Result<(), String> {
 
     // Batch insert edges
     for chunk in graph.edges.chunks(batch_size) {
-        let edges_json: Vec<_> = chunk
-            .iter()
-            .map(|(src, tgt, _, _)| {
-                let src_id = graph.nodes[*src]
-                    .1
-                    .get("id")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(*src as i64);
-                let tgt_id = graph.nodes[*tgt]
-                    .1
-                    .get("id")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(*tgt as i64);
-                serde_json::json!({"src": src_id, "tgt": tgt_id})
-            })
-            .collect();
+        let mut edges_json: Vec<serde_json::Value> = Vec::with_capacity(chunk.len());
+        for (src, tgt, _, _) in chunk {
+            let src_id = graph.nodes[*src]
+                .1
+                .get("id")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(*src as i64);
+            let tgt_id = graph.nodes[*tgt]
+                .1
+                .get("id")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(*tgt as i64);
+            edges_json.push(serde_json::json!({"src": src_id, "tgt": tgt_id}));
+        }
 
         let query = format!(
             "UNWIND {} AS e MATCH (a:Node {{id: e.src}}), (b:Node {{id: e.tgt}}) CREATE (a)-[:EDGE]->(b)",

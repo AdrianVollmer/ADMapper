@@ -36,3 +36,28 @@ tempfile = "3.10"
 toml = "0.8"
 glob = "0.3"
 pprof = { version = "0.14", features = ["flamegraph"] }
+
+# Explicitly list examples (exclude generators.rs and comparison.rs which are modules)
+[[example]]
+name = "bench_crud"
+path = "examples/bench_crud.rs"
+
+[[example]]
+name = "bench_shortest"
+path = "examples/bench_shortest.rs"
+
+[[example]]
+name = "bench_stress"
+path = "examples/bench_stress.rs"
+
+[[example]]
+name = "profile_crud"
+path = "examples/profile_crud.rs"
+
+[[example]]
+name = "profile_shortest"
+path = "examples/profile_shortest.rs"
+
+[[example]]
+name = "test_grid"
+path = "examples/test_grid.rs"

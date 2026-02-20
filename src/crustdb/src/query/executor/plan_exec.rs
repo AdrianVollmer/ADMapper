@@ -1,0 +1,1346 @@
+//! Plan executor - interprets and executes query plans.
+//!
+//! This module takes a `QueryPlan` from the planner and executes it
+//! against the storage backend, producing a `QueryResult`.
+
+use super::{Binding, Path};
+use crate::error::{Error, Result};
+use crate::graph::{Edge, Node, PropertyValue};
+use crate::query::planner::{
+    AggregateFunction, CreateEdge, CreateNode, ExpandDirection, FilterPredicate, PlanExpr,
+    PlanLiteral, PlanOperator, ProjectColumn, QueryPlan, SetOperation,
+};
+use crate::query::{PathEdge, PathNode, QueryResult, QueryStats, ResultValue, Row};
+use crate::storage::SqliteStorage;
+use std::collections::{HashMap, HashSet, VecDeque};
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+/// Execute a query plan against storage.
+pub fn execute_plan(plan: &QueryPlan, storage: &SqliteStorage) -> Result<QueryResult> {
+    let mut stats = QueryStats::default();
+    let start = std::time::Instant::now();
+
+    // Execute the plan tree
+    let execution_result = execute_operator(&plan.root, storage, &mut stats)?;
+
+    // Convert to QueryResult
+    let result = match execution_result {
+        ExecutionResult::Bindings(bindings) => {
+            // No RETURN clause - empty result
+            QueryResult {
+                columns: Vec::new(),
+                rows: Vec::new(),
+                stats,
+            }
+        }
+        ExecutionResult::Rows { columns, rows } => QueryResult { columns, rows, stats },
+    };
+
+    let mut result = result;
+    result.stats.execution_time_ms = start.elapsed().as_millis() as u64;
+    Ok(result)
+}
+
+/// Internal execution result - either bindings (for intermediate steps) or final rows.
+enum ExecutionResult {
+    Bindings(Vec<Binding>),
+    Rows { columns: Vec<String>, rows: Vec<Row> },
+}
+
+// =============================================================================
+// Operator Execution
+// =============================================================================
+
+fn execute_operator(
+    op: &PlanOperator,
+    storage: &SqliteStorage,
+    stats: &mut QueryStats,
+) -> Result<ExecutionResult> {
+    match op {
+        PlanOperator::Empty => Ok(ExecutionResult::Bindings(Vec::new())),
+
+        PlanOperator::ProduceRow => Ok(ExecutionResult::Bindings(vec![Binding::new()])),
+
+        PlanOperator::NodeScan {
+            variable,
+            labels,
+            limit,
+        } => execute_node_scan(variable, labels, *limit, storage),
+
+        PlanOperator::Expand {
+            source,
+            source_variable,
+            rel_variable,
+            target_variable,
+            target_labels,
+            types,
+            direction,
+        } => {
+            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            execute_expand(
+                bindings,
+                source_variable,
+                rel_variable.as_deref(),
+                target_variable,
+                target_labels,
+                types,
+                *direction,
+                storage,
+            )
+        }
+
+        PlanOperator::VariableLengthExpand {
+            source,
+            source_variable,
+            rel_variable,
+            target_variable,
+            target_labels,
+            path_variable,
+            types,
+            direction,
+            min_hops,
+            max_hops,
+        } => {
+            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            execute_variable_length_expand(
+                bindings,
+                source_variable,
+                rel_variable.as_deref(),
+                target_variable,
+                target_labels,
+                path_variable.as_deref(),
+                types,
+                *direction,
+                *min_hops,
+                *max_hops,
+                storage,
+            )
+        }
+
+        PlanOperator::ShortestPath {
+            source,
+            source_variable,
+            target_variable,
+            target_labels,
+            path_variable,
+            types,
+            direction,
+            min_hops,
+            max_hops,
+            k,
+        } => {
+            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            execute_shortest_path(
+                bindings,
+                source_variable,
+                target_variable,
+                target_labels,
+                path_variable.as_deref(),
+                types,
+                *direction,
+                *min_hops,
+                *max_hops,
+                *k,
+                storage,
+            )
+        }
+
+        PlanOperator::Filter { source, predicate } => {
+            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let filtered = filter_bindings(bindings, predicate)?;
+            Ok(ExecutionResult::Bindings(filtered))
+        }
+
+        PlanOperator::Project {
+            source,
+            columns,
+            distinct,
+        } => {
+            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            execute_project(bindings, columns, *distinct, storage)
+        }
+
+        PlanOperator::Aggregate {
+            source,
+            group_by,
+            aggregates,
+        } => {
+            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            execute_aggregate(bindings, group_by, aggregates, storage)
+        }
+
+        PlanOperator::CountPushdown { label, alias } => {
+            execute_count_pushdown(label.as_deref(), alias, storage)
+        }
+
+        PlanOperator::Limit { source, count } => {
+            let mut bindings = execute_operator_to_bindings(source, storage, stats)?;
+            bindings.truncate(*count as usize);
+            Ok(ExecutionResult::Bindings(bindings))
+        }
+
+        PlanOperator::Skip { source, count } => {
+            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let skipped: Vec<_> = bindings.into_iter().skip(*count as usize).collect();
+            Ok(ExecutionResult::Bindings(skipped))
+        }
+
+        PlanOperator::Create {
+            source,
+            nodes,
+            edges,
+        } => execute_create(source.as_deref(), nodes, edges, storage, stats),
+
+        PlanOperator::SetProperties { source, sets } => {
+            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            execute_set_properties(&bindings, sets, storage, stats)?;
+            Ok(ExecutionResult::Bindings(bindings))
+        }
+
+        PlanOperator::Delete {
+            source,
+            variables,
+            detach,
+        } => {
+            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            execute_delete(&bindings, variables, *detach, storage, stats)?;
+            Ok(ExecutionResult::Bindings(Vec::new()))
+        }
+
+        PlanOperator::Sort { source, keys: _ } => {
+            // TODO: Implement sorting
+            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            Ok(ExecutionResult::Bindings(bindings))
+        }
+
+        PlanOperator::EdgeScan { .. } => {
+            Err(Error::Cypher("EdgeScan not implemented".into()))
+        }
+    }
+}
+
+/// Execute an operator and expect bindings (not final rows).
+fn execute_operator_to_bindings(
+    op: &PlanOperator,
+    storage: &SqliteStorage,
+    stats: &mut QueryStats,
+) -> Result<Vec<Binding>> {
+    match execute_operator(op, storage, stats)? {
+        ExecutionResult::Bindings(b) => Ok(b),
+        ExecutionResult::Rows { .. } => {
+            // This shouldn't happen in a well-formed plan
+            Err(Error::Internal("Expected bindings, got rows".into()))
+        }
+    }
+}
+
+// =============================================================================
+// Scan Operators
+// =============================================================================
+
+fn execute_node_scan(
+    variable: &str,
+    labels: &[String],
+    limit: Option<u64>,
+    storage: &SqliteStorage,
+) -> Result<ExecutionResult> {
+    let nodes = if labels.is_empty() {
+        storage.get_all_nodes_limit(limit)?
+    } else if labels.len() == 1 {
+        storage.find_nodes_by_label_limit(&labels[0], limit)?
+    } else {
+        // Multiple labels - get first and filter
+        let mut nodes = storage.find_nodes_by_label(&labels[0])?;
+        nodes.retain(|n| labels[1..].iter().all(|l| n.has_label(l)));
+        if let Some(lim) = limit {
+            nodes.truncate(lim as usize);
+        }
+        nodes
+    };
+
+    let bindings = nodes
+        .into_iter()
+        .map(|node| Binding::new().with_node(variable, node))
+        .collect();
+
+    Ok(ExecutionResult::Bindings(bindings))
+}
+
+// =============================================================================
+// Expand Operators
+// =============================================================================
+
+fn execute_expand(
+    bindings: Vec<Binding>,
+    source_variable: &str,
+    rel_variable: Option<&str>,
+    target_variable: &str,
+    target_labels: &[String],
+    types: &[String],
+    direction: ExpandDirection,
+    storage: &SqliteStorage,
+) -> Result<ExecutionResult> {
+    let mut result = Vec::new();
+
+    for binding in bindings {
+        let source_node = binding
+            .nodes
+            .get(source_variable)
+            .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
+
+        let edges = get_edges(source_node.id, direction, storage)?;
+        let edges = filter_edges_by_type(edges, types);
+
+        for edge in edges {
+            let target_id = get_target_id(&edge, source_node.id, direction);
+            let target_node = match storage.get_node(target_id)? {
+                Some(n) => n,
+                None => continue,
+            };
+
+            // Check target labels
+            if !target_labels.is_empty()
+                && !target_labels.iter().any(|l| target_node.has_label(l))
+            {
+                continue;
+            }
+
+            let mut new_binding = binding.clone().with_node(target_variable, target_node);
+
+            if let Some(rv) = rel_variable {
+                new_binding = new_binding.with_edge(rv, edge);
+            }
+
+            result.push(new_binding);
+        }
+    }
+
+    Ok(ExecutionResult::Bindings(result))
+}
+
+fn execute_variable_length_expand(
+    bindings: Vec<Binding>,
+    source_variable: &str,
+    rel_variable: Option<&str>,
+    target_variable: &str,
+    target_labels: &[String],
+    path_variable: Option<&str>,
+    types: &[String],
+    direction: ExpandDirection,
+    min_hops: u32,
+    max_hops: u32,
+    storage: &SqliteStorage,
+) -> Result<ExecutionResult> {
+    let mut result = Vec::new();
+
+    for binding in bindings {
+        let source_node = binding
+            .nodes
+            .get(source_variable)
+            .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
+
+        // BFS traversal
+        let mut queue: VecDeque<(i64, Vec<i64>, Vec<Edge>)> = VecDeque::new();
+        let mut found_targets: HashSet<i64> = HashSet::new();
+
+        queue.push_back((source_node.id, vec![source_node.id], Vec::new()));
+
+        while let Some((current_id, path_nodes, path_edges)) = queue.pop_front() {
+            let depth = path_edges.len() as u32;
+
+            // Check if we've reached a valid target
+            if depth >= min_hops && depth <= max_hops && current_id != source_node.id {
+                if let Some(target_node) = storage.get_node(current_id)? {
+                    // Check target labels
+                    let matches_labels = target_labels.is_empty()
+                        || target_labels.iter().any(|l| target_node.has_label(l));
+
+                    if matches_labels && !found_targets.contains(&current_id) {
+                        found_targets.insert(current_id);
+
+                        let mut new_binding = binding
+                            .clone()
+                            .with_node(target_variable, target_node);
+
+                        if let Some(pv) = path_variable {
+                            // Build full path
+                            let mut nodes = Vec::new();
+                            for &nid in &path_nodes {
+                                if let Some(n) = storage.get_node(nid)? {
+                                    nodes.push(n);
+                                }
+                            }
+                            new_binding = new_binding.with_path(
+                                pv,
+                                Path {
+                                    nodes,
+                                    edges: path_edges.clone(),
+                                },
+                            );
+                        }
+
+                        if let Some(rv) = rel_variable {
+                            new_binding = new_binding.with_edge_list(rv, path_edges.clone());
+                        }
+
+                        result.push(new_binding);
+                    }
+                }
+            }
+
+            // Don't expand beyond max depth
+            if depth >= max_hops {
+                continue;
+            }
+
+            // Expand to neighbors
+            let edges = get_edges(current_id, direction, storage)?;
+            let edges = filter_edges_by_type(edges, types);
+
+            for edge in edges {
+                let next_id = get_target_id(&edge, current_id, direction);
+
+                // Avoid cycles within path
+                if path_nodes.contains(&next_id) {
+                    continue;
+                }
+
+                let mut new_path_nodes = path_nodes.clone();
+                new_path_nodes.push(next_id);
+
+                let mut new_path_edges = path_edges.clone();
+                new_path_edges.push(edge);
+
+                queue.push_back((next_id, new_path_nodes, new_path_edges));
+            }
+        }
+    }
+
+    Ok(ExecutionResult::Bindings(result))
+}
+
+fn execute_shortest_path(
+    bindings: Vec<Binding>,
+    source_variable: &str,
+    target_variable: &str,
+    target_labels: &[String],
+    path_variable: Option<&str>,
+    types: &[String],
+    direction: ExpandDirection,
+    min_hops: u32,
+    max_hops: u32,
+    k: u32,
+    storage: &SqliteStorage,
+) -> Result<ExecutionResult> {
+    let mut result = Vec::new();
+
+    // Pre-scan target nodes if we have label constraints
+    let target_ids: Option<HashSet<i64>> = if !target_labels.is_empty() {
+        let mut ids = HashSet::new();
+        for label in target_labels {
+            for node in storage.find_nodes_by_label(label)? {
+                ids.insert(node.id);
+            }
+        }
+        Some(ids)
+    } else {
+        None
+    };
+
+    for binding in bindings {
+        let source_node = binding
+            .nodes
+            .get(source_variable)
+            .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
+
+        // BFS for shortest paths
+        let use_fast_bfs = k == 1;
+        let mut visited: HashSet<i64> = HashSet::new();
+        let mut found_paths: Vec<(Node, Vec<i64>, Vec<i64>)> = Vec::new();
+        let mut shortest_found: Option<u32> = None;
+
+        let mut queue: VecDeque<(i64, Vec<i64>, Vec<i64>)> = VecDeque::new();
+        queue.push_back((source_node.id, vec![source_node.id], Vec::new()));
+        visited.insert(source_node.id);
+
+        while let Some((current_id, path_nodes, path_edge_ids)) = queue.pop_front() {
+            let depth = path_edge_ids.len() as u32;
+
+            // Early termination
+            if found_paths.len() >= k as usize {
+                break;
+            }
+            if let Some(shortest) = shortest_found {
+                if depth > shortest {
+                    break;
+                }
+            }
+            if depth > max_hops {
+                continue;
+            }
+
+            // Check if we reached a valid target
+            if depth >= min_hops && current_id != source_node.id {
+                let is_target = target_ids
+                    .as_ref()
+                    .map(|ids| ids.contains(&current_id))
+                    .unwrap_or(true);
+
+                if is_target {
+                    if let Some(target_node) = storage.get_node(current_id)? {
+                        found_paths.push((target_node, path_nodes.clone(), path_edge_ids.clone()));
+                        if shortest_found.is_none() {
+                            shortest_found = Some(depth);
+                        }
+                        if use_fast_bfs {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Don't expand past shortest depth
+            if let Some(shortest) = shortest_found {
+                if depth >= shortest {
+                    continue;
+                }
+            }
+
+            // Expand
+            let edges = get_edges(current_id, direction, storage)?;
+            let edges = filter_edges_by_type(edges, types);
+
+            for edge in edges {
+                let next_id = get_target_id(&edge, current_id, direction);
+
+                if use_fast_bfs {
+                    if visited.contains(&next_id) {
+                        continue;
+                    }
+                    visited.insert(next_id);
+                } else if path_nodes.contains(&next_id) {
+                    continue;
+                }
+
+                let mut new_path_nodes = path_nodes.clone();
+                new_path_nodes.push(next_id);
+
+                let mut new_path_edge_ids = path_edge_ids.clone();
+                new_path_edge_ids.push(edge.id);
+
+                queue.push_back((next_id, new_path_nodes, new_path_edge_ids));
+            }
+        }
+
+        // Convert found paths to bindings
+        for (target_node, path_node_ids, path_edge_ids) in found_paths {
+            let mut new_binding = binding
+                .clone()
+                .with_node(target_variable, target_node);
+
+            if let Some(pv) = path_variable {
+                let mut nodes = Vec::new();
+                for &nid in &path_node_ids {
+                    if let Some(n) = storage.get_node(nid)? {
+                        nodes.push(n);
+                    }
+                }
+                let mut edges = Vec::new();
+                for &eid in &path_edge_ids {
+                    if let Some(e) = storage.get_edge(eid)? {
+                        edges.push(e);
+                    }
+                }
+                new_binding = new_binding.with_path(pv, Path { nodes, edges });
+            }
+
+            result.push(new_binding);
+        }
+    }
+
+    Ok(ExecutionResult::Bindings(result))
+}
+
+// =============================================================================
+// Helper Functions for Traversal
+// =============================================================================
+
+fn get_edges(node_id: i64, direction: ExpandDirection, storage: &SqliteStorage) -> Result<Vec<Edge>> {
+    match direction {
+        ExpandDirection::Outgoing => storage.find_outgoing_edges(node_id),
+        ExpandDirection::Incoming => storage.find_incoming_edges(node_id),
+        ExpandDirection::Both => {
+            let mut edges = storage.find_outgoing_edges(node_id)?;
+            edges.extend(storage.find_incoming_edges(node_id)?);
+            Ok(edges)
+        }
+    }
+}
+
+fn filter_edges_by_type(edges: Vec<Edge>, types: &[String]) -> Vec<Edge> {
+    if types.is_empty() {
+        edges
+    } else {
+        edges
+            .into_iter()
+            .filter(|e| types.contains(&e.edge_type))
+            .collect()
+    }
+}
+
+fn get_target_id(edge: &Edge, from_id: i64, direction: ExpandDirection) -> i64 {
+    match direction {
+        ExpandDirection::Outgoing => edge.target,
+        ExpandDirection::Incoming => edge.source,
+        ExpandDirection::Both => {
+            if edge.source == from_id {
+                edge.target
+            } else {
+                edge.source
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Filter Operator
+// =============================================================================
+
+fn filter_bindings(bindings: Vec<Binding>, predicate: &FilterPredicate) -> Result<Vec<Binding>> {
+    let mut result = Vec::new();
+    for binding in bindings {
+        if evaluate_predicate(predicate, &binding)? {
+            result.push(binding);
+        }
+    }
+    Ok(result)
+}
+
+fn evaluate_predicate(predicate: &FilterPredicate, binding: &Binding) -> Result<bool> {
+    match predicate {
+        FilterPredicate::True => Ok(true),
+
+        FilterPredicate::Eq { left, right } => {
+            let l = evaluate_expr(left, binding)?;
+            let r = evaluate_expr(right, binding)?;
+            Ok(values_equal(&l, &r))
+        }
+
+        FilterPredicate::Ne { left, right } => {
+            let l = evaluate_expr(left, binding)?;
+            let r = evaluate_expr(right, binding)?;
+            Ok(!values_equal(&l, &r))
+        }
+
+        FilterPredicate::Lt { left, right } => {
+            let l = evaluate_expr(left, binding)?;
+            let r = evaluate_expr(right, binding)?;
+            Ok(compare_values(&l, &r).map(|c| c < 0).unwrap_or(false))
+        }
+
+        FilterPredicate::Le { left, right } => {
+            let l = evaluate_expr(left, binding)?;
+            let r = evaluate_expr(right, binding)?;
+            Ok(compare_values(&l, &r).map(|c| c <= 0).unwrap_or(false))
+        }
+
+        FilterPredicate::Gt { left, right } => {
+            let l = evaluate_expr(left, binding)?;
+            let r = evaluate_expr(right, binding)?;
+            Ok(compare_values(&l, &r).map(|c| c > 0).unwrap_or(false))
+        }
+
+        FilterPredicate::Ge { left, right } => {
+            let l = evaluate_expr(left, binding)?;
+            let r = evaluate_expr(right, binding)?;
+            Ok(compare_values(&l, &r).map(|c| c >= 0).unwrap_or(false))
+        }
+
+        FilterPredicate::And { left, right } => {
+            Ok(evaluate_predicate(left, binding)? && evaluate_predicate(right, binding)?)
+        }
+
+        FilterPredicate::Or { left, right } => {
+            Ok(evaluate_predicate(left, binding)? || evaluate_predicate(right, binding)?)
+        }
+
+        FilterPredicate::Not { inner } => Ok(!evaluate_predicate(inner, binding)?),
+
+        FilterPredicate::IsNull { expr } => {
+            let v = evaluate_expr(expr, binding)?;
+            Ok(matches!(v, EvalValue::Null))
+        }
+
+        FilterPredicate::IsNotNull { expr } => {
+            let v = evaluate_expr(expr, binding)?;
+            Ok(!matches!(v, EvalValue::Null))
+        }
+
+        FilterPredicate::StartsWith { expr, prefix } => {
+            let v = evaluate_expr(expr, binding)?;
+            if let EvalValue::String(s) = v {
+                Ok(s.starts_with(prefix))
+            } else {
+                Ok(false)
+            }
+        }
+
+        FilterPredicate::EndsWith { expr, suffix } => {
+            let v = evaluate_expr(expr, binding)?;
+            if let EvalValue::String(s) = v {
+                Ok(s.ends_with(suffix))
+            } else {
+                Ok(false)
+            }
+        }
+
+        FilterPredicate::Contains { expr, substring } => {
+            let v = evaluate_expr(expr, binding)?;
+            if let EvalValue::String(s) = v {
+                Ok(s.contains(substring))
+            } else {
+                Ok(false)
+            }
+        }
+
+        FilterPredicate::Regex { expr, pattern } => {
+            let v = evaluate_expr(expr, binding)?;
+            if let EvalValue::String(s) = v {
+                let re = regex::Regex::new(pattern).map_err(|e| Error::Cypher(e.to_string()))?;
+                Ok(re.is_match(&s))
+            } else {
+                Ok(false)
+            }
+        }
+
+        FilterPredicate::HasLabel { variable, label } => {
+            if let Some(node) = binding.nodes.get(variable) {
+                Ok(node.has_label(label))
+            } else {
+                Ok(false)
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Expression Evaluation
+// =============================================================================
+
+#[derive(Debug, Clone)]
+enum EvalValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+    List(Vec<EvalValue>),
+    Node(Node),
+    Edge(Edge),
+    Path(Path),
+}
+
+fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalValue> {
+    match expr {
+        PlanExpr::Literal(lit) => Ok(match lit {
+            PlanLiteral::Null => EvalValue::Null,
+            PlanLiteral::Bool(b) => EvalValue::Bool(*b),
+            PlanLiteral::Int(i) => EvalValue::Int(*i),
+            PlanLiteral::Float(f) => EvalValue::Float(*f),
+            PlanLiteral::String(s) => EvalValue::String(s.clone()),
+        }),
+
+        PlanExpr::Variable(v) => {
+            if let Some(node) = binding.nodes.get(v) {
+                Ok(EvalValue::Node(node.clone()))
+            } else if let Some(edge) = binding.edges.get(v) {
+                Ok(EvalValue::Edge(edge.clone()))
+            } else if let Some(path) = binding.paths.get(v) {
+                Ok(EvalValue::Path(path.clone()))
+            } else {
+                Ok(EvalValue::Null)
+            }
+        }
+
+        PlanExpr::Property { variable, property } => {
+            if let Some(node) = binding.nodes.get(variable) {
+                Ok(property_to_eval_value(node.properties.get(property)))
+            } else if let Some(edge) = binding.edges.get(variable) {
+                Ok(property_to_eval_value(edge.properties.get(property)))
+            } else {
+                Ok(EvalValue::Null)
+            }
+        }
+
+        PlanExpr::PathLength { path_variable } => {
+            if let Some(path) = binding.paths.get(path_variable) {
+                Ok(EvalValue::Int(path.edges.len() as i64))
+            } else {
+                Ok(EvalValue::Null)
+            }
+        }
+
+        PlanExpr::Function { name, args } => {
+            // Handle common functions
+            let upper = name.to_uppercase();
+            match upper.as_str() {
+                "ID" => {
+                    if args.len() == 1 {
+                        let v = evaluate_expr(&args[0], binding)?;
+                        match v {
+                            EvalValue::Node(n) => Ok(EvalValue::Int(n.id)),
+                            EvalValue::Edge(e) => Ok(EvalValue::Int(e.id)),
+                            _ => Ok(EvalValue::Null),
+                        }
+                    } else {
+                        Ok(EvalValue::Null)
+                    }
+                }
+                "TYPE" => {
+                    if args.len() == 1 {
+                        let v = evaluate_expr(&args[0], binding)?;
+                        if let EvalValue::Edge(e) = v {
+                            Ok(EvalValue::String(e.edge_type))
+                        } else {
+                            Ok(EvalValue::Null)
+                        }
+                    } else {
+                        Ok(EvalValue::Null)
+                    }
+                }
+                "LABELS" => {
+                    if args.len() == 1 {
+                        let v = evaluate_expr(&args[0], binding)?;
+                        if let EvalValue::Node(n) = v {
+                            let labels: Vec<EvalValue> =
+                                n.labels.into_iter().map(EvalValue::String).collect();
+                            Ok(EvalValue::List(labels))
+                        } else {
+                            Ok(EvalValue::Null)
+                        }
+                    } else {
+                        Ok(EvalValue::Null)
+                    }
+                }
+                _ => Ok(EvalValue::Null), // Unknown function
+            }
+        }
+    }
+}
+
+fn property_to_eval_value(prop: Option<&PropertyValue>) -> EvalValue {
+    match prop {
+        None => EvalValue::Null,
+        Some(PropertyValue::Null) => EvalValue::Null,
+        Some(PropertyValue::Bool(b)) => EvalValue::Bool(*b),
+        Some(PropertyValue::Integer(i)) => EvalValue::Int(*i),
+        Some(PropertyValue::Float(f)) => EvalValue::Float(*f),
+        Some(PropertyValue::String(s)) => EvalValue::String(s.clone()),
+        Some(PropertyValue::List(items)) => {
+            let values: Vec<EvalValue> = items.iter().map(|p| property_to_eval_value(Some(p))).collect();
+            EvalValue::List(values)
+        }
+        Some(PropertyValue::Map(_)) => {
+            // Maps are not currently supported as eval values
+            EvalValue::Null
+        }
+    }
+}
+
+fn values_equal(a: &EvalValue, b: &EvalValue) -> bool {
+    match (a, b) {
+        (EvalValue::Null, EvalValue::Null) => false, // NULL != NULL in Cypher
+        (EvalValue::Bool(x), EvalValue::Bool(y)) => x == y,
+        (EvalValue::Int(x), EvalValue::Int(y)) => x == y,
+        (EvalValue::Float(x), EvalValue::Float(y)) => (x - y).abs() < f64::EPSILON,
+        (EvalValue::Int(x), EvalValue::Float(y)) | (EvalValue::Float(y), EvalValue::Int(x)) => {
+            (*x as f64 - y).abs() < f64::EPSILON
+        }
+        (EvalValue::String(x), EvalValue::String(y)) => x == y,
+        _ => false,
+    }
+}
+
+fn compare_values(a: &EvalValue, b: &EvalValue) -> Option<i32> {
+    match (a, b) {
+        (EvalValue::Int(x), EvalValue::Int(y)) => Some(x.cmp(y) as i32),
+        (EvalValue::Float(x), EvalValue::Float(y)) => {
+            if x < y {
+                Some(-1)
+            } else if x > y {
+                Some(1)
+            } else {
+                Some(0)
+            }
+        }
+        (EvalValue::Int(x), EvalValue::Float(y)) => {
+            let xf = *x as f64;
+            if xf < *y {
+                Some(-1)
+            } else if xf > *y {
+                Some(1)
+            } else {
+                Some(0)
+            }
+        }
+        (EvalValue::Float(x), EvalValue::Int(y)) => {
+            let yf = *y as f64;
+            if *x < yf {
+                Some(-1)
+            } else if *x > yf {
+                Some(1)
+            } else {
+                Some(0)
+            }
+        }
+        (EvalValue::String(x), EvalValue::String(y)) => Some(x.cmp(y) as i32),
+        _ => None,
+    }
+}
+
+// =============================================================================
+// Project and Aggregate Operators
+// =============================================================================
+
+fn execute_project(
+    bindings: Vec<Binding>,
+    columns: &[ProjectColumn],
+    distinct: bool,
+    _storage: &SqliteStorage,
+) -> Result<ExecutionResult> {
+    let column_names: Vec<String> = columns.iter().map(|c| c.alias.clone()).collect();
+    let mut rows = Vec::new();
+
+    for binding in bindings {
+        let mut values = HashMap::new();
+        for col in columns {
+            let value = evaluate_expr(&col.expr, &binding)?;
+            values.insert(col.alias.clone(), eval_to_result_value(value));
+        }
+        rows.push(Row { values });
+    }
+
+    if distinct {
+        // Simple deduplication based on string representation
+        let mut seen = HashSet::new();
+        let mut unique_rows = Vec::new();
+        for row in rows {
+            let key = format!("{:?}", row.values);
+            if seen.insert(key) {
+                unique_rows.push(row);
+            }
+        }
+        rows = unique_rows;
+    }
+
+    Ok(ExecutionResult::Rows {
+        columns: column_names,
+        rows,
+    })
+}
+
+fn execute_aggregate(
+    bindings: Vec<Binding>,
+    group_by: &[ProjectColumn],
+    aggregates: &[crate::query::planner::AggregateColumn],
+    _storage: &SqliteStorage,
+) -> Result<ExecutionResult> {
+    // If no GROUP BY, treat all rows as one group
+    if group_by.is_empty() {
+        let mut values = HashMap::new();
+
+        for agg in aggregates {
+            let result = compute_aggregate(&agg.function, &bindings)?;
+            values.insert(agg.alias.clone(), result);
+        }
+
+        let columns: Vec<String> = aggregates.iter().map(|a| a.alias.clone()).collect();
+        return Ok(ExecutionResult::Rows {
+            columns,
+            rows: vec![Row { values }],
+        });
+    }
+
+    // Group by implementation
+    let mut groups: HashMap<String, Vec<Binding>> = HashMap::new();
+
+    for binding in bindings {
+        let mut key_parts = Vec::new();
+        for col in group_by {
+            let v = evaluate_expr(&col.expr, &binding)?;
+            key_parts.push(format!("{:?}", v));
+        }
+        let key = key_parts.join("|");
+        groups.entry(key).or_default().push(binding);
+    }
+
+    let mut columns: Vec<String> = group_by.iter().map(|c| c.alias.clone()).collect();
+    columns.extend(aggregates.iter().map(|a| a.alias.clone()));
+
+    let mut rows = Vec::new();
+    for (_, group_bindings) in groups {
+        let first = &group_bindings[0];
+        let mut values = HashMap::new();
+
+        // Add GROUP BY columns
+        for col in group_by {
+            let v = evaluate_expr(&col.expr, first)?;
+            values.insert(col.alias.clone(), eval_to_result_value(v));
+        }
+
+        // Add aggregates
+        for agg in aggregates {
+            let result = compute_aggregate(&agg.function, &group_bindings)?;
+            values.insert(agg.alias.clone(), result);
+        }
+
+        rows.push(Row { values });
+    }
+
+    Ok(ExecutionResult::Rows { columns, rows })
+}
+
+fn compute_aggregate(func: &AggregateFunction, bindings: &[Binding]) -> Result<ResultValue> {
+    match func {
+        AggregateFunction::Count(arg) => {
+            let count = if let Some(expr) = arg {
+                bindings
+                    .iter()
+                    .filter(|b| !matches!(evaluate_expr(expr, b), Ok(EvalValue::Null)))
+                    .count()
+            } else {
+                bindings.len()
+            };
+            Ok(ResultValue::Property(PropertyValue::Integer(count as i64)))
+        }
+
+        AggregateFunction::Sum(expr) => {
+            let mut sum = 0.0;
+            let mut is_int = true;
+            for b in bindings {
+                match evaluate_expr(expr, b)? {
+                    EvalValue::Int(i) => sum += i as f64,
+                    EvalValue::Float(f) => {
+                        sum += f;
+                        is_int = false;
+                    }
+                    _ => {}
+                }
+            }
+            if is_int {
+                Ok(ResultValue::Property(PropertyValue::Integer(sum as i64)))
+            } else {
+                Ok(ResultValue::Property(PropertyValue::Float(sum)))
+            }
+        }
+
+        AggregateFunction::Avg(expr) => {
+            let mut sum = 0.0;
+            let mut count = 0;
+            for b in bindings {
+                match evaluate_expr(expr, b)? {
+                    EvalValue::Int(i) => {
+                        sum += i as f64;
+                        count += 1;
+                    }
+                    EvalValue::Float(f) => {
+                        sum += f;
+                        count += 1;
+                    }
+                    _ => {}
+                }
+            }
+            if count > 0 {
+                Ok(ResultValue::Property(PropertyValue::Float(sum / count as f64)))
+            } else {
+                Ok(ResultValue::Property(PropertyValue::Null))
+            }
+        }
+
+        AggregateFunction::Min(expr) => {
+            let mut min: Option<EvalValue> = None;
+            for b in bindings {
+                let v = evaluate_expr(expr, b)?;
+                if !matches!(v, EvalValue::Null) {
+                    min = Some(match min {
+                        None => v,
+                        Some(m) => {
+                            if compare_values(&v, &m).map(|c| c < 0).unwrap_or(false) {
+                                v
+                            } else {
+                                m
+                            }
+                        }
+                    });
+                }
+            }
+            Ok(eval_to_result_value(min.unwrap_or(EvalValue::Null)))
+        }
+
+        AggregateFunction::Max(expr) => {
+            let mut max: Option<EvalValue> = None;
+            for b in bindings {
+                let v = evaluate_expr(expr, b)?;
+                if !matches!(v, EvalValue::Null) {
+                    max = Some(match max {
+                        None => v,
+                        Some(m) => {
+                            if compare_values(&v, &m).map(|c| c > 0).unwrap_or(false) {
+                                v
+                            } else {
+                                m
+                            }
+                        }
+                    });
+                }
+            }
+            Ok(eval_to_result_value(max.unwrap_or(EvalValue::Null)))
+        }
+
+        AggregateFunction::Collect(expr) => {
+            let mut items = Vec::new();
+            for b in bindings {
+                let v = evaluate_expr(expr, b)?;
+                if !matches!(v, EvalValue::Null) {
+                    items.push(eval_to_property_value(v));
+                }
+            }
+            Ok(ResultValue::Property(PropertyValue::List(items)))
+        }
+    }
+}
+
+fn execute_count_pushdown(
+    label: Option<&str>,
+    alias: &str,
+    storage: &SqliteStorage,
+) -> Result<ExecutionResult> {
+    let count = if let Some(l) = label {
+        storage.count_nodes_by_label(l)?
+    } else {
+        storage.count_nodes()?
+    };
+
+    let mut values = HashMap::new();
+    values.insert(
+        alias.to_string(),
+        ResultValue::Property(PropertyValue::Integer(count as i64)),
+    );
+
+    Ok(ExecutionResult::Rows {
+        columns: vec![alias.to_string()],
+        rows: vec![Row { values }],
+    })
+}
+
+// =============================================================================
+// Mutation Operators
+// =============================================================================
+
+fn execute_create(
+    source: Option<&PlanOperator>,
+    nodes: &[CreateNode],
+    edges: &[CreateEdge],
+    storage: &SqliteStorage,
+    stats: &mut QueryStats,
+) -> Result<ExecutionResult> {
+    // Build nodes first, tracking variable -> id mapping
+    let mut var_to_id: HashMap<String, i64> = HashMap::new();
+
+    for create_node in nodes {
+        let props = plan_properties_to_json(&create_node.properties)?;
+        let node_id = storage.insert_node(&create_node.labels, &props)?;
+
+        stats.nodes_created += 1;
+        stats.labels_added += create_node.labels.len();
+        stats.properties_set += create_node.properties.len();
+
+        if let Some(ref var) = create_node.variable {
+            var_to_id.insert(var.clone(), node_id);
+        }
+    }
+
+    // Create edges using variable name lookup
+    for create_edge in edges {
+        let source_id = var_to_id
+            .get(&create_edge.source)
+            .ok_or_else(|| Error::Cypher(format!("Unknown source variable: {}", create_edge.source)))?;
+        let target_id = var_to_id
+            .get(&create_edge.target)
+            .ok_or_else(|| Error::Cypher(format!("Unknown target variable: {}", create_edge.target)))?;
+        let props = plan_properties_to_json(&create_edge.properties)?;
+
+        storage.insert_edge(*source_id, *target_id, &create_edge.edge_type, &props)?;
+        stats.relationships_created += 1;
+        stats.properties_set += create_edge.properties.len();
+    }
+
+    // Return empty result for CREATE
+    if source.is_some() {
+        // If there's a source (MATCH ... CREATE), pass through
+        Ok(ExecutionResult::Bindings(Vec::new()))
+    } else {
+        Ok(ExecutionResult::Bindings(Vec::new()))
+    }
+}
+
+fn execute_set_properties(
+    bindings: &[Binding],
+    sets: &[SetOperation],
+    storage: &SqliteStorage,
+    stats: &mut QueryStats,
+) -> Result<()> {
+    for binding in bindings {
+        for set_op in sets {
+            match set_op {
+                SetOperation::Property {
+                    variable,
+                    property,
+                    value,
+                } => {
+                    if let Some(node) = binding.nodes.get(variable) {
+                        let val = evaluate_expr(value, binding)?;
+                        let prop_val = eval_to_property_value(val);
+                        storage.update_node_property(node.id, property, &prop_val)?;
+                        stats.properties_set += 1;
+                    }
+                }
+                SetOperation::AddLabel { variable, label } => {
+                    if let Some(node) = binding.nodes.get(variable) {
+                        storage.add_node_label(node.id, label)?;
+                        stats.labels_added += 1;
+                    }
+                }
+                SetOperation::RemoveLabel { .. } => {
+                    // Not implemented yet
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn execute_delete(
+    bindings: &[Binding],
+    variables: &[String],
+    detach: bool,
+    storage: &SqliteStorage,
+    stats: &mut QueryStats,
+) -> Result<()> {
+    for binding in bindings {
+        for var in variables {
+            if let Some(node) = binding.nodes.get(var) {
+                // Check for edges if not DETACH DELETE
+                if !detach && storage.has_edges(node.id)? {
+                    return Err(Error::Cypher(
+                        "Cannot delete node with relationships. Use DETACH DELETE.".into(),
+                    ));
+                }
+                storage.delete_node(node.id)?;
+                stats.nodes_deleted += 1;
+            } else if let Some(edge) = binding.edges.get(var) {
+                storage.delete_edge(edge.id)?;
+                stats.relationships_deleted += 1;
+            }
+        }
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Value Conversion Utilities
+// =============================================================================
+
+fn eval_to_result_value(v: EvalValue) -> ResultValue {
+    match v {
+        EvalValue::Null => ResultValue::Property(PropertyValue::Null),
+        EvalValue::Bool(b) => ResultValue::Property(PropertyValue::Bool(b)),
+        EvalValue::Int(i) => ResultValue::Property(PropertyValue::Integer(i)),
+        EvalValue::Float(f) => ResultValue::Property(PropertyValue::Float(f)),
+        EvalValue::String(s) => ResultValue::Property(PropertyValue::String(s)),
+        EvalValue::List(items) => {
+            let props: Vec<PropertyValue> = items.into_iter().map(eval_to_property_value).collect();
+            ResultValue::Property(PropertyValue::List(props))
+        }
+        EvalValue::Node(n) => ResultValue::Node {
+            id: n.id,
+            labels: n.labels,
+            properties: n.properties,
+        },
+        EvalValue::Edge(e) => ResultValue::Edge {
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            edge_type: e.edge_type,
+            properties: e.properties,
+        },
+        EvalValue::Path(p) => ResultValue::Path {
+            nodes: p
+                .nodes
+                .into_iter()
+                .map(|n| PathNode {
+                    id: n.id,
+                    labels: n.labels,
+                    properties: n.properties,
+                })
+                .collect(),
+            edges: p
+                .edges
+                .into_iter()
+                .map(|e| PathEdge {
+                    id: e.id,
+                    source: e.source,
+                    target: e.target,
+                    edge_type: e.edge_type,
+                    properties: e.properties,
+                })
+                .collect(),
+        },
+    }
+}
+
+fn eval_to_property_value(v: EvalValue) -> PropertyValue {
+    match v {
+        EvalValue::Null => PropertyValue::Null,
+        EvalValue::Bool(b) => PropertyValue::Bool(b),
+        EvalValue::Int(i) => PropertyValue::Integer(i),
+        EvalValue::Float(f) => PropertyValue::Float(f),
+        EvalValue::String(s) => PropertyValue::String(s),
+        EvalValue::List(items) => {
+            PropertyValue::List(items.into_iter().map(eval_to_property_value).collect())
+        }
+        // Nodes/edges/paths can't be converted to property values
+        _ => PropertyValue::Null,
+    }
+}
+
+fn plan_properties_to_json(
+    props: &[(String, PlanExpr)],
+) -> Result<serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    for (key, expr) in props {
+        let value = match expr {
+            PlanExpr::Literal(lit) => match lit {
+                PlanLiteral::Null => serde_json::Value::Null,
+                PlanLiteral::Bool(b) => serde_json::Value::Bool(*b),
+                PlanLiteral::Int(i) => serde_json::Value::Number((*i).into()),
+                PlanLiteral::Float(f) => {
+                    serde_json::Number::from_f64(*f)
+                        .map(serde_json::Value::Number)
+                        .unwrap_or(serde_json::Value::Null)
+                }
+                PlanLiteral::String(s) => serde_json::Value::String(s.clone()),
+            },
+            _ => {
+                return Err(Error::Cypher(
+                    "Only literal values supported in CREATE properties".into(),
+                ))
+            }
+        };
+        map.insert(key.clone(), value);
+    }
+    Ok(serde_json::Value::Object(map))
+}
