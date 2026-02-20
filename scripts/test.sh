@@ -105,7 +105,7 @@ test_crustdb() {
 
 test_backend() {
 	log_info "Running backend tests (Cargo)..."
-	cargo test --manifest-path src/backend/Cargo.toml --no-default-features
+	cargo test --manifest-path src/backend/Cargo.toml --no-default-features -F crustdb -F neo4j -F falkordb
 	log_info "Backend tests passed!"
 }
 
