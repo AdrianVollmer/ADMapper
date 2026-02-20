@@ -86,6 +86,7 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/edges", get(handlers::graph_edges))
         .route("/api/graph/all", get(handlers::graph_all))
         .route("/api/graph/search", get(handlers::graph_search))
+        .route("/api/graph/node/:id", get(handlers::node_get))
         .route("/api/graph/node/:id/counts", get(handlers::node_counts))
         .route(
             "/api/graph/node/:id/connections/:direction",

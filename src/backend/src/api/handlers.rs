@@ -418,6 +418,28 @@ pub async fn graph_search(
     Ok(Json(nodes))
 }
 
+/// Get a single node by ID with full properties.
+///
+/// This endpoint is used to fetch node properties on-demand when clicking
+/// on a node in the graph visualization.
+#[instrument(skip(state))]
+pub async fn node_get(
+    State(state): State<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<DbNode>, ApiError> {
+    let db = state.require_db()?;
+    info!(node_id = %node_id, "Fetching node properties");
+
+    let node_id_clone = node_id.clone();
+    let nodes = run_db(db, move |db| db.get_nodes_by_ids(&[node_id_clone])).await?;
+
+    nodes
+        .into_iter()
+        .next()
+        .map(Json)
+        .ok_or_else(|| ApiError::NotFound(format!("Node not found: {node_id}")))
+}
+
 /// Get connection counts for a node.
 /// Returns counts for incoming, outgoing, admin permissions, memberOf, and members.
 #[instrument(skip(state))]

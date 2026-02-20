@@ -755,6 +755,7 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
 
   // Build properties list - show ALL properties
   let propsHtml = "";
+  let needsFetch = false;
   if (attrs.properties) {
     // Sort properties by priority, then alphabetically
     const entries = Object.entries(attrs.properties);
@@ -777,6 +778,18 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
         </div>
       `;
     }
+  } else {
+    // Properties not available - need to fetch them
+    needsFetch = true;
+    propsHtml = `
+      <div class="flex items-center gap-2 text-sm text-gray-500">
+        <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+          <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/>
+        </svg>
+        <span>Loading properties...</span>
+      </div>
+    `;
   }
 
   // Check if this is a placeholder node
@@ -816,22 +829,12 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
 
     ${placeholderBanner}
 
-    ${
-      propsHtml
-        ? `
     <div class="detail-section">
       <h3 class="detail-section-title">Properties</h3>
-      <div class="detail-props">
+      <div id="node-properties-content" class="detail-props">
         ${propsHtml}
       </div>
     </div>
-    `
-        : `
-    <div class="detail-section">
-      <p class="text-sm text-gray-500">No properties available</p>
-    </div>
-    `
-    }
   `;
 
   // Fetch user security status from backend (for User nodes)
@@ -841,6 +844,19 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
 
   // Fetch and display connection counts
   fetchNodeCounts(nodeId);
+
+  // Fetch properties if not already available
+  if (needsFetch) {
+    fetchNodeProperties(nodeId);
+  }
+}
+
+/** Node response from API (with full properties) */
+interface NodeResponse {
+  id: string;
+  name: string;
+  type: string;
+  properties: Record<string, unknown>;
 }
 
 /** Node counts response from API */
@@ -938,5 +954,54 @@ async function fetchNodeCounts(nodeId: string): Promise<void> {
     }
   } catch (err) {
     console.error("Failed to fetch node counts:", err);
+  }
+}
+
+/** Fetch and display properties for a node */
+async function fetchNodeProperties(nodeId: string): Promise<void> {
+  const propsContainer = document.getElementById("node-properties-content");
+  if (!propsContainer) return;
+
+  try {
+    const node = await api.get<NodeResponse>(`/api/graph/node/${encodeURIComponent(nodeId)}`);
+
+    // Check if we're still showing the same node
+    if (appState.selectedNodeId !== nodeId) return;
+
+    // Build properties HTML
+    const entries = Object.entries(node.properties);
+    if (entries.length === 0) {
+      propsContainer.innerHTML = `<p class="text-sm text-gray-500">No properties available</p>`;
+      return;
+    }
+
+    // Sort properties by priority, then alphabetically
+    entries.sort((a, b) => {
+      const aPriority = PROPERTY_PRIORITY[a[0].toLowerCase()] ?? 100;
+      const bPriority = PROPERTY_PRIORITY[b[0].toLowerCase()] ?? 100;
+      if (aPriority !== bPriority) return aPriority - bPriority;
+      return a[0].localeCompare(b[0]);
+    });
+
+    let propsHtml = "";
+    for (const [key, value] of entries) {
+      const formatted = formatValue(key, value);
+      const rawValue = value === null || value === undefined ? "" : String(value);
+      propsHtml += `
+        <div class="detail-prop">
+          <span class="detail-prop-label">${escapeHtml(getPrettyLabel(key))}</span>
+          <span class="detail-prop-value" data-value="${escapeHtml(rawValue)}" title="Click to copy">
+            ${escapeHtml(formatted)}
+          </span>
+        </div>
+      `;
+    }
+
+    propsContainer.innerHTML = propsHtml;
+  } catch (err) {
+    console.error("Failed to fetch node properties:", err);
+    if (appState.selectedNodeId === nodeId) {
+      propsContainer.innerHTML = `<p class="text-sm text-gray-500">Failed to load properties</p>`;
+    }
   }
 }
