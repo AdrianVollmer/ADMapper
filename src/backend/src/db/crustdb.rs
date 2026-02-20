@@ -464,16 +464,19 @@ impl CrustDatabase {
                     })
                     .unwrap_or_else(|| object_id.clone());
 
-                let label = properties
-                    .get("label")
-                    .and_then(|v| {
-                        if let crustdb::PropertyValue::String(s) = v {
-                            Some(s.clone())
-                        } else {
-                            None
-                        }
+                // Get node type: prefer Cypher labels, then node_type property
+                let label = labels
+                    .first()
+                    .cloned()
+                    .or_else(|| {
+                        properties.get("node_type").and_then(|v| {
+                            if let crustdb::PropertyValue::String(s) = v {
+                                Some(s.clone())
+                            } else {
+                                None
+                            }
+                        })
                     })
-                    .or_else(|| labels.first().cloned())
                     .unwrap_or_else(|| "Unknown".to_string());
 
                 // Convert all properties to JSON

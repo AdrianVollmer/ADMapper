@@ -888,6 +888,30 @@ fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalValue> {
                         Ok(EvalValue::Null)
                     }
                 }
+                "TOLOWER" | "LOWER" => {
+                    if args.len() == 1 {
+                        let v = evaluate_expr(&args[0], binding)?;
+                        if let EvalValue::String(s) = v {
+                            Ok(EvalValue::String(s.to_lowercase()))
+                        } else {
+                            Ok(EvalValue::Null)
+                        }
+                    } else {
+                        Ok(EvalValue::Null)
+                    }
+                }
+                "TOUPPER" | "UPPER" => {
+                    if args.len() == 1 {
+                        let v = evaluate_expr(&args[0], binding)?;
+                        if let EvalValue::String(s) = v {
+                            Ok(EvalValue::String(s.to_uppercase()))
+                        } else {
+                            Ok(EvalValue::Null)
+                        }
+                    } else {
+                        Ok(EvalValue::Null)
+                    }
+                }
                 _ => Ok(EvalValue::Null), // Unknown function
             }
         }

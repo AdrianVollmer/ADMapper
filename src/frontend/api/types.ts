@@ -44,6 +44,8 @@ export interface SearchResult {
   name: string;
   /** Cypher label (User, Computer, Group, etc.) */
   type: string;
+  /** Node properties */
+  properties: Record<string, unknown>;
 }
 
 // ============================================================================

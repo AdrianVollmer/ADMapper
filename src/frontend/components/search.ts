@@ -34,6 +34,8 @@ interface SearchState {
   inputToResults: Map<HTMLInputElement, HTMLElement>;
   pathStartNodeId: string | null;
   pathEndNodeId: string | null;
+  /** Cache of recent search results for property lookup */
+  searchResultsCache: Map<string, SearchResult>;
 }
 
 const elements: SearchElements = {
@@ -53,6 +55,7 @@ const state: SearchState = {
   inputToResults: new Map(),
   pathStartNodeId: null,
   pathEndNodeId: null,
+  searchResultsCache: new Map(),
 };
 
 const SEARCH_DEBOUNCE_MS = 200;
@@ -70,6 +73,7 @@ export function resetSearchState(): void {
   state.inputToResults.clear();
   state.pathStartNodeId = null;
   state.pathEndNodeId = null;
+  state.searchResultsCache.clear();
   for (const key of Object.keys(elements) as (keyof SearchElements)[]) {
     elements[key] = null;
   }
@@ -216,6 +220,11 @@ async function performSearch(
   try {
     const results = await api.get<SearchResult[]>(`/api/graph/search?q=${encodeURIComponent(query)}&limit=10`, signal);
 
+    // Cache results for property lookup when selected
+    for (const r of results) {
+      state.searchResultsCache.set(r.id, r);
+    }
+
     if (results.length === 0) {
       resultsEl.innerHTML = '<div class="search-no-results">No nodes found</div>';
     } else {
@@ -313,9 +322,13 @@ function handleResultSelection(resultItem: HTMLElement, context: string): void {
 
   if (!nodeId) return;
 
+  // Get cached properties for this node
+  const cachedResult = state.searchResultsCache.get(nodeId);
+  const properties = cachedResult?.properties ?? {};
+
   switch (context) {
     case "node":
-      loadSingleNode(nodeId, nodeLabel || nodeId, nodeType);
+      loadSingleNode(nodeId, nodeLabel || nodeId, nodeType, properties);
       clearSearch(elements.nodeSearchInput, elements.nodeSearchResults);
       break;
     case "path-start":
@@ -347,7 +360,7 @@ function clearSearch(input: HTMLInputElement | null, resultsEl: HTMLElement | nu
 }
 
 /** Load a single node as a trivial graph */
-function loadSingleNode(nodeId: string, label: string, nodeType: string): void {
+function loadSingleNode(nodeId: string, label: string, nodeType: string, properties: Record<string, unknown>): void {
   // Create a minimal graph with just this one node
   const graph: RawADGraph = {
     nodes: [
@@ -355,7 +368,7 @@ function loadSingleNode(nodeId: string, label: string, nodeType: string): void {
         id: nodeId,
         name: label,
         type: nodeType as ADNodeType,
-        properties: {},
+        properties,
       },
     ],
     edges: [],
