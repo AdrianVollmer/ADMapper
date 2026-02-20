@@ -162,6 +162,56 @@ impl Database {
         storage.cache_stats()
     }
 
+    /// Create an index on a JSON property for faster lookups.
+    ///
+    /// This creates a SQLite expression index on `json_extract(properties, '$.property')`,
+    /// which significantly speeds up queries that filter nodes by this property.
+    ///
+    /// Common properties to index: `object_id`, `name`, etc.
+    ///
+    /// # Example
+    /// ```ignore
+    /// db.create_property_index("object_id")?;
+    /// // Now queries like MATCH (n {object_id: '...'}) will use the index
+    /// ```
+    pub fn create_property_index(&self, property: &str) -> Result<()> {
+        let storage = self
+            .write_conn
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.create_property_index(property)
+    }
+
+    /// Drop an index on a JSON property.
+    ///
+    /// Returns Ok(true) if the index existed and was dropped,
+    /// Ok(false) if the index didn't exist.
+    pub fn drop_property_index(&self, property: &str) -> Result<bool> {
+        let storage = self
+            .write_conn
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.drop_property_index(property)
+    }
+
+    /// List all property indexes that have been created.
+    pub fn list_property_indexes(&self) -> Result<Vec<String>> {
+        let storage = self
+            .write_conn
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.list_property_indexes()
+    }
+
+    /// Check if a property index exists.
+    pub fn has_property_index(&self, property: &str) -> Result<bool> {
+        let storage = self
+            .write_conn
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.has_property_index(property)
+    }
+
     /// Execute a Cypher query.
     ///
     /// Read-only queries (MATCH without SET/DELETE) are executed on a pooled
@@ -620,6 +670,44 @@ mod tests {
 
         let not_found = db.find_node_by_property("object_id", "nobody").unwrap();
         assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_create_property_index() {
+        let db = Database::in_memory().unwrap();
+
+        // Create nodes first
+        db.execute("CREATE (n:Person {object_id: 'p1', name: 'Alice'})")
+            .unwrap();
+        db.execute("CREATE (n:Person {object_id: 'p2', name: 'Bob'})")
+            .unwrap();
+
+        // Initially no property indexes
+        assert!(db.list_property_indexes().unwrap().is_empty());
+
+        // Create index on object_id
+        db.create_property_index("object_id").unwrap();
+        assert!(db.has_property_index("object_id").unwrap());
+
+        // Index should be listed
+        let indexes = db.list_property_indexes().unwrap();
+        assert_eq!(indexes, vec!["object_id"]);
+
+        // Queries using the indexed property should still work correctly
+        let result = db
+            .execute("MATCH (n {object_id: 'p1'}) RETURN n.name")
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+
+        // Drop the index
+        assert!(db.drop_property_index("object_id").unwrap());
+        assert!(!db.has_property_index("object_id").unwrap());
+
+        // Query still works after dropping index
+        let result = db
+            .execute("MATCH (n {object_id: 'p2'}) RETURN n.name")
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
     }
 
     #[test]
