@@ -445,7 +445,7 @@ async function loadConnections(nodeId: string, direction: string): Promise<void>
         id: n.id,
         name: n.name,
         type: n.type as ADNodeType,
-        properties: n.properties || {},
+        properties: n.properties,
       })),
       edges: response.edges.map((e) => ({
         source: e.source,

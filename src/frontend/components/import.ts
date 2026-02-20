@@ -269,7 +269,7 @@ async function loadDomainAdmins(): Promise<void> {
           id: n.id,
           name: n.name,
           type: mapNodeType(n.type),
-          properties: n.properties ?? {},
+          properties: n.properties,
         })),
         edges: result.graph.edges.map((e) => ({
           source: e.source,

@@ -427,7 +427,7 @@ async function findPath(): Promise<void> {
           id: n.id,
           name: n.name,
           type: n.type as ADNodeType,
-          properties: n.properties ?? {},
+          properties: n.properties,
         })),
         edges: data.graph.edges.map((e) => ({
           source: e.source,

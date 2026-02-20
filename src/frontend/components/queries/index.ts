@@ -294,7 +294,7 @@ async function runQuery(queryId: string): Promise<void> {
           id: n.id,
           name: n.name,
           type: n.type as RawADGraph["nodes"][0]["type"],
-          properties: n.properties ?? {},
+          properties: n.properties,
         })),
         edges: result.graph.edges.map((e) => ({
           source: e.source,
