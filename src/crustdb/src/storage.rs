@@ -53,6 +53,24 @@ impl SqliteStorage {
         Ok(storage)
     }
 
+    /// Open an existing database in read-only mode.
+    ///
+    /// This is used for read pool connections. The schema is assumed to exist
+    /// (created by the primary write connection). Read-only connections can
+    /// execute queries concurrently without blocking each other or the writer.
+    pub fn open_read_only<P: AsRef<Path>>(path: P) -> Result<Self> {
+        use rusqlite::OpenFlags;
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_URI,
+        )?;
+        // Set busy timeout for read connections too
+        conn.execute_batch("PRAGMA busy_timeout = 5000;")?;
+        Ok(Self { conn })
+    }
+
     /// Initialize the database schema.
     fn init_schema(&self) -> Result<()> {
         // Enable WAL mode for better concurrency.

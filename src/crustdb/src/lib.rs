@@ -35,39 +35,96 @@ pub use query::{QueryResult, QueryStats, ResultValue, Row};
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use storage::SqliteStorage;
 
 pub use storage::CacheStats;
 
+/// Default number of read connections in the pool.
+const DEFAULT_READ_POOL_SIZE: usize = 4;
+
 /// Main database handle.
 ///
-/// Uses Mutex for thread-safety. For concurrent queries, consider using
-/// a connection pool in the future.
+/// Uses a connection pool for concurrent read queries:
+/// - One write connection protected by a Mutex (writes are serialized)
+/// - N read connections for concurrent read queries (round-robin selection)
+///
+/// WAL mode allows readers and writers to proceed concurrently at the SQLite level.
 pub struct Database {
-    storage: Mutex<SqliteStorage>,
+    /// Primary write connection (also used for reads when pool is exhausted or in-memory).
+    write_conn: Mutex<SqliteStorage>,
+    /// Pool of read-only connections for concurrent queries.
+    /// Empty for in-memory databases (each connection would be separate DB).
+    read_pool: Vec<Mutex<SqliteStorage>>,
+    /// Round-robin index for selecting read connections.
+    read_index: AtomicUsize,
+    /// Path to database file (None for in-memory).
+    db_path: Option<PathBuf>,
     /// Whether query caching is enabled (disabled by default).
     caching_enabled: bool,
 }
 
 impl Database {
     /// Open or create a database at the given path.
+    ///
+    /// Creates a connection pool with one write connection and multiple read
+    /// connections for concurrent query execution.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let storage = SqliteStorage::open(path)?;
+        Self::open_with_pool_size(path, DEFAULT_READ_POOL_SIZE)
+    }
+
+    /// Open or create a database with a specific read pool size.
+    ///
+    /// - `pool_size = 0`: No read pool, all queries use the write connection
+    /// - `pool_size > 0`: Creates N read-only connections for concurrent reads
+    pub fn open_with_pool_size<P: AsRef<Path>>(path: P, pool_size: usize) -> Result<Self> {
+        let path_buf = path.as_ref().to_path_buf();
+
+        // Primary write connection
+        let write_storage = SqliteStorage::open(&path_buf)?;
+
+        // Create read pool
+        let read_pool = (0..pool_size)
+            .map(|_| SqliteStorage::open_read_only(&path_buf).map(Mutex::new))
+            .collect::<Result<Vec<_>>>()?;
+
         Ok(Self {
-            storage: Mutex::new(storage),
+            write_conn: Mutex::new(write_storage),
+            read_pool,
+            read_index: AtomicUsize::new(0),
+            db_path: Some(path_buf),
             caching_enabled: false,
         })
     }
 
     /// Create an in-memory database.
+    ///
+    /// In-memory databases cannot use connection pooling because each connection
+    /// would create a separate database. All queries use the single connection.
     pub fn in_memory() -> Result<Self> {
         let storage = SqliteStorage::in_memory()?;
         Ok(Self {
-            storage: Mutex::new(storage),
+            write_conn: Mutex::new(storage),
+            read_pool: Vec::new(), // No pooling for in-memory
+            read_index: AtomicUsize::new(0),
+            db_path: None,
             caching_enabled: false,
         })
+    }
+
+    /// Get a read connection from the pool (round-robin).
+    /// Falls back to write connection if pool is empty.
+    fn get_read_storage(&self) -> std::sync::MutexGuard<'_, SqliteStorage> {
+        if self.read_pool.is_empty() {
+            // No pool (in-memory or pool_size=0), use write connection
+            self.write_conn.lock().unwrap()
+        } else {
+            // Round-robin selection from pool
+            let idx = self.read_index.fetch_add(1, Ordering::Relaxed) % self.read_pool.len();
+            self.read_pool[idx].lock().unwrap()
+        }
     }
 
     /// Enable or disable query caching.
@@ -87,7 +144,7 @@ impl Database {
     /// Clear the query cache.
     pub fn clear_cache(&self) -> Result<()> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.clear_query_cache()
@@ -96,41 +153,52 @@ impl Database {
     /// Get cache statistics.
     pub fn cache_stats(&self) -> Result<CacheStats> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.cache_stats()
     }
 
     /// Execute a Cypher query.
+    ///
+    /// Read-only queries (MATCH without SET/DELETE) are executed on a pooled
+    /// read connection for better concurrency. Write queries use the primary
+    /// write connection.
     pub fn execute(&self, query: &str) -> Result<QueryResult> {
         let statement = query::parser::parse(query)?;
-        let storage = self
-            .storage
-            .lock()
-            .map_err(|e| Error::Internal(e.to_string()))?;
 
-        // Only cache read-only queries when caching is enabled
-        if self.caching_enabled && statement.is_read_only() {
-            let ast_json = serde_json::to_string(&statement)
-                .map_err(|e| Error::Internal(format!("Failed to serialize AST: {}", e)))?;
-            let query_hash = compute_hash(&ast_json);
+        if statement.is_read_only() {
+            // Use read connection from pool
+            let storage = self.get_read_storage();
 
-            // Check cache
-            if let Some(cached_bytes) = storage.get_cached_result(&query_hash)? {
-                if let Ok(cached_result) = serde_json::from_slice(&cached_bytes) {
-                    return Ok(cached_result);
+            // Handle caching for read-only queries
+            if self.caching_enabled {
+                let ast_json = serde_json::to_string(&statement)
+                    .map_err(|e| Error::Internal(format!("Failed to serialize AST: {}", e)))?;
+                let query_hash = compute_hash(&ast_json);
+
+                // Check cache
+                if let Some(cached_bytes) = storage.get_cached_result(&query_hash)? {
+                    if let Ok(cached_result) = serde_json::from_slice(&cached_bytes) {
+                        return Ok(cached_result);
+                    }
                 }
-                // If deserialization fails, fall through and execute normally
-            }
 
-            // Execute and cache
-            let result = query::executor::execute(&statement, &storage)?;
-            let result_bytes = serde_json::to_vec(&result)
-                .map_err(|e| Error::Internal(format!("Failed to serialize result: {}", e)))?;
-            storage.cache_result(&query_hash, &ast_json, &result_bytes)?;
-            Ok(result)
+                // Execute and cache
+                let result = query::executor::execute(&statement, &storage)?;
+                let result_bytes = serde_json::to_vec(&result)
+                    .map_err(|e| Error::Internal(format!("Failed to serialize result: {}", e)))?;
+                storage.cache_result(&query_hash, &ast_json, &result_bytes)?;
+                Ok(result)
+            } else {
+                query::executor::execute(&statement, &storage)
+            }
         } else {
+            // Write queries use the write connection
+            let storage = self
+                .write_conn
+                .lock()
+                .map_err(|e| Error::Internal(e.to_string()))?;
             query::executor::execute(&statement, &storage)
         }
     }
@@ -138,7 +206,7 @@ impl Database {
     /// Get database statistics.
     pub fn stats(&self) -> Result<DatabaseStats> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.stats()
@@ -148,7 +216,7 @@ impl Database {
     /// This is much faster than using Cypher DELETE queries.
     pub fn clear(&self) -> Result<()> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.clear()
@@ -166,7 +234,7 @@ impl Database {
         nodes: &[(Vec<String>, serde_json::Value)],
     ) -> Result<Vec<i64>> {
         let mut storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.insert_nodes_batch(nodes)
@@ -183,7 +251,7 @@ impl Database {
         edges: &[(i64, i64, String, serde_json::Value)],
     ) -> Result<Vec<i64>> {
         let mut storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.insert_edges_batch(edges)
@@ -194,7 +262,7 @@ impl Database {
     /// Searches for nodes where the JSON properties contain the specified key-value pair.
     pub fn find_node_by_property(&self, property: &str, value: &str) -> Result<Option<i64>> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.find_node_by_property(property, value)
@@ -209,7 +277,7 @@ impl Database {
         property: &str,
     ) -> Result<std::collections::HashMap<String, i64>> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.build_property_index(property)
@@ -224,7 +292,7 @@ impl Database {
         object_id: &str,
     ) -> Result<Vec<(String, String, String)>> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.get_node_edges_by_object_id(object_id)
@@ -236,7 +304,7 @@ impl Database {
     /// This is much faster than running separate Cypher COUNT queries for each label.
     pub fn get_label_counts(&self) -> Result<std::collections::HashMap<String, usize>> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.get_label_counts()
@@ -261,7 +329,7 @@ impl Database {
         error: Option<&str>,
     ) -> Result<()> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.add_query_history(
@@ -287,7 +355,7 @@ impl Database {
         error: Option<&str>,
     ) -> Result<()> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.update_query_status(id, status, duration_ms, result_count, error)
@@ -297,7 +365,7 @@ impl Database {
     /// Returns (rows, total_count).
     pub fn get_query_history(&self, limit: usize, offset: usize) -> Result<(Vec<QueryHistoryRow>, usize)> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.get_query_history(limit, offset)
@@ -306,7 +374,7 @@ impl Database {
     /// Delete a query from history.
     pub fn delete_query_history(&self, id: &str) -> Result<()> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.delete_query_history(id)
@@ -315,7 +383,7 @@ impl Database {
     /// Clear all query history.
     pub fn clear_query_history(&self) -> Result<()> {
         let storage = self
-            .storage
+            .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.clear_query_history()
@@ -845,5 +913,61 @@ mod tests {
 
         let stats = db.cache_stats().unwrap();
         assert_eq!(stats.entry_count, 0);
+    }
+
+    #[test]
+    fn test_concurrent_reads() {
+        use std::sync::Arc;
+        use std::thread;
+
+        // Create a file-backed database to test connection pooling
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_concurrent.db");
+        let db = Arc::new(Database::open(&db_path).unwrap());
+
+        // Create some test data
+        db.execute("CREATE (n:Person {name: 'Alice', id: 1})").unwrap();
+        db.execute("CREATE (n:Person {name: 'Bob', id: 2})").unwrap();
+        db.execute("CREATE (n:Person {name: 'Charlie', id: 3})").unwrap();
+
+        // Spawn multiple threads to read concurrently
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let db = Arc::clone(&db);
+                thread::spawn(move || {
+                    for _ in 0..10 {
+                        let result = db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+                        assert_eq!(result.rows.len(), 3);
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify data integrity
+        let result = db.execute("MATCH (n:Person) RETURN count(n)").unwrap();
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_read_pool_with_custom_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_pool.db");
+
+        // Create with pool size 2
+        let db = Database::open_with_pool_size(&db_path, 2).unwrap();
+
+        db.execute("CREATE (n:Test {x: 1})").unwrap();
+        let result = db.execute("MATCH (n:Test) RETURN n.x").unwrap();
+        assert_eq!(result.rows.len(), 1);
+
+        // Pool size 0 should also work (no read pool)
+        let db2 = Database::open_with_pool_size(&db_path, 0).unwrap();
+        let result = db2.execute("MATCH (n:Test) RETURN n.x").unwrap();
+        assert_eq!(result.rows.len(), 1);
     }
 }
