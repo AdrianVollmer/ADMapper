@@ -211,11 +211,11 @@ impl KuzuDatabase {
 
         for node in nodes {
             let props_str = serde_json::to_string(&node.properties)?;
-            let table_name = Self::normalize_node_type(&node.node_type);
+            let table_name = Self::normalize_node_type(&node.label);
 
             // Extract common properties for dedicated columns
             let object_id = Self::escape_string(&node.id);
-            let label = Self::escape_string(&node.label);
+            let label = Self::escape_string(&node.name);
             let name = Self::extract_property_string(&node.properties, "name")
                 .map(|s| Self::escape_string(&s))
                 .unwrap_or_else(|| label.clone());
@@ -454,8 +454,8 @@ impl KuzuDatabase {
                         let properties = serde_json::from_str(parts[2]).unwrap_or(JsonValue::Null);
                         nodes.push(DbNode {
                             id: parts[0].to_string(),
-                            label: parts[1].to_string(),
-                            node_type: node_type.to_string(),
+                            name: parts[1].to_string(),
+                            label: node_type.to_string(),
                             properties,
                         });
                     }
@@ -563,8 +563,8 @@ impl KuzuDatabase {
                         let properties = serde_json::from_str(parts[2]).unwrap_or(JsonValue::Null);
                         nodes.push(DbNode {
                             id: parts[0].to_string(),
-                            label: parts[1].to_string(),
-                            node_type: node_type.to_string(),
+                            name: parts[1].to_string(),
+                            label: node_type.to_string(),
                             properties,
                         });
                     }
@@ -819,8 +819,8 @@ impl KuzuDatabase {
                         let properties = serde_json::from_str(parts[2]).unwrap_or(JsonValue::Null);
                         nodes.push(DbNode {
                             id: parts[0].to_string(),
-                            label: parts[1].to_string(),
-                            node_type: node_type.to_string(),
+                            name: parts[1].to_string(),
+                            label: node_type.to_string(),
                             properties,
                         });
                     }

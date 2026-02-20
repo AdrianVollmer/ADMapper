@@ -7,13 +7,16 @@ use thiserror::Error;
 /// A node stored in the database.
 ///
 /// This type is used both for internal storage and API responses.
-/// The `node_type` field is serialized as "type" for API compatibility.
+/// The `label` field is serialized as "type" for API compatibility.
 #[derive(Clone, Debug, Serialize)]
 pub struct DbNode {
     pub id: String,
-    pub label: String,
+    /// Display name of the node (from BloodHound's `name` property).
+    pub name: String,
+    /// Cypher label (e.g., "User", "Computer", "Group").
+    /// Serialized as "type" for API compatibility.
     #[serde(rename = "type")]
-    pub node_type: String,
+    pub label: String,
     pub properties: JsonValue,
 }
 

@@ -267,8 +267,8 @@ impl BloodHoundImporter {
 
         Some(DbNode {
             id,
-            label,
-            node_type: node_type.to_string(),
+            name: label,
+            label: node_type.to_string(),
             properties,
         })
     }
@@ -742,8 +742,8 @@ mod tests {
 
         let node = node.unwrap();
         assert_eq!(node.id, "S-1-5-21-1234-USER");
-        assert_eq!(node.label, "testuser@corp.local");
-        assert_eq!(node.node_type, "User");
+        assert_eq!(node.name, "testuser@corp.local");
+        assert_eq!(node.label, "User");
         assert_eq!(node.properties["enabled"], true);
     }
 
@@ -764,8 +764,8 @@ mod tests {
 
         let node = node.unwrap();
         assert_eq!(node.id, "S-1-5-21-1234-COMP");
-        assert_eq!(node.label, "DC01.corp.local");
-        assert_eq!(node.node_type, "Computer");
+        assert_eq!(node.name, "DC01.corp.local");
+        assert_eq!(node.label, "Computer");
     }
 
     #[test]
@@ -783,8 +783,8 @@ mod tests {
         assert!(node.is_some());
 
         let node = node.unwrap();
-        assert_eq!(node.node_type, "Group");
-        assert_eq!(node.label, "Domain Admins");
+        assert_eq!(node.label, "Group");
+        assert_eq!(node.name, "Domain Admins");
     }
 
     #[test]
@@ -815,7 +815,7 @@ mod tests {
         assert!(node.is_some());
 
         let node = node.unwrap();
-        assert_eq!(node.label, "S-1-5-21-1234-USER");
+        assert_eq!(node.name, "S-1-5-21-1234-USER");
     }
 
     // ========================================================================
@@ -1145,7 +1145,7 @@ mod tests {
         assert!(result.is_ok());
         // Should infer as "groups" due to Members field
         let nodes = importer.db.get_all_nodes().unwrap();
-        assert_eq!(nodes[0].node_type, "Group");
+        assert_eq!(nodes[0].label, "Group");
     }
 
     #[test]

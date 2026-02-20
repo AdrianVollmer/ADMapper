@@ -107,14 +107,14 @@ impl FalkorDbDatabase {
             .map(|s| s.to_string())
             .unwrap_or_default();
 
-        let label = obj
+        let name = obj
             .get("properties")
             .and_then(|p| p.get("name"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| id.clone());
 
-        let node_type = obj
+        let label = obj
             .get("labels")
             .and_then(|l| l.as_array())
             .and_then(|arr| arr.first())
@@ -129,8 +129,8 @@ impl FalkorDbDatabase {
 
         Some(DbNode {
             id,
+            name,
             label,
-            node_type,
             properties,
         })
     }
@@ -141,7 +141,7 @@ impl FalkorDbDatabase {
 
         // Add core identifiers
         props.insert("objectid".to_string(), json!(node.id));
-        props.insert("name".to_string(), json!(node.label));
+        props.insert("name".to_string(), json!(node.name));
 
         // Flatten BloodHound properties into top-level fields
         if let JsonValue::Object(bh_props) = &node.properties {
@@ -327,20 +327,20 @@ impl DatabaseBackend for FalkorDbDatabase {
             return Ok(0);
         }
 
-        // Group nodes by type for efficient batching
-        let mut nodes_by_type: std::collections::HashMap<String, Vec<&DbNode>> =
+        // Group nodes by label for efficient batching
+        let mut nodes_by_label: std::collections::HashMap<String, Vec<&DbNode>> =
             std::collections::HashMap::new();
         for node in nodes {
-            nodes_by_type
-                .entry(node.node_type.clone())
+            nodes_by_label
+                .entry(node.label.clone())
                 .or_default()
                 .push(node);
         }
 
-        // Batch insert nodes of each type using UNWIND with flattened properties
+        // Batch insert nodes of each label using UNWIND with flattened properties
         const BATCH_SIZE: usize = 200;
-        for (node_type, type_nodes) in nodes_by_type {
-            for chunk in type_nodes.chunks(BATCH_SIZE) {
+        for (cypher_label, label_nodes) in nodes_by_label {
+            for chunk in label_nodes.chunks(BATCH_SIZE) {
                 // Build list of flattened property maps
                 let items: Vec<String> = chunk
                     .iter()
@@ -355,11 +355,11 @@ impl DatabaseBackend for FalkorDbDatabase {
                      MERGE (n:{} {{objectid: props.objectid}}) \
                      SET n += props",
                     items.join(", "),
-                    node_type
+                    cypher_label
                 );
 
                 if let Err(e) = self.run_query(&cypher) {
-                    debug!("Failed to insert {} nodes batch: {}", node_type, e);
+                    debug!("Failed to insert {} nodes batch: {}", cypher_label, e);
                 }
             }
         }

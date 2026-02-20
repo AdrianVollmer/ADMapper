@@ -737,8 +737,8 @@ pub async fn graph_path(
                     .map(|(id, edge_type)| {
                         let node = node_map.get(id).cloned().unwrap_or_else(|| DbNode {
                             id: id.clone(),
-                            label: id.clone(),
-                            node_type: "Unknown".to_string(),
+                            name: id.clone(),
+                            label: "Unknown".to_string(),
                             properties: JsonValue::Null,
                         });
                         PathStep {
@@ -837,10 +837,10 @@ pub async fn paths_to_domain_admins(
 
     let entries: Vec<PathsToDaEntry> = results
         .into_iter()
-        .map(|(id, node_type, label, hops)| PathsToDaEntry {
+        .map(|(id, label, name, hops)| PathsToDaEntry {
             id,
-            node_type,
             label,
+            name,
             hops,
         })
         .collect();
@@ -908,17 +908,17 @@ pub async fn add_node(
     if body.id.is_empty() {
         return Err(ApiError::BadRequest("Node ID is required".to_string()));
     }
+    if body.name.is_empty() {
+        return Err(ApiError::BadRequest("Node name is required".to_string()));
+    }
     if body.label.is_empty() {
         return Err(ApiError::BadRequest("Node label is required".to_string()));
-    }
-    if body.node_type.is_empty() {
-        return Err(ApiError::BadRequest("Node type is required".to_string()));
     }
 
     let node = DbNode {
         id: body.id.clone(),
+        name: body.name.clone(),
         label: body.label.clone(),
-        node_type: body.node_type.clone(),
         properties: if body.properties.is_null() {
             serde_json::json!({})
         } else {
@@ -928,12 +928,12 @@ pub async fn add_node(
 
     let db = state.require_db()?;
     run_db(db, move |db| db.insert_node(node)).await?;
-    info!(id = %body.id, label = %body.label, node_type = %body.node_type, "Node added");
+    info!(id = %body.id, name = %body.name, label = %body.label, "Node added");
 
     Ok(Json(DbNode {
         id: body.id,
+        name: body.name,
         label: body.label,
-        node_type: body.node_type,
         properties: serde_json::json!({}),
     }))
 }

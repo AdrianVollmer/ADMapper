@@ -65,12 +65,12 @@ impl Neo4jDatabase {
             .or_else(|_| node.get::<i64>("id").map(|id| id.to_string()))
             .unwrap_or_else(|_| format!("node_{}", node.id()));
 
-        let label = node
+        let name = node
             .get::<String>("name")
             .or_else(|_| node.get::<String>("label"))
             .unwrap_or_else(|_| id.clone());
 
-        let node_type = node
+        let label = node
             .labels()
             .first()
             .map(|s| s.to_string())
@@ -94,8 +94,8 @@ impl Neo4jDatabase {
 
         DbNode {
             id,
+            name,
             label,
-            node_type,
             properties: JsonValue::Object(properties),
         }
     }
@@ -157,7 +157,7 @@ impl Neo4jDatabase {
 
         // Add core identifiers
         props.insert("objectid".to_string(), json!(node.id));
-        props.insert("name".to_string(), json!(node.label));
+        props.insert("name".to_string(), json!(node.name));
 
         // Flatten BloodHound properties into top-level fields
         if let JsonValue::Object(bh_props) = &node.properties {
@@ -261,19 +261,19 @@ impl DatabaseBackend for Neo4jDatabase {
             return Ok(0);
         }
 
-        // Group nodes by type for efficient batching
-        let mut nodes_by_type: HashMap<String, Vec<&DbNode>> = HashMap::new();
+        // Group nodes by label for efficient batching
+        let mut nodes_by_label: HashMap<String, Vec<&DbNode>> = HashMap::new();
         for node in nodes {
-            nodes_by_type
-                .entry(node.node_type.clone())
+            nodes_by_label
+                .entry(node.label.clone())
                 .or_default()
                 .push(node);
         }
 
-        // Batch insert nodes of each type using UNWIND with flattened properties
+        // Batch insert nodes of each label using UNWIND with flattened properties
         const BATCH_SIZE: usize = 200;
-        for (node_type, type_nodes) in nodes_by_type {
-            for chunk in type_nodes.chunks(BATCH_SIZE) {
+        for (cypher_label, label_nodes) in nodes_by_label {
+            for chunk in label_nodes.chunks(BATCH_SIZE) {
                 // Build list of flattened property maps
                 let items: Vec<String> = chunk
                     .iter()
@@ -288,7 +288,7 @@ impl DatabaseBackend for Neo4jDatabase {
                      MERGE (n:{} {{objectid: props.objectid}}) \
                      SET n += props",
                     items.join(", "),
-                    node_type
+                    cypher_label
                 );
 
                 self.run_query(query(&cypher))?;
@@ -899,8 +899,8 @@ impl DatabaseBackend for Neo4jDatabase {
                                 col.to_string(),
                                 json!({
                                     "id": db_node.id,
-                                    "label": db_node.label,
-                                    "type": db_node.node_type,
+                                    "name": db_node.name,
+                                    "type": db_node.label,
                                     "properties": db_node.properties,
                                 }),
                             );

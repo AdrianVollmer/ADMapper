@@ -47,13 +47,13 @@ impl GraphDatabase {
         debug!("Initializing database schema");
 
         // Create nodes relation
-        // object_id is the primary key, stores label, type, and JSON properties
+        // object_id is the primary key, stores name (display), label (Cypher label), and JSON properties
         let create_nodes = r#"
             :create nodes {
                 object_id: String
                 =>
+                name: String,
                 label: String,
-                node_type: String,
                 properties: String
             }
         "#;
@@ -172,10 +172,10 @@ impl GraphDatabase {
         Ok(types)
     }
 
-    /// Get all distinct node types in the database.
+    /// Get all distinct node labels in the database.
     pub fn get_node_types(&self) -> Result<Vec<String>> {
         let result = self.db.run_script(
-            "?[node_type] := *nodes{node_type}",
+            "?[label] := *nodes{label}",
             Default::default(),
             ScriptMutability::Immutable,
         )?;
@@ -217,8 +217,8 @@ impl GraphDatabase {
             let props_str = serde_json::to_string(&node.properties)?;
             rows.push(vec![
                 DataValue::Str(node.id.clone().into()),
+                DataValue::Str(node.name.clone().into()),
                 DataValue::Str(node.label.clone().into()),
-                DataValue::Str(node.node_type.clone().into()),
                 DataValue::Str(props_str.into()),
             ]);
         }
@@ -226,8 +226,8 @@ impl GraphDatabase {
         let params = NamedRows {
             headers: vec![
                 "object_id".to_string(),
+                "name".to_string(),
                 "label".to_string(),
-                "node_type".to_string(),
                 "properties".to_string(),
             ],
             rows,
@@ -309,9 +309,9 @@ impl GraphDatabase {
     pub fn get_detailed_stats(&self) -> Result<DetailedStats> {
         let (node_count, edge_count) = self.get_stats()?;
 
-        // Get counts by node type
+        // Get counts by node label
         let type_result = self.db.run_script(
-            "?[node_type, count(object_id)] := *nodes{object_id, node_type}",
+            "?[label, count(object_id)] := *nodes{object_id, label}",
             Default::default(),
             ScriptMutability::Immutable,
         )?;
@@ -320,11 +320,11 @@ impl GraphDatabase {
         let mut type_counts = std::collections::HashMap::new();
         if let Some(rows) = type_json["rows"].as_array() {
             for row in rows {
-                if let (Some(node_type), Some(count)) = (
+                if let (Some(label), Some(count)) = (
                     row.get(0).and_then(|v| v.as_str()),
                     row.get(1).and_then(|v| v.as_u64()),
                 ) {
-                    type_counts.insert(node_type.to_string(), count as usize);
+                    type_counts.insert(label.to_string(), count as usize);
                 }
             }
         }
@@ -349,7 +349,7 @@ impl GraphDatabase {
         let edges = self.get_all_edges()?;
 
         // Count total users
-        let total_users = nodes.iter().filter(|n| n.node_type == "User").count();
+        let total_users = nodes.iter().filter(|n| n.label == "User").count();
 
         // Find Domain Admins groups (SID ending in -512)
         let da_nodes: Vec<&DbNode> = nodes
@@ -376,7 +376,7 @@ impl GraphDatabase {
 
         let mut real_das: Vec<(String, String)> = Vec::new();
         for node in &nodes {
-            if node.node_type != "User" {
+            if node.label != "User" {
                 continue;
             }
 
@@ -388,7 +388,7 @@ impl GraphDatabase {
 
             while let Some(current) = queue.pop_front() {
                 if da_ids.contains(current.as_str()) {
-                    real_das.push((node.id.clone(), node.label.clone()));
+                    real_das.push((node.id.clone(), node.name.clone()));
                     break;
                 }
                 if let Some(targets) = member_of_adj.get(&current) {
@@ -493,7 +493,7 @@ impl GraphDatabase {
     /// Get all nodes (for graph rendering).
     pub fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
         self.query_rows(
-            "?[object_id, label, node_type, properties] := *nodes{object_id, label, node_type, properties}",
+            "?[object_id, name, label, properties] := *nodes{object_id, name, label, properties}",
             Self::parse_node_row,
         )
     }
@@ -501,15 +501,15 @@ impl GraphDatabase {
     /// Parse a database row into a DbNode.
     fn parse_node_row(row: &JsonValue) -> Option<DbNode> {
         let id = row.get(0).and_then(|v| v.as_str())?;
-        let label = row.get(1).and_then(|v| v.as_str())?;
-        let node_type = row.get(2).and_then(|v| v.as_str())?;
+        let name = row.get(1).and_then(|v| v.as_str())?;
+        let label = row.get(2).and_then(|v| v.as_str())?;
         let props_str = row.get(3).and_then(|v| v.as_str())?;
         let properties = serde_json::from_str(props_str).unwrap_or(JsonValue::Null);
 
         Some(DbNode {
             id: id.to_string(),
+            name: name.to_string(),
             label: label.to_string(),
-            node_type: node_type.to_string(),
             properties,
         })
     }
@@ -553,12 +553,12 @@ impl GraphDatabase {
             }
         }
 
-        // Then, check for exact label match (case-insensitive)
+        // Then, check for exact name match (case-insensitive)
         // Collect all matches to handle duplicates
         let identifier_lower = identifier.to_lowercase();
         let matches: Vec<&DbNode> = all_nodes
             .iter()
-            .filter(|node| node.label.to_lowercase() == identifier_lower)
+            .filter(|node| node.name.to_lowercase() == identifier_lower)
             .collect();
 
         match matches.len() {
@@ -577,7 +577,7 @@ impl GraphDatabase {
         }
     }
 
-    /// Search nodes by label (case-insensitive substring match).
+    /// Search nodes by name (case-insensitive substring match).
     pub fn search_nodes(&self, search_query: &str, limit: usize) -> Result<Vec<DbNode>> {
         let query_lower = search_query.to_lowercase();
         debug!(query = %search_query, limit = limit, "Searching nodes");
@@ -586,12 +586,12 @@ impl GraphDatabase {
         // For large datasets, consider adding a full-text search index
         let nodes: Vec<DbNode> = self
             .query_rows(
-                "?[object_id, label, node_type, properties] := *nodes{object_id, label, node_type, properties}",
+                "?[object_id, name, label, properties] := *nodes{object_id, name, label, properties}",
                 Self::parse_node_row,
             )?
             .into_iter()
             .filter(|node| {
-                node.label.to_lowercase().contains(&query_lower)
+                node.name.to_lowercase().contains(&query_lower)
                     || node.id.to_lowercase().contains(&query_lower)
             })
             .take(limit)
@@ -734,8 +734,8 @@ impl GraphDatabase {
                     return None; // Exclude DA nodes themselves
                 }
                 let node = node_map.get(id.as_str())?;
-                if node.node_type == "User" {
-                    Some((id, node.node_type.clone(), node.label.clone(), hops))
+                if node.label == "User" {
+                    Some((id, node.label.clone(), node.name.clone(), hops))
                 } else {
                     None
                 }
@@ -1380,14 +1380,14 @@ mod tests {
         let nodes = vec![
             DbNode {
                 id: "user-1".to_string(),
-                label: "admin@corp.local".to_string(),
-                node_type: "User".to_string(),
+                name: "admin@corp.local".to_string(),
+                label: "User".to_string(),
                 properties: serde_json::json!({"enabled": true}),
             },
             DbNode {
                 id: "group-1".to_string(),
-                label: "Domain Admins".to_string(),
-                node_type: "Group".to_string(),
+                name: "Domain Admins".to_string(),
+                label: "Group".to_string(),
                 properties: serde_json::json!({}),
             },
         ];
@@ -1424,8 +1424,8 @@ mod tests {
 
         let nodes = vec![DbNode {
             id: "user-1".to_string(),
-            label: "admin".to_string(),
-            node_type: "User".to_string(),
+            name: "admin".to_string(),
+            label: "User".to_string(),
             properties: serde_json::json!({}),
         }];
         db.insert_nodes(&nodes).unwrap();
@@ -1443,32 +1443,32 @@ mod tests {
         let nodes = vec![
             DbNode {
                 id: "S-1-5-21-USER1".to_string(),
-                label: "admin@corp.local".to_string(),
-                node_type: "User".to_string(),
+                name: "admin@corp.local".to_string(),
+                label: "User".to_string(),
                 properties: serde_json::json!({"enabled": true}),
             },
             DbNode {
                 id: "S-1-5-21-USER2".to_string(),
-                label: "jsmith@corp.local".to_string(),
-                node_type: "User".to_string(),
+                name: "jsmith@corp.local".to_string(),
+                label: "User".to_string(),
                 properties: serde_json::json!({"enabled": true}),
             },
             DbNode {
                 id: "S-1-5-21-GROUP1".to_string(),
-                label: "Domain Admins".to_string(),
-                node_type: "Group".to_string(),
+                name: "Domain Admins".to_string(),
+                label: "Group".to_string(),
                 properties: serde_json::json!({}),
             },
             DbNode {
                 id: "S-1-5-21-GROUP2".to_string(),
-                label: "IT Staff".to_string(),
-                node_type: "Group".to_string(),
+                name: "IT Staff".to_string(),
+                label: "Group".to_string(),
                 properties: serde_json::json!({}),
             },
             DbNode {
                 id: "S-1-5-21-COMP1".to_string(),
-                label: "DC01.corp.local".to_string(),
-                node_type: "Computer".to_string(),
+                name: "DC01.corp.local".to_string(),
+                label: "Computer".to_string(),
                 properties: serde_json::json!({}),
             },
         ];
@@ -1520,7 +1520,7 @@ mod tests {
         // Search for "jsmith" - unique, tests case insensitivity
         let results = db.search_nodes("jsmith", 10).unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].label, "jsmith@corp.local");
+        assert_eq!(results[0].name, "jsmith@corp.local");
 
         // Search with uppercase should find lowercase
         let results = db.search_nodes("JSMITH", 10).unwrap();
@@ -1559,7 +1559,7 @@ mod tests {
         // Partial match on label
         let results = db.search_nodes("smith", 10).unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].label, "jsmith@corp.local");
+        assert_eq!(results[0].name, "jsmith@corp.local");
 
         // Partial match on ID
         let results = db.search_nodes("USER1", 10).unwrap();

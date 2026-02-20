@@ -239,8 +239,8 @@ pub struct PathsToDaParams {
 pub struct PathsToDaEntry {
     pub id: String,
     #[serde(rename = "type")]
-    pub node_type: String,
     pub label: String,
+    pub name: String,
     pub hops: usize,
 }
 
@@ -259,8 +259,8 @@ pub struct PathsToDaResponse {
 #[derive(Deserialize)]
 pub struct AddNodeRequest {
     pub id: String,
+    pub name: String,
     pub label: String,
-    pub node_type: String,
     #[serde(default)]
     pub properties: JsonValue,
 }

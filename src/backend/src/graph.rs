@@ -238,8 +238,8 @@ fn extract_node_from_json(value: &JsonValue) -> Option<DbNode> {
 
     Some(DbNode {
         id: object_id,
-        label,
-        node_type,
+        name: label,
+        label: node_type,
         properties,
     })
 }

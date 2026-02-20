@@ -373,26 +373,26 @@ fn test_nodes() -> Vec<DbNode> {
     vec![
         DbNode {
             id: "user-jsmith".to_string(),
-            label: "jsmith@corp.local".to_string(),
-            node_type: "User".to_string(),
+            name: "jsmith@corp.local".to_string(),
+            label: "User".to_string(),
             properties: json!({"enabled": true}),
         },
         DbNode {
             id: "user-admin".to_string(),
-            label: "admin@corp.local".to_string(),
-            node_type: "User".to_string(),
+            name: "admin@corp.local".to_string(),
+            label: "User".to_string(),
             properties: json!({"enabled": true, "admincount": true}),
         },
         DbNode {
             id: "group-admins".to_string(),
-            label: "Domain Admins".to_string(),
-            node_type: "Group".to_string(),
+            name: "Domain Admins".to_string(),
+            label: "Group".to_string(),
             properties: json!({}),
         },
         DbNode {
             id: "computer-dc01".to_string(),
-            label: "DC01.corp.local".to_string(),
-            node_type: "Computer".to_string(),
+            name: "DC01.corp.local".to_string(),
+            label: "Computer".to_string(),
             properties: json!({"operatingsystem": "Windows Server 2019"}),
         },
     ]
@@ -406,12 +406,16 @@ fn test_edges() -> Vec<DbEdge> {
             target: "group-admins".to_string(),
             edge_type: "MemberOf".to_string(),
             properties: json!({}),
+            source_type: None,
+            target_type: None,
         },
         DbEdge {
             source: "group-admins".to_string(),
             target: "computer-dc01".to_string(),
             edge_type: "AdminTo".to_string(),
             properties: json!({}),
+            source_type: None,
+            target_type: None,
         },
     ]
 }
@@ -672,8 +676,8 @@ async fn test_debug_actual_db() {
     println!("\n=== NODES ({} total) ===", nodes.len());
     for node in nodes.iter().take(10) {
         println!("  ID: {}", node.id);
+        println!("  Name: {}", node.name);
         println!("  Label: {}", node.label);
-        println!("  Type: {}", node.node_type);
         println!();
     }
 
@@ -737,16 +741,16 @@ async fn test_debug_actual_db() {
         for node in &nodes {
             if node.id.ends_with("-500") {
                 println!(
-                    "    Found: ID={}, Label={}, Type={}",
-                    node.id, node.label, node.node_type
+                    "    Found: ID={}, Name={}, Label={}",
+                    node.id, node.name, node.label
                 );
                 // Check edges from this node
                 let edges_from: Vec<_> = edges.iter().filter(|e| e.source == node.id).collect();
                 println!("    Edges from this node: {}", edges_from.len());
                 for e in edges_from.iter().take(5) {
                     let target_node = nodes.iter().find(|n| n.id == e.target);
-                    let target_label = target_node.map(|n| n.label.as_str()).unwrap_or("UNKNOWN");
-                    println!("      -> {} ({}) [{}]", e.target, target_label, e.edge_type);
+                    let target_name = target_node.map(|n| n.name.as_str()).unwrap_or("UNKNOWN");
+                    println!("      -> {} ({}) [{}]", e.target, target_name, e.edge_type);
                 }
             }
         }
@@ -776,14 +780,14 @@ async fn test_graph_path_bloodhound_style() {
     let nodes = vec![
         DbNode {
             id: "S-1-5-21-2697957641-2271029196-387917394-500".to_string(),
-            label: "ADMINISTRATOR@PHANTOM.CORP".to_string(),
-            node_type: "User".to_string(),
+            name: "ADMINISTRATOR@PHANTOM.CORP".to_string(),
+            label: "User".to_string(),
             properties: json!({"enabled": true, "admincount": true}),
         },
         DbNode {
             id: "S-1-5-21-2697957641-2271029196-387917394-512".to_string(),
-            label: "DOMAIN ADMINS@PHANTOM.CORP".to_string(),
-            node_type: "Group".to_string(),
+            name: "DOMAIN ADMINS@PHANTOM.CORP".to_string(),
+            label: "Group".to_string(),
             properties: json!({"admincount": true}),
         },
     ];
@@ -794,6 +798,8 @@ async fn test_graph_path_bloodhound_style() {
         target: "S-1-5-21-2697957641-2271029196-387917394-512".to_string(),
         edge_type: "MemberOf".to_string(),
         properties: json!({}),
+        source_type: None,
+        target_type: None,
     }];
 
     app.db().insert_nodes(&nodes).unwrap();

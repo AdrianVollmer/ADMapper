@@ -91,7 +91,7 @@ impl CrustDatabase {
         let batch: Vec<(Vec<String>, serde_json::Value)> = nodes
             .iter()
             .map(|node| {
-                let labels = vec![node.node_type.clone()];
+                let labels = vec![node.label.clone()];
                 // Flatten BloodHound properties into top-level fields
                 let props = Self::flatten_node_properties(node);
                 (labels, props)
@@ -121,9 +121,9 @@ impl CrustDatabase {
             // Build flattened properties for Cypher
             let props = Self::flatten_node_properties(node);
             let props_str = Self::json_to_cypher_props(&props);
-            let node_type = node.node_type.replace('\'', "''");
+            let cypher_label = node.label.replace('\'', "''");
 
-            let query = format!("CREATE (n:{} {})", node_type, props_str);
+            let query = format!("CREATE (n:{} {})", cypher_label, props_str);
 
             if self.execute(&query).is_ok() {
                 count += 1;
@@ -141,8 +141,8 @@ impl CrustDatabase {
 
         // Add core identifiers
         props.insert("object_id".to_string(), serde_json::json!(node.id));
+        props.insert("name".to_string(), serde_json::json!(node.name));
         props.insert("label".to_string(), serde_json::json!(node.label));
-        props.insert("node_type".to_string(), serde_json::json!(node.node_type));
 
         // Flatten BloodHound properties into top-level fields
         if let serde_json::Value::Object(bh_props) = &node.properties {
@@ -157,7 +157,7 @@ impl CrustDatabase {
                     }
                 }
                 // Don't overwrite core fields
-                if key != "object_id" && key != "label" && key != "node_type" {
+                if key != "object_id" && key != "name" && key != "label" {
                     props.insert(key.clone(), value.clone());
                 }
             }
@@ -452,8 +452,8 @@ impl CrustDatabase {
                     })
                     .unwrap_or_default();
 
-                let label = properties
-                    .get("label")
+                let name = properties
+                    .get("name")
                     .and_then(|v| {
                         if let crustdb::PropertyValue::String(s) = v {
                             Some(s.clone())
@@ -463,8 +463,8 @@ impl CrustDatabase {
                     })
                     .unwrap_or_else(|| object_id.clone());
 
-                let node_type = properties
-                    .get("node_type")
+                let label = properties
+                    .get("label")
                     .and_then(|v| {
                         if let crustdb::PropertyValue::String(s) = v {
                             Some(s.clone())
@@ -480,8 +480,8 @@ impl CrustDatabase {
 
                 Some(DbNode {
                     id: object_id,
+                    name,
                     label,
-                    node_type,
                     properties: props_json,
                 })
             }
@@ -561,9 +561,9 @@ impl CrustDatabase {
         Ok(types)
     }
 
-    /// Get all distinct node types.
+    /// Get all distinct node labels (Cypher labels).
     pub fn get_node_types(&self) -> Result<Vec<String>> {
-        let result = self.execute("MATCH (n) RETURN DISTINCT n.node_type")?;
+        let result = self.execute("MATCH (n) RETURN DISTINCT n.label")?;
 
         let mut types = Vec::new();
         for row in &result.rows {
@@ -622,9 +622,9 @@ impl CrustDatabase {
             }
         }
 
-        // Try label match
+        // Try name match
         let query = format!(
-            "MATCH (n) WHERE n.label = '{}' RETURN n.object_id LIMIT 1",
+            "MATCH (n) WHERE n.name = '{}' RETURN n.object_id LIMIT 1",
             id_escaped
         );
         if let Ok(result) = self.execute(&query) {
@@ -730,15 +730,15 @@ impl CrustDatabase {
         }
 
         // BFS from each user to find paths to DA
-        let users: Vec<&DbNode> = nodes.iter().filter(|n| n.node_type == "User").collect();
+        let users: Vec<&DbNode> = nodes.iter().filter(|n| n.label == "User").collect();
 
         let mut results = Vec::new();
         for user in users {
             if let Some(hops) = self.bfs_to_targets(&user.id, &da_groups, &adj) {
                 results.push((
                     user.id.clone(),
-                    user.node_type.clone(),
                     user.label.clone(),
+                    user.name.clone(),
                     hops,
                 ));
             }
@@ -927,9 +927,9 @@ impl CrustDatabase {
             }) = row.values.get("a")
             {
                 if !nodes_map.contains_key(&source) {
-                    let node_type = labels.first().cloned().unwrap_or_default();
+                    let cypher_label = labels.first().cloned().unwrap_or_default();
                     let props = Self::props_to_json(properties);
-                    let label = props
+                    let name = props
                         .get("name")
                         .and_then(|v| v.as_str())
                         .unwrap_or(&source)
@@ -938,8 +938,8 @@ impl CrustDatabase {
                         source.clone(),
                         DbNode {
                             id: source.clone(),
-                            label,
-                            node_type,
+                            name,
+                            label: cypher_label,
                             properties: props,
                         },
                     );
@@ -951,9 +951,9 @@ impl CrustDatabase {
             }) = row.values.get("b")
             {
                 if !nodes_map.contains_key(&target) {
-                    let node_type = labels.first().cloned().unwrap_or_default();
+                    let cypher_label = labels.first().cloned().unwrap_or_default();
                     let props = Self::props_to_json(properties);
-                    let label = props
+                    let name = props
                         .get("name")
                         .and_then(|v| v.as_str())
                         .unwrap_or(&target)
@@ -962,8 +962,8 @@ impl CrustDatabase {
                         target.clone(),
                         DbNode {
                             id: target.clone(),
-                            label,
-                            node_type,
+                            name,
+                            label: cypher_label,
                             properties: props,
                         },
                     );
@@ -1160,7 +1160,7 @@ impl CrustDatabase {
         let nodes = self.get_all_nodes()?;
         let edges = self.get_all_edges()?;
 
-        let total_users = nodes.iter().filter(|n| n.node_type == "User").count();
+        let total_users = nodes.iter().filter(|n| n.label == "User").count();
 
         // Find DA groups (SID ends with -512)
         let da_groups: Vec<&str> = nodes
@@ -1183,9 +1183,9 @@ impl CrustDatabase {
 
         // Find real DAs (users directly or transitively in DA group via MemberOf)
         let mut real_das = Vec::new();
-        for user in nodes.iter().filter(|n| n.node_type == "User") {
+        for user in nodes.iter().filter(|n| n.label == "User") {
             if self.is_transitive_member(&user.id, &da_groups, &memberof_adj) {
-                real_das.push((user.id.clone(), user.label.clone()));
+                real_das.push((user.id.clone(), user.name.clone()));
             }
         }
 
@@ -1201,9 +1201,9 @@ impl CrustDatabase {
 
         // Find effective DAs (any path to DA group)
         let mut effective_das = Vec::new();
-        for user in nodes.iter().filter(|n| n.node_type == "User") {
+        for user in nodes.iter().filter(|n| n.label == "User") {
             if let Some(hops) = self.bfs_to_targets(&user.id, &da_groups, &full_adj) {
-                effective_das.push((user.id.clone(), user.label.clone(), hops));
+                effective_das.push((user.id.clone(), user.name.clone(), hops));
             }
         }
 
