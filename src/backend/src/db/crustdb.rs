@@ -970,6 +970,15 @@ impl CrustDatabase {
             }
         }
 
+        // Always include the source node (matches Neo4j/FalkorDB behavior)
+        if !nodes_map.contains_key(node_id) {
+            if let Ok(source_nodes) = self.get_nodes_by_ids(&[node_id.to_string()]) {
+                if let Some(source_node) = source_nodes.into_iter().next() {
+                    nodes_map.insert(node_id.to_string(), source_node);
+                }
+            }
+        }
+
         let nodes: Vec<DbNode> = nodes_map.into_values().collect();
         Ok((nodes, edges))
     }
