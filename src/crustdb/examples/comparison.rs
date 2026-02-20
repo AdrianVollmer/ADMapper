@@ -246,7 +246,10 @@ fn parse_falkordb_row_count(output: &str) -> Option<usize> {
         if line.contains("Nodes") || line.contains("count") {
             // Try to extract number
             for word in line.split_whitespace() {
-                if let Ok(n) = word.trim_matches(|c: char| !c.is_numeric()).parse::<usize>() {
+                if let Ok(n) = word
+                    .trim_matches(|c: char| !c.is_numeric())
+                    .parse::<usize>()
+                {
                     return Some(n);
                 }
             }

@@ -196,7 +196,12 @@ pub fn generate_wide_fanout(branching: usize, depth: usize) -> GeneratedGraph {
                         "depth": d + 1
                     }),
                 ));
-                edges.push((parent_idx, child_idx, "CHILD".to_string(), serde_json::json!({})));
+                edges.push((
+                    parent_idx,
+                    child_idx,
+                    "CHILD".to_string(),
+                    serde_json::json!({}),
+                ));
                 next_level.push(child_idx);
             }
         }

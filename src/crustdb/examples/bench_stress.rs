@@ -411,19 +411,13 @@ fn build_crustdb_query(query_type: QueryType, scale: usize) -> String {
     let target_id = scale.saturating_sub(1);
 
     match query_type {
-        QueryType::PointLookup => {
-            "MATCH (n:Node {id: 0}) RETURN n".to_string()
-        }
-        QueryType::SingleHop => {
-            "MATCH (n:Node {id: 0})-[r]->(m) RETURN m LIMIT 10".to_string()
-        }
+        QueryType::PointLookup => "MATCH (n:Node {id: 0}) RETURN n".to_string(),
+        QueryType::SingleHop => "MATCH (n:Node {id: 0})-[r]->(m) RETURN m LIMIT 10".to_string(),
         QueryType::BoundedVarLength => {
             // Note: CrustDB doesn't support COUNT(DISTINCT ...), so just count rows
             "MATCH (s:Node {id: 0})-[*1..3]->(t) RETURN t LIMIT 100".to_string()
         }
-        QueryType::CountAll => {
-            "MATCH (n) RETURN COUNT(n)".to_string()
-        }
+        QueryType::CountAll => "MATCH (n) RETURN COUNT(n)".to_string(),
         QueryType::FullScanFilter => {
             // K1: Full scan with property filter (no index)
             "MATCH (n) WHERE n.value > 500 RETURN COUNT(n)".to_string()
@@ -597,7 +591,10 @@ fn print_results_summary(results: &BenchmarkResults) {
         "      {:30} {:>12} {:>12} {:>8} {:>8}",
         "Query", "Latency(ms)", "P99(ms)", "Rows", "Status"
     );
-    println!("      {:->30} {:->12} {:->12} {:->8} {:->8}", "", "", "", "", "");
+    println!(
+        "      {:->30} {:->12} {:->12} {:->8} {:->8}",
+        "", "", "", "", ""
+    );
 
     for qr in &results.queries {
         let status = if qr.success { "OK" } else { "FAIL" };
@@ -656,10 +653,8 @@ fn parse_args() -> Config {
                             Topology::PowerLaw,
                         ];
                     } else {
-                        config.topologies = args[i]
-                            .split(',')
-                            .filter_map(|s| s.parse().ok())
-                            .collect();
+                        config.topologies =
+                            args[i].split(',').filter_map(|s| s.parse().ok()).collect();
                     }
                 }
             }

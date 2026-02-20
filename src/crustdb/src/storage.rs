@@ -1171,20 +1171,28 @@ impl SqliteStorage {
             "UPDATE query_history
              SET status = ?2, duration_ms = ?3, result_count = ?4, error = ?5
              WHERE id = ?1",
-            params![id, status, duration_ms.map(|d| d as i64), result_count, error],
+            params![
+                id,
+                status,
+                duration_ms.map(|d| d as i64),
+                result_count,
+                error
+            ],
         )?;
         Ok(())
     }
 
     /// Get query history with pagination.
     /// Returns (rows, total_count).
-    pub fn get_query_history(&self, limit: usize, offset: usize) -> Result<(Vec<QueryHistoryRow>, usize)> {
+    pub fn get_query_history(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
         // Get total count
-        let total: usize = self.conn.query_row(
-            "SELECT COUNT(*) FROM query_history",
-            [],
-            |row| row.get(0),
-        )?;
+        let total: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM query_history", [], |row| row.get(0))?;
 
         // Get paginated results
         let mut stmt = self.conn.prepare(
@@ -1265,17 +1273,15 @@ impl SqliteStorage {
 
     /// Get cache statistics (entry count, total size).
     pub fn cache_stats(&self) -> Result<CacheStats> {
-        let entry_count: usize = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM query_cache", [], |row| row.get(0))?;
+        let entry_count: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM query_cache", [], |row| row.get(0))?;
 
-        let total_size_bytes: usize = self
-            .conn
-            .query_row(
-                "SELECT COALESCE(SUM(LENGTH(result)), 0) FROM query_cache",
-                [],
-                |row| row.get(0),
-            )?;
+        let total_size_bytes: usize = self.conn.query_row(
+            "SELECT COALESCE(SUM(LENGTH(result)), 0) FROM query_cache",
+            [],
+            |row| row.get(0),
+        )?;
 
         Ok(CacheStats {
             entry_count,
