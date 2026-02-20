@@ -1922,6 +1922,182 @@ body[data-theme="light"] {
   @apply text-gray-900;
 }
 
+/* Database manager additional */
+[data-theme="light"] .db-stat-card {
+  @apply bg-gray-50;
+}
+
+[data-theme="light"] .db-stat-primary {
+  @apply bg-blue-50 border-blue-200;
+}
+
+[data-theme="light"] .db-stat-value {
+  @apply text-gray-900;
+}
+
+[data-theme="light"] .db-stat-label {
+  @apply text-gray-600;
+}
+
+[data-theme="light"] .db-stats-section-title {
+  @apply text-gray-600;
+}
+
+[data-theme="light"] .db-stat-item-label {
+  @apply text-gray-600;
+}
+
+[data-theme="light"] .db-danger-zone {
+  @apply bg-red-50 border-red-200;
+}
+
+[data-theme="light"] .db-danger-title {
+  @apply text-red-700;
+}
+
+[data-theme="light"] .db-danger-text {
+  @apply text-gray-600;
+}
+
+/* Security Insights */
+[data-theme="light"] .insight-section {
+  @apply bg-gray-50;
+}
+
+[data-theme="light"] .insight-section-title {
+  @apply text-gray-700;
+}
+
+[data-theme="light"] .insight-desc {
+  @apply text-gray-600;
+}
+
+[data-theme="light"] .insight-card {
+  @apply bg-white border-gray-200;
+}
+
+[data-theme="light"] .insight-card-primary {
+  @apply bg-blue-50 border-blue-200;
+}
+
+[data-theme="light"] .insight-card-secondary {
+  @apply bg-purple-50 border-purple-200;
+}
+
+[data-theme="light"] .insight-card-value {
+  @apply text-gray-900;
+}
+
+[data-theme="light"] .insight-card-label {
+  @apply text-gray-700;
+}
+
+[data-theme="light"] .insight-card-desc {
+  @apply text-gray-500;
+}
+
+[data-theme="light"] .insight-row {
+  @apply bg-gray-100;
+}
+
+[data-theme="light"] .insight-label {
+  @apply text-gray-600;
+}
+
+[data-theme="light"] .insight-value {
+  @apply text-gray-900;
+}
+
+/* Keyboard Shortcuts */
+[data-theme="light"] .shortcut-category-title {
+  @apply text-gray-700 border-gray-300;
+}
+
+[data-theme="light"] .shortcut-label {
+  @apply text-gray-600;
+}
+
+[data-theme="light"] .shortcut-key {
+  @apply bg-gray-100 text-gray-700 border-gray-300;
+}
+
+/* DB Connect tabs */
+[data-theme="light"] .db-type-tabs {
+  @apply border-gray-300;
+}
+
+[data-theme="light"] .db-type-tab {
+  @apply text-gray-600 hover:text-gray-900 hover:border-gray-400;
+}
+
+[data-theme="light"] .db-type-tab.active {
+  @apply text-blue-600 border-blue-600;
+}
+
+[data-theme="light"] .form-warning {
+  @apply text-yellow-700 bg-yellow-50 border-yellow-300;
+}
+
+[data-theme="light"] .form-checkbox {
+  @apply text-gray-700;
+}
+
+[data-theme="light"] .form-checkbox input[type="checkbox"] {
+  @apply border-gray-400 bg-white;
+}
+
+/* Schema example (Manage Queries) */
+[data-theme="light"] .schema-example {
+  @apply bg-gray-100 text-gray-700;
+}
+
+/* Overflow menu (sidebar) */
+[data-theme="light"] .overflow-trigger {
+  @apply text-gray-600;
+}
+
+[data-theme="light"] .overflow-dropdown {
+  @apply bg-white border-gray-300;
+}
+
+[data-theme="light"] .overflow-item {
+  @apply text-gray-700 hover:bg-gray-100 hover:text-gray-900;
+}
+
+[data-theme="light"] .overflow-item.danger {
+  @apply text-red-600 hover:text-red-700 hover:bg-red-50;
+}
+
+/* Placeholder warning */
+[data-theme="light"] .placeholder-warning {
+  @apply bg-yellow-50 border-yellow-300;
+}
+
+[data-theme="light"] .placeholder-icon {
+  @apply text-yellow-600;
+}
+
+[data-theme="light"] .placeholder-title {
+  @apply text-yellow-700;
+}
+
+[data-theme="light"] .placeholder-desc {
+  @apply text-yellow-600;
+}
+
+[data-theme="light"] .placeholder-learn-more {
+  @apply text-yellow-700 hover:text-yellow-800;
+}
+
+/* Detail section (sidebar) */
+[data-theme="light"] .detail-section {
+  @apply border-gray-200;
+}
+
+[data-theme="light"] .detail-section-title {
+  @apply text-gray-500;
+}
+
 /* Query history */
 [data-theme="light"] .query-history-item {
   @apply bg-gray-100 hover:bg-gray-200;

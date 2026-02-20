@@ -377,6 +377,15 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     sigma.setSetting("labelColor", { color: LABEL_COLOR[t] });
   }
 
+  // Listen for theme changes from the app
+  function handleThemeChange(event: Event) {
+    const customEvent = event as CustomEvent<{ theme: "light" | "dark" }>;
+    currentTheme = customEvent.detail.theme;
+    updateThemeStyles(currentTheme);
+    sigma.refresh();
+  }
+  window.addEventListener("themechange", handleThemeChange);
+
   // Event handlers
   if (enableHover) {
     sigma.on("enterNode", (event) => {
@@ -474,6 +483,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     },
 
     destroy() {
+      window.removeEventListener("themechange", handleThemeChange);
       sigma.kill();
     },
 
