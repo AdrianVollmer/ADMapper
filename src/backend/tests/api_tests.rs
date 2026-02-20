@@ -3,7 +3,9 @@
 //! These tests use the actual application router and database,
 //! not mocks. Each test creates a fresh in-memory database.
 
-use admapper::{create_api_router, AppState, DbEdge, DbNode, GraphDatabase};
+use admapper::{
+    create_api_router, AppState, CrustDatabase, DatabaseBackend, DatabaseType, DbEdge, DbNode,
+};
 use axum::{
     body::Body,
     http::{header, Method, Request, StatusCode},
@@ -11,20 +13,22 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use serde_json::{json, Value as JsonValue};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 /// Test application with access to both router and database.
 struct TestApp {
     router: Router,
-    db: GraphDatabase,
+    db: Arc<dyn DatabaseBackend>,
 }
 
 impl TestApp {
     fn new() -> Self {
-        let db = GraphDatabase::in_memory().unwrap();
-        // Clone db before passing to state so we keep a reference for seeding
-        let db_clone = db.clone();
-        let state = AppState::new(db);
+        let db = CrustDatabase::in_memory().unwrap();
+        let db_arc: Arc<dyn DatabaseBackend> = Arc::new(db);
+        // Clone Arc before passing to state so we keep a reference for seeding
+        let db_clone = Arc::clone(&db_arc);
+        let state = AppState::new_connected(db_arc, DatabaseType::CrustDB);
         let router = create_api_router(state);
         Self {
             router,
@@ -36,15 +40,16 @@ impl TestApp {
         &self.router
     }
 
-    fn db(&self) -> &GraphDatabase {
+    fn db(&self) -> &Arc<dyn DatabaseBackend> {
         &self.db
     }
 }
 
 /// Create a test application with an in-memory database.
 fn create_test_app() -> Router {
-    let db = GraphDatabase::in_memory().unwrap();
-    let state = AppState::new(db);
+    let db = CrustDatabase::in_memory().unwrap();
+    let db_arc: Arc<dyn DatabaseBackend> = Arc::new(db);
+    let state = AppState::new_connected(db_arc, DatabaseType::CrustDB);
     create_api_router(state)
 }
 
@@ -669,7 +674,7 @@ async fn test_debug_actual_db() {
         return;
     }
 
-    let db = admapper::GraphDatabase::new(db_path).expect("Failed to open database");
+    let db = admapper::CrustDatabase::new(db_path, true).expect("Failed to open database");
 
     // Get all nodes
     let nodes = db.get_all_nodes().unwrap();
@@ -756,7 +761,7 @@ async fn test_debug_actual_db() {
         }
 
         // Try shortest path
-        let path = db.shortest_path(from_id, to_id).unwrap();
+        let path: Option<Vec<(String, Option<String>)>> = db.shortest_path(from_id, to_id).unwrap();
         match path {
             Some(p) => {
                 println!("  PATH FOUND! {} hops", p.len());

@@ -41,8 +41,7 @@ impl CrustDatabase {
         Ok(instance)
     }
 
-    /// Create an in-memory database (for testing).
-    #[cfg(test)]
+    /// Create an in-memory database (useful for testing).
     pub fn in_memory() -> Result<Self> {
         debug!("Creating in-memory CrustDB");
         let mut db = Database::in_memory().map_err(|e| DbError::Database(e.to_string()))?;

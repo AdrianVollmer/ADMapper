@@ -24,9 +24,13 @@ use tauri::Manager;
 
 // Re-export public types
 pub use api::types::ApiError;
-pub use db::{DbEdge, DbNode};
+pub use db::{DatabaseBackend, DatabaseType, DbEdge, DbNode};
 pub use graph::{FullGraph, GraphEdge, GraphNode};
 pub use state::AppState;
+
+// Re-export database implementations for testing
+#[cfg(feature = "crustdb")]
+pub use db::CrustDatabase;
 
 /// Run as Tauri desktop application.
 #[cfg(feature = "desktop")]
