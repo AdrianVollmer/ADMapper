@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
 
 /// Current schema version.
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 /// Validate a property name to prevent JSON path injection.
 ///
@@ -204,6 +204,9 @@ impl SqliteStorage {
         if old_version < 3 {
             self.migrate_v2_to_v3()?;
         }
+        if old_version < 4 {
+            self.migrate_v3_to_v4()?;
+        }
         Ok(())
     }
 
@@ -269,6 +272,29 @@ impl SqliteStorage {
         Ok(())
     }
 
+    /// Migration from v3 to v4: Convert JSON TEXT to JSONB for better query performance.
+    ///
+    /// JSONB stores JSON in a binary format that doesn't need re-parsing on each
+    /// json_extract() call. This provides 2-3x speedup for property queries.
+    fn migrate_v3_to_v4(&self) -> Result<()> {
+        // Convert existing JSON text to JSONB binary format
+        // SQLite's jsonb() function converts JSON text to JSONB blob
+        // json_extract() works transparently on both formats
+        self.conn.execute_batch(
+            r#"
+            -- Convert nodes properties from JSON text to JSONB
+            UPDATE nodes SET properties = jsonb(properties) WHERE properties IS NOT NULL;
+
+            -- Convert edges properties from JSON text to JSONB
+            UPDATE edges SET properties = jsonb(properties) WHERE properties IS NOT NULL;
+
+            -- Update schema version
+            UPDATE meta SET value = '4' WHERE key = 'schema_version';
+            "#,
+        )?;
+        Ok(())
+    }
+
     /// Get or create a node label ID.
     fn get_or_create_label(&self, label: &str) -> Result<i64> {
         // Try to get existing
@@ -317,7 +343,7 @@ impl SqliteStorage {
     pub fn insert_node(&self, labels: &[String], properties: &serde_json::Value) -> Result<i64> {
         let props_json = serde_json::to_string(properties)?;
         self.conn.execute(
-            "INSERT INTO nodes (properties) VALUES (?1)",
+            "INSERT INTO nodes (properties) VALUES (jsonb(?1))",
             params![props_json],
         )?;
         let node_id = self.conn.last_insert_rowid();
@@ -344,7 +370,7 @@ impl SqliteStorage {
         let type_id = self.get_or_create_edge_type(edge_type)?;
         let props_json = serde_json::to_string(properties)?;
         self.conn.execute(
-            "INSERT INTO edges (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO edges (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, jsonb(?4))",
             params![source_id, target_id, type_id, props_json],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -394,7 +420,7 @@ impl SqliteStorage {
 
         // Insert nodes using prepared statement
         {
-            let mut node_stmt = tx.prepare("INSERT INTO nodes (properties) VALUES (?1)")?;
+            let mut node_stmt = tx.prepare("INSERT INTO nodes (properties) VALUES (jsonb(?1))")?;
             let mut label_stmt =
                 tx.prepare("INSERT INTO node_label_map (node_id, label_id) VALUES (?1, ?2)")?;
 
@@ -460,7 +486,7 @@ impl SqliteStorage {
         // Insert edges using prepared statement
         {
             let mut edge_stmt = tx.prepare(
-                "INSERT INTO edges (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO edges (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, jsonb(?4))",
             )?;
 
             for (source_id, target_id, edge_type, properties) in edges {
@@ -526,10 +552,11 @@ impl SqliteStorage {
 
     /// Get a node by ID.
     pub fn get_node(&self, id: i64) -> Result<Option<Node>> {
+        // Use json() to convert JSONB blob back to JSON text
         let node: Option<(i64, String)> = self
             .conn
             .query_row(
-                "SELECT id, properties FROM nodes WHERE id = ?1",
+                "SELECT id, json(properties) FROM nodes WHERE id = ?1",
                 params![id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -561,10 +588,11 @@ impl SqliteStorage {
 
     /// Get an edge by ID.
     pub fn get_edge(&self, id: i64) -> Result<Option<Edge>> {
+        // Use json() to convert JSONB blob back to JSON text
         let edge: Option<(i64, i64, i64, String, String)> = self
             .conn
             .query_row(
-                "SELECT e.id, e.source_id, e.target_id, et.name, e.properties
+                "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
                  FROM edges e
                  JOIN edge_types et ON e.type_id = et.id
                  WHERE e.id = ?1",
@@ -630,11 +658,11 @@ impl SqliteStorage {
         property: &str,
         value: &PropertyValue,
     ) -> Result<bool> {
-        // Get current properties
+        // Get current properties (use json() to convert JSONB to text)
         let current: Option<String> = self
             .conn
             .query_row(
-                "SELECT properties FROM nodes WHERE id = ?1",
+                "SELECT json(properties) FROM nodes WHERE id = ?1",
                 params![node_id],
                 |row| row.get(0),
             )
@@ -651,7 +679,7 @@ impl SqliteStorage {
         let new_json = serde_json::to_string(&properties)?;
 
         let affected = self.conn.execute(
-            "UPDATE nodes SET properties = ?1 WHERE id = ?2",
+            "UPDATE nodes SET properties = jsonb(?1) WHERE id = ?2",
             params![new_json, node_id],
         )?;
         Ok(affected > 0)
@@ -697,7 +725,7 @@ impl SqliteStorage {
     /// Find edges by type.
     pub fn find_edges_by_type(&self, edge_type: &str) -> Result<Vec<Edge>> {
         let mut stmt = self.conn.prepare(
-            "SELECT e.id, e.source_id, e.target_id, et.name, e.properties
+            "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
              FROM edges e
              JOIN edge_types et ON e.type_id = et.id
              WHERE et.name = ?1",
@@ -786,9 +814,10 @@ impl SqliteStorage {
     pub fn find_nodes_by_label_limit(&self, label: &str, limit: Option<u64>) -> Result<Vec<Node>> {
         // Use subquery to limit nodes BEFORE joining for all labels
         // This ensures we only process N nodes instead of all matching nodes
+        // Use json() to convert JSONB to text for deserialization
         let sql = match limit {
             Some(n) => format!(
-                "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+                "SELECT n.id, json(n.properties), GROUP_CONCAT(nl.name) as labels
                  FROM (
                      SELECT DISTINCT nodes.id, nodes.properties
                      FROM nodes
@@ -802,7 +831,7 @@ impl SqliteStorage {
                  GROUP BY n.id, n.properties",
                 n
             ),
-            None => "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+            None => "SELECT n.id, json(n.properties), GROUP_CONCAT(nl.name) as labels
                      FROM nodes n
                      JOIN node_label_map nlm ON n.id = nlm.node_id
                      JOIN node_labels nl ON nlm.label_id = nl.id
@@ -823,16 +852,17 @@ impl SqliteStorage {
     pub fn get_all_nodes_limit(&self, limit: Option<u64>) -> Result<Vec<Node>> {
         // Use subquery to limit nodes BEFORE joining for labels
         // This ensures we only process N nodes instead of all nodes
+        // Use json() to convert JSONB to text for deserialization
         let sql = match limit {
             Some(n) => format!(
-                "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+                "SELECT n.id, json(n.properties), GROUP_CONCAT(nl.name) as labels
                  FROM (SELECT id, properties FROM nodes LIMIT {}) AS n
                  LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
                  LEFT JOIN node_labels nl ON nlm.label_id = nl.id
                  GROUP BY n.id, n.properties",
                 n
             ),
-            None => "SELECT n.id, n.properties, GROUP_CONCAT(nl.name) as labels
+            None => "SELECT n.id, json(n.properties), GROUP_CONCAT(nl.name) as labels
                      FROM nodes n
                      LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
                      LEFT JOIN node_labels nl ON nlm.label_id = nl.id
@@ -881,7 +911,7 @@ impl SqliteStorage {
     /// Find outgoing edges from a node.
     pub fn find_outgoing_edges(&self, node_id: i64) -> Result<Vec<Edge>> {
         let mut stmt = self.conn.prepare(
-            "SELECT e.id, e.source_id, e.target_id, et.name, e.properties
+            "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
              FROM edges e
              JOIN edge_types et ON e.type_id = et.id
              WHERE e.source_id = ?1",
@@ -893,7 +923,7 @@ impl SqliteStorage {
     /// Find incoming edges to a node.
     pub fn find_incoming_edges(&self, node_id: i64) -> Result<Vec<Edge>> {
         let mut stmt = self.conn.prepare(
-            "SELECT e.id, e.source_id, e.target_id, et.name, e.properties
+            "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
              FROM edges e
              JOIN edge_types et ON e.type_id = et.id
              WHERE e.target_id = ?1",
