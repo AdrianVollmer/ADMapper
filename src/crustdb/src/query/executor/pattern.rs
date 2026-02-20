@@ -464,6 +464,12 @@ pub fn execute_single_node_pattern(
 }
 
 /// Execute a single-hop relationship pattern match.
+/// Check if a node pattern has filters (labels or properties).
+/// Used to determine selectivity for query optimization.
+fn pattern_has_filters(pattern: &NodePattern) -> bool {
+    !pattern.labels.is_empty() || pattern.properties.is_some()
+}
+
 pub fn execute_single_hop_pattern(
     pattern: &Pattern,
     storage: &SqliteStorage,
@@ -484,6 +490,26 @@ pub fn execute_single_hop_pattern(
     let rel_var = rel_pattern.variable.as_deref();
     let target_var = target_pattern.variable.as_deref().unwrap_or("_tgt");
     let path_var = pattern.path_variable.as_deref();
+
+    // Optimization: flip traversal direction when target is more selective than source.
+    // This avoids scanning all nodes when only the target has filters.
+    // For example: MATCH (a)-[r]->(b {id: '...'}) should start from b and find incoming edges.
+    let source_has_filters = pattern_has_filters(source_pattern);
+    let target_has_filters = pattern_has_filters(target_pattern);
+    let should_flip = !source_has_filters && target_has_filters;
+
+    if should_flip {
+        return execute_single_hop_pattern_flipped(
+            source_pattern,
+            rel_pattern,
+            target_pattern,
+            source_var,
+            rel_var,
+            target_var,
+            path_var,
+            storage,
+        );
+    }
 
     // Scan source nodes
     let source_nodes = scan_nodes(source_pattern, storage)?;
@@ -543,6 +569,109 @@ pub fn execute_single_hop_pattern(
             }
 
             // Create binding for this match
+            let mut binding = Binding::new()
+                .with_node(source_var, source_node.clone())
+                .with_node(target_var, target_node.clone());
+
+            if let Some(rv) = rel_var {
+                binding = binding.with_edge(rv, edge.clone());
+            }
+
+            // Add path variable if specified
+            if let Some(pv) = path_var {
+                let path = Path {
+                    nodes: vec![source_node.clone(), target_node.clone()],
+                    edges: vec![edge.clone()],
+                };
+                binding = binding.with_path(pv, path);
+            }
+
+            bindings.push(binding);
+        }
+    }
+
+    Ok(bindings)
+}
+
+/// Execute single-hop pattern with flipped traversal direction.
+/// Called when the target node is more selective than the source node.
+/// Instead of scanning all source nodes, we scan the (filtered) target nodes
+/// and traverse edges in the reverse direction.
+#[allow(clippy::too_many_arguments)]
+fn execute_single_hop_pattern_flipped(
+    source_pattern: &NodePattern,
+    rel_pattern: &RelationshipPattern,
+    target_pattern: &NodePattern,
+    source_var: &str,
+    rel_var: Option<&str>,
+    target_var: &str,
+    path_var: Option<&str>,
+    storage: &SqliteStorage,
+) -> Result<Vec<Binding>> {
+    // Scan the MORE selective target nodes first
+    let target_nodes = scan_nodes(target_pattern, storage)?;
+    let target_nodes = filter_by_properties(target_nodes, target_pattern)?;
+
+    let mut bindings = Vec::new();
+
+    // For each target node, find edges in the REVERSE direction
+    for target_node in target_nodes {
+        // Flip the edge lookup direction:
+        // - Original Outgoing (a)->(b): now find incoming edges to b
+        // - Original Incoming (a)<-(b): now find outgoing edges from b
+        // - Original Both: still need both directions
+        let edges = match rel_pattern.direction {
+            Direction::Outgoing => storage.find_incoming_edges(target_node.id)?,
+            Direction::Incoming => storage.find_outgoing_edges(target_node.id)?,
+            Direction::Both => {
+                let mut edges = storage.find_outgoing_edges(target_node.id)?;
+                edges.extend(storage.find_incoming_edges(target_node.id)?);
+                edges
+            }
+        };
+
+        // Filter edges by type if specified
+        let edges: Vec<Edge> = if rel_pattern.types.is_empty() {
+            edges
+        } else {
+            edges
+                .into_iter()
+                .filter(|e| rel_pattern.types.contains(&e.edge_type))
+                .collect()
+        };
+
+        // Filter edges by properties if specified
+        let edges = filter_edges_by_properties(edges, rel_pattern)?;
+
+        // For each matching edge, get the source node (we're traversing backwards)
+        for edge in edges {
+            // Determine the actual source node based on original direction
+            // (reversed from the normal case since we're traversing backwards)
+            let source_id = match rel_pattern.direction {
+                Direction::Outgoing => edge.source, // In flipped: edge points TO target, so source is edge.source
+                Direction::Incoming => edge.target, // In flipped: edge points FROM target, so source is edge.target
+                Direction::Both => {
+                    if edge.target == target_node.id {
+                        edge.source
+                    } else {
+                        edge.target
+                    }
+                }
+            };
+
+            // Get the source node
+            let source_node = match storage.get_node(source_id)? {
+                Some(n) => n,
+                None => continue,
+            };
+
+            // Check if source node matches the source pattern
+            // (source_pattern may still have label filters even if no properties)
+            if !node_matches_pattern(&source_node, source_pattern) {
+                continue;
+            }
+
+            // Create binding for this match (same variable names as original)
             let mut binding = Binding::new()
                 .with_node(source_var, source_node.clone())
                 .with_node(target_var, target_node.clone());

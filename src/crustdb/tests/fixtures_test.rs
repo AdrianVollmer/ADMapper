@@ -552,6 +552,46 @@ fn test_m5_single_hop_with_where() {
     assert_eq!(result.rows.len(), 1);
 }
 
+/// Test the flipped traversal optimization: when the target has a filter but the source doesn't,
+/// the executor should start from the target and traverse edges in reverse for efficiency.
+#[test]
+fn test_m5_single_hop_flipped_optimization() {
+    let db = Database::in_memory().unwrap();
+
+    // Create multiple nodes - many sources, one specific target
+    db.execute("CREATE (a1:Person {name: 'Alice'})-[:KNOWS]->(target:Person {id: 'T1', name: 'Target'})")
+        .unwrap();
+    db.execute("CREATE (a2:Person {name: 'Bob'})-[:KNOWS]->(target:Person {id: 'T1', name: 'Target'})")
+        .unwrap();
+    db.execute("CREATE (a3:Person {name: 'Charlie'})-[:FOLLOWS]->(target:Person {id: 'T1', name: 'Target'})")
+        .unwrap();
+    db.execute("CREATE (a4:Person {name: 'David'})-[:KNOWS]->(other:Person {id: 'T2', name: 'Other'})")
+        .unwrap();
+
+    // Query with unfiltered source, filtered target - should trigger flipped optimization
+    // This pattern: (a)-[r]->(b {id: 'T1'}) should flip to start from 'T1' and find incoming edges
+    let result = db
+        .execute("MATCH (a)-[:KNOWS]->(b {id: 'T1'}) RETURN a.name")
+        .unwrap();
+
+    // Should find Alice and Bob (both KNOWS edges to T1), not Charlie (FOLLOWS) or David (to T2)
+    assert_eq!(result.rows.len(), 2);
+
+    // Test with incoming direction and flipped optimization
+    let result = db
+        .execute("MATCH (a)<-[:KNOWS]-(b {id: 'T1'}) RETURN b.name")
+        .unwrap();
+    // T1 has no outgoing KNOWS edges, so should be empty
+    assert_eq!(result.rows.len(), 0);
+
+    // Test bidirectional with flipped optimization
+    let result = db
+        .execute("MATCH (a)-[:KNOWS]-(b {id: 'T1'}) RETURN a.name")
+        .unwrap();
+    // Should find Alice and Bob (incoming KNOWS to T1)
+    assert_eq!(result.rows.len(), 2);
+}
+
 // =============================================================================
 // M6: Multi-Hop Traversal Tests
 // =============================================================================
