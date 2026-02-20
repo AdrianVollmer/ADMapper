@@ -11,6 +11,7 @@ import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import { setPathStart, setPathEnd } from "./search";
 import { getRenderer, loadGraphData } from "./graph-view";
+import { showError } from "../utils/notifications";
 
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
@@ -409,7 +410,7 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
           updateDetailPanel(null, null);
         } catch (err) {
           console.error("Failed to delete node:", err);
-          alert("Failed to delete node");
+          showError("Failed to delete node");
         }
       }
       break;

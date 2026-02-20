@@ -5,12 +5,13 @@
  */
 
 import { getRenderer } from "./graph-view";
+import { showError, showInfo } from "../utils/notifications";
 
 /** Export the graph as PNG */
 export async function exportPNG(): Promise<void> {
   const renderer = getRenderer();
   if (!renderer) {
-    alert("No graph to export. Please load a graph first.");
+    showInfo("No graph to export. Please load a graph first.");
     return;
   }
 
@@ -21,7 +22,7 @@ export async function exportPNG(): Promise<void> {
     const canvases = container.querySelectorAll("canvas");
 
     if (canvases.length === 0) {
-      alert("No graph canvas found.");
+      showError("No graph canvas found.");
       return;
     }
 
@@ -34,7 +35,7 @@ export async function exportPNG(): Promise<void> {
     const ctx = combinedCanvas.getContext("2d");
 
     if (!ctx) {
-      alert("Failed to create export canvas.");
+      showError("Failed to create export canvas.");
       return;
     }
 
@@ -53,14 +54,14 @@ export async function exportPNG(): Promise<void> {
     // Convert to blob and download
     combinedCanvas.toBlob((blob) => {
       if (!blob) {
-        alert("Failed to create image.");
+        showError("Failed to create image.");
         return;
       }
       downloadBlob(blob, "admapper-graph.png");
     }, "image/png");
   } catch (err) {
     console.error("PNG export failed:", err);
-    alert("Failed to export PNG: " + (err instanceof Error ? err.message : String(err)));
+    showError("Failed to export PNG: " + (err instanceof Error ? err.message : String(err)));
   }
 }
 
@@ -68,7 +69,7 @@ export async function exportPNG(): Promise<void> {
 export async function exportSVG(): Promise<void> {
   const renderer = getRenderer();
   if (!renderer) {
-    alert("No graph to export. Please load a graph first.");
+    showInfo("No graph to export. Please load a graph first.");
     return;
   }
 
@@ -124,7 +125,7 @@ export async function exportSVG(): Promise<void> {
     downloadBlob(blob, "admapper-graph.svg");
   } catch (err) {
     console.error("SVG export failed:", err);
-    alert("Failed to export SVG: " + (err instanceof Error ? err.message : String(err)));
+    showError("Failed to export SVG: " + (err instanceof Error ? err.message : String(err)));
   }
 }
 
@@ -132,7 +133,7 @@ export async function exportSVG(): Promise<void> {
 export async function exportJSON(): Promise<void> {
   const renderer = getRenderer();
   if (!renderer) {
-    alert("No graph to export. Please load a graph first.");
+    showInfo("No graph to export. Please load a graph first.");
     return;
   }
 
@@ -192,7 +193,7 @@ export async function exportJSON(): Promise<void> {
     downloadBlob(blob, "admapper-graph.json");
   } catch (err) {
     console.error("JSON export failed:", err);
-    alert("Failed to export JSON: " + (err instanceof Error ? err.message : String(err)));
+    showError("Failed to export JSON: " + (err instanceof Error ? err.message : String(err)));
   }
 }
 

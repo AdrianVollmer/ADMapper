@@ -7,6 +7,7 @@
 
 import { escapeHtml } from "../utils/html";
 import { getRenderer } from "./graph-view";
+import { showInfo } from "../utils/notifications";
 import type { ADNodeAttributes, ADNodeType } from "../graph/types";
 
 /** Node data for the list */
@@ -75,7 +76,7 @@ export function openListView(): void {
 
   const renderer = getRenderer();
   if (!renderer) {
-    alert("No graph loaded. Run a query first to view nodes.");
+    showInfo("No graph loaded. Run a query first to view nodes.");
     return;
   }
 
@@ -93,7 +94,7 @@ export function openListView(): void {
   });
 
   if (nodes.length === 0) {
-    alert("No nodes in the current graph.");
+    showInfo("No nodes in the current graph.");
     return;
   }
 

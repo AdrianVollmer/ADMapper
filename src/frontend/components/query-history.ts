@@ -10,6 +10,7 @@ import { api } from "../api/client";
 import type { QueryHistoryEntry, QueryHistoryResponse, QueryStatus } from "../api/types";
 import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
 import { hasActiveQueries } from "./query-activity";
+import { showSuccess, showError, showInfo } from "../utils/notifications";
 
 // Re-export for backwards compatibility
 export type { QueryHistoryEntry } from "../api/types";
@@ -265,13 +266,13 @@ async function runQuery(query: string, name: string): Promise<void> {
     if (result.graph && result.graph.nodes.length > 0) {
       // TODO: Load graph into renderer
       console.log("Query returned graph:", result.graph);
-      alert(`Query returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
+      showSuccess(`Query returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
     } else {
-      alert(`Query returned ${result.resultCount} rows`);
+      showInfo(`Query returned ${result.resultCount} rows`);
     }
   } catch (err) {
     console.error("Query execution failed:", err);
-    alert(`Query failed: ${getQueryErrorMessage(err)}`);
+    showError(`Query failed: ${getQueryErrorMessage(err)}`);
   }
 }
 
@@ -674,9 +675,9 @@ export async function goBackInHistory(): Promise<boolean> {
     // Show results
     if (result.graph && result.graph.nodes.length > 0) {
       console.log("Query returned graph:", result.graph);
-      alert(`Query returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
+      showSuccess(`Query returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
     } else {
-      alert(`Query returned ${result.resultCount} rows`);
+      showInfo(`Query returned ${result.resultCount} rows`);
     }
 
     return true;
