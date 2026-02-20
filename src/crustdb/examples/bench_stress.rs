@@ -51,7 +51,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             topologies: vec![Topology::LongChain],
-            scales: vec![1000, 10_000],
+            scales: vec![10, 100, 1000, 10_000],
             queries: vec![
                 QueryType::PointLookup,
                 QueryType::SingleHop,
@@ -750,17 +750,20 @@ QUERIES:
         K5_high_fanout      - Count all neighbors of hub node
 
 EXAMPLES:
-    # Quick test with chain topology
-    cargo run --release --example bench_stress
+    # Quick test with small graph (10 nodes)
+    cargo run --release --example bench_stress -- --scales 10
+
+    # Test specific sizes
+    cargo run --release --example bench_stress -- --scales 100,500
 
     # Full stress test with all topologies
-    cargo run --release --example bench_stress -- --topology all --scales 1000,10000,100000
+    cargo run --release --example bench_stress -- --topology all --scales 1000,10000
 
     # Compare against FalkorDB and Neo4j
     cargo run --release --example bench_stress -- --compare
 
     # Only run killer queries on large scale
-    cargo run --release --example bench_stress -- --killer-only --scales 100000
+    cargo run --release --example bench_stress -- --killer-only --scales 10000
 "#
     );
 }
