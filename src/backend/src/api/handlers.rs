@@ -485,63 +485,69 @@ pub async fn node_status(
     // First pass: quick checks (properties and group memberships)
     let node_id_clone = node_id.clone();
     let db_for_quick = db.clone();
-    let quick_status: (bool, bool, bool, bool, bool) =
-        run_db(db_for_quick, move |db| {
-            // Get the node to check its properties
-            let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
-            let node = nodes.first();
+    let quick_status: (bool, bool, bool, bool, bool) = run_db(db_for_quick, move |db| {
+        // Get the node to check its properties
+        let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
+        let node = nodes.first();
 
-            // Check owned status from properties
-            let owned = node
-                .and_then(|n| {
-                    let props = &n.properties;
-                    props.get("owned").or(props.get("Owned")).and_then(|v| {
+        // Check owned status from properties
+        let owned = node
+            .and_then(|n| {
+                let props = &n.properties;
+                props.get("owned").or(props.get("Owned")).and_then(|v| {
+                    v.as_bool()
+                        .or_else(|| v.as_i64().map(|i| i == 1))
+                        .or_else(|| v.as_str().map(|s| s == "true"))
+                })
+            })
+            .unwrap_or(false);
+
+        // Check high value from properties
+        let high_value_prop = node
+            .and_then(|n| {
+                let props = &n.properties;
+                props
+                    .get("highvalue")
+                    .or(props.get("HighValue"))
+                    .or(props.get("highValue"))
+                    .and_then(|v| {
                         v.as_bool()
                             .or_else(|| v.as_i64().map(|i| i == 1))
                             .or_else(|| v.as_str().map(|s| s == "true"))
                     })
-                })
-                .unwrap_or(false);
+            })
+            .unwrap_or(false);
 
-            // Check high value from properties
-            let high_value_prop = node
-                .and_then(|n| {
-                    let props = &n.properties;
-                    props
-                        .get("highvalue")
-                        .or(props.get("HighValue"))
-                        .or(props.get("highValue"))
-                        .and_then(|v| {
-                            v.as_bool()
-                                .or_else(|| v.as_i64().map(|i| i == 1))
-                                .or_else(|| v.as_str().map(|s| s == "true"))
-                        })
-                })
-                .unwrap_or(false);
+        // Check group memberships using graph traversal
+        let is_enterprise_admin = db
+            .find_membership_by_sid_suffix(&node_id_clone, "-519")?
+            .is_some();
+        let is_domain_admin = db
+            .find_membership_by_sid_suffix(&node_id_clone, "-512")?
+            .is_some();
 
-            // Check group memberships using graph traversal
-            let is_enterprise_admin = db
-                .find_membership_by_sid_suffix(&node_id_clone, "-519")?
-                .is_some();
-            let is_domain_admin = db
-                .find_membership_by_sid_suffix(&node_id_clone, "-512")?
-                .is_some();
+        // High-value RIDs to check membership for
+        let high_value_rids = ["-512", "-519", "-518", "-516", "-498", "-544"];
+        let is_high_value_member = high_value_rids.iter().any(|rid| {
+            db.find_membership_by_sid_suffix(&node_id_clone, rid)
+                .unwrap_or(None)
+                .is_some()
+        });
 
-            // High-value RIDs to check membership for
-            let high_value_rids = ["-512", "-519", "-518", "-516", "-498", "-544"];
-            let is_high_value_member = high_value_rids.iter().any(|rid| {
-                db.find_membership_by_sid_suffix(&node_id_clone, rid)
-                    .unwrap_or(None)
-                    .is_some()
-            });
+        let is_high_value = high_value_prop || is_high_value_member;
 
-            let is_high_value = high_value_prop || is_high_value_member;
+        Ok((
+            owned,
+            is_enterprise_admin,
+            is_domain_admin,
+            is_high_value,
+            high_value_prop,
+        ))
+    })
+    .await?;
 
-            Ok((owned, is_enterprise_admin, is_domain_admin, is_high_value, high_value_prop))
-        })
-        .await?;
-
-    let (owned, is_enterprise_admin, is_domain_admin, is_high_value, _high_value_prop) = quick_status;
+    let (owned, is_enterprise_admin, is_domain_admin, is_high_value, _high_value_prop) =
+        quick_status;
 
     // If already high value, no need to check paths
     if is_enterprise_admin || is_domain_admin || is_high_value {
@@ -606,9 +612,13 @@ pub async fn node_status(
             } else {
                 Some(0)
             };
-            if let Err(e) =
-                db.update_query_status(&query_id, "completed", Some(duration_ms), result_count, None)
-            {
+            if let Err(e) = db.update_query_status(
+                &query_id,
+                "completed",
+                Some(duration_ms),
+                result_count,
+                None,
+            ) {
                 warn!(error = %e, "Failed to update path check history");
             }
         }
@@ -774,9 +784,13 @@ pub async fn graph_path(
             } else {
                 Some(0)
             };
-            if let Err(e) =
-                db.update_query_status(&query_id, "completed", Some(duration_ms), result_count, None)
-            {
+            if let Err(e) = db.update_query_status(
+                &query_id,
+                "completed",
+                Some(duration_ms),
+                result_count,
+                None,
+            ) {
                 warn!(error = %e, "Failed to update path query history");
             }
         }
@@ -1200,9 +1214,9 @@ pub async fn graph_query(
         // Broadcast activity update (query no longer "running" for UI purposes)
         let _ = query_activity_tx.send(QueryActivity {
             active: running_queries
-                    .iter()
-                    .filter(|e| e.value().completed_at.read().is_none())
-                    .count(),
+                .iter()
+                .filter(|e| e.value().completed_at.read().is_none())
+                .count(),
         });
     });
 

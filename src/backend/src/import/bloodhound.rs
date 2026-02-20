@@ -526,10 +526,20 @@ impl BloodHoundImporter {
             let Some(target_sid) = trust.get("TargetDomainSid").and_then(|v| v.as_str()) else {
                 continue;
             };
-            let trust_direction = trust
-                .get("TrustDirection")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
+
+            // Parse TrustDirection - supports both integer (legacy) and string (BloodHound CE) formats
+            // Integer: 0=Disabled, 1=Inbound, 2=Outbound, 3=Bidirectional
+            // String: "Disabled", "Inbound", "Outbound", "Bidirectional"
+            let trust_direction = match trust.get("TrustDirection") {
+                Some(JsonValue::Number(n)) => n.as_i64().unwrap_or(0),
+                Some(JsonValue::String(s)) => match s.to_lowercase().as_str() {
+                    "inbound" => 1,
+                    "outbound" => 2,
+                    "bidirectional" => 3,
+                    _ => 0,
+                },
+                _ => 0,
+            };
 
             // Bidirectional or outbound trust
             if trust_direction == 2 || trust_direction == 3 {
@@ -924,6 +934,53 @@ mod tests {
         assert!(edges
             .iter()
             .any(|e| e.source == "S-1-5-21-DOMAIN1" && e.target == "S-1-5-21-DOMAIN2"));
+    }
+
+    #[test]
+    fn test_extract_edges_trusts_string_format() {
+        // Test BloodHound CE format which uses string values for TrustDirection
+        let importer = test_importer();
+
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN1",
+            "Trusts": [
+                {
+                    "TargetDomainSid": "S-1-5-21-DOMAIN2",
+                    "TrustDirection": "Bidirectional"
+                },
+                {
+                    "TargetDomainSid": "S-1-5-21-DOMAIN3",
+                    "TrustDirection": "Outbound"
+                },
+                {
+                    "TargetDomainSid": "S-1-5-21-DOMAIN4",
+                    "TrustDirection": "Inbound"
+                }
+            ]
+        });
+
+        let edges = importer.extract_edges("domains", &entity);
+
+        // Bidirectional creates 2 edges, Outbound creates 1, Inbound creates 1 = 4 total
+        assert_eq!(edges.len(), 4);
+
+        // Bidirectional with DOMAIN2
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-DOMAIN2"
+            && e.target == "S-1-5-21-DOMAIN1"
+            && e.edge_type == "TrustedBy"));
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
+            && e.target == "S-1-5-21-DOMAIN2"
+            && e.edge_type == "TrustedBy"));
+
+        // Outbound to DOMAIN3 (we trust them)
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-DOMAIN3"
+            && e.target == "S-1-5-21-DOMAIN1"
+            && e.edge_type == "TrustedBy"));
+
+        // Inbound from DOMAIN4 (they trust us)
+        assert!(edges.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
+            && e.target == "S-1-5-21-DOMAIN4"
+            && e.edge_type == "TrustedBy"));
     }
 
     #[test]
