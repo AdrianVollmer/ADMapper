@@ -10,6 +10,7 @@
 
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import noverlap from "graphology-layout-noverlap";
+import dagre from "dagre";
 import type { ADGraphType } from "./ADGraph";
 
 /** Available layout algorithms */
@@ -200,219 +201,70 @@ function applyForceLayout(graph: ADGraphType, options: LayoutOptions): void {
 }
 
 /**
- * Apply hierarchical layout with edges flowing left-to-right.
+ * Apply hierarchical layout using dagre.
  *
- * Computes layers based on longest path from source nodes (nodes with no incoming edges).
- * Uses barycenter heuristic to position parents at the vertical center of their children.
+ * Dagre is a JavaScript library for laying out directed graphs.
+ * It handles layer assignment, edge crossing minimization, and coordinate assignment.
  */
 function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettings = {}): void {
   const settings = { ...DEFAULT_HIERARCHICAL_SETTINGS, ...options };
   const { layerSpacing, nodeSpacing, direction } = settings;
 
-  // Step 1: Compute layer for each node (longest path from roots)
-  const nodeLayers = computeNodeLayers(graph);
+  // Create a dagre graph
+  const g = new dagre.graphlib.Graph();
 
-  // Step 2: Group nodes by layer
-  const layerGroups = new Map<number, string[]>();
-  let maxLayer = 0;
-  for (const [nodeId, layer] of nodeLayers.entries()) {
-    const group = layerGroups.get(layer) ?? [];
-    group.push(nodeId);
-    layerGroups.set(layer, group);
-    maxLayer = Math.max(maxLayer, layer);
-  }
-
-  // Step 3: Initial ordering - sort by out-degree for first pass
-  for (const nodes of layerGroups.values()) {
-    nodes.sort((a, b) => {
-      const degDiff = graph.outDegree(b) - graph.outDegree(a);
-      return degDiff !== 0 ? degDiff : a.localeCompare(b);
-    });
-  }
-
-  // Step 4: Barycenter iterations to minimize edge crossings
-  // Position nodes at the barycenter (average position) of their neighbors
-  const nodePositions = new Map<string, number>();
-
-  // Initialize positions based on order in layer
-  for (const [, nodes] of layerGroups.entries()) {
-    for (let i = 0; i < nodes.length; i++) {
-      nodePositions.set(nodes[i]!, i);
-    }
-  }
-
-  // Run barycenter iterations
-  const iterations = 4;
-  for (let iter = 0; iter < iterations; iter++) {
-    // Forward pass: position based on predecessors (incoming neighbors)
-    for (let layer = 1; layer <= maxLayer; layer++) {
-      const nodes = layerGroups.get(layer) ?? [];
-      reorderByBarycenter(graph, nodes, nodePositions, "in");
-      // Update positions after reordering
-      for (let i = 0; i < nodes.length; i++) {
-        nodePositions.set(nodes[i]!, i);
-      }
-    }
-
-    // Backward pass: position based on successors (outgoing neighbors)
-    for (let layer = maxLayer - 1; layer >= 0; layer--) {
-      const nodes = layerGroups.get(layer) ?? [];
-      reorderByBarycenter(graph, nodes, nodePositions, "out");
-      // Update positions after reordering
-      for (let i = 0; i < nodes.length; i++) {
-        nodePositions.set(nodes[i]!, i);
-      }
-    }
-  }
-
-  // Step 5: Assign initial coordinates based on order
-  for (const [layer, nodes] of layerGroups.entries()) {
-    const layerHeight = nodes.length * nodeSpacing!;
-    const startY = -layerHeight / 2;
-
-    for (let i = 0; i < nodes.length; i++) {
-      const nodeId = nodes[i];
-      if (direction === "left-to-right") {
-        graph.setNodeAttribute(nodeId, "x", layer * layerSpacing!);
-        graph.setNodeAttribute(nodeId, "y", startY + i * nodeSpacing!);
-      } else {
-        // top-to-bottom
-        graph.setNodeAttribute(nodeId, "x", startY + i * nodeSpacing!);
-        graph.setNodeAttribute(nodeId, "y", layer * layerSpacing!);
-      }
-    }
-  }
-
-  // Step 6: Coordinate adjustment - position parents at center of gravity of children
-  // Only forward pass: center each layer's nodes on their incoming neighbors (children)
-  // We don't do backward pass because it would pull children toward parents,
-  // disrupting spacing when multiple children share one parent.
-  const coordAttr = direction === "left-to-right" ? "y" : "x";
-  const coordIterations = 4;
-
-  for (let iter = 0; iter < coordIterations; iter++) {
-    // Forward pass only: adjust nodes to center on their predecessors
-    for (let layer = 1; layer <= maxLayer; layer++) {
-      const nodes = layerGroups.get(layer) ?? [];
-      adjustToNeighborCentroid(graph, nodes, coordAttr, "in", nodeSpacing!);
-    }
-  }
-}
-
-/**
- * Reorder nodes in a layer based on barycenter of their neighbors.
- * This positions nodes at the average position of their connected neighbors.
- */
-function reorderByBarycenter(
-  graph: ADGraphType,
-  nodes: string[],
-  positions: Map<string, number>,
-  direction: "in" | "out"
-): void {
-  // Compute barycenter for each node
-  const barycenters: { node: string; barycenter: number; hasNeighbors: boolean }[] = [];
-
-  for (const node of nodes) {
-    let sum = 0;
-    let count = 0;
-
-    const neighbors =
-      direction === "in" ? Array.from(graph.inNeighborEntries(node)) : Array.from(graph.outNeighborEntries(node));
-
-    for (const { neighbor } of neighbors) {
-      const pos = positions.get(neighbor);
-      if (pos !== undefined) {
-        sum += pos;
-        count++;
-      }
-    }
-
-    if (count > 0) {
-      barycenters.push({ node, barycenter: sum / count, hasNeighbors: true });
-    } else {
-      // Keep original position for nodes with no neighbors in that direction
-      barycenters.push({ node, barycenter: positions.get(node) ?? 0, hasNeighbors: false });
-    }
-  }
-
-  // Sort by barycenter, keeping nodes without neighbors in their relative positions
-  barycenters.sort((a, b) => {
-    // Nodes with neighbors should be positioned by their barycenter
-    // Nodes without neighbors maintain relative order
-    if (a.hasNeighbors && b.hasNeighbors) {
-      return a.barycenter - b.barycenter;
-    }
-    if (a.hasNeighbors) return -1;
-    if (b.hasNeighbors) return 1;
-    return a.barycenter - b.barycenter;
+  // Configure the graph layout
+  g.setGraph({
+    rankdir: direction === "left-to-right" ? "LR" : "TB",
+    nodesep: nodeSpacing,
+    ranksep: layerSpacing,
+    marginx: 0,
+    marginy: 0,
   });
 
-  // Update the nodes array in place
-  nodes.length = 0;
-  for (const { node } of barycenters) {
-    nodes.push(node);
-  }
-}
+  // Default edge label (required by dagre)
+  g.setDefaultEdgeLabel(() => ({}));
 
-/**
- * Adjust node coordinates to center them on their neighbors' centroid.
- * Places each node at its ideal position, then resolves overlaps symmetrically.
- */
-function adjustToNeighborCentroid(
-  graph: ADGraphType,
-  nodes: string[],
-  coordAttr: "x" | "y",
-  direction: "in" | "out",
-  minSpacing: number
-): void {
-  if (nodes.length === 0) return;
+  // Add nodes to dagre graph
+  graph.forEachNode((nodeId) => {
+    g.setNode(nodeId, { width: 40, height: 40 });
+  });
 
-  // Compute ideal coordinate for each node (centroid of neighbors)
-  const nodeData: { node: string; ideal: number }[] = [];
+  // Add edges to dagre graph
+  graph.forEachEdge((_, _attrs, source, target) => {
+    g.setEdge(source, target);
+  });
 
-  for (const node of nodes) {
-    const current = graph.getNodeAttribute(node, coordAttr) as number;
-    const neighbors =
-      direction === "in" ? Array.from(graph.inNeighborEntries(node)) : Array.from(graph.outNeighborEntries(node));
+  // Run dagre layout
+  dagre.layout(g);
 
-    if (neighbors.length > 0) {
-      let sum = 0;
-      for (const { neighbor } of neighbors) {
-        sum += graph.getNodeAttribute(neighbor, coordAttr) as number;
-      }
-      const ideal = sum / neighbors.length;
-      nodeData.push({ node, ideal });
-    } else {
-      nodeData.push({ node, ideal: current });
+  // Apply positions back to graphology graph
+  // Center the layout around origin
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  g.nodes().forEach((nodeId) => {
+    const node = g.node(nodeId);
+    if (node) {
+      minX = Math.min(minX, node.x);
+      minY = Math.min(minY, node.y);
+      maxX = Math.max(maxX, node.x);
+      maxY = Math.max(maxY, node.y);
     }
-  }
+  });
 
-  // Sort by ideal position
-  nodeData.sort((a, b) => a.ideal - b.ideal);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
 
-  // Place nodes at ideal positions, then resolve overlaps
-  const positions = nodeData.map((d) => d.ideal);
-
-  // Resolve overlaps: push nodes apart symmetrically when they're too close
-  for (let iter = 0; iter < 10; iter++) {
-    let changed = false;
-    for (let i = 0; i < positions.length - 1; i++) {
-      const gap = positions[i + 1]! - positions[i]!;
-      if (gap < minSpacing) {
-        // Push apart symmetrically
-        const overlap = minSpacing - gap;
-        positions[i]! -= overlap / 2;
-        positions[i + 1]! += overlap / 2;
-        changed = true;
-      }
+  g.nodes().forEach((nodeId) => {
+    const node = g.node(nodeId);
+    if (node && graph.hasNode(nodeId)) {
+      graph.setNodeAttribute(nodeId, "x", node.x - centerX);
+      graph.setNodeAttribute(nodeId, "y", node.y - centerY);
     }
-    if (!changed) break;
-  }
-
-  // Apply positions
-  for (let i = 0; i < nodeData.length; i++) {
-    graph.setNodeAttribute(nodeData[i]!.node, coordAttr, positions[i]!);
-  }
+  });
 }
 
 /**
@@ -694,88 +546,6 @@ function computeSinkBasedLayers(graph: ADGraphType): Map<string, number> {
   }
 
   // Handle any remaining unvisited nodes (isolated)
-  graph.forEachNode((nodeId) => {
-    if (!layers.has(nodeId)) {
-      layers.set(nodeId, 0);
-    }
-  });
-
-  return layers;
-}
-
-/**
- * Compute the layer (depth) for each node based on longest path from source nodes.
- * Source nodes are those with no incoming edges, or all nodes if the graph is cyclic.
- */
-function computeNodeLayers(graph: ADGraphType): Map<string, number> {
-  const layers = new Map<string, number>();
-
-  // Find source nodes (no incoming edges)
-  const sources: string[] = [];
-  graph.forEachNode((nodeId) => {
-    if (graph.inDegree(nodeId) === 0) {
-      sources.push(nodeId);
-    }
-  });
-
-  // If no sources (fully cyclic), use nodes with minimum in-degree
-  if (sources.length === 0) {
-    let minInDegree = Infinity;
-    graph.forEachNode((nodeId) => {
-      const inDeg = graph.inDegree(nodeId);
-      if (inDeg < minInDegree) {
-        minInDegree = inDeg;
-        sources.length = 0;
-        sources.push(nodeId);
-      } else if (inDeg === minInDegree) {
-        sources.push(nodeId);
-      }
-    });
-  }
-
-  // BFS to compute longest path (layer = max layer of predecessors + 1)
-  // Use iterative approach to handle cycles
-  const incomingCount = new Map<string, number>();
-  const maxPredLayer = new Map<string, number>();
-
-  // Initialize
-  graph.forEachNode((nodeId) => {
-    incomingCount.set(nodeId, graph.inDegree(nodeId));
-    maxPredLayer.set(nodeId, -1);
-  });
-
-  // Start with sources at layer 0
-  const queue: string[] = [];
-  for (const source of sources) {
-    layers.set(source, 0);
-    queue.push(source);
-  }
-
-  // Process nodes in topological-ish order
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const currentLayer = layers.get(current) ?? 0;
-
-    graph.forEachOutNeighbor(current, (neighbor) => {
-      const prevMax = maxPredLayer.get(neighbor) ?? -1;
-      maxPredLayer.set(neighbor, Math.max(prevMax, currentLayer));
-
-      // Decrement incoming count
-      const count = (incomingCount.get(neighbor) ?? 1) - 1;
-      incomingCount.set(neighbor, count);
-
-      // If all predecessors processed (or first visit for cycles)
-      if (count <= 0 || !layers.has(neighbor)) {
-        const newLayer = (maxPredLayer.get(neighbor) ?? -1) + 1;
-        if (!layers.has(neighbor) || newLayer > layers.get(neighbor)!) {
-          layers.set(neighbor, newLayer);
-          queue.push(neighbor);
-        }
-      }
-    });
-  }
-
-  // Handle any remaining unvisited nodes (isolated or in unprocessed cycles)
   graph.forEachNode((nodeId) => {
     if (!layers.has(nodeId)) {
       layers.set(nodeId, 0);
