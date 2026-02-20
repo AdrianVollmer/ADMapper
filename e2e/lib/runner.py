@@ -272,26 +272,31 @@ class TestRunner:
             results.append(self._run_test("Graph has edges", check_has_edges))
 
             # Check individual type counts
-            for type_key, type_name in [
-                ("users", "Users"),
-                ("computers", "Computers"),
-                ("groups", "Groups"),
-                ("domains", "Domains"),
+            # Note: domains use >= because trusts can create orphaned domain references
+            for type_key, type_name, exact_match in [
+                ("users", "Users", True),
+                ("computers", "Computers", True),
+                ("groups", "Groups", True),
+                ("domains", "Domains", False),  # Allow extra domains from trusts
             ]:
-                def make_check(key, name):
+                def make_check(key, name, exact):
                     def check():
                         actual = detailed.get(key, 0)
                         exp = expected.get(key, 0)
                         proof = f"actual: {actual}, expected: {exp}"
-                        if actual != exp:
-                            return False, f"Expected {exp} {name}, got {actual}", proof
+                        if exact:
+                            if actual != exp:
+                                return False, f"Expected {exp} {name}, got {actual}", proof
+                        else:
+                            if actual < exp:
+                                return False, f"Expected at least {exp} {name}, got {actual}", proof
                         self.logger.info(f"{name}: {actual}")
                         return True, "", proof
                     return check
 
                 results.append(self._run_test(
                     f"{type_name} count matches expected",
-                    make_check(type_key, type_name)
+                    make_check(type_key, type_name, exact_match)
                 ))
 
         # Node types endpoint
