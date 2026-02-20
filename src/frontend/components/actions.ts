@@ -34,8 +34,6 @@ export const Actions = {
   SETTINGS: "settings",
   QUIT: "quit",
   // Edit menu
-  SELECT_ALL: "select-all",
-  FIND: "find",
   ADD_NODE: "add-node",
   ADD_EDGE: "add-edge",
   // View menu
@@ -100,10 +98,6 @@ const actionHandlers: Record<StaticAction, () => void> = {
     }
   },
   // Edit menu
-  "select-all": () => {
-    // TODO: Select all nodes
-  },
-  find: () => document.getElementById("node-search")?.focus(),
   "add-node": () => openAddNode(),
   "add-edge": () => openAddEdge(),
   // View menu

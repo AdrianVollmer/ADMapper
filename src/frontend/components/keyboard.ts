@@ -25,10 +25,6 @@ const shortcuts: ShortcutDef[] = [
   { key: ",", ctrl: true, action: "settings", label: "Settings", category: "File" },
   { key: "q", ctrl: true, action: "quit", label: "Quit", category: "File" },
 
-  // Edit menu
-  { key: "a", ctrl: true, action: "select-all", label: "Select All", category: "Edit" },
-  { key: "f", ctrl: true, action: "find", label: "Find", category: "Edit" },
-
   // View menu
   { key: "t", ctrl: true, action: "toggle-theme", label: "Toggle Theme", category: "View" },
   { key: "\\", ctrl: true, action: "toggle-sidebars", label: "Toggle Sidebars", category: "View" },
