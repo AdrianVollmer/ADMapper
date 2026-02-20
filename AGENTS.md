@@ -10,9 +10,8 @@ so never worry about backwards compatibility.
 
 - Written in Rust
 - CozoDB/SQLite DB backend
-- HTMX and vanilla TypeScript for the frontend
+- Vanilla TypeScript for the frontend
 - Tailwind CSS
-- Focus on server-side rendering, except for diagrams
 - Modern, intuitive and beautiful UI
 - Snappy interface
 - Obsessed with efficency and speed
