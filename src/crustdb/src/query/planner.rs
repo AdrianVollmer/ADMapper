@@ -222,6 +222,11 @@ pub enum FilterPredicate {
         variable: String,
         label: String,
     },
+    /// IN list check.
+    In {
+        expr: PlanExpr,
+        list: Vec<PlanExpr>,
+    },
     /// Always true (for optimized-away predicates).
     True,
 }
@@ -902,6 +907,17 @@ fn plan_expression_as_predicate(expr: &Expression) -> Result<FilterPredicate> {
                     })
                 } else {
                     Err(Error::Cypher("=~ requires string literal pattern".into()))
+                }
+            }
+            BinaryOperator::In => {
+                if let Expression::List(items) = right.as_ref() {
+                    let list: Result<Vec<PlanExpr>> = items.iter().map(plan_expression).collect();
+                    Ok(FilterPredicate::In {
+                        expr: plan_expression(left)?,
+                        list: list?,
+                    })
+                } else {
+                    Err(Error::Cypher("IN requires a list on the right side".into()))
                 }
             }
             _ => Err(Error::Cypher(format!("Operator {:?} not supported", op))),

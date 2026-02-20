@@ -786,6 +786,17 @@ fn evaluate_predicate(predicate: &FilterPredicate, binding: &Binding) -> Result<
                 Ok(false)
             }
         }
+
+        FilterPredicate::In { expr, list } => {
+            let v = evaluate_expr(expr, binding)?;
+            for item in list {
+                let item_v = evaluate_expr(item, binding)?;
+                if values_equal(&v, &item_v) {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
     }
 }
 
