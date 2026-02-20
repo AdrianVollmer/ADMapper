@@ -56,7 +56,17 @@ impl CrustDatabase {
     fn init_schema(&self) -> Result<()> {
         debug!("Initializing CrustDB schema");
         // CrustDB auto-creates nodes/edges on first use
-        // Create any necessary indexes here if supported
+
+        // Create property indexes for commonly queried fields
+        // These significantly speed up node lookups by object_id and name
+        self.db
+            .create_property_index("object_id")
+            .map_err(|e| DbError::Database(e.to_string()))?;
+        self.db
+            .create_property_index("name")
+            .map_err(|e| DbError::Database(e.to_string()))?;
+
+        debug!("Property indexes created for object_id and name");
         Ok(())
     }
 
