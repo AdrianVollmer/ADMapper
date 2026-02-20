@@ -7,7 +7,7 @@ use crate::api::types::{
     QueryProgress, QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
 };
 use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, QueryLanguage, Result as DbResult};
-use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge};
+use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
 use crate::import::{BloodHoundImporter, ImportProgress};
 use crate::settings::{self, Settings};
 use crate::state::{AppState, ImportJob, RunningQuery};
@@ -391,7 +391,7 @@ pub async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>,
     .await?;
 
     let result = FullGraph {
-        nodes,
+        nodes: nodes.into_iter().map(GraphNode::from).collect(),
         edges: edges.into_iter().map(GraphEdge::from).collect(),
     };
 
@@ -467,7 +467,7 @@ pub async fn node_connections(
     .await?;
 
     Ok(Json(FullGraph {
-        nodes,
+        nodes: nodes.into_iter().map(GraphNode::from).collect(),
         edges: edges.into_iter().map(GraphEdge::from).collect(),
     }))
 }
@@ -752,7 +752,10 @@ pub async fn graph_path(
                 let edges = db.get_edges_between(&node_ids)?;
 
                 let graph = FullGraph {
-                    nodes: path_steps.iter().map(|s| s.node.clone()).collect(),
+                    nodes: path_steps
+                        .iter()
+                        .map(|s| GraphNode::from(s.node.clone()))
+                        .collect(),
                     edges: edges.into_iter().map(GraphEdge::from).collect(),
                 };
 
@@ -1178,7 +1181,10 @@ pub async fn graph_query(
                     duration_ms: Some(duration_ms),
                     result_count,
                     error: None,
-                    results: Some(results),
+                    // Only send raw results if we don't have an extracted graph.
+                    // The frontend only uses the graph for visualization, so sending
+                    // both is wasteful and can overwhelm the browser with large payloads.
+                    results: if graph.is_some() { None } else { Some(results) },
                     graph,
                 }
             }

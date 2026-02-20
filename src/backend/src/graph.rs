@@ -10,11 +10,34 @@ use std::sync::Arc;
 // Graph Types
 // ============================================================================
 
+/// Graph node response format for visualization.
+///
+/// This is a minimal subset of `DbNode` used for graph rendering, excluding
+/// the heavy `properties` field which can contain large BloodHound data.
+/// Properties can be fetched on-demand when a user clicks on a node.
+#[derive(Debug, Clone, Serialize)]
+pub struct GraphNode {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub node_type: String,
+}
+
+impl From<DbNode> for GraphNode {
+    fn from(node: DbNode) -> Self {
+        GraphNode {
+            id: node.id,
+            name: node.name,
+            node_type: node.label,
+        }
+    }
+}
+
 /// Graph edge response format.
 ///
 /// This is a subset of `DbEdge` used for API responses, excluding
 /// internal fields like `properties`, `source_type`, and `target_type`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct GraphEdge {
     pub source: String,
     pub target: String,
@@ -32,10 +55,13 @@ impl From<DbEdge> for GraphEdge {
     }
 }
 
-/// Full graph response.
+/// Full graph response for visualization.
+///
+/// Uses `GraphNode` instead of `DbNode` to avoid sending heavy properties
+/// that aren't needed for graph rendering.
 #[derive(Debug, Clone, Serialize)]
 pub struct FullGraph {
-    pub nodes: Vec<DbNode>,
+    pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
 }
 
@@ -56,7 +82,7 @@ impl FullGraph {
         let edges = db.get_edges_between(node_ids)?;
 
         Ok(FullGraph {
-            nodes,
+            nodes: nodes.into_iter().map(GraphNode::from).collect(),
             edges: edges.into_iter().map(GraphEdge::from).collect(),
         })
     }
@@ -81,7 +107,7 @@ pub fn extract_graph_from_results(
         _ => return Ok(None),
     };
 
-    let mut nodes: Vec<DbNode> = Vec::new();
+    let mut nodes: Vec<GraphNode> = Vec::new();
     let mut raw_edges: Vec<JsonValue> = Vec::new();
     let mut node_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     // Map internal database IDs to object_ids for edge resolution
@@ -148,10 +174,13 @@ pub fn extract_graph_from_results(
         }
     }
 
-    // Process edges, mapping internal IDs to object_ids
+    // Process edges, mapping internal IDs to object_ids and deduplicating
+    // Multiple paths can share the same edge, so we need to deduplicate
     let edges: Vec<GraphEdge> = raw_edges
         .iter()
         .filter_map(|value| extract_edge_from_json(value, &id_to_object_id))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
         .collect();
 
     // If we found direct node/edge objects, use those
@@ -168,7 +197,7 @@ pub fn extract_graph_from_results(
             let additional_nodes = db.get_nodes_by_ids(&missing_ids)?;
             for node in additional_nodes {
                 if node_ids.insert(node.id.clone()) {
-                    nodes.push(node);
+                    nodes.push(GraphNode::from(node));
                 }
             }
         }
@@ -185,8 +214,11 @@ pub fn extract_graph_from_results(
     FullGraph::from_node_ids(db, &ids).map(Some)
 }
 
-/// Extract a DbNode from a JSON node object.
-fn extract_node_from_json(value: &JsonValue) -> Option<DbNode> {
+/// Extract a GraphNode from a JSON node object.
+///
+/// Only extracts the minimal fields needed for graph visualization (id, name, type).
+/// Full properties are not included to keep response sizes small.
+fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
     let object_id = value
         .get("object_id")
         .and_then(|v| v.as_str())
@@ -226,21 +258,17 @@ fn extract_node_from_json(value: &JsonValue) -> Option<DbNode> {
         .or(node_type_from_labels)
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let label = value
+    let name = value
         .get("properties")
         .and_then(|p| p.get("label"))
         .and_then(|l| l.as_str())
         .map(String::from)
         .unwrap_or_else(|| object_id.clone());
 
-    // Extract properties - handle nested JSON string from CrustDB storage
-    let properties = extract_nested_properties(value);
-
-    Some(DbNode {
+    Some(GraphNode {
         id: object_id,
-        name: label,
-        label: node_type,
-        properties,
+        name,
+        node_type,
     })
 }
 
@@ -277,52 +305,4 @@ fn extract_edge_from_json(
         target,
         edge_type,
     })
-}
-
-/// Extract nested properties from a node JSON object.
-///
-/// CrustDB stores original BloodHound properties as a JSON string in the
-/// `properties.properties` field. This function parses that nested JSON
-/// and flattens it into the top-level properties object.
-fn extract_nested_properties(value: &JsonValue) -> JsonValue {
-    let props = match value.get("properties") {
-        Some(p) => p,
-        None => return JsonValue::Object(serde_json::Map::new()),
-    };
-
-    // Check if there's a nested "properties" field that's a JSON string
-    if let Some(nested_str) = props.get("properties").and_then(|p| p.as_str()) {
-        // Try to parse the nested JSON string
-        if let Ok(JsonValue::Object(mut nested_props)) =
-            serde_json::from_str::<JsonValue>(nested_str)
-        {
-            // Merge with top-level properties, preferring nested values
-            // but keeping object_id, label, node_type from top level
-            if let Some(object_id) = props.get("object_id") {
-                nested_props.insert("object_id".to_string(), object_id.clone());
-            }
-            if let Some(label) = props.get("label") {
-                nested_props.insert("label".to_string(), label.clone());
-            }
-            if let Some(node_type) = props.get("node_type") {
-                nested_props.insert("node_type".to_string(), node_type.clone());
-            }
-            return JsonValue::Object(nested_props);
-        }
-    }
-
-    // No nested properties or parsing failed - return as-is but remove the
-    // "properties" key if it's a string (to avoid showing raw JSON)
-    if let JsonValue::Object(mut obj) = props.clone() {
-        if obj
-            .get("properties")
-            .map(|p| p.is_string())
-            .unwrap_or(false)
-        {
-            obj.remove("properties");
-        }
-        return JsonValue::Object(obj);
-    }
-
-    props.clone()
 }
