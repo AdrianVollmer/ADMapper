@@ -99,7 +99,7 @@ test_frontend_coverage() {
 
 test_crustdb() {
 	log_info "Running CrustDB tests (Cargo)..."
-	cargo test --manifest-path src/crustdb/Cargo.toml --no-default-features
+	cargo test --manifest-path src/crustdb/Cargo.toml
 	log_info "CrustDB tests passed!"
 }
 

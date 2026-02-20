@@ -559,14 +559,20 @@ fn test_m5_single_hop_flipped_optimization() {
     let db = Database::in_memory().unwrap();
 
     // Create multiple nodes - many sources, one specific target
-    db.execute("CREATE (a1:Person {name: 'Alice'})-[:KNOWS]->(target:Person {id: 'T1', name: 'Target'})")
-        .unwrap();
-    db.execute("CREATE (a2:Person {name: 'Bob'})-[:KNOWS]->(target:Person {id: 'T1', name: 'Target'})")
-        .unwrap();
+    db.execute(
+        "CREATE (a1:Person {name: 'Alice'})-[:KNOWS]->(target:Person {id: 'T1', name: 'Target'})",
+    )
+    .unwrap();
+    db.execute(
+        "CREATE (a2:Person {name: 'Bob'})-[:KNOWS]->(target:Person {id: 'T1', name: 'Target'})",
+    )
+    .unwrap();
     db.execute("CREATE (a3:Person {name: 'Charlie'})-[:FOLLOWS]->(target:Person {id: 'T1', name: 'Target'})")
         .unwrap();
-    db.execute("CREATE (a4:Person {name: 'David'})-[:KNOWS]->(other:Person {id: 'T2', name: 'Other'})")
-        .unwrap();
+    db.execute(
+        "CREATE (a4:Person {name: 'David'})-[:KNOWS]->(other:Person {id: 'T2', name: 'Other'})",
+    )
+    .unwrap();
 
     // Query with unfiltered source, filtered target - should trigger flipped optimization
     // This pattern: (a)-[r]->(b {id: 'T1'}) should flip to start from 'T1' and find incoming edges
