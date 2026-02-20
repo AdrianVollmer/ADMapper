@@ -2,6 +2,10 @@
 //!
 //! These tests use the actual application router and database,
 //! not mocks. Each test creates a fresh in-memory database.
+//!
+//! These tests require the `crustdb` feature to be enabled.
+
+#![cfg(feature = "crustdb")]
 
 use admapper::{
     create_api_router, AppState, CrustDatabase, DatabaseBackend, DatabaseType, DbEdge, DbNode,
