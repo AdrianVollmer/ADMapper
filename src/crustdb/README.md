@@ -308,6 +308,38 @@ This tests on:
 - **Grids**: NxN grids with diagonal shortcuts
 - **Binary trees**: Trees of varying depths
 
+### Stress Testing
+
+Run stress tests with synthetic graph topologies designed to expose bottlenecks:
+
+```bash
+cargo run --release --example bench_stress -- --help
+```
+
+**Topologies:**
+- `dense_cluster` - Near-clique (10% edge density), tests BFS explosion
+- `long_chain` - Linear path with shortcuts, tests deep traversals
+- `wide_fanout` - Tree with branching=100, tests high-degree expansion
+- `power_law` - Barabási-Albert scale-free, tests skewed degree distribution
+
+**Query workloads:**
+- Baseline: point lookup, single-hop, bounded variable-length, COUNT
+- Killer queries: full scan filter, deep shortest path, unbounded traversal, multi-path BFS, high fan-out
+
+Examples:
+```bash
+# Quick baseline test
+cargo run --release --example bench_stress -- --baseline-only --scales 1000,5000
+
+# Full stress test (use with caution - can exhaust memory)
+cargo run --release --example bench_stress -- --topology all --scales 1000,10000
+
+# Compare against FalkorDB and Neo4j (requires Docker)
+cargo run --release --example bench_stress -- --compare
+```
+
+Results are written to `stress_results.json` for analysis.
+
 ## Profiling
 
 Generate flamegraph SVGs to identify performance bottlenecks.
