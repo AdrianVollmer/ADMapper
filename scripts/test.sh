@@ -9,6 +9,7 @@
 #   all (default) - Run all tests (frontend + backend)
 #   frontend      - Run frontend tests only (Vitest)
 #   backend       - Run backend tests only (Cargo)
+#   crustdb       - Run CrustDB tests only (Cargo)
 #   coverage      - Run all tests with coverage
 #
 # Environment variables:
@@ -96,9 +97,15 @@ test_frontend_coverage() {
 	log_info "Frontend tests with coverage complete!"
 }
 
+test_crustdb() {
+	log_info "Running CrustDB tests (Cargo)..."
+	cargo test --manifest-path src/crustdb/Cargo.toml --no-default-features
+	log_info "CrustDB tests passed!"
+}
+
 test_backend() {
 	log_info "Running backend tests (Cargo)..."
-	cargo test --manifest-path src-backend/Cargo.toml --no-default-features
+	cargo test --manifest-path src/backend/Cargo.toml --no-default-features
 	log_info "Backend tests passed!"
 }
 
@@ -110,6 +117,8 @@ test_all() {
 	echo ""
 	echo "=== Backend Tests ==="
 	test_backend
+	echo "=== CrustDB Tests ==="
+	test_crustdb
 	echo ""
 	log_info "All tests passed!"
 }
@@ -122,6 +131,8 @@ test_coverage() {
 	echo ""
 	echo "=== Backend Tests ==="
 	test_backend
+	echo "=== CrustDB Tests ==="
+	test_crustdb
 	echo ""
 	log_info "All tests with coverage complete!"
 }
@@ -139,6 +150,9 @@ frontend)
 backend)
 	test_backend
 	;;
+crustdb)
+	test_crustdb
+	;;
 coverage)
 	test_coverage
 	;;
@@ -149,6 +163,7 @@ coverage)
 	echo "  all (default) - Run all tests (frontend + backend)"
 	echo "  frontend      - Run frontend tests only (Vitest)"
 	echo "  backend       - Run backend tests only (Cargo)"
+	echo "  crustdb       - Run CrustDB tests only (Cargo)"
 	echo "  coverage      - Run all tests with coverage"
 	exit 1
 	;;
