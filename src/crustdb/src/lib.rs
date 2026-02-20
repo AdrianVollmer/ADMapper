@@ -168,8 +168,8 @@ impl Database {
         let statement = query::parser::parse(query)?;
 
         if statement.is_read_only() {
-            // Use read connection from pool
-            let storage = self.get_read_storage();
+            // Use read connection from pool for query execution
+            let read_storage = self.get_read_storage();
 
             // Handle caching for read-only queries
             if self.caching_enabled {
@@ -177,21 +177,26 @@ impl Database {
                     .map_err(|e| Error::Internal(format!("Failed to serialize AST: {}", e)))?;
                 let query_hash = compute_hash(&ast_json);
 
-                // Check cache
-                if let Some(cached_bytes) = storage.get_cached_result(&query_hash)? {
+                // Check cache (can read from read-only connection)
+                if let Some(cached_bytes) = read_storage.get_cached_result(&query_hash)? {
                     if let Ok(cached_result) = serde_json::from_slice(&cached_bytes) {
                         return Ok(cached_result);
                     }
                 }
 
-                // Execute and cache
-                let result = query::executor::execute(&statement, &storage)?;
+                // Execute on read connection
+                let result = query::executor::execute(&statement, &read_storage)?;
+
+                // Cache via write connection (cache writes need write access)
                 let result_bytes = serde_json::to_vec(&result)
                     .map_err(|e| Error::Internal(format!("Failed to serialize result: {}", e)))?;
-                storage.cache_result(&query_hash, &ast_json, &result_bytes)?;
+                if let Ok(write_storage) = self.write_conn.lock() {
+                    // Best-effort caching - don't fail if we can't cache
+                    let _ = write_storage.cache_result(&query_hash, &ast_json, &result_bytes);
+                }
                 Ok(result)
             } else {
-                query::executor::execute(&statement, &storage)
+                query::executor::execute(&statement, &read_storage)
             }
         } else {
             // Write queries use the write connection
