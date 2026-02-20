@@ -103,7 +103,7 @@ export interface RawADNode {
   name: string;
   /** Cypher label (User, Computer, Group, etc.) - serialized as "type" by backend */
   type: ADNodeType;
-  properties?: Record<string, unknown>;
+  properties?: Record<string, unknown> | undefined;
   x?: number;
   y?: number;
 }

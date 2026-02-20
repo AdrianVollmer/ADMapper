@@ -1323,11 +1323,15 @@ impl SqliteStorage {
         let index_name = format!("idx_nodes_prop_{}", property);
 
         // Check if index exists
-        let exists: bool = self.conn.query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
-            params![&index_name],
-            |_| Ok(true),
-        ).optional()?.unwrap_or(false);
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                params![&index_name],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
 
         if exists {
             let sql = format!("DROP INDEX {}", index_name);
@@ -1351,7 +1355,10 @@ impl SqliteStorage {
             .query_map([], |row| {
                 let name: String = row.get(0)?;
                 // Strip the prefix to get the property name
-                Ok(name.strip_prefix("idx_nodes_prop_").unwrap_or(&name).to_string())
+                Ok(name
+                    .strip_prefix("idx_nodes_prop_")
+                    .unwrap_or(&name)
+                    .to_string())
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
@@ -1363,11 +1370,15 @@ impl SqliteStorage {
         validate_property_name(property)?;
 
         let index_name = format!("idx_nodes_prop_{}", property);
-        let exists: bool = self.conn.query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
-            params![&index_name],
-            |_| Ok(true),
-        ).optional()?.unwrap_or(false);
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                params![&index_name],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
 
         Ok(exists)
     }
