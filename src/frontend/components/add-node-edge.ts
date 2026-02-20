@@ -38,7 +38,7 @@ const COMMON_NODE_TYPES = ["User", "Computer", "Group", "Domain", "OU", "GPO", "
 /** Search result from API */
 interface SearchResult {
   id: string;
-  label: string;
+  name: string;
   type: string;
 }
 
@@ -310,8 +310,8 @@ async function performSearch(
       resultsEl.innerHTML = results
         .map(
           (r) => `
-          <div class="search-result-item" data-id="${escapeHtml(r.id)}" data-label="${escapeHtml(r.label)}">
-            <span class="search-result-label">${escapeHtml(r.label)}</span>
+          <div class="search-result-item" data-id="${escapeHtml(r.id)}" data-label="${escapeHtml(r.name)}">
+            <span class="search-result-label">${escapeHtml(r.name)}</span>
             <span class="search-result-type">${escapeHtml(r.type)}</span>
           </div>
         `

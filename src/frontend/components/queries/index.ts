@@ -292,7 +292,7 @@ async function runQuery(queryId: string): Promise<void> {
       const rawGraph: RawADGraph = {
         nodes: result.graph.nodes.map((n) => ({
           id: n.id,
-          label: n.label,
+          name: n.name,
           type: n.type as RawADGraph["nodes"][0]["type"],
           properties: n.properties ?? {},
         })),

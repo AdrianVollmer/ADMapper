@@ -99,7 +99,9 @@ export interface ADEdgeAttributes {
 /** Raw node data as received from server */
 export interface RawADNode {
   id: string;
-  label: string;
+  /** Display name (from BloodHound's name property) */
+  name: string;
+  /** Cypher label (User, Computer, Group, etc.) - serialized as "type" by backend */
   type: ADNodeType;
   properties?: Record<string, unknown>;
   x?: number;

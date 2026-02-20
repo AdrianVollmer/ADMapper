@@ -145,8 +145,8 @@ describe("GET /api/graph/all", () => {
   it("returns graph data", async () => {
     const graphData: GraphData = {
       nodes: [
-        { id: "user-1", label: "admin@corp.local", type: "User" },
-        { id: "group-1", label: "Domain Admins", type: "Group" },
+        { id: "user-1", name: "admin@corp.local", type: "User" },
+        { id: "group-1", name: "Domain Admins", type: "Group" },
       ],
       edges: [{ source: "user-1", target: "group-1", type: "MemberOf" }],
     };
@@ -189,8 +189,8 @@ describe("GET /api/graph/search", () => {
 
         if (query === "admin") {
           return HttpResponse.json([
-            { id: "user-1", label: "admin@corp.local", type: "User" },
-            { id: "group-1", label: "Domain Admins", type: "Group" },
+            { id: "user-1", name: "admin@corp.local", type: "User" },
+            { id: "group-1", name: "Domain Admins", type: "Group" },
           ]);
         }
 
@@ -200,7 +200,7 @@ describe("GET /api/graph/search", () => {
 
     const results = await api.get<SearchResult[]>("/api/graph/search?q=admin");
     expect(results).toHaveLength(2);
-    expect(results[0]!.label).toBe("admin@corp.local");
+    expect(results[0]!.name).toBe("admin@corp.local");
   });
 
   it("returns empty array for no matches", async () => {
@@ -224,8 +224,8 @@ describe("GET /api/graph/path", () => {
     const pathResponse: PathResponse = {
       found: true,
       path: [
-        { node: { id: "a", label: "A", type: "User" }, edge_type: "MemberOf" },
-        { node: { id: "b", label: "B", type: "Group" } },
+        { node: { id: "a", name: "A", type: "User" }, edge_type: "MemberOf" },
+        { node: { id: "b", name: "B", type: "Group" } },
       ],
       graph: { nodes: [], edges: [] },
     };

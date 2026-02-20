@@ -225,11 +225,11 @@ async function performSearch(
           const color = NODE_COLORS[nodeType] || "#6c757d";
           const iconPath = getNodeIconPath(nodeType);
           return `
-          <div class="search-result-item" data-node-id="${escapeHtml(r.id)}" data-node-label="${escapeHtml(r.label)}" data-node-type="${escapeHtml(r.type)}" data-context="${context}">
+          <div class="search-result-item" data-node-id="${escapeHtml(r.id)}" data-node-label="${escapeHtml(r.name)}" data-node-type="${escapeHtml(r.type)}" data-context="${context}">
             <span class="node-type-icon" style="background-color: ${color}" title="${escapeHtml(r.type)}">
               <svg viewBox="0 0 24 24" fill="#fff">${iconPath}</svg>
             </span>
-            <span class="node-name">${escapeHtml(r.label)}</span>
+            <span class="node-name">${escapeHtml(r.name)}</span>
           </div>
         `;
         })
@@ -353,7 +353,7 @@ function loadSingleNode(nodeId: string, label: string, nodeType: string): void {
     nodes: [
       {
         id: nodeId,
-        label: label,
+        name: label,
         type: nodeType as ADNodeType,
         properties: {},
       },
@@ -412,7 +412,7 @@ async function findPath(): Promise<void> {
       const pathGraph: RawADGraph = {
         nodes: data.graph.nodes.map((n) => ({
           id: n.id,
-          label: n.label,
+          name: n.name,
           type: n.type as ADNodeType,
           properties: n.properties ?? {},
         })),

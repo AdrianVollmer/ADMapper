@@ -53,8 +53,8 @@ describe("loadGraph", () => {
   it("loads nodes with correct attributes", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "user1", label: "jsmith@corp.local", type: "User" },
-        { id: "group1", label: "Domain Admins", type: "Group" },
+        { id: "user1", name: "jsmith@corp.local", type: "User" },
+        { id: "group1", name: "Domain Admins", type: "Group" },
       ],
       edges: [],
     };
@@ -72,8 +72,8 @@ describe("loadGraph", () => {
   it("loads edges between existing nodes", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "user1", label: "jsmith", type: "User" },
-        { id: "group1", label: "Admins", type: "Group" },
+        { id: "user1", name: "jsmith", type: "User" },
+        { id: "group1", name: "Admins", type: "Group" },
       ],
       edges: [{ source: "user1", target: "group1", type: "MemberOf" }],
     };
@@ -85,7 +85,7 @@ describe("loadGraph", () => {
 
   it("ignores edges with missing source node", () => {
     const data: RawADGraph = {
-      nodes: [{ id: "group1", label: "Admins", type: "Group" }],
+      nodes: [{ id: "group1", name: "Admins", type: "Group" }],
       edges: [{ source: "missing", target: "group1", type: "MemberOf" }],
     };
 
@@ -95,7 +95,7 @@ describe("loadGraph", () => {
 
   it("ignores edges with missing target node", () => {
     const data: RawADGraph = {
-      nodes: [{ id: "user1", label: "jsmith", type: "User" }],
+      nodes: [{ id: "user1", name: "jsmith", type: "User" }],
       edges: [{ source: "user1", target: "missing", type: "MemberOf" }],
     };
 
@@ -105,7 +105,7 @@ describe("loadGraph", () => {
 
   it("handles unknown node types", () => {
     const data: RawADGraph = {
-      nodes: [{ id: "x", label: "Unknown Thing", type: "SomethingNew" as unknown as ADNodeType }],
+      nodes: [{ id: "x", name: "Unknown Thing", type: "SomethingNew" as unknown as ADNodeType }],
       edges: [],
     };
 
@@ -119,7 +119,7 @@ describe("loadGraph", () => {
       nodes: [
         {
           id: "user1",
-          label: "jsmith",
+          name: "jsmith",
           type: "User",
           properties: { enabled: true, admincount: 1 },
         },
@@ -141,8 +141,8 @@ describe("edge curvatures", () => {
   it("assigns no curvature to single edges", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "a", label: "A", type: "User" },
-        { id: "b", label: "B", type: "Group" },
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
       ],
       edges: [{ source: "a", target: "b", type: "MemberOf" }],
     };
@@ -156,8 +156,8 @@ describe("edge curvatures", () => {
   it("assigns opposite curvatures to bidirectional edges", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "a", label: "A", type: "User" },
-        { id: "b", label: "B", type: "Group" },
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
       ],
       edges: [
         { source: "a", target: "b", type: "MemberOf" },
@@ -179,8 +179,8 @@ describe("edge curvatures", () => {
   it("distributes curvatures evenly for multiple parallel edges", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "a", label: "A", type: "User" },
-        { id: "b", label: "B", type: "Group" },
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
       ],
       edges: [
         { source: "a", target: "b", type: "MemberOf" },
@@ -204,7 +204,7 @@ describe("edge curvatures", () => {
 
   it("handles self-loops", () => {
     const data: RawADGraph = {
-      nodes: [{ id: "a", label: "A", type: "User" }],
+      nodes: [{ id: "a", name: "A", type: "User" }],
       edges: [{ source: "a", target: "a", type: "GenericAll" }],
     };
 
@@ -229,9 +229,9 @@ describe("getNodesByType", () => {
   it("returns nodes of specified type", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "u1", label: "User 1", type: "User" },
-        { id: "u2", label: "User 2", type: "User" },
-        { id: "g1", label: "Group 1", type: "Group" },
+        { id: "u1", name: "User 1", type: "User" },
+        { id: "u2", name: "User 2", type: "User" },
+        { id: "g1", name: "Group 1", type: "Group" },
       ],
       edges: [],
     };
@@ -245,7 +245,7 @@ describe("getNodesByType", () => {
 
   it("returns empty array when no nodes match", () => {
     const data: RawADGraph = {
-      nodes: [{ id: "g1", label: "Group 1", type: "Group" }],
+      nodes: [{ id: "g1", name: "Group 1", type: "Group" }],
       edges: [],
     };
 
@@ -266,7 +266,7 @@ describe("getNeighbors", () => {
 
   it("returns empty array for isolated node", () => {
     const data: RawADGraph = {
-      nodes: [{ id: "a", label: "A", type: "User" }],
+      nodes: [{ id: "a", name: "A", type: "User" }],
       edges: [],
     };
 
@@ -277,9 +277,9 @@ describe("getNeighbors", () => {
   it("returns all neighbors (in and out)", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "a", label: "A", type: "User" },
-        { id: "b", label: "B", type: "Group" },
-        { id: "c", label: "C", type: "Computer" },
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
+        { id: "c", name: "C", type: "Computer" },
       ],
       edges: [
         { source: "a", target: "b", type: "MemberOf" },
@@ -302,7 +302,7 @@ describe("getNeighbors", () => {
 describe("getReachableNodes", () => {
   it("returns only start node when isolated", () => {
     const data: RawADGraph = {
-      nodes: [{ id: "a", label: "A", type: "User" }],
+      nodes: [{ id: "a", name: "A", type: "User" }],
       edges: [],
     };
 
@@ -315,10 +315,10 @@ describe("getReachableNodes", () => {
   it("finds all reachable nodes via outgoing edges", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "a", label: "A", type: "User" },
-        { id: "b", label: "B", type: "Group" },
-        { id: "c", label: "C", type: "Computer" },
-        { id: "d", label: "D", type: "Domain" },
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
+        { id: "c", name: "C", type: "Computer" },
+        { id: "d", name: "D", type: "Domain" },
       ],
       edges: [
         { source: "a", target: "b", type: "MemberOf" },
@@ -339,9 +339,9 @@ describe("getReachableNodes", () => {
   it("respects maxDepth parameter", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "a", label: "A", type: "User" },
-        { id: "b", label: "B", type: "Group" },
-        { id: "c", label: "C", type: "Computer" },
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
+        { id: "c", name: "C", type: "Computer" },
       ],
       edges: [
         { source: "a", target: "b", type: "MemberOf" },
@@ -365,9 +365,9 @@ describe("getReachableNodes", () => {
   it("handles cycles without infinite loop", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "a", label: "A", type: "User" },
-        { id: "b", label: "B", type: "Group" },
-        { id: "c", label: "C", type: "Computer" },
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
+        { id: "c", name: "C", type: "Computer" },
       ],
       edges: [
         { source: "a", target: "b", type: "MemberOf" },
@@ -398,9 +398,9 @@ describe("getGraphStats", () => {
   it("counts nodes and edges correctly", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "u1", label: "User 1", type: "User" },
-        { id: "u2", label: "User 2", type: "User" },
-        { id: "g1", label: "Group 1", type: "Group" },
+        { id: "u1", name: "User 1", type: "User" },
+        { id: "u2", name: "User 2", type: "User" },
+        { id: "g1", name: "Group 1", type: "Group" },
       ],
       edges: [
         { source: "u1", target: "g1", type: "MemberOf" },
@@ -424,8 +424,8 @@ describe("clearGraph", () => {
   it("removes all nodes and edges", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "a", label: "A", type: "User" },
-        { id: "b", label: "B", type: "Group" },
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
       ],
       edges: [{ source: "a", target: "b", type: "MemberOf" }],
     };
@@ -457,7 +457,7 @@ describe("exportGraph", () => {
       nodes: [
         {
           id: "user1",
-          label: "jsmith",
+          name: "jsmith",
           type: "User",
           properties: { enabled: true },
         },
@@ -470,7 +470,7 @@ describe("exportGraph", () => {
 
     expect(exported.nodes).toHaveLength(1);
     expect(exported.nodes[0]!.id).toBe("user1");
-    expect(exported.nodes[0]!.label).toBe("jsmith");
+    expect(exported.nodes[0]!.name).toBe("jsmith");
     expect(exported.nodes[0]!.type).toBe("User");
     expect(exported.nodes[0]!.properties).toEqual({ enabled: true });
   });
@@ -478,8 +478,8 @@ describe("exportGraph", () => {
   it("exports edges with correct structure", () => {
     const data: RawADGraph = {
       nodes: [
-        { id: "a", label: "A", type: "User" },
-        { id: "b", label: "B", type: "Group" },
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
       ],
       edges: [{ source: "a", target: "b", type: "MemberOf" }],
     };
@@ -496,8 +496,8 @@ describe("exportGraph", () => {
   it("round-trips graph data", () => {
     const original: RawADGraph = {
       nodes: [
-        { id: "u1", label: "User 1", type: "User" },
-        { id: "g1", label: "Group 1", type: "Group" },
+        { id: "u1", name: "User 1", type: "User" },
+        { id: "g1", name: "Group 1", type: "Group" },
       ],
       edges: [{ source: "u1", target: "g1", type: "MemberOf" }],
     };
@@ -522,7 +522,7 @@ describe("exportGraph", () => {
 describe("addNode", () => {
   it("adds a new node", () => {
     const graph = createGraph();
-    const node: RawADNode = { id: "n1", label: "Node 1", type: "User" };
+    const node: RawADNode = { id: "n1", name: "Node 1", type: "User" };
     addNode(graph, node);
 
     expect(graph.hasNode("n1")).toBe(true);
@@ -531,8 +531,8 @@ describe("addNode", () => {
 
   it("merges attributes when node already exists", () => {
     const graph = createGraph();
-    const node1: RawADNode = { id: "n1", label: "Original", type: "User" };
-    const node2: RawADNode = { id: "n1", label: "Updated", type: "User" };
+    const node1: RawADNode = { id: "n1", name: "Original", type: "User" };
+    const node2: RawADNode = { id: "n1", name: "Updated", type: "User" };
 
     addNode(graph, node1);
     addNode(graph, node2);
@@ -545,8 +545,8 @@ describe("addNode", () => {
 describe("addEdge", () => {
   it("adds a new edge", () => {
     const graph = createGraph();
-    addNode(graph, { id: "a", label: "A", type: "User" });
-    addNode(graph, { id: "b", label: "B", type: "Group" });
+    addNode(graph, { id: "a", name: "A", type: "User" });
+    addNode(graph, { id: "b", name: "B", type: "Group" });
 
     const edge: RawADEdge = { source: "a", target: "b", type: "MemberOf" };
     addEdge(graph, edge);
@@ -557,8 +557,8 @@ describe("addEdge", () => {
 
   it("does not add duplicate edge with same type", () => {
     const graph = createGraph();
-    addNode(graph, { id: "a", label: "A", type: "User" });
-    addNode(graph, { id: "b", label: "B", type: "Group" });
+    addNode(graph, { id: "a", name: "A", type: "User" });
+    addNode(graph, { id: "b", name: "B", type: "Group" });
 
     const edge: RawADEdge = { source: "a", target: "b", type: "MemberOf" };
     addEdge(graph, edge);
@@ -569,8 +569,8 @@ describe("addEdge", () => {
 
   it("allows multiple edges with different types", () => {
     const graph = createGraph();
-    addNode(graph, { id: "a", label: "A", type: "User" });
-    addNode(graph, { id: "b", label: "B", type: "Group" });
+    addNode(graph, { id: "a", name: "A", type: "User" });
+    addNode(graph, { id: "b", name: "B", type: "Group" });
 
     addEdge(graph, { source: "a", target: "b", type: "MemberOf" });
     addEdge(graph, { source: "a", target: "b", type: "GenericAll" });

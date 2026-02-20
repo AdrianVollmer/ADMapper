@@ -33,6 +33,7 @@ export function initMenuBar(): void {
       }
       const action = option.getAttribute("data-action");
       if (action) {
+        e.stopPropagation(); // Prevent handleGraphClicks from also dispatching
         closeAllMenus();
         dispatchAction(action as Action);
       }

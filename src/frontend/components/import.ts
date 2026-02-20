@@ -267,7 +267,7 @@ async function loadDomainAdmins(): Promise<void> {
       const graph: RawADGraph = {
         nodes: result.graph.nodes.map((n) => ({
           id: n.id,
-          label: n.label,
+          name: n.name,
           type: mapNodeType(n.type),
           properties: n.properties ?? {},
         })),

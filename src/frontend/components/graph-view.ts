@@ -289,7 +289,7 @@ function generateDemoGraph(_nodeCount: number): RawADGraph {
   // Domain
   nodes.push({
     id: "domain",
-    label: "CORP.LOCAL",
+    name: "CORP.LOCAL",
     type: "Domain",
     properties: {
       objectid: "S-1-5-21-1234567890-1234567890-1234567890",
@@ -298,27 +298,27 @@ function generateDemoGraph(_nodeCount: number): RawADGraph {
   });
 
   // OUs
-  nodes.push({ id: "ou-it", label: "IT Department", type: "OU" });
-  nodes.push({ id: "ou-hr", label: "HR Department", type: "OU" });
+  nodes.push({ id: "ou-it", name: "IT Department", type: "OU" });
+  nodes.push({ id: "ou-hr", name: "HR Department", type: "OU" });
 
   // Groups
-  nodes.push({ id: "grp-admins", label: "Domain Admins", type: "Group" });
-  nodes.push({ id: "grp-it", label: "IT Staff", type: "Group" });
-  nodes.push({ id: "grp-hr", label: "HR Staff", type: "Group" });
-  nodes.push({ id: "grp-rdp", label: "RDP Users", type: "Group" });
+  nodes.push({ id: "grp-admins", name: "Domain Admins", type: "Group" });
+  nodes.push({ id: "grp-it", name: "IT Staff", type: "Group" });
+  nodes.push({ id: "grp-hr", name: "HR Staff", type: "Group" });
+  nodes.push({ id: "grp-rdp", name: "RDP Users", type: "Group" });
 
   // Users
-  nodes.push({ id: "user-alice", label: "alice", type: "User" });
-  nodes.push({ id: "user-bob", label: "bob", type: "User" });
-  nodes.push({ id: "user-carol", label: "carol", type: "User" });
-  nodes.push({ id: "user-dave", label: "dave", type: "User" });
-  nodes.push({ id: "user-eve", label: "eve", type: "User" });
+  nodes.push({ id: "user-alice", name: "alice", type: "User" });
+  nodes.push({ id: "user-bob", name: "bob", type: "User" });
+  nodes.push({ id: "user-carol", name: "carol", type: "User" });
+  nodes.push({ id: "user-dave", name: "dave", type: "User" });
+  nodes.push({ id: "user-eve", name: "eve", type: "User" });
 
   // Computers
-  nodes.push({ id: "comp-dc01", label: "DC01", type: "Computer" });
-  nodes.push({ id: "comp-srv01", label: "SRV01", type: "Computer" });
-  nodes.push({ id: "comp-ws01", label: "WS01", type: "Computer" });
-  nodes.push({ id: "comp-ws02", label: "WS02", type: "Computer" });
+  nodes.push({ id: "comp-dc01", name: "DC01", type: "Computer" });
+  nodes.push({ id: "comp-srv01", name: "SRV01", type: "Computer" });
+  nodes.push({ id: "comp-ws01", name: "WS01", type: "Computer" });
+  nodes.push({ id: "comp-ws02", name: "WS02", type: "Computer" });
 
   // Structure edges
   edges.push({ source: "ou-it", target: "domain", type: "Contains" });

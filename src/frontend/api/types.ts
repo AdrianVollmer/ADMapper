@@ -12,7 +12,9 @@
 /** Node in the graph from API */
 export interface GraphNode {
   id: string;
-  label: string;
+  /** Display name (from BloodHound's name property) */
+  name: string;
+  /** Cypher label (User, Computer, Group, etc.) */
   type: string;
   properties?: Record<string, unknown>;
 }
@@ -38,7 +40,9 @@ export interface GraphData {
 /** Search result from /api/graph/search */
 export interface SearchResult {
   id: string;
-  label: string;
+  /** Display name (from BloodHound's name property) */
+  name: string;
+  /** Cypher label (User, Computer, Group, etc.) */
   type: string;
 }
 

@@ -26,7 +26,7 @@ function rawNodeToAttributes(node: RawADNode): ADNodeAttributes {
   const nodeType = NODE_COLORS[node.type] ? node.type : "Unknown";
 
   const attrs: ADNodeAttributes = {
-    label: node.label,
+    label: node.name, // Display name from backend's "name" field
     nodeType: nodeType,
     x: node.x ?? Math.random() * 1000,
     y: node.y ?? Math.random() * 1000,
@@ -196,7 +196,7 @@ export function exportGraph(graph: ADGraphType): RawADGraph {
   graph.forEachNode((id, attrs) => {
     const node: RawADNode = {
       id,
-      label: attrs.label,
+      name: attrs.label, // Export display label as "name" to match backend
       type: attrs.nodeType,
       x: attrs.x,
       y: attrs.y,

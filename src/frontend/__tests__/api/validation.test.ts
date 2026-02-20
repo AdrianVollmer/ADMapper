@@ -23,14 +23,14 @@ import {
 
 describe("isGraphNode", () => {
   it("returns true for valid node", () => {
-    expect(isGraphNode({ id: "1", label: "Test", type: "User" })).toBe(true);
+    expect(isGraphNode({ id: "1", name: "Test", type: "User" })).toBe(true);
   });
 
   it("returns true for node with optional properties", () => {
     expect(
       isGraphNode({
         id: "1",
-        label: "Test",
+        name: "Test",
         type: "User",
         properties: { enabled: true },
       })
@@ -38,11 +38,11 @@ describe("isGraphNode", () => {
   });
 
   it("returns false for missing id", () => {
-    expect(isGraphNode({ label: "Test", type: "User" })).toBe(false);
+    expect(isGraphNode({ name: "Test", type: "User" })).toBe(false);
   });
 
   it("returns false for non-string id", () => {
-    expect(isGraphNode({ id: 123, label: "Test", type: "User" })).toBe(false);
+    expect(isGraphNode({ id: 123, name: "Test", type: "User" })).toBe(false);
   });
 
   it("returns false for null", () => {
@@ -76,7 +76,7 @@ describe("isGraphData", () => {
   it("returns true for valid graph data", () => {
     expect(
       isGraphData({
-        nodes: [{ id: "1", label: "A", type: "User" }],
+        nodes: [{ id: "1", name: "A", type: "User" }],
         edges: [{ source: "1", target: "2", type: "MemberOf" }],
       })
     ).toBe(true);
@@ -106,11 +106,11 @@ describe("isGraphData", () => {
 
 describe("isSearchResult", () => {
   it("returns true for valid result", () => {
-    expect(isSearchResult({ id: "1", label: "Admin", type: "User" })).toBe(true);
+    expect(isSearchResult({ id: "1", name: "Admin", type: "User" })).toBe(true);
   });
 
   it("returns false for missing type", () => {
-    expect(isSearchResult({ id: "1", label: "Admin" })).toBe(false);
+    expect(isSearchResult({ id: "1", name: "Admin" })).toBe(false);
   });
 });
 
@@ -118,8 +118,8 @@ describe("isSearchResultArray", () => {
   it("returns true for valid array", () => {
     expect(
       isSearchResultArray([
-        { id: "1", label: "A", type: "User" },
-        { id: "2", label: "B", type: "Group" },
+        { id: "1", name: "A", type: "User" },
+        { id: "2", name: "B", type: "Group" },
       ])
     ).toBe(true);
   });
@@ -145,7 +145,7 @@ describe("isPathStep", () => {
   it("returns true for valid step", () => {
     expect(
       isPathStep({
-        node: { id: "1", label: "A", type: "User" },
+        node: { id: "1", name: "A", type: "User" },
         edge_type: "MemberOf",
       })
     ).toBe(true);
@@ -154,7 +154,7 @@ describe("isPathStep", () => {
   it("returns true for step without edge_type", () => {
     expect(
       isPathStep({
-        node: { id: "1", label: "A", type: "User" },
+        node: { id: "1", name: "A", type: "User" },
       })
     ).toBe(true);
   });
@@ -174,8 +174,8 @@ describe("isPathResponse", () => {
       isPathResponse({
         found: true,
         path: [
-          { node: { id: "a", label: "A", type: "User" }, edge_type: "MemberOf" },
-          { node: { id: "b", label: "B", type: "Group" } },
+          { node: { id: "a", name: "A", type: "User" }, edge_type: "MemberOf" },
+          { node: { id: "b", name: "B", type: "Group" } },
         ],
         graph: { nodes: [], edges: [] },
       })
@@ -340,7 +340,7 @@ describe("isPaginatedResponse", () => {
 
 describe("assertValidResponse", () => {
   it("does not throw for valid data", () => {
-    expect(() => assertValidResponse({ id: "1", label: "A", type: "User" }, isGraphNode, "GraphNode")).not.toThrow();
+    expect(() => assertValidResponse({ id: "1", name: "A", type: "User" }, isGraphNode, "GraphNode")).not.toThrow();
   });
 
   it("throws for invalid data", () => {

@@ -44,7 +44,7 @@ function isArray(value: unknown): value is unknown[] {
 /** Validate a GraphNode structure */
 export function isGraphNode(value: unknown): value is GraphNode {
   if (!isObject(value)) return false;
-  return isString(value.id) && isString(value.label) && isString(value.type);
+  return isString(value.id) && isString(value.name) && isString(value.type);
 }
 
 /** Validate a GraphEdge structure */
@@ -67,7 +67,7 @@ export function isGraphData(value: unknown): value is GraphData {
 /** Validate a SearchResult structure */
 export function isSearchResult(value: unknown): value is SearchResult {
   if (!isObject(value)) return false;
-  return isString(value.id) && isString(value.label) && isString(value.type);
+  return isString(value.id) && isString(value.name) && isString(value.type);
 }
 
 /** Validate an array of SearchResults */

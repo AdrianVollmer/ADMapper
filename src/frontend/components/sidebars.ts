@@ -430,7 +430,7 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
 async function loadConnections(nodeId: string, direction: string): Promise<void> {
   try {
     const response = await api.get<{
-      nodes: Array<{ id: string; label: string; type: string; properties?: Record<string, unknown> }>;
+      nodes: Array<{ id: string; name: string; type: string; properties?: Record<string, unknown> }>;
       edges: Array<{ source: string; target: string; type: string }>;
     }>(`/api/graph/node/${encodeURIComponent(nodeId)}/connections/${direction}`);
 
@@ -443,7 +443,7 @@ async function loadConnections(nodeId: string, direction: string): Promise<void>
     loadGraphData({
       nodes: response.nodes.map((n) => ({
         id: n.id,
-        label: n.label,
+        name: n.name,
         type: n.type as ADNodeType,
         properties: n.properties || {},
       })),

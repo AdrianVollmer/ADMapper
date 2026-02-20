@@ -16,9 +16,13 @@ export async function exportPNG(): Promise<void> {
   }
 
   try {
-    // Get the sigma canvas layers
     const sigma = renderer.sigma;
     const container = sigma.getContainer();
+
+    // Force a synchronous render to ensure canvas content is fresh
+    sigma.refresh();
+
+    // Get all canvas layers (Sigma uses multiple: edges, nodes, labels, hovers, etc.)
     const canvases = container.querySelectorAll("canvas");
 
     if (canvases.length === 0) {
@@ -26,7 +30,7 @@ export async function exportPNG(): Promise<void> {
       return;
     }
 
-    // Create a combined canvas
+    // Create a combined canvas at 2x resolution for crisp output
     const width = container.clientWidth;
     const height = container.clientHeight;
     const combinedCanvas = document.createElement("canvas");
@@ -42,11 +46,12 @@ export async function exportPNG(): Promise<void> {
     // Scale for higher resolution
     ctx.scale(2, 2);
 
-    // Fill background
-    ctx.fillStyle = "#111827"; // bg-gray-900
+    // Fill background (respecting current theme)
+    const isDark = document.documentElement.classList.contains("dark");
+    ctx.fillStyle = isDark ? "#111827" : "#f9fafb"; // bg-gray-900 / bg-gray-50
     ctx.fillRect(0, 0, width, height);
 
-    // Draw each canvas layer
+    // Draw each canvas layer in order (they stack properly)
     for (const canvas of canvases) {
       ctx.drawImage(canvas, 0, 0, width, height);
     }
@@ -76,50 +81,55 @@ export async function exportSVG(): Promise<void> {
   try {
     const sigma = renderer.sigma;
     const graph = sigma.getGraph();
-    const camera = sigma.getCamera();
     const container = sigma.getContainer();
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // Build SVG manually from graph data
+    // Determine background color based on theme
+    const isDark = document.documentElement.classList.contains("dark");
+    const bgColor = isDark ? "#111827" : "#f9fafb";
+    const labelColor = isDark ? "#9ca3af" : "#374151";
+    const edgeColor = isDark ? "#4b5563" : "#9ca3af";
+
+    // Build SVG manually from graph data using viewport coordinates
     let svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <rect width="100%" height="100%" fill="#111827"/>
-  <g transform="translate(${width / 2}, ${height / 2}) scale(${1 / camera.ratio})">
+  <rect width="100%" height="100%" fill="${bgColor}"/>
 `;
 
-    // Draw edges
+    // Draw edges first (so they appear behind nodes)
     svg += '  <g class="edges">\n';
-    graph.forEachEdge((_edge: string, _attrs: unknown, source: string, target: string) => {
-      const sourcePos = graph.getNodeAttributes(source);
-      const targetPos = graph.getNodeAttributes(target);
-      if (sourcePos && targetPos) {
-        const x1 = ((sourcePos.x || 0) - camera.x) * 100;
-        const y1 = ((sourcePos.y || 0) - camera.y) * 100;
-        const x2 = ((targetPos.x || 0) - camera.x) * 100;
-        const y2 = ((targetPos.y || 0) - camera.y) * 100;
-        svg += `    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#4b5563" stroke-width="1"/>\n`;
+    graph.forEachEdge((_edge: string, attrs: { color?: string; size?: number }, source: string, target: string) => {
+      // Use getNodeDisplayData to get viewport coordinates (already transformed by camera)
+      const sourceDisplay = sigma.getNodeDisplayData(source);
+      const targetDisplay = sigma.getNodeDisplayData(target);
+      if (sourceDisplay && targetDisplay) {
+        const color = attrs.color || edgeColor;
+        const strokeWidth = attrs.size || 1;
+        svg += `    <line x1="${sourceDisplay.x}" y1="${sourceDisplay.y}" x2="${targetDisplay.x}" y2="${targetDisplay.y}" stroke="${color}" stroke-width="${strokeWidth}"/>\n`;
       }
     });
     svg += "  </g>\n";
 
     // Draw nodes
     svg += '  <g class="nodes">\n';
-    graph.forEachNode(
-      (_node: string, attrs: { x?: number; y?: number; size?: number; color?: string; label?: string }) => {
-        const x = ((attrs.x || 0) - camera.x) * 100;
-        const y = ((attrs.y || 0) - camera.y) * 100;
-        const size = (attrs.size || 5) * 2;
-        const color = attrs.color || "#6b7280";
-        svg += `    <circle cx="${x}" cy="${y}" r="${size}" fill="${color}"/>\n`;
-        if (attrs.label) {
-          svg += `    <text x="${x}" y="${y + size + 10}" text-anchor="middle" fill="#9ca3af" font-size="10">${escapeXml(attrs.label)}</text>\n`;
+    graph.forEachNode((node: string) => {
+      // Use getNodeDisplayData to get viewport coordinates and display properties
+      const display = sigma.getNodeDisplayData(node);
+      if (display && !display.hidden) {
+        const color = display.color || "#6b7280";
+        const size = display.size || 5;
+        svg += `    <circle cx="${display.x}" cy="${display.y}" r="${size}" fill="${color}"/>\n`;
+        // Label is in display data
+        const label = display.label;
+        if (label) {
+          svg += `    <text x="${display.x}" y="${display.y + size + 12}" text-anchor="middle" fill="${labelColor}" font-size="10" font-family="sans-serif">${escapeXml(label)}</text>\n`;
         }
       }
-    );
+    });
     svg += "  </g>\n";
 
-    svg += "</g>\n</svg>";
+    svg += "</svg>";
 
     const blob = new Blob([svg], { type: "image/svg+xml" });
     downloadBlob(blob, "admapper-graph.svg");
@@ -203,8 +213,24 @@ function downloadBlob(blob: Blob, filename: string): void {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  a.style.display = "none";
+  a.rel = "noopener"; // Security best practice
+
+  // Use a click event that doesn't bubble to avoid duplicate triggers
+  const clickEvent = new MouseEvent("click", {
+    bubbles: false,
+    cancelable: false,
+    view: window,
+  });
+
+  document.body.appendChild(a);
+  a.dispatchEvent(clickEvent);
+
+  // Clean up after a short delay to ensure download starts
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 100);
 }
 
 /** Escape XML special characters */
