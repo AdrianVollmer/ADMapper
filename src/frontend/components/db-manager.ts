@@ -6,6 +6,7 @@
 
 import { api } from "../api/client";
 import { escapeHtml } from "../utils/html";
+import { showConfirm } from "../utils/notifications";
 
 /** Detailed stats response from API */
 interface DetailedStats {
@@ -209,7 +210,11 @@ function handleClick(e: Event): void {
 
 /** Clear the database */
 async function clearDatabase(): Promise<void> {
-  if (!confirm("Are you sure you want to clear all data from the database? This cannot be undone.")) {
+  const confirmed = await showConfirm(
+    "Are you sure you want to clear all data from the database? This cannot be undone.",
+    { title: "Clear Database", confirmText: "Clear All Data", danger: true }
+  );
+  if (!confirmed) {
     return;
   }
 

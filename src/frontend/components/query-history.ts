@@ -10,7 +10,7 @@ import { api } from "../api/client";
 import type { QueryHistoryEntry, QueryHistoryResponse, QueryStatus } from "../api/types";
 import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
 import { hasActiveQueries } from "./query-activity";
-import { showSuccess, showError, showInfo } from "../utils/notifications";
+import { showSuccess, showError, showInfo, showConfirm } from "../utils/notifications";
 
 // Re-export for backwards compatibility
 export type { QueryHistoryEntry } from "../api/types";
@@ -230,7 +230,12 @@ async function deleteEntry(id: string): Promise<void> {
 
 /** Clear all history */
 async function clearHistory(): Promise<void> {
-  if (!confirm("Are you sure you want to clear all query history?")) {
+  const confirmed = await showConfirm("Are you sure you want to clear all query history?", {
+    title: "Clear History",
+    confirmText: "Clear All",
+    danger: true,
+  });
+  if (!confirmed) {
     return;
   }
 

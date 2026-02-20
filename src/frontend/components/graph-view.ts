@@ -12,6 +12,7 @@ import { autoCollapseGraph, clearCollapseState } from "../graph/collapse";
 import { dispatchAction, type Action } from "./actions";
 import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-visibility";
 import { getDefaultLayout } from "./settings";
+import { showConfirm } from "../utils/notifications";
 
 let renderer: ADGraphRenderer | null = null;
 let currentLayout: LayoutType = "force";
@@ -151,7 +152,7 @@ const LARGE_GRAPH_NODE_THRESHOLD = 1000;
 const LARGE_GRAPH_EDGE_THRESHOLD = 500;
 
 /** Load graph data and render */
-export function loadGraphData(data: RawADGraph): void {
+export async function loadGraphData(data: RawADGraph): Promise<void> {
   const container = document.getElementById("graph-canvas");
   if (!container) return;
 
@@ -160,10 +161,10 @@ export function loadGraphData(data: RawADGraph): void {
   const edgeCount = data.edges.length;
 
   if (nodeCount > LARGE_GRAPH_NODE_THRESHOLD || edgeCount > LARGE_GRAPH_EDGE_THRESHOLD) {
-    const confirmed = confirm(
+    const confirmed = await showConfirm(
       `This graph is very large (${nodeCount.toLocaleString()} nodes, ${edgeCount.toLocaleString()} edges) ` +
-        `and may cause performance issues or browser slowdown.\n\n` +
-        `Do you want to render it anyway?`
+        `and may cause performance issues or browser slowdown. Do you want to render it anyway?`,
+      { title: "Large Graph Warning", confirmText: "Render Anyway" }
     );
     if (!confirmed) {
       // Update stats to show what was skipped

@@ -11,7 +11,7 @@ import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import { setPathStart, setPathEnd } from "./search";
 import { getRenderer, loadGraphData } from "./graph-view";
-import { showError } from "../utils/notifications";
+import { showError, showConfirm } from "../utils/notifications";
 
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
@@ -398,8 +398,13 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
       setPathEnd(nodeId, nodeLabel);
       break;
 
-    case "delete-node":
-      if (confirm(`Delete node "${nodeLabel}"?`)) {
+    case "delete-node": {
+      const confirmed = await showConfirm(`Delete node "${nodeLabel}"?`, {
+        title: "Delete Node",
+        confirmText: "Delete",
+        danger: true,
+      });
+      if (confirmed) {
         try {
           await api.delete(`/api/graph/nodes/${encodeURIComponent(nodeId)}`);
           // Remove from graph view
@@ -414,6 +419,7 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
         }
       }
       break;
+    }
 
     default:
       console.log(`Unknown detail action: ${action}`);
