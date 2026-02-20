@@ -24,9 +24,12 @@ pub struct QueryPlan {
 #[derive(Debug, Clone)]
 pub enum PlanOperator {
     /// Scan all nodes with optional label filter.
+    /// `label_groups` preserves OR semantics: each inner Vec is OR'd, outer Vec is AND'd.
+    /// Example: `:Person|Company` → `[["Person", "Company"]]`
+    /// Example: `:Person:Actor|Director` → `[["Person"], ["Actor", "Director"]]`
     NodeScan {
         variable: String,
-        labels: Vec<String>,
+        label_groups: Vec<Vec<String>>,
         /// SQL-level limit pushdown for simple scans.
         limit: Option<u64>,
     },
@@ -294,6 +297,7 @@ fn plan_create(create: &super::parser::CreateClause) -> Result<PlanOperator> {
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut auto_var_counter = 0;
+    let mut declared_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Process pattern, tracking the previous node variable for relationship binding
     let mut prev_node_var: Option<String> = None;
@@ -328,11 +332,21 @@ fn plan_create(create: &super::parser::CreateClause) -> Result<PlanOperator> {
 
                 let labels: Vec<String> = np.labels.iter().flatten().cloned().collect();
                 let properties = plan_properties(&np.properties)?;
-                nodes.push(CreateNode {
-                    variable: Some(var.clone()),
-                    labels,
-                    properties,
-                });
+
+                // Only create a node if it has labels/properties (declaration) or hasn't been declared yet
+                // A node pattern like `(charlie)` appearing after `(charlie:Person {...})` is a reference
+                let is_reference = labels.is_empty()
+                    && properties.is_empty()
+                    && declared_vars.contains(&var);
+
+                if !is_reference {
+                    nodes.push(CreateNode {
+                        variable: Some(var.clone()),
+                        labels,
+                        properties,
+                    });
+                    declared_vars.insert(var.clone());
+                }
 
                 prev_node_var = Some(var);
             }
@@ -428,11 +442,11 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
     };
 
     let variable = first_node.variable.clone().unwrap_or_else(|| "_n0".to_string());
-    let labels: Vec<String> = first_node.labels.iter().flatten().cloned().collect();
+    let label_groups: Vec<Vec<String>> = first_node.labels.clone();
 
     let mut plan = PlanOperator::NodeScan {
         variable: variable.clone(),
-        labels,
+        label_groups,
         limit: None,
     };
 
@@ -545,7 +559,7 @@ fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
 
     let source_var = source_node.variable.clone().unwrap_or_else(|| "_src".to_string());
     let target_var = target_node.variable.clone().unwrap_or_else(|| "_tgt".to_string());
-    let source_labels: Vec<String> = source_node.labels.iter().flatten().cloned().collect();
+    let source_label_groups: Vec<Vec<String>> = source_node.labels.clone();
     let target_labels: Vec<String> = target_node.labels.iter().flatten().cloned().collect();
 
     // Determine hop bounds
@@ -559,7 +573,7 @@ fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
 
     let mut plan = PlanOperator::NodeScan {
         variable: source_var.clone(),
-        labels: source_labels,
+        label_groups: source_label_groups,
         limit: None,
     };
 
@@ -1024,16 +1038,19 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                 if let AggregateFunction::Count(ref arg) = aggregates[0].function {
                     // Check if source is a simple NodeScan without filters
                     if let PlanOperator::NodeScan {
-                        ref labels,
+                        ref label_groups,
                         limit: None,
                         ..
                     } = *source
                     {
-                        // Can push COUNT to SQL
-                        let label = if labels.is_empty() {
+                        // Can push COUNT to SQL only for simple single label
+                        // Flatten to check - OR labels can't be pushed down easily
+                        let flat_labels: Vec<String> =
+                            label_groups.iter().flatten().cloned().collect();
+                        let label = if flat_labels.is_empty() {
                             None
-                        } else if labels.len() == 1 {
-                            Some(labels[0].clone())
+                        } else if flat_labels.len() == 1 {
+                            Some(flat_labels[0].clone())
                         } else {
                             // Multiple labels - can't push down easily
                             return PlanOperator::Aggregate {
@@ -1067,11 +1084,11 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                 // LIMIT on NodeScan can be pushed down
                 PlanOperator::NodeScan {
                     variable,
-                    labels,
+                    label_groups,
                     limit: None,
                 } => PlanOperator::NodeScan {
                     variable,
-                    labels,
+                    label_groups,
                     limit: Some(count),
                 },
 
@@ -1083,14 +1100,14 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                 } => {
                     if let PlanOperator::NodeScan {
                         variable,
-                        labels,
+                        label_groups,
                         limit: None,
                     } = *inner_source
                     {
                         PlanOperator::Project {
                             source: Box::new(PlanOperator::NodeScan {
                                 variable,
-                                labels,
+                                label_groups,
                                 limit: Some(count),
                             }),
                             columns,

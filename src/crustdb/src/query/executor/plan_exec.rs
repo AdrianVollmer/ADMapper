@@ -66,9 +66,9 @@ fn execute_operator(
 
         PlanOperator::NodeScan {
             variable,
-            labels,
+            label_groups,
             limit,
-        } => execute_node_scan(variable, labels, *limit, storage),
+        } => execute_node_scan(variable, label_groups, *limit, storage),
 
         PlanOperator::Expand {
             source,
@@ -177,15 +177,31 @@ fn execute_operator(
         }
 
         PlanOperator::Limit { source, count } => {
-            let mut bindings = execute_operator_to_bindings(source, storage, stats)?;
-            bindings.truncate(*count as usize);
-            Ok(ExecutionResult::Bindings(bindings))
+            // Limit can work on either Bindings or Rows
+            match execute_operator(source, storage, stats)? {
+                ExecutionResult::Bindings(mut bindings) => {
+                    bindings.truncate(*count as usize);
+                    Ok(ExecutionResult::Bindings(bindings))
+                }
+                ExecutionResult::Rows { columns, mut rows } => {
+                    rows.truncate(*count as usize);
+                    Ok(ExecutionResult::Rows { columns, rows })
+                }
+            }
         }
 
         PlanOperator::Skip { source, count } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats)?;
-            let skipped: Vec<_> = bindings.into_iter().skip(*count as usize).collect();
-            Ok(ExecutionResult::Bindings(skipped))
+            // Skip can work on either Bindings or Rows
+            match execute_operator(source, storage, stats)? {
+                ExecutionResult::Bindings(bindings) => {
+                    let skipped: Vec<_> = bindings.into_iter().skip(*count as usize).collect();
+                    Ok(ExecutionResult::Bindings(skipped))
+                }
+                ExecutionResult::Rows { columns, rows } => {
+                    let skipped: Vec<_> = rows.into_iter().skip(*count as usize).collect();
+                    Ok(ExecutionResult::Rows { columns, rows: skipped })
+                }
+            }
         }
 
         PlanOperator::Create {
@@ -243,18 +259,57 @@ fn execute_operator_to_bindings(
 
 fn execute_node_scan(
     variable: &str,
-    labels: &[String],
+    label_groups: &[Vec<String>],
     limit: Option<u64>,
     storage: &SqliteStorage,
 ) -> Result<ExecutionResult> {
-    let nodes = if labels.is_empty() {
+    // label_groups structure:
+    // - Each inner Vec is OR'd (alternatives)
+    // - Outer Vec is AND'd (all groups must match)
+    // Example: :Person|Company → [["Person", "Company"]]
+    // Example: :Person:Actor|Director → [["Person"], ["Actor", "Director"]]
+
+    let nodes = if label_groups.is_empty() || label_groups.iter().all(|g| g.is_empty()) {
+        // No label filter - scan all nodes
         storage.get_all_nodes_limit(limit)?
-    } else if labels.len() == 1 {
-        storage.find_nodes_by_label_limit(&labels[0], limit)?
+    } else if label_groups.len() == 1 && label_groups[0].len() == 1 {
+        // Simple single label case - use index
+        storage.find_nodes_by_label_limit(&label_groups[0][0], limit)?
+    } else if label_groups.len() == 1 && label_groups[0].len() > 1 {
+        // Single group with OR alternatives (e.g., :Person|Company)
+        // Scan for each label and merge, avoiding duplicates
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut all_nodes = Vec::new();
+        for label in &label_groups[0] {
+            for node in storage.find_nodes_by_label(label)? {
+                if seen_ids.insert(node.id) {
+                    all_nodes.push(node);
+                }
+            }
+        }
+        if let Some(lim) = limit {
+            all_nodes.truncate(lim as usize);
+        }
+        all_nodes
     } else {
-        // Multiple labels - get first and filter
-        let mut nodes = storage.find_nodes_by_label(&labels[0])?;
-        nodes.retain(|n| labels[1..].iter().all(|l| n.has_label(l)));
+        // Multiple groups - use first label from first group for initial scan, then filter
+        let first_group = &label_groups[0];
+        let first_label = first_group.first().map(String::as_str).unwrap_or("");
+
+        let mut nodes = if first_label.is_empty() {
+            storage.get_all_nodes_limit(None)?
+        } else {
+            storage.find_nodes_by_label(first_label)?
+        };
+
+        // Filter: for each group, node must have at least one matching label
+        nodes.retain(|n: &crate::graph::Node| {
+            label_groups.iter().all(|group| {
+                // Node must have at least one label from this group
+                group.is_empty() || group.iter().any(|label| n.has_label(label))
+            })
+        });
+
         if let Some(lim) = limit {
             nodes.truncate(lim as usize);
         }
@@ -457,7 +512,8 @@ fn execute_shortest_path(
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
 
         // BFS for shortest paths
-        let use_fast_bfs = k == 1;
+        // Note: we enumerate ALL paths at shortest depth, not just k, because a Filter
+        // operator after us might eliminate some paths. Truncation to k happens at the end.
         let mut visited: HashSet<i64> = HashSet::new();
         let mut found_paths: Vec<(Node, Vec<i64>, Vec<i64>)> = Vec::new();
         let mut shortest_found: Option<u32> = None;
@@ -469,20 +525,15 @@ fn execute_shortest_path(
         while let Some((current_id, path_nodes, path_edge_ids)) = queue.pop_front() {
             let depth = path_edge_ids.len() as u32;
 
-            // Early termination
-            if found_paths.len() >= k as usize {
-                break;
-            }
-            if let Some(shortest) = shortest_found {
-                if depth > shortest {
-                    break;
-                }
-            }
+            // Stop BFS at max depth
             if depth > max_hops {
                 continue;
             }
 
-            // Check if we reached a valid target
+            // Check if we reached a valid target (by label)
+            // Note: We don't terminate early based on finding label-matched targets
+            // because a subsequent Filter operator may apply additional WHERE constraints
+            // that require exploring deeper paths.
             if depth >= min_hops && current_id != source_node.id {
                 let is_target = target_ids
                     .as_ref()
@@ -492,20 +543,7 @@ fn execute_shortest_path(
                 if is_target {
                     if let Some(target_node) = storage.get_node(current_id)? {
                         found_paths.push((target_node, path_nodes.clone(), path_edge_ids.clone()));
-                        if shortest_found.is_none() {
-                            shortest_found = Some(depth);
-                        }
-                        if use_fast_bfs {
-                            break;
-                        }
                     }
-                }
-            }
-
-            // Don't expand past shortest depth
-            if let Some(shortest) = shortest_found {
-                if depth >= shortest {
-                    continue;
                 }
             }
 
@@ -516,14 +554,12 @@ fn execute_shortest_path(
             for edge in edges {
                 let next_id = get_target_id(&edge, current_id, direction);
 
-                if use_fast_bfs {
-                    if visited.contains(&next_id) {
-                        continue;
-                    }
-                    visited.insert(next_id);
-                } else if path_nodes.contains(&next_id) {
+                // Use global visited set for efficiency when we only need shortest paths
+                // (all paths at shortest depth are equally valid)
+                if visited.contains(&next_id) {
                     continue;
                 }
+                visited.insert(next_id);
 
                 let mut new_path_nodes = path_nodes.clone();
                 new_path_nodes.push(next_id);

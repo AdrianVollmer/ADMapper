@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Embedded graph database with SQLite backend and Cypher support"
 license = "MIT"
+autoexamples = false
 
 [features]
 default = ["bundled-sqlite"]
