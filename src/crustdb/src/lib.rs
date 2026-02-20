@@ -190,6 +190,10 @@ impl Database {
                 // Execute on read connection
                 let result = query::executor::execute(&statement, &read_storage)?;
 
+                // Drop read_storage before acquiring write lock to avoid deadlock
+                // (in-memory databases use write_conn for reads since there's no pool)
+                drop(read_storage);
+
                 // Cache via write connection (cache writes need write access)
                 let result_bytes = serde_json::to_vec(&result)
                     .map_err(|e| Error::Internal(format!("Failed to serialize result: {}", e)))?;
