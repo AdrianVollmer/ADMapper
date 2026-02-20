@@ -579,14 +579,15 @@ impl CrustDatabase {
         Ok(types)
     }
 
-    /// Search nodes by label (case-insensitive substring match).
+    /// Search nodes by name (case-insensitive substring match).
     pub fn search_nodes(&self, search_query: &str, limit: usize) -> Result<Vec<DbNode>> {
         let query_escaped = search_query.replace('\'', "''").to_lowercase();
 
         // CrustDB supports CONTAINS for string matching
         // Use toLower() for case-insensitive search
+        // Search both n.name (BloodHound property) and n.object_id
         let query = format!(
-            "MATCH (n) WHERE toLower(n.label) CONTAINS '{}' OR toLower(n.object_id) CONTAINS '{}' \
+            "MATCH (n) WHERE toLower(n.name) CONTAINS '{}' OR toLower(n.object_id) CONTAINS '{}' \
              RETURN n LIMIT {}",
             query_escaped, query_escaped, limit
         );

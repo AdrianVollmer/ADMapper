@@ -203,3 +203,14 @@ cypher = "MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person) WHERE r.since >
 [test.expected]
 row_count = 1
 columns = ["b.name"]
+
+[[test]]
+name = "single_hop_path_variable"
+description = "Return path variable from single-hop pattern"
+[test.setup]
+cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})"]
+[test.query]
+cypher = "MATCH p = (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person) RETURN p"
+[test.expected]
+row_count = 1
+columns = ["p"]

@@ -76,6 +76,7 @@ fn execute_operator(
             rel_variable,
             target_variable,
             target_labels,
+            path_variable,
             types,
             direction,
         } => {
@@ -86,6 +87,7 @@ fn execute_operator(
                 rel_variable.as_deref(),
                 target_variable,
                 target_labels,
+                path_variable.as_deref(),
                 types,
                 *direction,
                 storage,
@@ -334,6 +336,7 @@ fn execute_expand(
     rel_variable: Option<&str>,
     target_variable: &str,
     target_labels: &[String],
+    path_variable: Option<&str>,
     types: &[String],
     direction: ExpandDirection,
     storage: &SqliteStorage,
@@ -363,10 +366,21 @@ fn execute_expand(
                 continue;
             }
 
-            let mut new_binding = binding.clone().with_node(target_variable, target_node);
+            let mut new_binding = binding.clone().with_node(target_variable, target_node.clone());
 
             if let Some(rv) = rel_variable {
-                new_binding = new_binding.with_edge(rv, edge);
+                new_binding = new_binding.with_edge(rv, edge.clone());
+            }
+
+            // Bind the path if path_variable is set
+            if let Some(pv) = path_variable {
+                new_binding = new_binding.with_path(
+                    pv,
+                    Path {
+                        nodes: vec![source_node.clone(), target_node],
+                        edges: vec![edge],
+                    },
+                );
             }
 
             result.push(new_binding);

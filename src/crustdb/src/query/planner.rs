@@ -46,6 +46,7 @@ pub enum PlanOperator {
         rel_variable: Option<String>,
         target_variable: String,
         target_labels: Vec<String>,
+        path_variable: Option<String>,
         types: Vec<String>,
         direction: ExpandDirection,
     },
@@ -513,6 +514,7 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
                 rel_variable: rel.variable.clone(),
                 target_variable: target_var.clone(),
                 target_labels: target_labels.clone(),
+                path_variable: pattern.path_variable.clone(),
                 types: rel.types.clone(),
                 direction: rel.direction.into(),
             };
@@ -1156,6 +1158,7 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             rel_variable,
             target_variable,
             target_labels,
+            path_variable,
             types,
             direction,
         } => PlanOperator::Expand {
@@ -1164,6 +1167,7 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             rel_variable,
             target_variable,
             target_labels,
+            path_variable,
             types,
             direction,
         },
