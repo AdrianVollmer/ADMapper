@@ -361,3 +361,33 @@ pub struct AddHistoryRequest {
     #[serde(default)]
     pub background: bool,
 }
+
+// ============================================================================
+// File Browser Types
+// ============================================================================
+
+/// File browser request params.
+#[derive(Debug, Deserialize)]
+pub struct BrowseParams {
+    /// Directory path to browse (defaults to home directory)
+    pub path: Option<String>,
+}
+
+/// A file or directory entry.
+#[derive(Debug, Serialize)]
+pub struct BrowseEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// File browser response.
+#[derive(Debug, Serialize)]
+pub struct BrowseResponse {
+    /// Current directory path
+    pub current: String,
+    /// Parent directory path (None if at root)
+    pub parent: Option<String>,
+    /// Entries in the directory
+    pub entries: Vec<BrowseEntry>,
+}

@@ -131,6 +131,8 @@ pub fn create_api_router(state: AppState) -> Router {
         // Settings
         .route("/api/settings", get(handlers::get_settings))
         .route("/api/settings", put(handlers::update_settings))
+        // File browser
+        .route("/api/browse", get(handlers::browse_directory))
         .with_state(state)
 }
 

@@ -300,36 +300,238 @@ function showError(message: string): void {
   }
 }
 
-/** Browse for database path using Tauri dialog */
+/** Browse response from API */
+interface BrowseEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+}
+
+interface BrowseResponse {
+  current: string;
+  parent: string | null;
+  entries: BrowseEntry[];
+}
+
+/** Browse for database path using Tauri dialog or web file browser */
 async function browseForPath(): Promise<void> {
   // Check if Tauri is available
-  if (!("__TAURI__" in window)) {
-    // Fallback: just focus the input field
-    document.getElementById("db-path")?.focus();
-    return;
+  if ("__TAURI__" in window) {
+    try {
+      // @ts-expect-error Tauri global
+      const { open } = await window.__TAURI__.dialog;
+
+      // KuzuDB uses a directory, CozoDB uses a file
+      const isDirectory = selectedDbType === "kuzu";
+
+      const selected = await open({
+        directory: isDirectory,
+        multiple: false,
+        title: isDirectory ? "Select Database Directory" : "Select Database File",
+      });
+
+      if (selected && typeof selected === "string") {
+        const pathInput = document.getElementById("db-path") as HTMLInputElement | null;
+        if (pathInput) {
+          pathInput.value = selected;
+        }
+      }
+      return;
+    } catch (error) {
+      console.error("Failed to open Tauri file dialog:", error);
+      // Fall through to web file browser
+    }
   }
 
+  // Use web-based file browser
+  openFileBrowser();
+}
+
+/** Open the web-based file browser modal */
+async function openFileBrowser(startPath?: string): Promise<void> {
+  // Create browser modal if it doesn't exist
+  let browserModal = document.getElementById("file-browser-modal");
+  if (!browserModal) {
+    browserModal = createFileBrowserModal();
+    document.body.appendChild(browserModal);
+  }
+
+  // Load initial directory
+  await loadDirectory(startPath);
+
+  // Show modal
+  browserModal.hidden = false;
+}
+
+/** Create the file browser modal */
+function createFileBrowserModal(): HTMLElement {
+  const modal = document.createElement("div");
+  modal.id = "file-browser-modal";
+  modal.className = "modal-overlay";
+  modal.hidden = true;
+
+  const isDirectory = selectedDbType === "kuzu";
+  const title = isDirectory ? "Select Database Directory" : "Select Database File";
+
+  modal.innerHTML = `
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h2 class="modal-title">${title}</h2>
+        <button class="modal-close" id="file-browser-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="file-browser-path mb-3">
+          <label class="form-label">Current Path</label>
+          <div class="flex gap-2">
+            <input type="text" id="file-browser-path-input" class="form-input flex-1" readonly />
+            <button type="button" id="file-browser-up" class="btn btn-secondary" title="Go to parent directory">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4">
+                <path d="M9 19l-7-7 7-7M2 12h20"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div id="file-browser-list" class="file-browser-list">
+          <div class="text-center py-4 text-gray-400">Loading...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="file-browser-cancel" class="btn btn-secondary">Cancel</button>
+        <button type="button" id="file-browser-select" class="btn btn-primary">Select This Directory</button>
+      </div>
+    </div>
+  `;
+
+  // Event listeners
+  modal.querySelector("#file-browser-close")?.addEventListener("click", closeFileBrowser);
+  modal.querySelector("#file-browser-cancel")?.addEventListener("click", closeFileBrowser);
+  modal.querySelector("#file-browser-up")?.addEventListener("click", goToParentDirectory);
+  modal.querySelector("#file-browser-select")?.addEventListener("click", selectCurrentPath);
+
+  // Close on backdrop click
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeFileBrowser();
+  });
+
+  return modal;
+}
+
+/** Current browser state */
+let currentBrowsePath = "";
+let currentParentPath: string | null = null;
+
+/** Load a directory's contents */
+async function loadDirectory(path?: string): Promise<void> {
+  const listEl = document.getElementById("file-browser-list");
+  const pathInput = document.getElementById("file-browser-path-input") as HTMLInputElement | null;
+
+  if (!listEl) return;
+
+  listEl.innerHTML = '<div class="text-center py-4 text-gray-400">Loading...</div>';
+
   try {
-    // @ts-expect-error Tauri global
-    const { open } = await window.__TAURI__.dialog;
+    const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : "/api/browse";
+    const response = await fetch(url);
 
-    // KuzuDB uses a directory, CozoDB uses a file
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || "Failed to browse directory");
+    }
+
+    const data: BrowseResponse = await response.json();
+    currentBrowsePath = data.current;
+    currentParentPath = data.parent;
+
+    if (pathInput) {
+      pathInput.value = data.current;
+    }
+
+    // Update up button state
+    const upBtn = document.getElementById("file-browser-up") as HTMLButtonElement | null;
+    if (upBtn) {
+      upBtn.disabled = !data.parent;
+    }
+
+    // Render entries
+    if (data.entries.length === 0) {
+      listEl.innerHTML = '<div class="text-center py-4 text-gray-400">Empty directory</div>';
+      return;
+    }
+
     const isDirectory = selectedDbType === "kuzu";
+    listEl.innerHTML = data.entries
+      .map((entry) => {
+        const icon = entry.is_dir
+          ? '<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 text-yellow-500"><path d="M3 4a2 2 0 012-2h4.586a2 2 0 011.414.586l1.414 1.414H19a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V4z"/></svg>'
+          : '<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 text-gray-400"><path d="M5 4a2 2 0 012-2h6l4 4v12a2 2 0 01-2 2H7a2 2 0 01-2-2V4z"/></svg>';
 
-    const selected = await open({
-      directory: isDirectory,
-      multiple: false,
-      title: isDirectory ? "Select Database Directory" : "Select Database File",
-    });
+        // For directory selection mode, only directories are clickable to navigate
+        // For file selection mode, directories navigate and files can be selected
+        const isSelectable = isDirectory ? entry.is_dir : true;
+        const clickAction = entry.is_dir ? `data-navigate="${entry.path}"` : `data-select="${entry.path}"`;
 
-    if (selected && typeof selected === "string") {
-      const pathInput = document.getElementById("db-path") as HTMLInputElement | null;
-      if (pathInput) {
-        pathInput.value = selected;
-      }
+        return `
+          <div class="file-browser-item ${isSelectable ? "selectable" : ""}" ${clickAction}>
+            ${icon}
+            <span class="file-browser-name">${entry.name}</span>
+          </div>
+        `;
+      })
+      .join("");
+
+    // Add click handlers
+    for (const item of listEl.querySelectorAll("[data-navigate]")) {
+      item.addEventListener("click", () => {
+        const path = item.getAttribute("data-navigate");
+        if (path) loadDirectory(path);
+      });
+    }
+
+    for (const item of listEl.querySelectorAll("[data-select]")) {
+      item.addEventListener("click", () => {
+        const path = item.getAttribute("data-select");
+        if (path) {
+          setSelectedPath(path);
+          closeFileBrowser();
+        }
+      });
     }
   } catch (error) {
-    console.error("Failed to open file dialog:", error);
+    console.error("Failed to load directory:", error);
+    listEl.innerHTML = `<div class="text-center py-4 text-red-400">Error: ${error instanceof Error ? error.message : "Unknown error"}</div>`;
+  }
+}
+
+/** Go to parent directory */
+function goToParentDirectory(): void {
+  if (currentParentPath) {
+    loadDirectory(currentParentPath);
+  }
+}
+
+/** Select current directory path */
+function selectCurrentPath(): void {
+  setSelectedPath(currentBrowsePath);
+  closeFileBrowser();
+}
+
+/** Set the selected path in the main form */
+function setSelectedPath(path: string): void {
+  const pathInput = document.getElementById("db-path") as HTMLInputElement | null;
+  if (pathInput) {
+    pathInput.value = path;
+  }
+}
+
+/** Close the file browser modal */
+function closeFileBrowser(): void {
+  const modal = document.getElementById("file-browser-modal");
+  if (modal) {
+    modal.hidden = true;
   }
 }
 
