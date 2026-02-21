@@ -449,7 +449,7 @@ async function toggleNodeOwned(nodeId: string): Promise<void> {
     const newOwned = !status.owned;
 
     // Update the owned status
-    await api.post(`/api/graph/node/${encodeURIComponent(nodeId)}/owned`, {
+    await api.postNoContent(`/api/graph/node/${encodeURIComponent(nodeId)}/owned`, {
       owned: newOwned,
     });
 
