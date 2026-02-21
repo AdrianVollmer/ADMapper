@@ -6,7 +6,8 @@ use serde_json::Value as JsonValue;
 use std::str::FromStr;
 
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, QueryHistoryRow, Result, SecurityInsights,
+    DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow, Result,
+    SecurityInsights,
 };
 
 /// Query language supported by a database backend.
@@ -335,19 +336,7 @@ pub trait DatabaseBackend: Send + Sync {
     // ========================================================================
 
     /// Add a query to history with status tracking.
-    fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()>;
+    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()>;
 
     /// Update a query's status in history.
     fn update_query_status(

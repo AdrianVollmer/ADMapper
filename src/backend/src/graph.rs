@@ -258,9 +258,10 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
         .or(node_type_from_labels)
         .unwrap_or_else(|| "Unknown".to_string());
 
+    // Try "name" first (standard property), fall back to "label" (BloodHound style)
     let name = value
         .get("properties")
-        .and_then(|p| p.get("label"))
+        .and_then(|p| p.get("name").or_else(|| p.get("label")))
         .and_then(|l| l.as_str())
         .map(String::from)
         .unwrap_or_else(|| object_id.clone());

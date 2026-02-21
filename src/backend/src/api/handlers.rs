@@ -6,7 +6,10 @@ use crate::api::types::{
     PathsToDaParams, PathsToDaResponse, QueryActivity, QueryHistoryEntry, QueryHistoryResponse,
     QueryProgress, QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
 };
-use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, QueryLanguage, Result as DbResult};
+use crate::db::{
+    DatabaseBackend, DbEdge, DbError, DbNode, NewQueryHistoryEntry, QueryLanguage,
+    Result as DbResult,
+};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
 use crate::import::{BloodHoundImporter, ImportProgress};
 use crate::settings::{self, Settings};
@@ -609,18 +612,18 @@ pub async fn node_status(
     let query_text = format!("FIND_PATH_TO_HIGH_VALUE({})", node_id);
 
     // Add to history with "running" status (background query)
-    if let Err(e) = db.add_query_history(
-        &query_id,
-        &query_name,
-        &query_text,
-        started_at_unix,
-        None,
-        "running",
-        started_at_unix,
-        None,
-        None,
-        true, // background query
-    ) {
+    if let Err(e) = db.add_query_history(NewQueryHistoryEntry {
+        id: &query_id,
+        name: &query_name,
+        query: &query_text,
+        timestamp: started_at_unix,
+        result_count: None,
+        status: "running",
+        started_at: started_at_unix,
+        duration_ms: None,
+        error: None,
+        background: true,
+    }) {
         warn!(error = %e, "Failed to add path check to history");
     }
 
@@ -738,18 +741,18 @@ pub async fn graph_path(
     let query_text = format!("SHORTEST_PATH({}, {})", params.from, params.to);
 
     // Add to history with "running" status
-    if let Err(e) = db.add_query_history(
-        &query_id,
-        &query_name,
-        &query_text,
-        started_at_unix,
-        None,
-        "running",
-        started_at_unix,
-        None,
-        None,
-        false, // user-initiated query
-    ) {
+    if let Err(e) = db.add_query_history(NewQueryHistoryEntry {
+        id: &query_id,
+        name: &query_name,
+        query: &query_text,
+        timestamp: started_at_unix,
+        result_count: None,
+        status: "running",
+        started_at: started_at_unix,
+        duration_ms: None,
+        error: None,
+        background: false,
+    }) {
         warn!(error = %e, "Failed to add path query to history");
     }
 
@@ -1114,18 +1117,18 @@ pub async fn graph_query(
 
     // Add query to history with "running" status
     let timestamp = started_at_unix;
-    if let Err(e) = db.add_query_history(
-        &query_id,
-        &body.query, // Use query text as name
-        &body.query,
+    if let Err(e) = db.add_query_history(NewQueryHistoryEntry {
+        id: &query_id,
+        name: &body.query, // Use query text as name
+        query: &body.query,
         timestamp,
-        None,
-        "running",
-        started_at_unix,
-        None,
-        None,
-        false, // user-initiated query
-    ) {
+        result_count: None,
+        status: "running",
+        started_at: started_at_unix,
+        duration_ms: None,
+        error: None,
+        background: body.background,
+    }) {
         warn!(error = %e, "Failed to add query to history");
     }
 
@@ -1498,18 +1501,18 @@ pub async fn add_query_history(
     let background = body.background;
     let status_str_owned = status_str.to_string();
     run_db(db, move |db| {
-        db.add_query_history(
-            &id_clone,
-            &name,
-            &query,
-            started_at,
+        db.add_query_history(NewQueryHistoryEntry {
+            id: &id_clone,
+            name: &name,
+            query: &query,
+            timestamp: started_at,
             result_count,
-            &status_str_owned,
+            status: &status_str_owned,
             started_at,
             duration_ms,
-            error.as_deref(),
+            error: error.as_deref(),
             background,
-        )
+        })
     })
     .await?;
 

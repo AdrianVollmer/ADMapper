@@ -377,36 +377,12 @@ impl Database {
     // ========================================================================
 
     /// Add a query to the history.
-    #[allow(clippy::too_many_arguments)]
-    pub fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()> {
+    pub fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
         let storage = self
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.add_query_history(
-            id,
-            name,
-            query,
-            timestamp,
-            result_count,
-            status,
-            started_at,
-            duration_ms,
-            error,
-            background,
-        )
+        storage.add_query_history(entry)
     }
 
     /// Update the status of a query in history.
@@ -465,7 +441,7 @@ fn compute_hash(s: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-/// A row from the query history.
+/// A row from the query history (owned version for reads).
 #[derive(Debug, Clone)]
 pub struct QueryHistoryRow {
     pub id: String,
@@ -478,6 +454,21 @@ pub struct QueryHistoryRow {
     pub duration_ms: Option<u64>,
     pub error: Option<String>,
     /// Whether this is a background query (auto-fired, not user-initiated).
+    pub background: bool,
+}
+
+/// A new query history entry (borrowed version for inserts).
+#[derive(Debug, Clone)]
+pub struct NewQueryHistoryEntry<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+    pub query: &'a str,
+    pub timestamp: i64,
+    pub result_count: Option<i64>,
+    pub status: &'a str,
+    pub started_at: i64,
+    pub duration_ms: Option<u64>,
+    pub error: Option<&'a str>,
     pub background: bool,
 }
 
@@ -796,18 +787,18 @@ mod tests {
         let db = Database::in_memory().unwrap();
 
         // Add a query to history
-        db.add_query_history(
-            "test-id-1",
-            "Test Query",
-            "MATCH (n) RETURN n",
-            1700000000,
-            Some(42),
-            "completed",
-            1700000000,
-            Some(150),
-            None,
-            false,
-        )
+        db.add_query_history(NewQueryHistoryEntry {
+            id: "test-id-1",
+            name: "Test Query",
+            query: "MATCH (n) RETURN n",
+            timestamp: 1700000000,
+            result_count: Some(42),
+            status: "completed",
+            started_at: 1700000000,
+            duration_ms: Some(150),
+            error: None,
+            background: false,
+        })
         .unwrap();
 
         // Get query history
@@ -835,18 +826,18 @@ mod tests {
         assert!(rows.is_empty());
 
         // Add another and clear all
-        db.add_query_history(
-            "test-id-2",
-            "Another",
-            "MATCH (n) RETURN n",
-            1700000001,
-            None,
-            "pending",
-            1700000001,
-            None,
-            None,
-            true, // background query
-        )
+        db.add_query_history(NewQueryHistoryEntry {
+            id: "test-id-2",
+            name: "Another",
+            query: "MATCH (n) RETURN n",
+            timestamp: 1700000001,
+            result_count: None,
+            status: "pending",
+            started_at: 1700000001,
+            duration_ms: None,
+            error: None,
+            background: true, // background query
+        })
         .unwrap();
         db.clear_query_history().unwrap();
         let (_, total) = db.get_query_history(10, 0).unwrap();

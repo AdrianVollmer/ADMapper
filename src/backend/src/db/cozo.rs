@@ -10,8 +10,8 @@ use tracing::{debug, info, trace};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights,
-    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow, ReachabilityInsight,
+    Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// A graph database backed by CozoDB with SQLite storage.
@@ -973,47 +973,35 @@ impl GraphDatabase {
     }
 
     /// Add a query to history.
-    pub fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()> {
-        debug!(id = %id, name = %name, status = %status, background = %background, "Adding query to history");
+    pub fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
+        debug!(id = %entry.id, name = %entry.name, status = %entry.status, background = %entry.background, "Adding query to history");
 
-        let result_val = match result_count {
+        let result_val = match entry.result_count {
             Some(c) => DataValue::from(c),
             None => DataValue::Null,
         };
 
-        let duration_val = match duration_ms {
+        let duration_val = match entry.duration_ms {
             Some(d) => DataValue::from(d as i64),
             None => DataValue::Null,
         };
 
-        let error_val = match error {
+        let error_val = match entry.error {
             Some(e) => DataValue::Str(e.into()),
             None => DataValue::Null,
         };
 
         let rows = vec![vec![
-            DataValue::Str(id.into()),
-            DataValue::Str(name.into()),
-            DataValue::Str(query.into()),
-            DataValue::from(timestamp),
+            DataValue::Str(entry.id.into()),
+            DataValue::Str(entry.name.into()),
+            DataValue::Str(entry.query.into()),
+            DataValue::from(entry.timestamp),
             result_val,
-            DataValue::Str(status.into()),
-            DataValue::from(started_at),
+            DataValue::Str(entry.status.into()),
+            DataValue::from(entry.started_at),
             duration_val,
             error_val,
-            DataValue::Bool(background),
+            DataValue::Bool(entry.background),
         ]];
 
         let params = NamedRows {
@@ -1082,18 +1070,18 @@ impl GraphDatabase {
                     .run_script(&delete_query, Default::default(), ScriptMutability::Mutable)?;
 
                 // Re-insert with updated values
-                self.add_query_history(
+                self.add_query_history(NewQueryHistoryEntry {
                     id,
                     name,
-                    query_str,
+                    query: query_str,
                     timestamp,
-                    final_result_count,
+                    result_count: final_result_count,
                     status,
                     started_at,
                     duration_ms,
                     error,
                     background,
-                )?;
+                })?;
             }
         }
 
@@ -1315,32 +1303,8 @@ impl DatabaseBackend for GraphDatabase {
         GraphDatabase::run_custom_query(self, query)
     }
 
-    fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()> {
-        GraphDatabase::add_query_history(
-            self,
-            id,
-            name,
-            query,
-            timestamp,
-            result_count,
-            status,
-            started_at,
-            duration_ms,
-            error,
-            background,
-        )
+    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
+        GraphDatabase::add_query_history(self, entry)
     }
 
     fn update_query_status(
@@ -1715,29 +1679,31 @@ mod tests {
         let db = GraphDatabase::in_memory().unwrap();
 
         // Add entries
-        db.add_query_history(
-            "id1",
-            "Query 1",
-            "?[x] := x = 1",
-            1000,
-            Some(1),
-            "completed",
-            1000,
-            Some(50),
-            None,
-        )
+        db.add_query_history(NewQueryHistoryEntry {
+            id: "id1",
+            name: "Query 1",
+            query: "?[x] := x = 1",
+            timestamp: 1000,
+            result_count: Some(1),
+            status: "completed",
+            started_at: 1000,
+            duration_ms: Some(50),
+            error: None,
+            background: false,
+        })
         .unwrap();
-        db.add_query_history(
-            "id2",
-            "Query 2",
-            "?[x] := x = 2",
-            2000,
-            Some(2),
-            "completed",
-            2000,
-            Some(100),
-            None,
-        )
+        db.add_query_history(NewQueryHistoryEntry {
+            id: "id2",
+            name: "Query 2",
+            query: "?[x] := x = 2",
+            timestamp: 2000,
+            result_count: Some(2),
+            status: "completed",
+            started_at: 2000,
+            duration_ms: Some(100),
+            error: None,
+            background: false,
+        })
         .unwrap();
 
         // Read entries
@@ -1763,41 +1729,44 @@ mod tests {
         let db = GraphDatabase::in_memory().unwrap();
 
         // Add entries with different timestamps
-        db.add_query_history(
-            "oldest",
-            "Old",
-            "q1",
-            1000,
-            None,
-            "completed",
-            1000,
-            Some(10),
-            None,
-        )
+        db.add_query_history(NewQueryHistoryEntry {
+            id: "oldest",
+            name: "Old",
+            query: "q1",
+            timestamp: 1000,
+            result_count: None,
+            status: "completed",
+            started_at: 1000,
+            duration_ms: Some(10),
+            error: None,
+            background: false,
+        })
         .unwrap();
-        db.add_query_history(
-            "middle",
-            "Mid",
-            "q2",
-            2000,
-            None,
-            "completed",
-            2000,
-            Some(20),
-            None,
-        )
+        db.add_query_history(NewQueryHistoryEntry {
+            id: "middle",
+            name: "Mid",
+            query: "q2",
+            timestamp: 2000,
+            result_count: None,
+            status: "completed",
+            started_at: 2000,
+            duration_ms: Some(20),
+            error: None,
+            background: false,
+        })
         .unwrap();
-        db.add_query_history(
-            "newest",
-            "New",
-            "q3",
-            3000,
-            None,
-            "completed",
-            3000,
-            Some(30),
-            None,
-        )
+        db.add_query_history(NewQueryHistoryEntry {
+            id: "newest",
+            name: "New",
+            query: "q3",
+            timestamp: 3000,
+            result_count: None,
+            status: "completed",
+            started_at: 3000,
+            duration_ms: Some(30),
+            error: None,
+            background: false,
+        })
         .unwrap();
 
         // Should be ordered by timestamp descending (newest first)
@@ -1813,17 +1782,18 @@ mod tests {
 
         // Add 5 entries
         for i in 0..5 {
-            db.add_query_history(
-                &format!("id{}", i),
-                &format!("Query {}", i),
-                "query",
-                i as i64 * 1000,
-                None,
-                "completed",
-                i as i64 * 1000,
-                Some(i as u64 * 10),
-                None,
-            )
+            db.add_query_history(NewQueryHistoryEntry {
+                id: &format!("id{}", i),
+                name: &format!("Query {}", i),
+                query: "query",
+                timestamp: i as i64 * 1000,
+                result_count: None,
+                status: "completed",
+                started_at: i as i64 * 1000,
+                duration_ms: Some(i as u64 * 10),
+                error: None,
+                background: false,
+            })
             .unwrap();
         }
 
@@ -1853,17 +1823,18 @@ mod tests {
         let db = GraphDatabase::in_memory().unwrap();
 
         // Add a running query
-        db.add_query_history(
-            "id1",
-            "Running Query",
-            "?[x] := x = 1",
-            1000,
-            None,
-            "running",
-            1000,
-            None,
-            None,
-        )
+        db.add_query_history(NewQueryHistoryEntry {
+            id: "id1",
+            name: "Running Query",
+            query: "?[x] := x = 1",
+            timestamp: 1000,
+            result_count: None,
+            status: "running",
+            started_at: 1000,
+            duration_ms: None,
+            error: None,
+            background: false,
+        })
         .unwrap();
 
         // Verify it's running

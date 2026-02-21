@@ -8,6 +8,14 @@
 import { api, ApiClientError } from "../api/client";
 import type { QueryStartResponse, QueryProgressEvent, GraphData } from "../api/types";
 
+/** Callback for when a foreground query starts */
+let onForegroundQueryStart: (() => void) | null = null;
+
+/** Register a callback for foreground query starts (used to reset history cursor) */
+export function setForegroundQueryCallback(callback: () => void): void {
+  onForegroundQueryStart = callback;
+}
+
 /** Result of executing a query */
 export interface QueryExecutionResult {
   /** Number of result rows */
@@ -18,22 +26,38 @@ export interface QueryExecutionResult {
   queryId: string;
 }
 
+/** Options for query execution */
+export interface QueryExecutionOptions {
+  /** Whether to extract graph data from results (default: true) */
+  extractGraph?: boolean;
+  /** Mark as background query, excluded from back navigation (default: false) */
+  background?: boolean;
+}
+
 /**
  * Execute a query via the async query API.
  *
  * This starts the query and waits for results via SSE.
  *
  * @param query The query string
- * @param extractGraph Whether to extract graph data from results
+ * @param options Query execution options
  * @returns Query execution result
  * @throws Error on query failure or timeout
  */
-export async function executeQuery(query: string, extractGraph: boolean = true): Promise<QueryExecutionResult> {
+export async function executeQuery(query: string, options: QueryExecutionOptions = {}): Promise<QueryExecutionResult> {
+  const { extractGraph = true, background = false } = options;
+
   // Start the async query
   const startResponse = await api.post<QueryStartResponse>("/api/graph/query", {
     query,
     extract_graph: extractGraph,
+    background,
   });
+
+  // Notify that a foreground query started (resets history cursor)
+  if (!background && onForegroundQueryStart) {
+    onForegroundQueryStart();
+  }
 
   const queryId = startResponse.query_id;
 
@@ -108,16 +132,18 @@ export async function executeQuery(query: string, extractGraph: boolean = true):
  *
  * @param name Display name for the query (used for logging)
  * @param query The query string
- * @param extractGraph Whether to extract graph data from results
+ * @param options Query execution options (extractGraph, background)
  * @returns Query execution result
  * @throws Error on query failure
  */
 export async function executeQueryWithHistory(
   _name: string,
   query: string,
-  extractGraph: boolean = true
+  options: QueryExecutionOptions | boolean = {}
 ): Promise<QueryExecutionResult> {
-  return executeQuery(query, extractGraph);
+  // Support legacy boolean argument for extractGraph
+  const opts: QueryExecutionOptions = typeof options === "boolean" ? { extractGraph: options } : options;
+  return executeQuery(query, opts);
 }
 
 /**

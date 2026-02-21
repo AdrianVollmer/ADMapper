@@ -289,6 +289,9 @@ pub struct QueryRequest {
     /// Query language (optional, defaults to backend's default)
     #[serde(default)]
     pub language: Option<String>,
+    /// If true, mark as background query (excluded from back navigation)
+    #[serde(default)]
+    pub background: bool,
 }
 
 /// Response when starting an async query.

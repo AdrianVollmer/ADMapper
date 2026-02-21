@@ -130,7 +130,7 @@ impl SecurityInsights {
     }
 }
 
-/// A row from the query history table.
+/// A row from the query history table (owned version for reads).
 #[derive(Clone, Debug)]
 pub struct QueryHistoryRow {
     pub id: String,
@@ -144,6 +144,21 @@ pub struct QueryHistoryRow {
     pub error: Option<String>,
     /// Whether this is a background query (auto-fired, not user-initiated).
     /// Background queries should be ignored when using "back" navigation.
+    pub background: bool,
+}
+
+/// A new query history entry (borrowed version for inserts).
+#[derive(Clone, Debug)]
+pub struct NewQueryHistoryEntry<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+    pub query: &'a str,
+    pub timestamp: i64,
+    pub result_count: Option<i64>,
+    pub status: &'a str,
+    pub started_at: i64,
+    pub duration_ms: Option<u64>,
+    pub error: Option<&'a str>,
     pub background: bool,
 }
 

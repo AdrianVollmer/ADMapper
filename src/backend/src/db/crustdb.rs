@@ -10,8 +10,8 @@ use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result,
-    SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow,
+    ReachabilityInsight, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// A graph database backed by CrustDB.
@@ -1273,33 +1273,20 @@ impl CrustDatabase {
     }
 
     // Query history methods - delegates to CrustDB's SQLite storage
-    #[allow(clippy::too_many_arguments)]
-    pub fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()> {
+    pub fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
         self.db
-            .add_query_history(
-                id,
-                name,
-                query,
-                timestamp,
-                result_count,
-                status,
-                started_at,
-                duration_ms,
-                error,
-                background,
-            )
+            .add_query_history(crustdb::NewQueryHistoryEntry {
+                id: entry.id,
+                name: entry.name,
+                query: entry.query,
+                timestamp: entry.timestamp,
+                result_count: entry.result_count,
+                status: entry.status,
+                started_at: entry.started_at,
+                duration_ms: entry.duration_ms,
+                error: entry.error,
+                background: entry.background,
+            })
             .map_err(|e| DbError::Database(e.to_string()))
     }
 
@@ -1517,32 +1504,8 @@ impl DatabaseBackend for CrustDatabase {
         CrustDatabase::run_custom_query(self, query)
     }
 
-    fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()> {
-        CrustDatabase::add_query_history(
-            self,
-            id,
-            name,
-            query,
-            timestamp,
-            result_count,
-            status,
-            started_at,
-            duration_ms,
-            error,
-            background,
-        )
+    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
+        CrustDatabase::add_query_history(self, entry)
     }
 
     fn update_query_status(

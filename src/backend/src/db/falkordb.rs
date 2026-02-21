@@ -11,8 +11,8 @@ use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result,
-    SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow,
+    ReachabilityInsight, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// FalkorDB database backend.
@@ -1038,29 +1038,20 @@ impl DatabaseBackend for FalkorDbDatabase {
         Ok(json!({ "results": rows }))
     }
 
-    fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query_str: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()> {
-        let id_escaped = id.replace('\'', "\\'");
-        let name_escaped = name.replace('\'', "\\'");
-        let query_escaped = query_str.replace('\'', "\\'");
-        let status_escaped = status.replace('\'', "\\'");
-        let error_escaped = error.map(|e| e.replace('\'', "\\'")).unwrap_or_default();
+    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
+        let id_escaped = entry.id.replace('\'', "\\'");
+        let name_escaped = entry.name.replace('\'', "\\'");
+        let query_escaped = entry.query.replace('\'', "\\'");
+        let status_escaped = entry.status.replace('\'', "\\'");
+        let error_escaped = entry
+            .error
+            .map(|e| e.replace('\'', "\\'"))
+            .unwrap_or_default();
 
         let cypher = format!(
             "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}, status: '{}', started_at: {}, duration_ms: {}, error: '{}', background: {}}})",
-            id_escaped, name_escaped, query_escaped, timestamp, result_count.unwrap_or(0),
-            status_escaped, started_at, duration_ms.unwrap_or(0), error_escaped, background
+            id_escaped, name_escaped, query_escaped, entry.timestamp, entry.result_count.unwrap_or(0),
+            status_escaped, entry.started_at, entry.duration_ms.unwrap_or(0), error_escaped, entry.background
         );
 
         self.run_query(&cypher)

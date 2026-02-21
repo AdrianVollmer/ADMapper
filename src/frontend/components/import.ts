@@ -260,7 +260,7 @@ RETURN m, e, g
 /** Load Domain Admin members after import */
 async function loadDomainAdmins(): Promise<void> {
   try {
-    const result = await executeQuery(DOMAIN_ADMINS_QUERY, true);
+    const result = await executeQuery(DOMAIN_ADMINS_QUERY, { extractGraph: true });
 
     if (result.graph && result.graph.nodes.length > 0) {
       // Convert to RawADGraph format

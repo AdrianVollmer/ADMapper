@@ -11,8 +11,8 @@ use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights,
-    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow, ReachabilityInsight,
+    Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// Neo4j database backend.
@@ -919,32 +919,20 @@ impl DatabaseBackend for Neo4jDatabase {
         Ok(json!({ "results": result }))
     }
 
-    fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query_str: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()> {
+    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
         let q = query(
             "CREATE (h:QueryHistory {id: $id, name: $name, query: $query, timestamp: $ts, result_count: $cnt, status: $status, started_at: $started_at, duration_ms: $duration_ms, error: $error, background: $background})"
         )
-        .param("id", id.to_string())
-        .param("name", name.to_string())
-        .param("query", query_str.to_string())
-        .param("ts", timestamp)
-        .param("cnt", result_count.unwrap_or(0))
-        .param("status", status.to_string())
-        .param("started_at", started_at)
-        .param("duration_ms", duration_ms.map(|d| d as i64).unwrap_or(0))
-        .param("error", error.unwrap_or("").to_string())
-        .param("background", background);
+        .param("id", entry.id.to_string())
+        .param("name", entry.name.to_string())
+        .param("query", entry.query.to_string())
+        .param("ts", entry.timestamp)
+        .param("cnt", entry.result_count.unwrap_or(0))
+        .param("status", entry.status.to_string())
+        .param("started_at", entry.started_at)
+        .param("duration_ms", entry.duration_ms.map(|d| d as i64).unwrap_or(0))
+        .param("error", entry.error.unwrap_or("").to_string())
+        .param("background", entry.background);
 
         self.run_query(q)
     }

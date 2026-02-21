@@ -8,8 +8,10 @@
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import type { QueryHistoryEntry, QueryHistoryResponse, QueryStatus } from "../api/types";
-import { executeQueryWithHistory, getQueryErrorMessage } from "../utils/query";
+import type { RawADGraph } from "../graph";
+import { executeQueryWithHistory, getQueryErrorMessage, setForegroundQueryCallback } from "../utils/query";
 import { hasActiveQueries } from "./query-activity";
+import { loadGraphData } from "./graph-view";
 import { showSuccess, showError, showInfo, showConfirm } from "../utils/notifications";
 
 // Re-export for backwards compatibility
@@ -32,6 +34,13 @@ let editedQuery = "";
 let editedName = "";
 let isLoading = false;
 
+/**
+ * History navigation cursor.
+ * Tracks position in foreground query history for back navigation.
+ * 0 = current query, 1 = previous query, etc.
+ */
+let historyCursor = 0;
+
 /** Live duration update interval */
 let durationInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -42,6 +51,11 @@ let modalEl: HTMLElement | null = null;
 export function initQueryHistory(): void {
   createModalElement();
   document.addEventListener("keydown", handleKeydown);
+
+  // Reset history cursor when a new foreground query starts
+  setForegroundQueryCallback(() => {
+    historyCursor = 0;
+  });
 }
 
 /** Create the modal element and append to body */
@@ -269,8 +283,7 @@ async function runQuery(query: string, name: string): Promise<void> {
 
     // Show results
     if (result.graph && result.graph.nodes.length > 0) {
-      // TODO: Load graph into renderer
-      console.log("Query returned graph:", result.graph);
+      loadGraphData(result.graph as unknown as RawADGraph);
       showSuccess(`Query returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
     } else {
       showInfo(`Query returned ${result.resultCount} rows`);
@@ -666,27 +679,41 @@ function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength) + "...";
 }
 
+/** Reset history cursor (call when a new foreground query is run) */
+export function resetHistoryCursor(): void {
+  historyCursor = 0;
+}
+
 /** Go back to the previous query in history (re-run the one before the current) */
 export async function goBackInHistory(): Promise<boolean> {
   try {
     // Fetch enough entries to find non-background queries
-    const data = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=20");
+    const data = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=50");
 
     // Filter to non-background queries only
     const foregroundQueries = data.entries.filter((entry) => !entry.background);
 
-    // Skip the first one (currently visible) and get the previous one
-    const previousEntry = foregroundQueries[1];
+    // Get the query at cursor+1 position (next one back from current position)
+    const targetIndex = historyCursor + 1;
+    const previousEntry = foregroundQueries[targetIndex];
     if (!previousEntry) {
+      showInfo("No more history to go back to");
       return false;
     }
 
-    const result = await executeQueryWithHistory(`${previousEntry.name} (replay)`, previousEntry.query, true);
+    // Increment cursor before executing
+    historyCursor = targetIndex;
 
-    // Show results
+    // Execute as background query so it doesn't pollute history
+    const result = await executeQueryWithHistory(`${previousEntry.name} (replay)`, previousEntry.query, {
+      extractGraph: true,
+      background: true,
+    });
+
+    // Show results and render graph
     if (result.graph && result.graph.nodes.length > 0) {
-      console.log("Query returned graph:", result.graph);
-      showSuccess(`Query returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
+      loadGraphData(result.graph as unknown as RawADGraph);
+      showSuccess(`Back to: ${previousEntry.name}`);
     } else {
       showInfo(`Query returned ${result.resultCount} rows`);
     }

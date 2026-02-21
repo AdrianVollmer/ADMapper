@@ -2,7 +2,7 @@
 
 use crate::error::{Error, Result};
 use crate::graph::{Edge, Node, PropertyValue};
-use crate::{DatabaseStats, QueryHistoryRow};
+use crate::{DatabaseStats, NewQueryHistoryEntry, QueryHistoryRow};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
 
@@ -1158,35 +1158,22 @@ impl SqliteStorage {
     // ========================================================================
 
     /// Add a query to the history.
-    #[allow(clippy::too_many_arguments)]
-    pub fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()> {
+    pub fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO query_history
              (id, name, query, timestamp, result_count, status, started_at, duration_ms, error, background)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
-                id,
-                name,
-                query,
-                timestamp,
-                result_count,
-                status,
-                started_at,
-                duration_ms.map(|d| d as i64),
-                error,
-                background
+                entry.id,
+                entry.name,
+                entry.query,
+                entry.timestamp,
+                entry.result_count,
+                entry.status,
+                entry.started_at,
+                entry.duration_ms.map(|d| d as i64),
+                entry.error,
+                entry.background
             ],
         )?;
         Ok(())
@@ -1763,18 +1750,18 @@ mod tests {
 
         // Add a query
         storage
-            .add_query_history(
-                "q1",
-                "Test Query",
-                "MATCH (n) RETURN n",
-                1700000000,
-                Some(10),
-                "completed",
-                1700000000,
-                Some(100),
-                None,
-                false,
-            )
+            .add_query_history(NewQueryHistoryEntry {
+                id: "q1",
+                name: "Test Query",
+                query: "MATCH (n) RETURN n",
+                timestamp: 1700000000,
+                result_count: Some(10),
+                status: "completed",
+                started_at: 1700000000,
+                duration_ms: Some(100),
+                error: None,
+                background: false,
+            })
             .unwrap();
 
         // Get query history
@@ -1790,18 +1777,18 @@ mod tests {
 
         // Add another query
         storage
-            .add_query_history(
-                "q2",
-                "Failed Query",
-                "INVALID",
-                1700000001,
-                None,
-                "error",
-                1700000001,
-                Some(50),
-                Some("Parse error"),
-                false,
-            )
+            .add_query_history(NewQueryHistoryEntry {
+                id: "q2",
+                name: "Failed Query",
+                query: "INVALID",
+                timestamp: 1700000001,
+                result_count: None,
+                status: "error",
+                started_at: 1700000001,
+                duration_ms: Some(50),
+                error: Some("Parse error"),
+                background: false,
+            })
             .unwrap();
 
         let (rows, total) = storage.get_query_history(10, 0).unwrap();

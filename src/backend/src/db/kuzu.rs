@@ -10,8 +10,8 @@ use tracing::{debug, info, trace};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbNode, DetailedStats, QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights,
-    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow, ReachabilityInsight,
+    Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// A graph database backed by KuzuDB.
@@ -1252,31 +1252,22 @@ impl KuzuDatabase {
     }
 
     // Query history methods
-    pub fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()> {
+    pub fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
         let conn = self.conn()?;
-        let id_escaped = id.replace('\'', "''");
-        let name_escaped = name.replace('\'', "''");
-        let query_escaped = query.replace('\'', "''");
-        let status_escaped = status.replace('\'', "''");
-        let error_escaped = error.map(|e| e.replace('\'', "''")).unwrap_or_default();
-        let count = result_count.unwrap_or(0);
-        let duration = duration_ms.unwrap_or(0) as i64;
+        let id_escaped = entry.id.replace('\'', "''");
+        let name_escaped = entry.name.replace('\'', "''");
+        let query_escaped = entry.query.replace('\'', "''");
+        let status_escaped = entry.status.replace('\'', "''");
+        let error_escaped = entry
+            .error
+            .map(|e| e.replace('\'', "''"))
+            .unwrap_or_default();
+        let count = entry.result_count.unwrap_or(0);
+        let duration = entry.duration_ms.unwrap_or(0) as i64;
 
         let cypher = format!(
             "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}, status: '{}', started_at: {}, duration_ms: {}, error: '{}', background: {}}})",
-            id_escaped, name_escaped, query_escaped, timestamp, count, status_escaped, started_at, duration, error_escaped, background
+            id_escaped, name_escaped, query_escaped, entry.timestamp, count, status_escaped, entry.started_at, duration, error_escaped, entry.background
         );
 
         conn.query(&cypher)?;
@@ -1509,32 +1500,8 @@ impl DatabaseBackend for KuzuDatabase {
         KuzuDatabase::run_custom_query(self, query)
     }
 
-    fn add_query_history(
-        &self,
-        id: &str,
-        name: &str,
-        query: &str,
-        timestamp: i64,
-        result_count: Option<i64>,
-        status: &str,
-        started_at: i64,
-        duration_ms: Option<u64>,
-        error: Option<&str>,
-        background: bool,
-    ) -> Result<()> {
-        KuzuDatabase::add_query_history(
-            self,
-            id,
-            name,
-            query,
-            timestamp,
-            result_count,
-            status,
-            started_at,
-            duration_ms,
-            error,
-            background,
-        )
+    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
+        KuzuDatabase::add_query_history(self, entry)
     }
 
     fn update_query_status(
