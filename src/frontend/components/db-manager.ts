@@ -115,8 +115,6 @@ async function loadStats(): Promise<void> {
 
 /** Render stats in the modal */
 function renderStats(body: HTMLElement, footer: HTMLElement, stats: DetailedStats): void {
-  const isEmpty = stats.total_nodes === 0 && stats.total_edges === 0;
-
   body.innerHTML = `
     <div class="db-stats-grid">
       <div class="db-stat-card db-stat-primary">
@@ -158,18 +156,6 @@ function renderStats(body: HTMLElement, footer: HTMLElement, stats: DetailedStat
         </div>
       </div>
     </div>
-
-    ${
-      !isEmpty
-        ? `
-    <div class="db-danger-zone">
-      <h3 class="db-danger-title">Danger Zone</h3>
-      <p class="db-danger-text">Clearing the database will permanently delete all nodes and edges. This action cannot be undone.</p>
-      <button class="btn btn-danger" data-action="clear-db">Clear Database</button>
-    </div>
-    `
-        : ""
-    }
   `;
 
   footer.innerHTML = `
@@ -201,15 +187,11 @@ function handleClick(e: Event): void {
     case "refresh":
       loadStats();
       break;
-
-    case "clear-db":
-      clearDatabase();
-      break;
   }
 }
 
 /** Clear the database */
-async function clearDatabase(): Promise<void> {
+export async function clearDatabase(): Promise<void> {
   const confirmed = await showConfirm(
     "Are you sure you want to clear all data from the database? This cannot be undone.",
     { title: "Clear Database", confirmText: "Clear All Data", danger: true }
@@ -218,29 +200,38 @@ async function clearDatabase(): Promise<void> {
     return;
   }
 
-  const body = document.getElementById("db-manager-body");
-  if (body) {
-    body.innerHTML = `
-      <div class="flex items-center justify-center py-8">
-        <div class="spinner"></div>
-        <span class="ml-3 text-gray-400">Clearing database...</span>
-      </div>
-    `;
-  }
-
   try {
     await api.postNoContent("/api/graph/clear");
-    // Reload stats to show empty state
-    await loadStats();
     // Refresh the page to reset the graph view
     window.location.reload();
   } catch (err) {
-    if (body) {
-      body.innerHTML = `
-        <div class="text-red-400 p-4">
-          Failed to clear database: ${escapeHtml(err instanceof Error ? err.message : String(err))}
-        </div>
-      `;
-    }
+    await showConfirm(`Failed to clear database: ${err instanceof Error ? err.message : String(err)}`, {
+      title: "Error",
+      confirmText: "OK",
+      danger: false,
+    });
+  }
+}
+
+/** Clear disabled objects from the database */
+export async function clearDisabledObjects(): Promise<void> {
+  const confirmed = await showConfirm(
+    "This will delete all disabled objects (users, computers, etc. with enabled=false) from the database. Continue?",
+    { title: "Clear Disabled Objects", confirmText: "Clear Disabled", danger: true }
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await api.postNoContent("/api/graph/clear-disabled");
+    // Refresh the page to update the graph view
+    window.location.reload();
+  } catch (err) {
+    await showConfirm(`Failed to clear disabled objects: ${err instanceof Error ? err.message : String(err)}`, {
+      title: "Error",
+      confirmText: "OK",
+      danger: false,
+    });
   }
 }

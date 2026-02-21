@@ -86,6 +86,10 @@ pub fn create_api_router(state: AppState) -> Router {
             get(handlers::graph_detailed_stats),
         )
         .route("/api/graph/clear", post(handlers::graph_clear))
+        .route(
+            "/api/graph/clear-disabled",
+            post(handlers::graph_clear_disabled),
+        )
         .route("/api/graph/nodes", get(handlers::graph_nodes))
         .route("/api/graph/edges", get(handlers::graph_edges))
         .route("/api/graph/all", get(handlers::graph_all))

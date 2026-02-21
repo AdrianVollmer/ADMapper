@@ -361,6 +361,20 @@ pub async fn graph_clear(State(state): State<AppState>) -> Result<StatusCode, Ap
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Clear all disabled objects (nodes with enabled=false) from the database.
+#[instrument(skip(state))]
+pub async fn graph_clear_disabled(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
+    let db = state.require_db()?;
+    run_db(db, |db| {
+        // Execute Cypher query to delete disabled nodes and their edges
+        db.run_custom_query("MATCH (n {enabled: false}) DETACH DELETE n")
+    })
+    .await?;
+
+    info!("Cleared disabled objects from database");
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ============================================================================
 // Graph Node/Edge Endpoints
 // ============================================================================
