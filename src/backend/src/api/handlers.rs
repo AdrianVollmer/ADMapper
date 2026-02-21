@@ -608,7 +608,7 @@ pub async fn node_status(
     let query_name = format!("Path check: {}", node_id);
     let query_text = format!("FIND_PATH_TO_HIGH_VALUE({})", node_id);
 
-    // Add to history with "running" status
+    // Add to history with "running" status (background query)
     if let Err(e) = db.add_query_history(
         &query_id,
         &query_name,
@@ -619,6 +619,7 @@ pub async fn node_status(
         started_at_unix,
         None,
         None,
+        true, // background query
     ) {
         warn!(error = %e, "Failed to add path check to history");
     }
@@ -747,6 +748,7 @@ pub async fn graph_path(
         started_at_unix,
         None,
         None,
+        false, // user-initiated query
     ) {
         warn!(error = %e, "Failed to add path query to history");
     }
@@ -1122,6 +1124,7 @@ pub async fn graph_query(
         started_at_unix,
         None,
         None,
+        false, // user-initiated query
     ) {
         warn!(error = %e, "Failed to add query to history");
     }
@@ -1446,6 +1449,7 @@ pub async fn get_query_history(
                 started_at: row.started_at,
                 duration_ms: row.duration_ms,
                 error: row.error,
+                background: row.background,
             }
         })
         .collect();
@@ -1491,6 +1495,7 @@ pub async fn add_query_history(
     let result_count = body.result_count;
     let duration_ms = body.duration_ms;
     let error = body.error.clone();
+    let background = body.background;
     let status_str_owned = status_str.to_string();
     run_db(db, move |db| {
         db.add_query_history(
@@ -1503,6 +1508,7 @@ pub async fn add_query_history(
             started_at,
             duration_ms,
             error.as_deref(),
+            background,
         )
     })
     .await?;
@@ -1518,6 +1524,7 @@ pub async fn add_query_history(
         started_at,
         duration_ms: body.duration_ms,
         error: body.error,
+        background: body.background,
     }))
 }
 

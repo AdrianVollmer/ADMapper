@@ -443,9 +443,7 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
 async function toggleNodeOwned(nodeId: string): Promise<void> {
   try {
     // Get current status
-    const status = await api.get<NodeStatusResponse>(
-      `/api/graph/node/${encodeURIComponent(nodeId)}/status`
-    );
+    const status = await api.get<NodeStatusResponse>(`/api/graph/node/${encodeURIComponent(nodeId)}/status`);
     const newOwned = !status.owned;
 
     // Update the owned status
@@ -457,9 +455,7 @@ async function toggleNodeOwned(nodeId: string): Promise<void> {
     fetchNodeStatus(nodeId);
 
     // Update the overflow menu button text
-    const toggleBtn = document.querySelector(
-      `[data-action="toggle-owned"][data-node-id="${nodeId}"]`
-    );
+    const toggleBtn = document.querySelector(`[data-action="toggle-owned"][data-node-id="${nodeId}"]`);
     if (toggleBtn) {
       const label = toggleBtn.querySelector("span");
       if (label) {
@@ -957,9 +953,7 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
     container.innerHTML = indicators.join("");
 
     // Update the overflow menu button text based on owned status
-    const toggleBtn = document.querySelector(
-      `[data-action="toggle-owned"][data-node-id="${nodeId}"]`
-    );
+    const toggleBtn = document.querySelector(`[data-action="toggle-owned"][data-node-id="${nodeId}"]`);
     if (toggleBtn) {
       const label = toggleBtn.querySelector("span");
       if (label) {

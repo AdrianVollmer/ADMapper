@@ -666,16 +666,22 @@ function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength) + "...";
 }
 
-/** Go back to the previous query in history (re-run the most recent one) */
+/** Go back to the previous query in history (re-run the one before the current) */
 export async function goBackInHistory(): Promise<boolean> {
   try {
-    const data = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=1");
-    if (data.entries.length === 0) {
+    // Fetch enough entries to find non-background queries
+    const data = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=20");
+
+    // Filter to non-background queries only
+    const foregroundQueries = data.entries.filter((entry) => !entry.background);
+
+    // Skip the first one (currently visible) and get the previous one
+    const previousEntry = foregroundQueries[1];
+    if (!previousEntry) {
       return false;
     }
 
-    const lastEntry = data.entries[0]!;
-    const result = await executeQueryWithHistory(`${lastEntry.name} (replay)`, lastEntry.query, true);
+    const result = await executeQueryWithHistory(`${previousEntry.name} (replay)`, previousEntry.query, true);
 
     // Show results
     if (result.graph && result.graph.nodes.length > 0) {

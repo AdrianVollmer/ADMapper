@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
 
 /// Current schema version.
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 /// Validate a property name to prevent JSON path injection.
 ///
@@ -180,7 +180,8 @@ impl SqliteStorage {
                 status TEXT NOT NULL,
                 started_at INTEGER NOT NULL,
                 duration_ms INTEGER,
-                error TEXT
+                error TEXT,
+                background INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX idx_query_history_timestamp ON query_history(timestamp DESC);
 
@@ -225,6 +226,9 @@ impl SqliteStorage {
         if old_version < 4 {
             self.migrate_v3_to_v4()?;
         }
+        if old_version < 5 {
+            self.migrate_v4_to_v5()?;
+        }
         Ok(())
     }
 
@@ -242,7 +246,8 @@ impl SqliteStorage {
                 status TEXT NOT NULL,
                 started_at INTEGER NOT NULL,
                 duration_ms INTEGER,
-                error TEXT
+                error TEXT,
+                background INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_query_history_timestamp ON query_history(timestamp DESC);
 
@@ -309,6 +314,33 @@ impl SqliteStorage {
             -- Update schema version
             UPDATE meta SET value = '4' WHERE key = 'schema_version';
             "#,
+        )?;
+        Ok(())
+    }
+
+    /// Migration from v4 to v5: Add background column to query_history.
+    fn migrate_v4_to_v5(&self) -> Result<()> {
+        // Check if background column already exists (added in updated v1_to_v2 for new databases)
+        let has_background: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('query_history') WHERE name = 'background'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .map(|c| c > 0)
+            .unwrap_or(false);
+
+        if !has_background {
+            self.conn.execute(
+                "ALTER TABLE query_history ADD COLUMN background INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+
+        self.conn.execute(
+            "UPDATE meta SET value = '5' WHERE key = 'schema_version'",
+            [],
         )?;
         Ok(())
     }
@@ -1138,11 +1170,12 @@ impl SqliteStorage {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO query_history
-             (id, name, query, timestamp, result_count, status, started_at, duration_ms, error)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (id, name, query, timestamp, result_count, status, started_at, duration_ms, error, background)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 id,
                 name,
@@ -1152,7 +1185,8 @@ impl SqliteStorage {
                 status,
                 started_at,
                 duration_ms.map(|d| d as i64),
-                error
+                error,
+                background
             ],
         )?;
         Ok(())
@@ -1196,7 +1230,7 @@ impl SqliteStorage {
 
         // Get paginated results
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, query, timestamp, result_count, status, started_at, duration_ms, error
+            "SELECT id, name, query, timestamp, result_count, status, started_at, duration_ms, error, background
              FROM query_history
              ORDER BY timestamp DESC
              LIMIT ?1 OFFSET ?2",
@@ -1213,6 +1247,7 @@ impl SqliteStorage {
                 started_at: row.get(6)?,
                 duration_ms: row.get::<_, Option<i64>>(7)?.map(|d| d as u64),
                 error: row.get(8)?,
+                background: row.get::<_, i64>(9).map(|v| v != 0).unwrap_or(false),
             })
         })?;
 
@@ -1738,6 +1773,7 @@ mod tests {
                 1700000000,
                 Some(100),
                 None,
+                false,
             )
             .unwrap();
 
@@ -1764,6 +1800,7 @@ mod tests {
                 1700000001,
                 Some(50),
                 Some("Parse error"),
+                false,
             )
             .unwrap();
 

@@ -1263,6 +1263,7 @@ impl KuzuDatabase {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()> {
         let conn = self.conn()?;
         let id_escaped = id.replace('\'', "''");
@@ -1274,8 +1275,8 @@ impl KuzuDatabase {
         let duration = duration_ms.unwrap_or(0) as i64;
 
         let cypher = format!(
-            "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}, status: '{}', started_at: {}, duration_ms: {}, error: '{}'}})",
-            id_escaped, name_escaped, query_escaped, timestamp, count, status_escaped, started_at, duration, error_escaped
+            "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}, status: '{}', started_at: {}, duration_ms: {}, error: '{}', background: {}}})",
+            id_escaped, name_escaped, query_escaped, timestamp, count, status_escaped, started_at, duration, error_escaped, background
         );
 
         conn.query(&cypher)?;
@@ -1330,7 +1331,7 @@ impl KuzuDatabase {
         // Get paginated results
         let query = format!(
             "MATCH (h:QueryHistory) \
-             RETURN h.id, h.name, h.query, h.timestamp, h.result_count, h.status, h.started_at, h.duration_ms, h.error \
+             RETURN h.id, h.name, h.query, h.timestamp, h.result_count, h.status, h.started_at, h.duration_ms, h.error, h.background \
              ORDER BY h.started_at DESC \
              SKIP {} LIMIT {}",
             offset, limit
@@ -1353,6 +1354,10 @@ impl KuzuDatabase {
                 } else {
                     Some(parts[8].to_string())
                 };
+                let background = parts
+                    .get(9)
+                    .map(|s| *s == "true" || *s == "True")
+                    .unwrap_or(false);
                 history.push(QueryHistoryRow {
                     id: parts[0].to_string(),
                     name: parts[1].to_string(),
@@ -1363,6 +1368,7 @@ impl KuzuDatabase {
                     started_at,
                     duration_ms,
                     error,
+                    background,
                 });
             }
         }
@@ -1514,6 +1520,7 @@ impl DatabaseBackend for KuzuDatabase {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()> {
         KuzuDatabase::add_query_history(
             self,
@@ -1526,6 +1533,7 @@ impl DatabaseBackend for KuzuDatabase {
             started_at,
             duration_ms,
             error,
+            background,
         )
     }
 

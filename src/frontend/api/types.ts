@@ -116,6 +116,8 @@ export interface QueryHistoryEntry {
   started_at: number;
   duration_ms: number | null;
   error: string | null;
+  /** Whether this is a background query (auto-fired, not user-initiated) */
+  background: boolean;
 }
 
 /** Paginated response wrapper */

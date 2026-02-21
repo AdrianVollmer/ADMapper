@@ -313,6 +313,8 @@ pub struct QueryHistoryEntry {
     pub started_at: i64,
     pub duration_ms: Option<u64>,
     pub error: Option<String>,
+    /// Whether this is a background query (auto-fired, not user-initiated).
+    pub background: bool,
 }
 
 /// Query history response with pagination.
@@ -353,4 +355,6 @@ pub struct AddHistoryRequest {
     pub duration_ms: Option<u64>,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
+    pub background: bool,
 }

@@ -1285,6 +1285,7 @@ impl CrustDatabase {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()> {
         self.db
             .add_query_history(
@@ -1297,6 +1298,7 @@ impl CrustDatabase {
                 started_at,
                 duration_ms,
                 error,
+                background,
             )
             .map_err(|e| DbError::Database(e.to_string()))
     }
@@ -1338,6 +1340,7 @@ impl CrustDatabase {
                 started_at: r.started_at,
                 duration_ms: r.duration_ms,
                 error: r.error,
+                background: r.background,
             })
             .collect();
 
@@ -1525,6 +1528,7 @@ impl DatabaseBackend for CrustDatabase {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()> {
         CrustDatabase::add_query_history(
             self,
@@ -1537,6 +1541,7 @@ impl DatabaseBackend for CrustDatabase {
             started_at,
             duration_ms,
             error,
+            background,
         )
     }
 

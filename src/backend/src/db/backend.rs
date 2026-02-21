@@ -346,6 +346,7 @@ pub trait DatabaseBackend: Send + Sync {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()>;
 
     /// Update a query's status in history.

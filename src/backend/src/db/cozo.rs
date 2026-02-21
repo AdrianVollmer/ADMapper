@@ -82,7 +82,8 @@ impl GraphDatabase {
                 status: String,
                 started_at: Int,
                 duration_ms: Int?,
-                error: String?
+                error: String?,
+                background: Bool default false
             }
         "#;
 
@@ -983,8 +984,9 @@ impl GraphDatabase {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()> {
-        debug!(id = %id, name = %name, status = %status, "Adding query to history");
+        debug!(id = %id, name = %name, status = %status, background = %background, "Adding query to history");
 
         let result_val = match result_count {
             Some(c) => DataValue::from(c),
@@ -1011,6 +1013,7 @@ impl GraphDatabase {
             DataValue::from(started_at),
             duration_val,
             error_val,
+            DataValue::Bool(background),
         ]];
 
         let params = NamedRows {
@@ -1024,6 +1027,7 @@ impl GraphDatabase {
                 "started_at".to_string(),
                 "duration_ms".to_string(),
                 "error".to_string(),
+                "background".to_string(),
             ],
             rows,
             next: None,
@@ -1050,7 +1054,7 @@ impl GraphDatabase {
         // CozoDB doesn't have a native UPDATE - we need to read, delete, and re-insert
         // First get the existing entry
         let query = format!(
-            "?[id, name, query, timestamp, result_count, status, started_at, duration_ms, error] := *query_history{{id, name, query, timestamp, result_count, status, started_at, duration_ms, error}}, id = \"{}\"",
+            "?[id, name, query, timestamp, result_count, status, started_at, duration_ms, error, background] := *query_history{{id, name, query, timestamp, result_count, status, started_at, duration_ms, error, background}}, id = \"{}\"",
             id.replace('"', "\\\"")
         );
 
@@ -1067,6 +1071,7 @@ impl GraphDatabase {
                 let timestamp = row.get(3).and_then(|v| v.as_i64()).unwrap_or(0);
                 let old_result_count = row.get(4).and_then(|v| v.as_i64());
                 let started_at = row.get(6).and_then(|v| v.as_i64()).unwrap_or(0);
+                let background = row.get(9).and_then(|v| v.as_bool()).unwrap_or(false);
 
                 // Use new values or fallback to old ones
                 let final_result_count = result_count.or(old_result_count);
@@ -1087,6 +1092,7 @@ impl GraphDatabase {
                     started_at,
                     duration_ms,
                     error,
+                    background,
                 )?;
             }
         }
@@ -1118,7 +1124,7 @@ impl GraphDatabase {
 
         // Get paginated results, ordered by timestamp desc
         let query = format!(
-            "?[id, name, query, timestamp, result_count, status, started_at, duration_ms, error] := *query_history{{id, name, query, timestamp, result_count, status, started_at, duration_ms, error}} :order -timestamp :limit {} :offset {}",
+            "?[id, name, query, timestamp, result_count, status, started_at, duration_ms, error, background] := *query_history{{id, name, query, timestamp, result_count, status, started_at, duration_ms, error, background}} :order -timestamp :limit {} :offset {}",
             limit, offset
         );
 
@@ -1149,6 +1155,7 @@ impl GraphDatabase {
                     let result_count = row.get(4).and_then(|v| v.as_i64());
                     let duration_ms = row.get(7).and_then(|v| v.as_u64());
                     let error = row.get(8).and_then(|v| v.as_str()).map(String::from);
+                    let background = row.get(9).and_then(|v| v.as_bool()).unwrap_or(false);
                     history.push(QueryHistoryRow {
                         id: id.to_string(),
                         name: name.to_string(),
@@ -1159,6 +1166,7 @@ impl GraphDatabase {
                         started_at,
                         duration_ms,
                         error,
+                        background,
                     });
                 }
             }
@@ -1318,6 +1326,7 @@ impl DatabaseBackend for GraphDatabase {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()> {
         GraphDatabase::add_query_history(
             self,
@@ -1330,6 +1339,7 @@ impl DatabaseBackend for GraphDatabase {
             started_at,
             duration_ms,
             error,
+            background,
         )
     }
 

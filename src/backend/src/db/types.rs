@@ -142,6 +142,9 @@ pub struct QueryHistoryRow {
     pub started_at: i64,
     pub duration_ms: Option<u64>,
     pub error: Option<String>,
+    /// Whether this is a background query (auto-fired, not user-initiated).
+    /// Background queries should be ignored when using "back" navigation.
+    pub background: bool,
 }
 
 /// Database error type.

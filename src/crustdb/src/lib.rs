@@ -389,6 +389,7 @@ impl Database {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()> {
         let storage = self
             .write_conn
@@ -404,6 +405,7 @@ impl Database {
             started_at,
             duration_ms,
             error,
+            background,
         )
     }
 
@@ -475,6 +477,8 @@ pub struct QueryHistoryRow {
     pub started_at: i64,
     pub duration_ms: Option<u64>,
     pub error: Option<String>,
+    /// Whether this is a background query (auto-fired, not user-initiated).
+    pub background: bool,
 }
 
 /// Database statistics.
@@ -802,6 +806,7 @@ mod tests {
             1700000000,
             Some(150),
             None,
+            false,
         )
         .unwrap();
 
@@ -840,6 +845,7 @@ mod tests {
             1700000001,
             None,
             None,
+            true, // background query
         )
         .unwrap();
         db.clear_query_history().unwrap();

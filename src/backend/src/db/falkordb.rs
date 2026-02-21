@@ -1049,6 +1049,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()> {
         let id_escaped = id.replace('\'', "\\'");
         let name_escaped = name.replace('\'', "\\'");
@@ -1057,9 +1058,9 @@ impl DatabaseBackend for FalkorDbDatabase {
         let error_escaped = error.map(|e| e.replace('\'', "\\'")).unwrap_or_default();
 
         let cypher = format!(
-            "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}, status: '{}', started_at: {}, duration_ms: {}, error: '{}'}})",
+            "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}, status: '{}', started_at: {}, duration_ms: {}, error: '{}', background: {}}})",
             id_escaped, name_escaped, query_escaped, timestamp, result_count.unwrap_or(0),
-            status_escaped, started_at, duration_ms.unwrap_or(0), error_escaped
+            status_escaped, started_at, duration_ms.unwrap_or(0), error_escaped, background
         );
 
         self.run_query(&cypher)
@@ -1102,7 +1103,8 @@ impl DatabaseBackend for FalkorDbDatabase {
         let cypher = format!(
             "MATCH (h:QueryHistory) \
              RETURN h.id AS id, h.name AS name, h.query AS query, h.timestamp AS ts, h.result_count AS cnt, \
-                    h.status AS status, h.started_at AS started_at, h.duration_ms AS duration_ms, h.error AS error \
+                    h.status AS status, h.started_at AS started_at, h.duration_ms AS duration_ms, h.error AS error, \
+                    h.background AS background \
              ORDER BY h.timestamp DESC \
              SKIP {} LIMIT {}",
             offset, limit
@@ -1130,6 +1132,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                     .and_then(|v| v.as_str())
                     .filter(|e| !e.is_empty())
                     .map(String::from);
+                let background = r.get(9).and_then(|v| v.as_bool()).unwrap_or(false);
                 Some(QueryHistoryRow {
                     id,
                     name,
@@ -1140,6 +1143,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                     started_at,
                     duration_ms,
                     error,
+                    background,
                 })
             })
             .collect();

@@ -930,9 +930,10 @@ impl DatabaseBackend for Neo4jDatabase {
         started_at: i64,
         duration_ms: Option<u64>,
         error: Option<&str>,
+        background: bool,
     ) -> Result<()> {
         let q = query(
-            "CREATE (h:QueryHistory {id: $id, name: $name, query: $query, timestamp: $ts, result_count: $cnt, status: $status, started_at: $started_at, duration_ms: $duration_ms, error: $error})"
+            "CREATE (h:QueryHistory {id: $id, name: $name, query: $query, timestamp: $ts, result_count: $cnt, status: $status, started_at: $started_at, duration_ms: $duration_ms, error: $error, background: $background})"
         )
         .param("id", id.to_string())
         .param("name", name.to_string())
@@ -942,7 +943,8 @@ impl DatabaseBackend for Neo4jDatabase {
         .param("status", status.to_string())
         .param("started_at", started_at)
         .param("duration_ms", duration_ms.map(|d| d as i64).unwrap_or(0))
-        .param("error", error.unwrap_or("").to_string());
+        .param("error", error.unwrap_or("").to_string())
+        .param("background", background);
 
         self.run_query(q)
     }
@@ -985,7 +987,8 @@ impl DatabaseBackend for Neo4jDatabase {
         let q = query(
             "MATCH (h:QueryHistory) \
              RETURN h.id AS id, h.name AS name, h.query AS query, h.timestamp AS ts, h.result_count AS cnt, \
-                    h.status AS status, h.started_at AS started_at, h.duration_ms AS duration_ms, h.error AS error \
+                    h.status AS status, h.started_at AS started_at, h.duration_ms AS duration_ms, h.error AS error, \
+                    h.background AS background \
              ORDER BY h.timestamp DESC \
              SKIP $offset LIMIT $limit"
         )
@@ -1009,6 +1012,7 @@ impl DatabaseBackend for Neo4jDatabase {
                 let started_at = r.get::<i64>("started_at").ok().unwrap_or(timestamp);
                 let duration_ms = r.get::<i64>("duration_ms").ok().map(|d| d as u64);
                 let error = r.get::<String>("error").ok().filter(|e| !e.is_empty());
+                let background = r.get::<bool>("background").ok().unwrap_or(false);
                 Some(QueryHistoryRow {
                     id,
                     name,
@@ -1019,6 +1023,7 @@ impl DatabaseBackend for Neo4jDatabase {
                     started_at,
                     duration_ms,
                     error,
+                    background,
                 })
             })
             .collect();
