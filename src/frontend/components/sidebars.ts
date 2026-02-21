@@ -827,7 +827,7 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
       </div>
     </div>
 
-    ${placeholderBanner}
+    <div id="placeholder-banner-container">${placeholderBanner}</div>
 
     <div class="detail-section">
       <h3 class="detail-section-title">Properties</h3>
@@ -967,6 +967,25 @@ async function fetchNodeProperties(nodeId: string): Promise<void> {
 
     // Check if we're still showing the same node
     if (appState.selectedNodeId !== nodeId) return;
+
+    // Check if this is a placeholder node and show banner if needed
+    const bannerContainer = document.getElementById("placeholder-banner-container");
+    if (bannerContainer && node.properties.placeholder === true) {
+      bannerContainer.innerHTML = `
+        <div class="placeholder-warning">
+          <svg class="placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <div class="placeholder-text">
+            <span class="placeholder-title">Placeholder Node</span>
+            <span class="placeholder-desc">
+              This node was auto-created as a placeholder.
+              <button class="placeholder-learn-more" data-action="show-placeholder-modal">Learn more</button>
+            </span>
+          </div>
+        </div>
+      `;
+    }
 
     // Build properties HTML
     const entries = Object.entries(node.properties);
