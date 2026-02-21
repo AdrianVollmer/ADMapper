@@ -684,6 +684,34 @@ pub async fn node_status(
     }))
 }
 
+/// Request body for setting owned status.
+#[derive(Debug, serde::Deserialize)]
+pub struct SetOwnedRequest {
+    pub owned: bool,
+}
+
+/// Toggle the owned status of a node.
+#[instrument(skip(state))]
+pub async fn node_set_owned(
+    State(state): State<AppState>,
+    Path(node_id): Path<String>,
+    Json(body): Json<SetOwnedRequest>,
+) -> Result<StatusCode, ApiError> {
+    let db = state.require_db()?;
+
+    // Escape the node_id for use in Cypher query
+    let escaped_id = node_id.replace('\'', "\\'");
+    let query = format!(
+        "MATCH (n {{object_id: '{}'}}) SET n.owned = {}",
+        escaped_id, body.owned
+    );
+
+    run_db(db, move |db| db.run_custom_query(&query)).await?;
+
+    info!(node_id = %node_id, owned = %body.owned, "Set node owned status");
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ============================================================================
 // Path Finding Endpoints
 // ============================================================================

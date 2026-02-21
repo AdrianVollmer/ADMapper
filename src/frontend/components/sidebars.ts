@@ -204,6 +204,14 @@ const MAIN_ACTIONS = [
 /** Overflow menu actions (three-dot menu) */
 const OVERFLOW_ACTIONS = [
   {
+    id: "toggle-owned",
+    label: "Mark Owned",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+      <polyline points="22 4 12 14.01 9 11.01"/>
+    </svg>`,
+  },
+  {
     id: "set-start-node",
     label: "Set as Start Node",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -421,8 +429,46 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
       break;
     }
 
+    case "toggle-owned": {
+      await toggleNodeOwned(nodeId);
+      break;
+    }
+
     default:
       console.log(`Unknown detail action: ${action}`);
+  }
+}
+
+/** Toggle the owned status of a node */
+async function toggleNodeOwned(nodeId: string): Promise<void> {
+  try {
+    // Get current status
+    const status = await api.get<NodeStatusResponse>(
+      `/api/graph/node/${encodeURIComponent(nodeId)}/status`
+    );
+    const newOwned = !status.owned;
+
+    // Update the owned status
+    await api.post(`/api/graph/node/${encodeURIComponent(nodeId)}/owned`, {
+      owned: newOwned,
+    });
+
+    // Refresh the status indicators
+    fetchNodeStatus(nodeId);
+
+    // Update the overflow menu button text
+    const toggleBtn = document.querySelector(
+      `[data-action="toggle-owned"][data-node-id="${nodeId}"]`
+    );
+    if (toggleBtn) {
+      const label = toggleBtn.querySelector("span");
+      if (label) {
+        label.textContent = newOwned ? "Unmark Owned" : "Mark Owned";
+      }
+    }
+  } catch (err) {
+    console.error("Failed to toggle owned status:", err);
+    showError("Failed to update owned status");
   }
 }
 
@@ -915,6 +961,17 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
     }
 
     container.innerHTML = indicators.join("");
+
+    // Update the overflow menu button text based on owned status
+    const toggleBtn = document.querySelector(
+      `[data-action="toggle-owned"][data-node-id="${nodeId}"]`
+    );
+    if (toggleBtn) {
+      const label = toggleBtn.querySelector("span");
+      if (label) {
+        label.textContent = status.owned ? "Unmark Owned" : "Mark Owned";
+      }
+    }
   } catch (err) {
     console.error("Failed to fetch node status:", err);
     if (appState.selectedNodeId === nodeId) {

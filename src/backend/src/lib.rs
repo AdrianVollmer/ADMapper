@@ -101,6 +101,7 @@ pub fn create_api_router(state: AppState) -> Router {
             get(handlers::node_connections),
         )
         .route("/api/graph/node/:id/status", get(handlers::node_status))
+        .route("/api/graph/node/:id/owned", post(handlers::node_set_owned))
         .route("/api/graph/path", get(handlers::graph_path))
         .route(
             "/api/graph/paths-to-da",
