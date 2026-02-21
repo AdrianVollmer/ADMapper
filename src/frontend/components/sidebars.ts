@@ -741,14 +741,10 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   const typeColor = NODE_COLORS[attrs.nodeType] || "#6c757d";
   const typeLower = attrs.nodeType.toLowerCase();
 
-  // Build user status indicators placeholder (for User nodes only)
-  // Actual status is fetched asynchronously from the backend
-  let indicatorsHtml = "";
-  if (attrs.nodeType === "User") {
-    indicatorsHtml = `<span id="user-status-indicators" class="user-indicators">
-      <span class="inline-flex items-center" title="Checking status...">${USER_INDICATORS.checking.icon}</span>
-    </span>`;
-  }
+  // Build status indicators placeholder (fetched asynchronously from backend)
+  const indicatorsHtml = `<span id="node-status-indicators" class="user-indicators">
+    <span class="inline-flex items-center" title="Checking status...">${USER_INDICATORS.checking.icon}</span>
+  </span>`;
 
   // Build main actions bar (filter by node type)
   const mainActionsHtml = MAIN_ACTIONS.filter(
@@ -883,10 +879,8 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
     </div>
   `;
 
-  // Fetch user security status from backend (for User nodes)
-  if (attrs.nodeType === "User") {
-    fetchNodeStatus(nodeId);
-  }
+  // Fetch node security status from backend
+  fetchNodeStatus(nodeId);
 
   // Fetch and display connection counts
   fetchNodeCounts(nodeId);
@@ -924,9 +918,9 @@ interface NodeStatusResponse {
   pathLength?: number;
 }
 
-/** Fetch and display user security status */
+/** Fetch and display node security status */
 async function fetchNodeStatus(nodeId: string): Promise<void> {
-  const container = document.getElementById("user-status-indicators");
+  const container = document.getElementById("node-status-indicators");
   if (!container) return;
 
   try {
