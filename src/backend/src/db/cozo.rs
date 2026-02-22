@@ -836,13 +836,14 @@ impl GraphDatabase {
     }
 
     /// Get edge counts for a node efficiently using targeted queries.
+    /// Counts unique connected NODES, not edges (a node with multiple edges counts as 1).
     pub fn get_node_edge_counts(
         &self,
         node_id: &str,
     ) -> Result<(usize, usize, usize, usize, usize)> {
-        // Count incoming edges
+        // Count unique incoming NODES (not edges - a node with multiple edges to us counts as 1)
         let incoming_query = format!(
-            "?[count(source)] := *edges{{source, target, edge_type}}, target = '{}'",
+            "?[count_unique(source)] := *edges{{source, target, edge_type}}, target = '{}'",
             node_id.replace('\'', "''")
         );
         let incoming_result = self.db.run_script(
@@ -856,9 +857,9 @@ impl GraphDatabase {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
 
-        // Count outgoing edges
+        // Count unique outgoing NODES
         let outgoing_query = format!(
-            "?[count(target)] := *edges{{source, target, edge_type}}, source = '{}'",
+            "?[count_unique(target)] := *edges{{source, target, edge_type}}, source = '{}'",
             node_id.replace('\'', "''")
         );
         let outgoing_result = self.db.run_script(
@@ -872,9 +873,9 @@ impl GraphDatabase {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
 
-        // Count admin_to (outgoing admin edges)
+        // Count unique admin_to NODES (outgoing admin edges)
         let admin_query = format!(
-            "?[count(target)] := *edges{{source, target, edge_type}}, source = '{}', \
+            "?[count_unique(target)] := *edges{{source, target, edge_type}}, source = '{}', \
              edge_type in ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']",
             node_id.replace('\'', "''")
         );
@@ -889,9 +890,9 @@ impl GraphDatabase {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
 
-        // Count member_of (outgoing MemberOf edges)
+        // Count unique member_of NODES (outgoing MemberOf edges)
         let memberof_query = format!(
-            "?[count(target)] := *edges{{source, target, edge_type}}, source = '{}', edge_type = 'MemberOf'",
+            "?[count_unique(target)] := *edges{{source, target, edge_type}}, source = '{}', edge_type = 'MemberOf'",
             node_id.replace('\'', "''")
         );
         let memberof_result = self.db.run_script(
@@ -905,9 +906,9 @@ impl GraphDatabase {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
 
-        // Count members (incoming MemberOf edges)
+        // Count unique member NODES (incoming MemberOf edges)
         let members_query = format!(
-            "?[count(source)] := *edges{{source, target, edge_type}}, target = '{}', edge_type = 'MemberOf'",
+            "?[count_unique(source)] := *edges{{source, target, edge_type}}, target = '{}', edge_type = 'MemberOf'",
             node_id.replace('\'', "''")
         );
         let members_result = self.db.run_script(

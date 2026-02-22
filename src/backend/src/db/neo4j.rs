@@ -706,18 +706,19 @@ impl DatabaseBackend for Neo4jDatabase {
 
     fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
         // Use a single query with multiple counts for efficiency
+        // Count unique NODES, not edges (e.g., 3 edges from same node = 1 incoming)
         let q = query(
             "MATCH (n {objectid: $id})
-             OPTIONAL MATCH (n)<-[in]-()
-             OPTIONAL MATCH (n)-[out]->()
-             OPTIONAL MATCH (n)-[admin]->() WHERE type(admin) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']
-             OPTIONAL MATCH (n)-[mo:MemberOf]->()
-             OPTIONAL MATCH (n)<-[mem:MemberOf]-()
-             RETURN count(DISTINCT in) AS incoming,
-                    count(DISTINCT out) AS outgoing,
-                    count(DISTINCT admin) AS admin_to,
-                    count(DISTINCT mo) AS member_of,
-                    count(DISTINCT mem) AS members"
+             OPTIONAL MATCH (n)<-[]-(in_node)
+             OPTIONAL MATCH (n)-[]->(out_node)
+             OPTIONAL MATCH (n)-[admin]->(admin_node) WHERE type(admin) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']
+             OPTIONAL MATCH (n)-[:MemberOf]->(mo_node)
+             OPTIONAL MATCH (n)<-[:MemberOf]-(mem_node)
+             RETURN count(DISTINCT in_node) AS incoming,
+                    count(DISTINCT out_node) AS outgoing,
+                    count(DISTINCT admin_node) AS admin_to,
+                    count(DISTINCT mo_node) AS member_of,
+                    count(DISTINCT mem_node) AS members"
         )
         .param("id", node_id.to_string());
 

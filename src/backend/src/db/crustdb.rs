@@ -1556,31 +1556,39 @@ impl DatabaseBackend for CrustDatabase {
         .into_iter()
         .collect();
 
-        let mut incoming = 0;
-        let mut outgoing = 0;
-        let mut admin_to = 0;
-        let mut member_of = 0;
-        let mut members = 0;
+        // Count unique nodes, not edges
+        // e.g., if node A has 3 edges from node B, count as 1 incoming node
+        let mut incoming_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut outgoing_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut admin_to_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut member_of_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut member_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
 
         for edge in &edges {
             if edge.target == node_id {
-                incoming += 1;
+                incoming_nodes.insert(&edge.source);
                 if edge.edge_type == "MemberOf" {
-                    members += 1;
+                    member_nodes.insert(&edge.source);
                 }
             }
             if edge.source == node_id {
-                outgoing += 1;
+                outgoing_nodes.insert(&edge.target);
                 if edge.edge_type == "MemberOf" {
-                    member_of += 1;
+                    member_of_nodes.insert(&edge.target);
                 }
                 if admin_types.contains(edge.edge_type.as_str()) {
-                    admin_to += 1;
+                    admin_to_nodes.insert(&edge.target);
                 }
             }
         }
 
-        Ok((incoming, outgoing, admin_to, member_of, members))
+        Ok((
+            incoming_nodes.len(),
+            outgoing_nodes.len(),
+            admin_to_nodes.len(),
+            member_of_nodes.len(),
+            member_nodes.len(),
+        ))
     }
 
     fn find_membership_by_sid_suffix(

@@ -976,38 +976,38 @@ impl KuzuDatabase {
             None => return Ok((0, 0, 0, 0, 0)), // Node not found
         };
 
-        // Count incoming edges
+        // Count unique incoming NODES (not edges - a node with multiple edges to us counts as 1)
         let incoming_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})<-[e:Edge]-() RETURN count(e)",
+            "MATCH (n:{} {{object_id: '{}'}})<-[:Edge]-(other) RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let incoming = self.extract_count(&conn.query(&incoming_query)?);
 
-        // Count outgoing edges
+        // Count unique outgoing NODES
         let outgoing_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge]->() RETURN count(e)",
+            "MATCH (n:{} {{object_id: '{}'}})-[:Edge]->(other) RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let outgoing = self.extract_count(&conn.query(&outgoing_query)?);
 
-        // Count admin_to (outgoing admin edges)
+        // Count unique admin_to NODES (outgoing admin edges)
         let admin_types = "'AdminTo','GenericAll','GenericWrite','Owns','WriteDacl','WriteOwner','AllExtendedRights','ForceChangePassword','AddMember'";
         let admin_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge]->() WHERE e.edge_type IN [{}] RETURN count(e)",
+            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge]->(other) WHERE e.edge_type IN [{}] RETURN count(DISTINCT other)",
             node_type, id_escaped, admin_types
         );
         let admin_to = self.extract_count(&conn.query(&admin_query)?);
 
-        // Count member_of (outgoing MemberOf edges)
+        // Count unique member_of NODES (outgoing MemberOf edges)
         let memberof_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge]->() WHERE e.edge_type = 'MemberOf' RETURN count(e)",
+            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge]->(other) WHERE e.edge_type = 'MemberOf' RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let member_of = self.extract_count(&conn.query(&memberof_query)?);
 
-        // Count members (incoming MemberOf edges)
+        // Count unique member NODES (incoming MemberOf edges)
         let members_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})<-[e:Edge]-() WHERE e.edge_type = 'MemberOf' RETURN count(e)",
+            "MATCH (n:{} {{object_id: '{}'}})<-[e:Edge]-(other) WHERE e.edge_type = 'MemberOf' RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let members = self.extract_count(&conn.query(&members_query)?);
