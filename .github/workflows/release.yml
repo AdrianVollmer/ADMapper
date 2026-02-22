@@ -109,10 +109,7 @@ jobs:
         run: npm ci
 
       - name: Generate icons
-        run: |
-          cargo install tauri-cli --version 2.2.5
-          cd src/backend
-          cargo tauri icon icons/icon.svg
+        run: npx tauri icon src/backend/icons/icon.svg --output src/backend/icons
 
       - name: Build Tauri app
         run: npm run tauri build
@@ -163,10 +160,7 @@ jobs:
         run: npm ci
 
       - name: Generate icons
-        run: |
-          cargo install tauri-cli --version 2.2.5
-          cd src/backend
-          cargo tauri icon icons/icon.svg
+        run: npx tauri icon src/backend/icons/icon.svg --output src/backend/icons
 
       - name: Build Tauri app (Universal)
         run: npm run tauri build -- --target universal-apple-darwin
@@ -183,56 +177,3 @@ jobs:
           asset_path: src/backend/target/universal-apple-darwin/release/bundle/dmg/ADMapper_${{ needs.prepare.outputs.version }}_universal.dmg
           asset_name: ADMapper_${{ needs.prepare.outputs.version }}_universal.dmg
           asset_content_type: application/x-apple-diskimage
-
-  build-headless:
-    name: Build Headless Binaries
-    needs: prepare
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: admapper-linux-x86_64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact: admapper-macos-x86_64
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: admapper-macos-aarch64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: admapper-windows-x86_64.exe
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Build headless binary
-        run: cargo build --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb --release --target ${{ matrix.target }}
-
-      - name: Upload binary (Unix)
-        if: matrix.os != 'windows-latest'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/${{ matrix.target }}/release/admapper
-          asset_name: ${{ matrix.artifact }}
-          asset_content_type: application/octet-stream
-
-      - name: Upload binary (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/${{ matrix.target }}/release/admapper.exe
-          asset_name: ${{ matrix.artifact }}
-          asset_content_type: application/octet-stream
