@@ -5,6 +5,8 @@ node_modules/
 build/
 dist/
 target/
+src/**/target/
+
 
 # Git
 .git/
@@ -13,7 +15,7 @@ target/
 .vscode/
 .idea/
 
-# OS
+# OsrcS
 .DS_Store
 Thumbs.db
 
