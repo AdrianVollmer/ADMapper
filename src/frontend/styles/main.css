@@ -38,7 +38,7 @@
   .menu-option {
     @apply w-full px-3 py-1.5 flex items-center justify-between gap-4
            text-sm text-gray-300 hover:bg-blue-600 hover:text-white
-           focus:outline-none focus:bg-blue-600 focus:text-white
+           focus:outline-none focus-visible:bg-blue-600 focus-visible:text-white
            transition-colors text-left;
   }
 
@@ -47,7 +47,7 @@
   }
 
   .menu-option:hover kbd,
-  .menu-option:focus kbd {
+  .menu-option:focus-visible kbd {
     @apply text-blue-200;
   }
 
