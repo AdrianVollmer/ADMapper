@@ -9,6 +9,7 @@ use crate::query::parser::{
 use crate::storage::SqliteStorage;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use super::create::literal_to_json;
 use super::eval::floats_equal;
 use super::{Binding, Path, PathConstraints};
 
@@ -1088,9 +1089,26 @@ pub fn filter_edges_by_properties(
 
 /// Scan nodes from storage based on the node pattern.
 /// This implements the Node Scan and Label Filter operators.
+///
+/// When the pattern has no labels but has properties with an available index,
+/// uses index lookup instead of full scan for O(1) vs O(N) performance.
 pub fn scan_nodes(pattern: &NodePattern, storage: &SqliteStorage) -> Result<Vec<Node>> {
     if pattern.labels.is_empty() {
-        // No label filter - scan all nodes
+        // No label filter - try property index lookup first
+        if let Some(Expression::Map(props)) = &pattern.properties {
+            // Try to find an indexed property we can use
+            for (key, value) in props {
+                if let Ok(true) = storage.has_property_index(key) {
+                    if let Expression::Literal(lit) = value {
+                        let json_value = literal_to_json(lit)?;
+                        // Use property index lookup
+                        // Other properties will be filtered by filter_by_properties() later
+                        return storage.find_nodes_by_property(key, &json_value, &[], None);
+                    }
+                }
+            }
+        }
+        // No indexed property found - fall back to full scan
         storage.scan_all_nodes()
     } else {
         // For efficiency, use first label from first group for initial scan
@@ -1128,13 +1146,29 @@ pub fn scan_nodes(pattern: &NodePattern, storage: &SqliteStorage) -> Result<Vec<
 }
 
 /// Scan nodes with optional SQL-level LIMIT pushdown.
-/// Only applies limit when we have a simple label pattern (no OR, no AND of multiple groups).
+/// Only applies limit when we have a simple label pattern (no OR, no AND of multiple groups),
+/// or when using an indexed property lookup.
 pub fn scan_nodes_with_limit(
     pattern: &NodePattern,
     storage: &SqliteStorage,
     limit: Option<u64>,
 ) -> Result<Vec<Node>> {
-    // Can only push limit for simple patterns
+    // Try property index lookup with limit if no labels but has indexed property
+    if pattern.labels.is_empty() {
+        if let Some(Expression::Map(props)) = &pattern.properties {
+            for (key, value) in props {
+                if let Ok(true) = storage.has_property_index(key) {
+                    if let Expression::Literal(lit) = value {
+                        let json_value = literal_to_json(lit)?;
+                        // Use property index lookup with limit
+                        return storage.find_nodes_by_property(key, &json_value, &[], limit);
+                    }
+                }
+            }
+        }
+    }
+
+    // Can only push limit for simple patterns without properties
     let can_push_limit = limit.is_some()
         && pattern.properties.is_none()
         && (pattern.labels.is_empty()

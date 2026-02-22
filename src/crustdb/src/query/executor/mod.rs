@@ -23,7 +23,7 @@ use std::collections::HashMap;
 #[allow(unused_imports)]
 pub use aggregate::{evaluate_aggregate, has_aggregate_functions, is_aggregate_function};
 #[allow(unused_imports)]
-pub use create::execute_create;
+pub use create::{execute_create, literal_to_json};
 #[allow(unused_imports)]
 pub use eval::{
     evaluate_expression_with_bindings, evaluate_function_call_with_bindings,

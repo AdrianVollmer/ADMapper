@@ -207,7 +207,7 @@ pub fn expression_to_json(expr: &Expression) -> Result<serde_json::Value> {
 }
 
 /// Convert a literal to a JSON value.
-fn literal_to_json(lit: &Literal) -> Result<serde_json::Value> {
+pub fn literal_to_json(lit: &Literal) -> Result<serde_json::Value> {
     Ok(match lit {
         Literal::Null => serde_json::Value::Null,
         Literal::Boolean(b) => serde_json::Value::Bool(*b),
