@@ -11,6 +11,10 @@ _*
 # Dependencies
 node_modules/
 
+# Rust
+src/crustdb-cli/Cargo.lock
+src/crustdb/Cargo.lock
+
 # Build output
 build/
 dist/
