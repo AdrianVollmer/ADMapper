@@ -78,6 +78,9 @@ pub enum PlanOperator {
         min_hops: u32,
         max_hops: u32,
         k: u32,
+        /// Target property filter for early termination (e.g., {id: 99}).
+        /// When set, BFS can terminate as soon as the specific target is found.
+        target_property_filter: Option<(String, serde_json::Value)>,
     },
     /// Filter rows by predicate.
     Filter {
@@ -675,6 +678,12 @@ fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         }
     }
 
+    // Try to extract a simple property filter for target (for early BFS termination)
+    let target_property_filter = target_node
+        .properties
+        .as_ref()
+        .and_then(extract_simple_property_filter);
+
     plan = PlanOperator::ShortestPath {
         source: Box::new(plan),
         source_variable: source_var,
@@ -686,16 +695,19 @@ fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         min_hops,
         max_hops,
         k: pattern.shortest_k.unwrap_or(1),
+        target_property_filter: target_property_filter.clone(),
     };
 
-    // Add inline property filter for target (applied after BFS)
+    // Add inline property filter for target if not pushed down (complex expressions)
     if let Some(ref props) = target_node.properties {
-        let predicate = plan_inline_properties(&target_var, props)?;
-        if !matches!(predicate, FilterPredicate::True) {
-            plan = PlanOperator::Filter {
-                source: Box::new(plan),
-                predicate,
-            };
+        if target_property_filter.is_none() {
+            let predicate = plan_inline_properties(&target_var, props)?;
+            if !matches!(predicate, FilterPredicate::True) {
+                plan = PlanOperator::Filter {
+                    source: Box::new(plan),
+                    predicate,
+                };
+            }
         }
     }
 
@@ -1333,6 +1345,7 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             min_hops,
             max_hops,
             k,
+            target_property_filter,
         } => PlanOperator::ShortestPath {
             source: Box::new(optimize_operator(*source)),
             source_variable,
@@ -1344,6 +1357,7 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             min_hops,
             max_hops,
             k,
+            target_property_filter,
         },
         PlanOperator::SetProperties { source, sets } => PlanOperator::SetProperties {
             source: Box::new(optimize_operator(*source)),

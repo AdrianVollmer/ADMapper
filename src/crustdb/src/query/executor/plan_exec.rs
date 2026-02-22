@@ -147,6 +147,7 @@ fn execute_operator(
             min_hops,
             max_hops,
             k,
+            target_property_filter,
         } => {
             let bindings = execute_operator_to_bindings(source, storage, stats)?;
             execute_shortest_path(
@@ -160,6 +161,7 @@ fn execute_operator(
                 *min_hops,
                 *max_hops,
                 *k,
+                target_property_filter.clone(),
                 storage,
             )
         }
@@ -528,22 +530,35 @@ fn execute_shortest_path(
     min_hops: u32,
     max_hops: u32,
     _k: u32,
+    target_property_filter: Option<(String, serde_json::Value)>,
     storage: &SqliteStorage,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
 
-    // Pre-scan target nodes if we have label constraints
-    let target_ids: Option<HashSet<i64>> = if !target_labels.is_empty() {
-        let mut ids = HashSet::new();
-        for label in target_labels {
-            for node in storage.find_nodes_by_label(label)? {
-                ids.insert(node.id);
+    // If we have a specific target property filter, look up the target node directly
+    // This enables early termination when we find this specific node
+    let specific_target_id: Option<i64> =
+        if let Some((ref prop, ref value)) = target_property_filter {
+            // Look up node(s) matching the property filter
+            let nodes = storage.find_nodes_by_property(prop, value, target_labels, Some(1))?;
+            nodes.first().map(|n| n.id)
+        } else {
+            None
+        };
+
+    // Pre-scan target nodes if we have label constraints (and no specific target)
+    let target_ids: Option<HashSet<i64>> =
+        if specific_target_id.is_none() && !target_labels.is_empty() {
+            let mut ids = HashSet::new();
+            for label in target_labels {
+                for node in storage.find_nodes_by_label(label)? {
+                    ids.insert(node.id);
+                }
             }
-        }
-        Some(ids)
-    } else {
-        None
-    };
+            Some(ids)
+        } else {
+            None
+        };
 
     for binding in bindings {
         let source_node = binding
@@ -552,11 +567,9 @@ fn execute_shortest_path(
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
 
         // BFS for shortest paths
-        // Note: we enumerate ALL paths at shortest depth, not just k, because a Filter
-        // operator after us might eliminate some paths. Truncation to k happens at the end.
         let mut visited: HashSet<i64> = HashSet::new();
         let mut found_paths: Vec<(Node, Vec<i64>, Vec<i64>)> = Vec::new();
-        let _shortest_found: Option<u32> = None;
+        let mut found_specific_target = false;
 
         let mut queue: VecDeque<(i64, Vec<i64>, Vec<i64>)> = VecDeque::new();
         queue.push_back((source_node.id, vec![source_node.id], Vec::new()));
@@ -570,21 +583,38 @@ fn execute_shortest_path(
                 continue;
             }
 
-            // Check if we reached a valid target (by label)
-            // Note: We don't terminate early based on finding label-matched targets
-            // because a subsequent Filter operator may apply additional WHERE constraints
-            // that require exploring deeper paths.
+            // Early termination: if we found the specific target, stop exploring
+            if found_specific_target {
+                break;
+            }
+
+            // Check if we reached a valid target
             if depth >= min_hops && current_id != source_node.id {
-                let is_target = target_ids
-                    .as_ref()
-                    .map(|ids| ids.contains(&current_id))
-                    .unwrap_or(true);
+                let is_target = if let Some(specific_id) = specific_target_id {
+                    // We have a specific target - check if this is it
+                    current_id == specific_id
+                } else {
+                    // Check against label-based target set
+                    target_ids
+                        .as_ref()
+                        .map(|ids| ids.contains(&current_id))
+                        .unwrap_or(true)
+                };
 
                 if is_target {
                     if let Some(target_node) = storage.get_node(current_id)? {
                         found_paths.push((target_node, path_nodes.clone(), path_edge_ids.clone()));
+                        // If we have a specific target, we found it - can terminate early
+                        if specific_target_id.is_some() {
+                            found_specific_target = true;
+                        }
                     }
                 }
+            }
+
+            // Don't expand if we already found our specific target
+            if found_specific_target {
+                break;
             }
 
             // Expand
