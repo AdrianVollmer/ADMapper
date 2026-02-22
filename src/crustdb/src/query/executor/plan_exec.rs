@@ -422,11 +422,14 @@ fn execute_variable_length_expand(
             .get(source_variable)
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
 
-        // BFS traversal
+        // BFS traversal with global visited set to prevent exponential explosion.
+        // Without this, dense graphs would explore the same node via every possible path,
+        // leading to O(edges^depth) complexity instead of O(V+E).
         let mut queue: VecDeque<(i64, Vec<i64>, Vec<Edge>)> = VecDeque::new();
-        let mut found_targets: HashSet<i64> = HashSet::new();
+        let mut visited: HashSet<i64> = HashSet::new();
 
         queue.push_back((source_node.id, vec![source_node.id], Vec::new()));
+        visited.insert(source_node.id);
 
         while let Some((current_id, path_nodes, path_edges)) = queue.pop_front() {
             let depth = path_edges.len() as u32;
@@ -438,9 +441,7 @@ fn execute_variable_length_expand(
                     let matches_labels = target_labels.is_empty()
                         || target_labels.iter().any(|l| target_node.has_label(l));
 
-                    if matches_labels && !found_targets.contains(&current_id) {
-                        found_targets.insert(current_id);
-
+                    if matches_labels {
                         let mut new_binding =
                             binding.clone().with_node(target_variable, target_node);
 
@@ -482,10 +483,11 @@ fn execute_variable_length_expand(
             for edge in edges {
                 let next_id = get_target_id(&edge, current_id, direction);
 
-                // Avoid cycles within path
-                if path_nodes.contains(&next_id) {
+                // Skip already visited nodes (global deduplication)
+                if visited.contains(&next_id) {
                     continue;
                 }
+                visited.insert(next_id);
 
                 let mut new_path_nodes = path_nodes.clone();
                 new_path_nodes.push(next_id);
