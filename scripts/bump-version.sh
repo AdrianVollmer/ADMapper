@@ -6,39 +6,41 @@ set -euo pipefail
 # Usage: ./scripts/bump-version.sh <new-version>
 # Example: ./scripts/bump-version.sh 0.2.0
 #
+# Set IN_CONTAINER=1 to use cargo check for Cargo.lock update (requires build env).
+# Without it, Cargo.lock is updated via sed (no build env required).
+#
 # This script:
-# 1. Updates version in Cargo.toml
+# 1. Updates version in src/backend/Cargo.toml
 # 2. Updates version in package.json
 # 3. Updates version in package-lock.json
-# 4. Updates version in src-tauri/Cargo.toml
-# 5. Updates version in src-tauri/tauri.conf.json
-# 6. Updates Cargo.lock
-# 7. Creates a git commit
-# 8. Creates a git tag (v<version>)
+# 4. Updates version in src/backend/tauri.conf.json
+# 5. Updates src/backend/Cargo.lock
+# 6. Creates a git commit
+# 7. Creates a git tag (v<version>)
 
 if [ $# -ne 1 ]; then
-    echo "Usage: $0 <new-version>"
-    echo "Example: $0 0.2.0"
-    exit 1
+	echo "Usage: $0 <new-version>"
+	echo "Example: $0 0.2.0"
+	exit 1
 fi
 
 NEW_VERSION="$1"
 
 # Validate version format (semantic versioning: X.Y.Z)
 if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-    echo "Error: Version must be in format X.Y.Z (e.g., 0.2.0)"
-    exit 1
+	echo "Error: Version must be in format X.Y.Z (e.g., 0.2.0)"
+	exit 1
 fi
 
-# Get current version from Cargo.toml
-CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -n1 | sed 's/version = "\(.*\)"/\1/')
+# Get current version from src/backend/Cargo.toml
+CURRENT_VERSION=$(grep '^version = ' src/backend/Cargo.toml | head -n1 | sed 's/version = "\(.*\)"/\1/')
 
 echo "Bumping version from $CURRENT_VERSION to $NEW_VERSION"
 
-# Update Cargo.toml
-echo "Updating Cargo.toml..."
-sed -i.bak "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" Cargo.toml
-rm Cargo.toml.bak
+# Update src/backend/Cargo.toml
+echo "Updating src/backend/Cargo.toml..."
+sed -i.bak "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" src/backend/Cargo.toml
+rm src/backend/Cargo.toml.bak
 
 # Update package.json
 echo "Updating package.json..."
@@ -50,54 +52,50 @@ echo "Updating package-lock.json..."
 sed -i.bak "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/g" package-lock.json
 rm package-lock.json.bak
 
-# Update src-tauri/Cargo.toml
-echo "Updating src-tauri/Cargo.toml..."
-TAURI_CURRENT=$(grep '^version = ' src-tauri/Cargo.toml | head -n1 | sed 's/version = "\(.*\)"/\1/')
-sed -i.bak "s/^version = \"$TAURI_CURRENT\"/version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml
-rm src-tauri/Cargo.toml.bak
-
-# Update src-tauri/tauri.conf.json
-echo "Updating src-tauri/tauri.conf.json..."
-sed -i.bak "s/\"version\": \"$TAURI_CURRENT\"/\"version\": \"$NEW_VERSION\"/" src-tauri/tauri.conf.json
-rm src-tauri/tauri.conf.json.bak
+# Update src/backend/tauri.conf.json
+echo "Updating src/backend/tauri.conf.json..."
+sed -i.bak "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" src/backend/tauri.conf.json
+rm src/backend/tauri.conf.json.bak
 
 # Update Cargo.lock
-echo "Updating Cargo.lock..."
-cargo check --quiet
+if [ -n "${IN_CONTAINER:-}" ]; then
+	echo "Updating src/backend/Cargo.lock (via cargo check)..."
+	cargo check --manifest-path src/backend/Cargo.toml --quiet
+else
+	echo "Updating src/backend/Cargo.lock (via sed, no build env)..."
+	sed -i.bak "/^name = \"admapper\"/{n;s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/;}" src/backend/Cargo.lock
+	rm src/backend/Cargo.lock.bak
+fi
 
 # Check if there are changes
-if ! git diff --quiet Cargo.toml package.json package-lock.json Cargo.lock src-tauri/Cargo.toml src-tauri/tauri.conf.json; then
-    echo "Creating git commit and tag..."
-    git add Cargo.toml package.json package-lock.json Cargo.lock src-tauri/Cargo.toml src-tauri/tauri.conf.json
-    git -c user.name="Claude Code" -c user.email="noreply@anthropic.com" commit -m "$(cat <<EOF
+if ! git diff --quiet src/backend/Cargo.toml package.json package-lock.json src/backend/Cargo.lock src/backend/tauri.conf.json; then
+	echo "Creating git commit and tag..."
+	git add src/backend/Cargo.toml package.json package-lock.json src/backend/Cargo.lock src/backend/tauri.conf.json
+	git commit -m "$(
+		cat <<EOF
 Bump version to $NEW_VERSION
 
 Updated version number across:
-- Cargo.toml
+- src/backend/Cargo.toml
 - package.json
 - package-lock.json
-- src-tauri/Cargo.toml
-- src-tauri/tauri.conf.json
-- Cargo.lock
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+- src/backend/tauri.conf.json
+- src/backend/Cargo.lock
 EOF
-)"
+	)"
 
-    # Create git tag
-    git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
+	# Create git tag
+	git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
 
-    echo ""
-    echo "✓ Version bumped to $NEW_VERSION"
-    echo "✓ Commit created"
-    echo "✓ Tag v$NEW_VERSION created"
-    echo ""
-    echo "To push the changes and trigger Docker build:"
-    echo "  git push origin main"
-    echo "  git push origin v$NEW_VERSION"
+	echo ""
+	echo "✓ Version bumped to $NEW_VERSION"
+	echo "✓ Commit created"
+	echo "✓ Tag v$NEW_VERSION created"
+	echo ""
+	echo "To push the changes and trigger Docker build:"
+	echo "  git push origin main"
+	echo "  git push origin v$NEW_VERSION"
 else
-    echo "No changes detected. Version might already be $NEW_VERSION"
-    exit 1
+	echo "No changes detected. Version might already be $NEW_VERSION"
+	exit 1
 fi
