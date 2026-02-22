@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import json
 import logging
 import os
 import random
@@ -28,6 +29,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -320,9 +322,6 @@ class E2ETestRunner:
 
     def _generate_xml_report(self, suite: TestSuite) -> None:
         """Generate JUnit XML report for a test suite."""
-        import xml.etree.ElementTree as ET
-        from datetime import datetime
-
         output_file = self.report_dir / f"report-{suite.backend}.xml"
         total_time_s = suite.total_duration_ms / 1000.0
         timestamp = datetime.now().isoformat()
@@ -465,6 +464,342 @@ proof::before {
         css_file.write_text(css_content)
         self.logger.info(f"Generated CSS: {css_file}")
 
+    def _get_git_commit(self) -> str:
+        """Get the current git commit hash."""
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                cwd=SCRIPT_DIR.parent,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return "unknown"
+
+    def _get_git_commit_short(self) -> str:
+        """Get the short git commit hash."""
+        commit = self._get_git_commit()
+        return commit[:7] if commit != "unknown" else "unknown"
+
+    def _load_previous_reports(self, limit: int = 10) -> list[dict]:
+        """Load previous report summaries for comparison."""
+        reports_base = self.report_dir.parent
+        previous_reports = []
+
+        # Get all report directories sorted by name (timestamp) descending
+        report_dirs = sorted(
+            [d for d in reports_base.iterdir() if d.is_dir() and d.name != "latest" and d != self.report_dir],
+            key=lambda d: d.name,
+            reverse=True,
+        )[:limit]
+
+        for report_dir in report_dirs:
+            summary_file = report_dir / "summary.json"
+            if summary_file.exists():
+                try:
+                    with open(summary_file) as f:
+                        summary = json.load(f)
+                        previous_reports.append(summary)
+                except Exception:
+                    pass
+            else:
+                # Parse XML reports for legacy directories
+                summary = self._parse_xml_reports(report_dir)
+                if summary:
+                    previous_reports.append(summary)
+
+        return previous_reports
+
+    def _parse_xml_reports(self, report_dir: Path) -> dict | None:
+        """Parse XML reports from a directory to extract summary info."""
+        xml_files = list(report_dir.glob("report-*.xml"))
+        if not xml_files:
+            return None
+
+        summary: dict = {
+            "timestamp": report_dir.name,
+            "commit": "unknown",
+            "backends": {},
+        }
+
+        for xml_file in xml_files:
+            backend = xml_file.stem.replace("report-", "")
+            try:
+                tree = ET.parse(xml_file)
+                root = tree.getroot()
+                testsuite = root.find("testsuite")
+                if testsuite is not None:
+                    summary["backends"][backend] = {
+                        "total": int(testsuite.get("tests", "0")),
+                        "failed": int(testsuite.get("failures", "0")),
+                        "passed": int(testsuite.get("tests", "0")) - int(testsuite.get("failures", "0")),
+                        "duration_ms": int(float(testsuite.get("time", "0")) * 1000),
+                    }
+            except Exception:
+                pass
+
+        return summary if summary["backends"] else None
+
+    def _generate_summary_report(self, suites: list[TestSuite]) -> None:
+        """Generate HTML summary report with comparison to previous runs."""
+        commit = self._get_git_commit()
+        commit_short = self._get_git_commit_short()
+        timestamp = self.report_dir.name
+        previous_reports = self._load_previous_reports()
+
+        # Build current summary data
+        current_summary = {
+            "timestamp": timestamp,
+            "commit": commit,
+            "backends": {},
+        }
+
+        for suite in suites:
+            current_summary["backends"][suite.backend] = {
+                "total": suite.total,
+                "passed": suite.passed,
+                "failed": suite.failed,
+                "duration_ms": suite.total_duration_ms,
+            }
+
+        # Save JSON summary for future comparisons
+        summary_file = self.report_dir / "summary.json"
+        with open(summary_file, "w") as f:
+            json.dump(current_summary, f, indent=2)
+        self.logger.info(f"Generated summary JSON: {summary_file}")
+
+        # Get previous report for comparison (most recent)
+        prev_report = previous_reports[0] if previous_reports else None
+
+        # Generate HTML summary
+        html = self._build_summary_html(suites, commit, commit_short, timestamp, prev_report, previous_reports)
+
+        html_file = self.report_dir / "summary.html"
+        with open(html_file, "w") as f:
+            f.write(html)
+        self.logger.info(f"Generated summary report: {html_file}")
+
+    def _build_summary_html(
+        self,
+        suites: list[TestSuite],
+        commit: str,
+        commit_short: str,
+        timestamp: str,
+        prev_report: dict | None,
+        history: list[dict],
+    ) -> str:
+        """Build the HTML content for the summary report."""
+        total_passed = sum(s.passed for s in suites)
+        total_failed = sum(s.failed for s in suites)
+        total_tests = sum(s.total for s in suites)
+        total_duration = sum(s.total_duration_ms for s in suites)
+
+        # Build backend rows
+        backend_rows = []
+        for suite in suites:
+            duration_s = suite.total_duration_ms / 1000.0
+            status_class = "pass" if suite.failed == 0 else "fail"
+            status_icon = "&#x2713;" if suite.failed == 0 else "&#x2717;"
+
+            # Comparison with previous
+            comparison = ""
+            if prev_report and suite.backend in prev_report.get("backends", {}):
+                prev = prev_report["backends"][suite.backend]
+                prev_duration = prev.get("duration_ms", 0)
+                duration_diff = suite.total_duration_ms - prev_duration
+
+                if duration_diff > 0:
+                    comparison = f'<span class="slower">+{duration_diff}ms</span>'
+                elif duration_diff < 0:
+                    comparison = f'<span class="faster">{duration_diff}ms</span>'
+
+                prev_failed = prev.get("failed", 0)
+                if suite.failed != prev_failed:
+                    diff = suite.failed - prev_failed
+                    if diff > 0:
+                        comparison += f' <span class="worse">+{diff} failures</span>'
+                    else:
+                        comparison += f' <span class="better">{abs(diff)} fewer failures</span>'
+
+            backend_rows.append(f'''
+            <tr class="{status_class}">
+                <td><span class="status-icon">{status_icon}</span> {suite.backend}</td>
+                <td>{suite.passed}</td>
+                <td>{suite.failed}</td>
+                <td>{suite.total}</td>
+                <td>{duration_s:.2f}s {comparison}</td>
+            </tr>''')
+
+        # Build history table
+        history_rows = []
+        for report in history[:5]:
+            report_commit = report.get("commit", "unknown")[:7]
+            report_ts = report.get("timestamp", "unknown")
+            backends_info = []
+            for backend, data in report.get("backends", {}).items():
+                status = "pass" if data.get("failed", 0) == 0 else "fail"
+                backends_info.append(f'<span class="{status}">{backend}: {data.get("passed", 0)}/{data.get("total", 0)}</span>')
+
+            history_rows.append(f'''
+            <tr>
+                <td><code>{report_commit}</code></td>
+                <td>{report_ts}</td>
+                <td>{" | ".join(backends_info)}</td>
+            </tr>''')
+
+        history_section = ""
+        if history_rows:
+            history_section = f'''
+        <h2>Recent History</h2>
+        <table class="history-table">
+            <thead>
+                <tr>
+                    <th>Commit</th>
+                    <th>Timestamp</th>
+                    <th>Results</th>
+                </tr>
+            </thead>
+            <tbody>
+                {"".join(history_rows)}
+            </tbody>
+        </table>'''
+
+        overall_status = "PASSED" if total_failed == 0 else "FAILED"
+        overall_class = "pass" if total_failed == 0 else "fail"
+
+        return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E2E Test Summary - {timestamp}</title>
+    <style>
+        :root {{
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --text: #e8e8e8;
+            --text-dim: #8a8a9a;
+            --pass: #4ade80;
+            --fail: #f87171;
+            --faster: #4ade80;
+            --slower: #fbbf24;
+            --border: #2a2a4e;
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 2rem;
+        }}
+        .container {{ max-width: 900px; margin: 0 auto; }}
+        h1 {{ margin-bottom: 0.5rem; }}
+        h2 {{ margin: 2rem 0 1rem; color: var(--text-dim); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.1em; }}
+        .meta {{ color: var(--text-dim); margin-bottom: 2rem; }}
+        .meta code {{ background: var(--card-bg); padding: 0.2em 0.5em; border-radius: 4px; font-size: 0.9em; }}
+        .overall {{
+            display: inline-block;
+            padding: 0.5rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+        }}
+        .overall.pass {{ background: rgba(74, 222, 128, 0.2); color: var(--pass); }}
+        .overall.fail {{ background: rgba(248, 113, 113, 0.2); color: var(--fail); }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--card-bg);
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        th, td {{ padding: 0.75rem 1rem; text-align: left; }}
+        th {{ background: rgba(0,0,0,0.2); font-weight: 500; color: var(--text-dim); }}
+        tr {{ border-bottom: 1px solid var(--border); }}
+        tr:last-child {{ border-bottom: none; }}
+        tr.pass td:first-child {{ color: var(--pass); }}
+        tr.fail td:first-child {{ color: var(--fail); }}
+        .status-icon {{ margin-right: 0.5rem; }}
+        .faster {{ color: var(--faster); font-size: 0.85em; margin-left: 0.5rem; }}
+        .slower {{ color: var(--slower); font-size: 0.85em; margin-left: 0.5rem; }}
+        .better {{ color: var(--faster); font-size: 0.85em; margin-left: 0.5rem; }}
+        .worse {{ color: var(--fail); font-size: 0.85em; margin-left: 0.5rem; }}
+        .summary-stats {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }}
+        .stat {{
+            background: var(--card-bg);
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }}
+        .stat-value {{ font-size: 2rem; font-weight: 600; }}
+        .stat-label {{ color: var(--text-dim); font-size: 0.85rem; }}
+        .stat-value.pass {{ color: var(--pass); }}
+        .stat-value.fail {{ color: var(--fail); }}
+        .history-table {{ margin-top: 1rem; }}
+        .history-table .pass {{ color: var(--pass); }}
+        .history-table .fail {{ color: var(--fail); }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>E2E Test Summary</h1>
+        <p class="meta">
+            <strong>Timestamp:</strong> {timestamp}<br>
+            <strong>Commit:</strong> <code>{commit_short}</code> ({commit})
+        </p>
+
+        <div class="overall {overall_class}">{overall_status}</div>
+
+        <div class="summary-stats">
+            <div class="stat">
+                <div class="stat-value">{total_tests}</div>
+                <div class="stat-label">Total Tests</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value pass">{total_passed}</div>
+                <div class="stat-label">Passed</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value {"fail" if total_failed > 0 else ""}">{total_failed}</div>
+                <div class="stat-label">Failed</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{total_duration / 1000:.1f}s</div>
+                <div class="stat-label">Duration</div>
+            </div>
+        </div>
+
+        <h2>Results by Backend</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Backend</th>
+                    <th>Passed</th>
+                    <th>Failed</th>
+                    <th>Total</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody>
+                {"".join(backend_rows)}
+            </tbody>
+        </table>
+
+        {history_section}
+    </div>
+</body>
+</html>'''
+
     def run(self, backends: list[str]) -> int:
         """Run tests for specified backends."""
         self.logger.info("ADMapper E2E Test Suite")
@@ -477,27 +812,32 @@ proof::before {
         self.report_dir.mkdir(parents=True, exist_ok=True)
         self._generate_report_css()
 
-        total_passed = 0
-        total_failed = 0
+        suites: list[TestSuite] = []
         overall_failed = False
 
         for backend in backends:
             suite = self.run_backend_tests(backend)
-            total_passed += suite.passed
-            total_failed += suite.failed
+            suites.append(suite)
             if suite.failed > 0:
                 overall_failed = True
+
+        # Generate summary report
+        self._generate_summary_report(suites)
+
+        total_passed = sum(s.passed for s in suites)
+        total_failed = sum(s.failed for s in suites)
 
         # Print overall summary
         print()
         print("=" * 34)
         print("Overall Summary")
         print("=" * 34)
+        print(f"Commit: {self._get_git_commit_short()}")
         print(f"Total passed: {total_passed}")
         print(f"Total failed: {total_failed}")
         print()
         print(f"Reports generated in: {self.report_dir}")
-        for report in self.report_dir.glob("*.xml"):
+        for report in sorted(self.report_dir.glob("*")):
             print(f"  - {report.name}")
         print()
 
