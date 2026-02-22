@@ -153,6 +153,26 @@ export interface ImportProgress {
 }
 
 // ============================================================================
+// Database Types
+// ============================================================================
+
+/** Database connection status response */
+export interface DatabaseStatusResponse {
+  connected: boolean;
+  database_type: string | null;
+}
+
+/** Database type identifiers */
+export type DatabaseType = "kuzu" | "cozo" | "crustdb" | "neo4j" | "falkordb";
+
+/** Supported database info */
+export interface SupportedDatabaseInfo {
+  id: DatabaseType;
+  name: string;
+  connection_type: "file" | "network";
+}
+
+// ============================================================================
 // API Error Types
 // ============================================================================
 

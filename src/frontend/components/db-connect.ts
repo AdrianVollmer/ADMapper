@@ -13,19 +13,11 @@ import { showNoConnectionPlaceholder, updateGraphForConnectionState } from "./gr
 import { saveConnection, getDisplayName } from "./connection-history";
 import { openDbManager } from "./db-manager";
 import { redactUrlCredentials } from "../utils/html";
-
-/** Database types */
-type DatabaseType = "kuzu" | "cozo" | "crustdb" | "neo4j" | "falkordb";
-
-/** Supported database info from API */
-interface SupportedDatabase {
-  id: DatabaseType;
-  name: string;
-  connection_type: "file" | "network";
-}
+import { api } from "../api/client";
+import type { DatabaseStatusResponse, SupportedDatabaseInfo, DatabaseType } from "../api/types";
 
 /** Cached list of supported database types */
-let supportedDatabases: SupportedDatabase[] = [];
+let supportedDatabases: SupportedDatabaseInfo[] = [];
 
 /** Current selected database type */
 let selectedDbType: DatabaseType = "kuzu";
@@ -70,18 +62,12 @@ function updateMenuItemsForConnection(connected: boolean): void {
 /** Fetch and update connection status from server */
 export async function refreshConnectionStatus(): Promise<void> {
   try {
-    const response = await fetch("/api/database/status");
-    if (response.ok) {
-      const status = await response.json();
-      appState.databaseConnected = status.connected;
-      appState.databaseType = status.database_type || null;
-      updateConnectionStatus();
-      // Update graph view based on connection state
-      updateGraphForConnectionState(status.connected);
-    } else {
-      // Server returned error - show placeholder
-      updateGraphForConnectionState(false);
-    }
+    const status = await api.get<DatabaseStatusResponse>("/api/database/status");
+    appState.databaseConnected = status.connected;
+    appState.databaseType = status.database_type || null;
+    updateConnectionStatus();
+    // Update graph view based on connection state
+    updateGraphForConnectionState(status.connected);
   } catch (error) {
     console.error("Failed to fetch database status:", error);
     // Could not reach server - show placeholder
@@ -202,31 +188,20 @@ async function connectToDatabase(): Promise<void> {
   }
 
   try {
-    const response = await fetch("/api/database/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+    const result = await api.post<DatabaseStatusResponse>("/api/database/connect", { url });
+    appState.databaseConnected = result.connected;
+    appState.databaseType = result.database_type;
+    updateConnectionStatus();
+
+    // Save to connection history
+    const dbType = result.database_type || selectedDbType;
+    await saveConnection({
+      url,
+      displayName: getDisplayName(url, dbType),
+      databaseType: dbType,
     });
 
-    if (response.ok) {
-      const result = await response.json();
-      appState.databaseConnected = result.connected;
-      appState.databaseType = result.database_type;
-      updateConnectionStatus();
-
-      // Save to connection history
-      const dbType = result.database_type || selectedDbType;
-      await saveConnection({
-        url,
-        displayName: getDisplayName(url, dbType),
-        databaseType: dbType,
-      });
-
-      closeDbConnect();
-    } else {
-      const error = await response.text();
-      showError(error || "Connection failed");
-    }
+    closeDbConnect();
   } catch (error) {
     showError(`Connection error: ${error}`);
   } finally {
@@ -240,33 +215,20 @@ async function connectToDatabase(): Promise<void> {
 /** Connect to a database using a URL directly (for recent connections) */
 export async function connectToUrl(url: string): Promise<boolean> {
   try {
-    const response = await fetch("/api/database/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+    const result = await api.post<DatabaseStatusResponse>("/api/database/connect", { url });
+    appState.databaseConnected = result.connected;
+    appState.databaseType = result.database_type;
+    updateConnectionStatus();
+
+    // Save to connection history (moves it to top)
+    const dbType = result.database_type || "unknown";
+    await saveConnection({
+      url,
+      displayName: getDisplayName(url, dbType),
+      databaseType: dbType,
     });
 
-    if (response.ok) {
-      const result = await response.json();
-      appState.databaseConnected = result.connected;
-      appState.databaseType = result.database_type;
-      updateConnectionStatus();
-
-      // Save to connection history (moves it to top)
-      const dbType = result.database_type || "unknown";
-      await saveConnection({
-        url,
-        displayName: getDisplayName(url, dbType),
-        databaseType: dbType,
-      });
-
-      return true;
-    } else {
-      const error = await response.text();
-      // Use redacted URL in logs to avoid exposing credentials
-      console.error("Connection failed:", redactUrlCredentials(url), error);
-      return false;
-    }
+    return true;
   } catch (error) {
     // Use redacted URL in logs to avoid exposing credentials
     console.error("Connection error:", redactUrlCredentials(url), error);
@@ -277,7 +239,7 @@ export async function connectToUrl(url: string): Promise<boolean> {
 /** Disconnect from database */
 export async function disconnectDb(): Promise<void> {
   try {
-    await fetch("/api/database/disconnect", { method: "POST" });
+    await api.postNoContent("/api/database/disconnect");
     appState.databaseConnected = false;
     appState.databaseType = null;
     updateConnectionStatus();
@@ -717,13 +679,11 @@ function createModal(): HTMLElement {
 /** Fetch supported database types from server */
 async function fetchSupportedDatabases(): Promise<void> {
   try {
-    const response = await fetch("/api/database/supported");
-    if (response.ok) {
-      supportedDatabases = await response.json();
-      // Set default to first supported type
-      if (supportedDatabases.length > 0) {
-        selectedDbType = supportedDatabases[0]!.id;
-      }
+    const result = await api.get<SupportedDatabaseInfo[]>("/api/database/supported");
+    supportedDatabases = result;
+    // Set default to first supported type
+    if (supportedDatabases.length > 0) {
+      selectedDbType = supportedDatabases[0]!.id;
     }
   } catch (error) {
     console.error("Failed to fetch supported databases:", error);
