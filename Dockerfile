@@ -20,9 +20,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Build frontend
+# Build frontend (vite root is src/frontend, index.html is there)
 COPY src/frontend src/frontend
-COPY vite.config.ts tsconfig.json tailwind.config.js postcss.config.js index.html ./
+COPY vite.config.ts tsconfig.json tailwind.config.js postcss.config.js ./
 RUN npm run build
 
 # ==============================================================================
