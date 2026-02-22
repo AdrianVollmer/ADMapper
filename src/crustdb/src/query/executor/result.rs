@@ -123,13 +123,13 @@ pub fn evaluate_return_item_with_bindings(
 ) -> Result<ResultValue> {
     match expr {
         Expression::Variable(name) => {
-            if let Some(node) = binding.nodes.get(name) {
+            if let Some(node) = binding.get_node(name) {
                 Ok(ResultValue::Node {
                     id: node.id,
                     labels: node.labels.clone(),
                     properties: node.properties.clone(),
                 })
-            } else if let Some(edge) = binding.edges.get(name) {
+            } else if let Some(edge) = binding.get_edge(name) {
                 Ok(ResultValue::Edge {
                     id: edge.id,
                     source: edge.source,
@@ -137,7 +137,7 @@ pub fn evaluate_return_item_with_bindings(
                     edge_type: edge.edge_type.clone(),
                     properties: edge.properties.clone(),
                 })
-            } else if let Some(path) = binding.paths.get(name) {
+            } else if let Some(path) = binding.get_path(name) {
                 Ok(ResultValue::Path {
                     nodes: path
                         .nodes
@@ -160,7 +160,7 @@ pub fn evaluate_return_item_with_bindings(
                         })
                         .collect(),
                 })
-            } else if let Some(edge_list) = binding.edge_lists.get(name) {
+            } else if let Some(edge_list) = binding.get_edge_list(name) {
                 let list: Vec<PropertyValue> = edge_list
                     .iter()
                     .map(|e| PropertyValue::Map(e.properties.clone()))
@@ -172,11 +172,11 @@ pub fn evaluate_return_item_with_bindings(
         }
         Expression::Property { base, property } => {
             if let Expression::Variable(base_name) = base.as_ref() {
-                if let Some(node) = binding.nodes.get(base_name) {
+                if let Some(node) = binding.get_node(base_name) {
                     let value = node.get(property).cloned().unwrap_or(PropertyValue::Null);
                     return Ok(ResultValue::Property(value));
                 }
-                if let Some(edge) = binding.edges.get(base_name) {
+                if let Some(edge) = binding.get_edge(base_name) {
                     let value = edge
                         .properties
                         .get(property)
@@ -199,7 +199,7 @@ pub fn evaluate_return_item_with_bindings(
                         return Err(Error::Cypher("length() requires 1 argument".into()));
                     }
                     if let Expression::Variable(var_name) = &args[0] {
-                        if let Some(path) = binding.paths.get(var_name) {
+                        if let Some(path) = binding.get_path(var_name) {
                             return Ok(ResultValue::Property(PropertyValue::Integer(
                                 path.edges.len() as i64,
                             )));
@@ -222,7 +222,7 @@ pub fn evaluate_return_item_with_bindings(
                         return Err(Error::Cypher("nodes() requires 1 argument".into()));
                     }
                     if let Expression::Variable(var_name) = &args[0] {
-                        if let Some(path) = binding.paths.get(var_name) {
+                        if let Some(path) = binding.get_path(var_name) {
                             let list: Vec<PropertyValue> = path
                                 .nodes
                                 .iter()
@@ -238,7 +238,7 @@ pub fn evaluate_return_item_with_bindings(
                         return Err(Error::Cypher("relationships() requires 1 argument".into()));
                     }
                     if let Expression::Variable(var_name) = &args[0] {
-                        if let Some(path) = binding.paths.get(var_name) {
+                        if let Some(path) = binding.get_path(var_name) {
                             let list: Vec<PropertyValue> = path
                                 .edges
                                 .iter()

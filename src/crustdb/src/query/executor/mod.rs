@@ -17,6 +17,7 @@ use super::QueryResult;
 use crate::error::Result;
 use crate::graph::{Edge, Node, PropertyValue};
 use crate::storage::SqliteStorage;
+use smallvec::SmallVec;
 use std::collections::HashMap;
 
 // Re-exports for submodules (some kept for backwards compatibility)
@@ -53,43 +54,94 @@ pub struct Path {
 }
 
 /// A binding represents a matched graph element (node or edge) with its variable name.
+///
+/// Uses SmallVec for cache-friendly storage. Most queries have 1-5 variables,
+/// so linear search beats HashMap hashing overhead.
 #[derive(Debug, Clone)]
 pub struct Binding {
-    pub nodes: HashMap<String, Node>,
-    pub edges: HashMap<String, Edge>,
+    nodes: SmallVec<[(String, Node); 4]>,
+    edges: SmallVec<[(String, Edge); 2]>,
     /// Paths bound to variables (for `p = (a)-[*]->(b)` syntax).
-    pub paths: HashMap<String, Path>,
+    paths: SmallVec<[(String, Path); 1]>,
     /// Edge lists for variable-length relationship bindings.
-    pub edge_lists: HashMap<String, Vec<Edge>>,
+    edge_lists: SmallVec<[(String, Vec<Edge>); 1]>,
 }
 
 impl Binding {
     pub fn new() -> Self {
         Binding {
-            nodes: HashMap::new(),
-            edges: HashMap::new(),
-            paths: HashMap::new(),
-            edge_lists: HashMap::new(),
+            nodes: SmallVec::new(),
+            edges: SmallVec::new(),
+            paths: SmallVec::new(),
+            edge_lists: SmallVec::new(),
         }
     }
 
+    /// Look up a node by variable name.
+    #[inline]
+    pub fn get_node(&self, name: &str) -> Option<&Node> {
+        self.nodes
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, node)| node)
+    }
+
+    /// Look up an edge by variable name.
+    #[inline]
+    pub fn get_edge(&self, name: &str) -> Option<&Edge> {
+        self.edges
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, edge)| edge)
+    }
+
+    /// Look up a path by variable name.
+    #[inline]
+    pub fn get_path(&self, name: &str) -> Option<&Path> {
+        self.paths
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, path)| path)
+    }
+
+    /// Look up an edge list by variable name.
+    #[inline]
+    pub fn get_edge_list(&self, name: &str) -> Option<&Vec<Edge>> {
+        self.edge_lists
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, edges)| edges)
+    }
+
+    /// Check if a node variable exists.
+    #[inline]
+    pub fn has_node(&self, name: &str) -> bool {
+        self.nodes.iter().any(|(n, _)| n == name)
+    }
+
+    /// Check if an edge variable exists.
+    #[inline]
+    pub fn has_edge(&self, name: &str) -> bool {
+        self.edges.iter().any(|(n, _)| n == name)
+    }
+
     pub fn with_node(mut self, var: &str, node: Node) -> Self {
-        self.nodes.insert(var.to_string(), node);
+        self.nodes.push((var.to_string(), node));
         self
     }
 
     pub fn with_edge(mut self, var: &str, edge: Edge) -> Self {
-        self.edges.insert(var.to_string(), edge);
+        self.edges.push((var.to_string(), edge));
         self
     }
 
     pub fn with_path(mut self, var: &str, path: Path) -> Self {
-        self.paths.insert(var.to_string(), path);
+        self.paths.push((var.to_string(), path));
         self
     }
 
     pub fn with_edge_list(mut self, var: &str, edges: Vec<Edge>) -> Self {
-        self.edge_lists.insert(var.to_string(), edges);
+        self.edge_lists.push((var.to_string(), edges));
         self
     }
 }

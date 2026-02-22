@@ -369,8 +369,7 @@ fn execute_expand(
 
     for binding in bindings {
         let source_node = binding
-            .nodes
-            .get(source_variable)
+            .get_node(source_variable)
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
 
         let edges = get_edges(source_node.id, direction, storage)?;
@@ -433,8 +432,7 @@ fn execute_variable_length_expand(
 
     for binding in bindings {
         let source_node = binding
-            .nodes
-            .get(source_variable)
+            .get_node(source_variable)
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
 
         // BFS traversal with global visited set to prevent exponential explosion.
@@ -562,8 +560,7 @@ fn execute_shortest_path(
 
     for binding in bindings {
         let source_node = binding
-            .nodes
-            .get(source_variable)
+            .get_node(source_variable)
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
 
         // BFS for shortest paths
@@ -825,7 +822,7 @@ fn evaluate_predicate(predicate: &FilterPredicate, binding: &Binding) -> Result<
         }
 
         FilterPredicate::HasLabel { variable, label } => {
-            if let Some(node) = binding.nodes.get(variable) {
+            if let Some(node) = binding.get_node(variable) {
                 Ok(node.has_label(label))
             } else {
                 Ok(false)
@@ -873,11 +870,11 @@ fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalValue> {
         }),
 
         PlanExpr::Variable(v) => {
-            if let Some(node) = binding.nodes.get(v) {
+            if let Some(node) = binding.get_node(v) {
                 Ok(EvalValue::Node(node.clone()))
-            } else if let Some(edge) = binding.edges.get(v) {
+            } else if let Some(edge) = binding.get_edge(v) {
                 Ok(EvalValue::Edge(edge.clone()))
-            } else if let Some(path) = binding.paths.get(v) {
+            } else if let Some(path) = binding.get_path(v) {
                 Ok(EvalValue::Path(path.clone()))
             } else {
                 Ok(EvalValue::Null)
@@ -885,9 +882,9 @@ fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalValue> {
         }
 
         PlanExpr::Property { variable, property } => {
-            if let Some(node) = binding.nodes.get(variable) {
+            if let Some(node) = binding.get_node(variable) {
                 Ok(property_to_eval_value(node.properties.get(property)))
-            } else if let Some(edge) = binding.edges.get(variable) {
+            } else if let Some(edge) = binding.get_edge(variable) {
                 Ok(property_to_eval_value(edge.properties.get(property)))
             } else {
                 Ok(EvalValue::Null)
@@ -895,7 +892,7 @@ fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalValue> {
         }
 
         PlanExpr::PathLength { path_variable } => {
-            if let Some(path) = binding.paths.get(path_variable) {
+            if let Some(path) = binding.get_path(path_variable) {
                 Ok(EvalValue::Int(path.edges.len() as i64))
             } else {
                 Ok(EvalValue::Null)
@@ -1349,7 +1346,7 @@ fn execute_set_properties(
                     property,
                     value,
                 } => {
-                    if let Some(node) = binding.nodes.get(variable) {
+                    if let Some(node) = binding.get_node(variable) {
                         let val = evaluate_expr(value, binding)?;
                         let prop_val = eval_to_property_value(val);
                         storage.update_node_property(node.id, property, &prop_val)?;
@@ -1357,7 +1354,7 @@ fn execute_set_properties(
                     }
                 }
                 SetOperation::AddLabel { variable, label } => {
-                    if let Some(node) = binding.nodes.get(variable) {
+                    if let Some(node) = binding.get_node(variable) {
                         storage.add_node_label(node.id, label)?;
                         stats.labels_added += 1;
                     }
@@ -1380,7 +1377,7 @@ fn execute_delete(
 ) -> Result<()> {
     for binding in bindings {
         for var in variables {
-            if let Some(node) = binding.nodes.get(var) {
+            if let Some(node) = binding.get_node(var) {
                 // Check for edges if not DETACH DELETE
                 if !detach && storage.has_edges(node.id)? {
                     return Err(Error::Cypher(
@@ -1389,7 +1386,7 @@ fn execute_delete(
                 }
                 storage.delete_node(node.id)?;
                 stats.nodes_deleted += 1;
-            } else if let Some(edge) = binding.edges.get(var) {
+            } else if let Some(edge) = binding.get_edge(var) {
                 storage.delete_edge(edge.id)?;
                 stats.relationships_deleted += 1;
             }

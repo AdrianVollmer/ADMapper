@@ -30,6 +30,9 @@ regex = "1.10"
 # Logging
 tracing = "0.1"
 
+# Small-size optimized vector (stack allocation for small collections)
+smallvec = "1.13"
+
 [dev-dependencies]
 tempfile = "3.10"
 toml = "0.8"

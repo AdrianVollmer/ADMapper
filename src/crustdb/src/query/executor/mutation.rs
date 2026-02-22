@@ -27,7 +27,7 @@ pub fn execute_set(
                     let prop_value = evaluate_expression_with_bindings(value, binding)?;
 
                     // Find the node to update
-                    if let Some(node) = binding.nodes.get(variable) {
+                    if let Some(node) = binding.get_node(variable) {
                         storage.update_node_property(node.id, property, &prop_value)?;
                         stats.properties_set += 1;
                     } else {
@@ -39,7 +39,7 @@ pub fn execute_set(
                 }
                 SetItem::Labels { variable, labels } => {
                     // Find the node to add labels to
-                    if let Some(node) = binding.nodes.get(variable) {
+                    if let Some(node) = binding.get_node(variable) {
                         for label in labels {
                             storage.add_node_label(node.id, label)?;
                             stats.labels_added += 1;
@@ -69,7 +69,7 @@ pub fn execute_delete(
             match expr {
                 Expression::Variable(name) => {
                     // Check if it's a node
-                    if let Some(node) = binding.nodes.get(name) {
+                    if let Some(node) = binding.get_node(name) {
                         if delete_clause.detach {
                             // DETACH DELETE - delete node and all its edges
                             storage.delete_node(node.id)?;
@@ -85,7 +85,7 @@ pub fn execute_delete(
                             storage.delete_node(node.id)?;
                             stats.nodes_deleted += 1;
                         }
-                    } else if let Some(edge) = binding.edges.get(name) {
+                    } else if let Some(edge) = binding.get_edge(name) {
                         // Delete edge
                         storage.delete_edge(edge.id)?;
                         stats.relationships_deleted += 1;

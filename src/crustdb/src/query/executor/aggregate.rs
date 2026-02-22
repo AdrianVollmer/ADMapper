@@ -44,9 +44,7 @@ pub fn evaluate_aggregate(expr: &Expression, bindings: &[Binding]) -> Result<Res
                     // count(n) - count rows where variable exists
                     let count = bindings
                         .iter()
-                        .filter(|b| {
-                            b.nodes.contains_key(var_name) || b.edges.contains_key(var_name)
-                        })
+                        .filter(|b| b.has_node(var_name) || b.has_edge(var_name))
                         .count();
                     Ok(ResultValue::Property(PropertyValue::Integer(count as i64)))
                 } else {
