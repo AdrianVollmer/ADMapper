@@ -1374,6 +1374,7 @@
     @apply w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded
            text-gray-200
            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
+    color-scheme: dark;
   }
 
   .form-help {
@@ -1842,9 +1843,13 @@ body[data-theme="light"] {
 }
 
 [data-theme="light"] .form-input,
-[data-theme="light"] .form-textarea,
-[data-theme="light"] .form-select {
+[data-theme="light"] .form-textarea {
   @apply bg-white border-gray-300 text-gray-900 placeholder-gray-400;
+}
+
+[data-theme="light"] .form-select {
+  @apply bg-white border-gray-300 text-gray-900;
+  color-scheme: light;
 }
 
 [data-theme="light"] .form-help {
