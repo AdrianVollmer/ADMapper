@@ -65,10 +65,10 @@ RUN useradd -m -s /bin/bash admapper
 
 # Copy built artifacts
 COPY --from=backend-builder /app/src/backend/target/release/admapper /usr/local/bin/
-COPY --from=frontend-builder /app/build /app/static
+COPY --from=frontend-builder /app/build /app/build
 
-# Set ownership
-RUN chown -R admapper:admapper /app
+# Set ownership of static files
+RUN chown -R admapper:admapper /app/build
 
 USER admapper
 WORKDIR /app
