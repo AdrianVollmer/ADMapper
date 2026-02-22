@@ -569,6 +569,93 @@ impl SqliteStorage {
         Ok(result)
     }
 
+    /// Find nodes by property value with optional label filter.
+    ///
+    /// Uses indexed property lookup when available (via `create_property_index`).
+    /// Property names must contain only alphanumeric characters and underscores.
+    pub fn find_nodes_by_property(
+        &self,
+        property: &str,
+        value: &serde_json::Value,
+        labels: &[String],
+        limit: Option<u64>,
+    ) -> Result<Vec<Node>> {
+        validate_property_name(property)?;
+
+        // Convert JSON value to rusqlite Value with correct type for comparison
+        let sql_value: rusqlite::types::Value = match value {
+            serde_json::Value::String(s) => rusqlite::types::Value::Text(s.clone()),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    rusqlite::types::Value::Integer(i)
+                } else if let Some(f) = n.as_f64() {
+                    rusqlite::types::Value::Real(f)
+                } else {
+                    return Ok(Vec::new());
+                }
+            }
+            serde_json::Value::Bool(b) => {
+                // SQLite stores booleans as integers (0/1)
+                rusqlite::types::Value::Integer(if *b { 1 } else { 0 })
+            }
+            serde_json::Value::Null => rusqlite::types::Value::Null,
+            _ => return Ok(Vec::new()), // Arrays/objects not supported for index lookup
+        };
+
+        let limit_clause = limit.map(|n| format!(" LIMIT {}", n)).unwrap_or_default();
+
+        let sql = if labels.is_empty() {
+            // No label filter - just property lookup
+            format!(
+                "SELECT n.id, json(n.properties), GROUP_CONCAT(nl.name) as labels
+                 FROM nodes n
+                 LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
+                 LEFT JOIN node_labels nl ON nlm.label_id = nl.id
+                 WHERE json_extract(n.properties, '$.{}') = ?1
+                 GROUP BY n.id{}",
+                property, limit_clause
+            )
+        } else {
+            // With label filter - use subquery for efficiency
+            let label_placeholders: Vec<String> =
+                (2..=labels.len() + 1).map(|i| format!("?{}", i)).collect();
+            format!(
+                "SELECT n.id, json(n.properties), GROUP_CONCAT(all_labels.name) as labels
+                 FROM (
+                     SELECT DISTINCT nodes.id, nodes.properties
+                     FROM nodes
+                     JOIN node_label_map nlm ON nodes.id = nlm.node_id
+                     JOIN node_labels nl ON nlm.label_id = nl.id
+                     WHERE json_extract(nodes.properties, '$.{}') = ?1
+                       AND nl.name IN ({})
+                     {}
+                 ) AS n
+                 LEFT JOIN node_label_map nlm2 ON n.id = nlm2.node_id
+                 LEFT JOIN node_labels all_labels ON nlm2.label_id = all_labels.id
+                 GROUP BY n.id, n.properties",
+                property,
+                label_placeholders.join(", "),
+                limit_clause
+            )
+        };
+
+        let mut stmt = self.conn.prepare(&sql)?;
+
+        if labels.is_empty() {
+            self.collect_nodes_from_stmt(&mut stmt, [&sql_value as &dyn rusqlite::ToSql])
+        } else {
+            // Build dynamic params: [sql_value, label1, label2, ...]
+            let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            param_values.push(Box::new(sql_value));
+            for label in labels {
+                param_values.push(Box::new(label.clone()));
+            }
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                param_values.iter().map(|p| p.as_ref()).collect();
+            self.collect_nodes_from_stmt(&mut stmt, params_refs.as_slice())
+        }
+    }
+
     /// Build an index of property values to node IDs for efficient batch lookups.
     ///
     /// Returns a HashMap from property value to node ID.

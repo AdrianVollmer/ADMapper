@@ -75,7 +75,14 @@ fn execute_operator(
             variable,
             label_groups,
             limit,
-        } => execute_node_scan(variable, label_groups, *limit, storage),
+            property_filter,
+        } => execute_node_scan(
+            variable,
+            label_groups,
+            *limit,
+            property_filter.clone(),
+            storage,
+        ),
 
         PlanOperator::Expand {
             source,
@@ -271,6 +278,7 @@ fn execute_node_scan(
     variable: &str,
     label_groups: &[Vec<String>],
     limit: Option<u64>,
+    property_filter: Option<(String, serde_json::Value)>,
     storage: &SqliteStorage,
 ) -> Result<ExecutionResult> {
     // label_groups structure:
@@ -279,7 +287,12 @@ fn execute_node_scan(
     // Example: :Person|Company → [["Person", "Company"]]
     // Example: :Person:Actor|Director → [["Person"], ["Actor", "Director"]]
 
-    let nodes = if label_groups.is_empty() || label_groups.iter().all(|g| g.is_empty()) {
+    // If we have a property filter, use indexed lookup (much faster)
+    let nodes = if let Some((prop, value)) = property_filter {
+        // Flatten labels for property lookup (handles simple single-label case)
+        let flat_labels: Vec<String> = label_groups.iter().flatten().cloned().collect();
+        storage.find_nodes_by_property(&prop, &value, &flat_labels, limit)?
+    } else if label_groups.is_empty() || label_groups.iter().all(|g| g.is_empty()) {
         // No label filter - scan all nodes
         storage.get_all_nodes_limit(limit)?
     } else if label_groups.len() == 1 && label_groups[0].len() == 1 {

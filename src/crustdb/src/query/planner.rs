@@ -32,6 +32,9 @@ pub enum PlanOperator {
         label_groups: Vec<Vec<String>>,
         /// SQL-level limit pushdown for simple scans.
         limit: Option<u64>,
+        /// Property equality filters pushed down to SQL for indexed lookup.
+        /// Format: (property_name, value) - uses property index if available.
+        property_filter: Option<(String, serde_json::Value)>,
     },
     /// Scan all edges with optional type filter.
     #[allow(dead_code)]
@@ -497,20 +500,30 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         .unwrap_or_else(|| "_n0".to_string());
     let label_groups: Vec<Vec<String>> = first_node.labels.clone();
 
+    // Try to extract a simple property equality filter for pushdown
+    let property_filter = first_node
+        .properties
+        .as_ref()
+        .and_then(extract_simple_property_filter);
+
     let mut plan = PlanOperator::NodeScan {
         variable: variable.clone(),
         label_groups,
         limit: None,
+        property_filter: property_filter.clone(),
     };
 
-    // Add inline property filter if present
+    // Add inline property filter if present and not already pushed down
     if let Some(ref props) = first_node.properties {
-        let predicate = plan_inline_properties(&variable, props)?;
-        if !matches!(predicate, FilterPredicate::True) {
-            plan = PlanOperator::Filter {
-                source: Box::new(plan),
-                predicate,
-            };
+        if property_filter.is_none() {
+            // Complex properties - use Filter operator
+            let predicate = plan_inline_properties(&variable, props)?;
+            if !matches!(predicate, FilterPredicate::True) {
+                plan = PlanOperator::Filter {
+                    source: Box::new(plan),
+                    predicate,
+                };
+            }
         }
     }
 
@@ -636,20 +649,29 @@ fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         (1, 100)
     };
 
+    // Try to extract a simple property filter for pushdown
+    let source_property_filter = source_node
+        .properties
+        .as_ref()
+        .and_then(extract_simple_property_filter);
+
     let mut plan = PlanOperator::NodeScan {
         variable: source_var.clone(),
         label_groups: source_label_groups,
         limit: None,
+        property_filter: source_property_filter.clone(),
     };
 
-    // Add inline property filter for source
+    // Add inline property filter for source if not pushed down
     if let Some(ref props) = source_node.properties {
-        let predicate = plan_inline_properties(&source_var, props)?;
-        if !matches!(predicate, FilterPredicate::True) {
-            plan = PlanOperator::Filter {
-                source: Box::new(plan),
-                predicate,
-            };
+        if source_property_filter.is_none() {
+            let predicate = plan_inline_properties(&source_var, props)?;
+            if !matches!(predicate, FilterPredicate::True) {
+                plan = PlanOperator::Filter {
+                    source: Box::new(plan),
+                    predicate,
+                };
+            }
         }
     }
 
@@ -944,6 +966,28 @@ fn plan_expression_as_predicate(expr: &Expression) -> Result<FilterPredicate> {
     }
 }
 
+/// Extract a simple property filter for pushdown (single key-value with literal value).
+/// Returns Some((property_name, value)) if the properties are a simple {key: literal}.
+fn extract_simple_property_filter(props: &Expression) -> Option<(String, serde_json::Value)> {
+    if let Expression::Map(entries) = props {
+        // Only push down single property filters for now
+        if entries.len() == 1 {
+            let (key, value) = entries.iter().next()?;
+            // Only push down literal values (not expressions)
+            let json_value = match value {
+                Expression::Literal(Literal::String(s)) => serde_json::Value::String(s.clone()),
+                Expression::Literal(Literal::Integer(n)) => serde_json::Value::Number((*n).into()),
+                Expression::Literal(Literal::Float(f)) => serde_json::json!(*f),
+                Expression::Literal(Literal::Boolean(b)) => serde_json::Value::Bool(*b),
+                Expression::Literal(Literal::Null) => serde_json::Value::Null,
+                _ => return None, // Complex expression, can't push down
+            };
+            return Some((key.clone(), json_value));
+        }
+    }
+    None
+}
+
 /// Plan inline properties (e.g., `{name: 'Alice'}`) as a filter predicate.
 fn plan_inline_properties(variable: &str, props: &Expression) -> Result<FilterPredicate> {
     if let Expression::Map(entries) = props {
@@ -1117,10 +1161,11 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             // Check for COUNT(*) or COUNT(n) with no grouping
             if group_by.is_empty() && aggregates.len() == 1 {
                 if let AggregateFunction::Count(ref arg) = aggregates[0].function {
-                    // Check if source is a simple NodeScan without filters
+                    // Check if source is a simple NodeScan without filters or property pushdown
                     if let PlanOperator::NodeScan {
                         ref label_groups,
                         limit: None,
+                        property_filter: None,
                         ..
                     } = *source
                     {
@@ -1167,10 +1212,12 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                     variable,
                     label_groups,
                     limit: None,
+                    property_filter,
                 } => PlanOperator::NodeScan {
                     variable,
                     label_groups,
                     limit: Some(count),
+                    property_filter,
                 },
 
                 // LIMIT on Project(NodeScan) can be pushed through
@@ -1183,6 +1230,7 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                         variable,
                         label_groups,
                         limit: None,
+                        property_filter,
                     } = *inner_source
                     {
                         PlanOperator::Project {
@@ -1190,6 +1238,7 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                                 variable,
                                 label_groups,
                                 limit: Some(count),
+                                property_filter,
                             }),
                             columns,
                             distinct: false,
