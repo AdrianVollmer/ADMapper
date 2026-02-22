@@ -1,0 +1,169 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    tags:
+      - '*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src/backend
+            src/crustdb
+            src/crustdb-cli
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Backend tests
+        run: cargo test --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb
+
+      - name: CrustDB tests
+        run: cargo test --manifest-path src/crustdb/Cargo.toml
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    services:
+      neo4j:
+        image: neo4j:5.18.1-community
+        env:
+          NEO4J_AUTH: neo4j/neo4j123
+          NEO4J_PLUGINS: '[]'
+          NEO4J_server_bolt_listen__address: 0.0.0.0:7687
+          NEO4J_server_http_listen__address: 0.0.0.0:7474
+        ports:
+          - 7474:7474
+          - 7687:7687
+        options: >-
+          --health-cmd "wget -q --spider http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+      falkordb:
+        image: falkordb/falkordb:v4.2.1
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src/backend
+            src/crustdb
+
+      - name: Build backend
+        run: cargo build --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb --release
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq python3
+
+      - name: Generate test data
+        run: |
+          # Generate sample data using the built binary
+          ./src/backend/target/release/admapper --headless --port 9191 &
+          ADMAPPER_PID=$!
+          sleep 2
+
+          # Wait for server to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:9191/api/health > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          # Connect to CrustDB and generate data
+          curl -X POST http://localhost:9191/api/database/connect \
+            -H "Content-Type: application/json" \
+            -d '{"url": "crustdb:///tmp/test.db"}'
+
+          curl -X POST http://localhost:9191/api/graph/generate \
+            -H "Content-Type: application/json" \
+            -d '{"size": "small"}'
+
+          # Export for testing
+          mkdir -p /tmp/e2e-data
+          curl http://localhost:9191/api/graph/all > /tmp/e2e-data/graph.json
+
+          kill $ADMAPPER_PID || true
+
+      - name: Run E2E tests (CrustDB)
+        env:
+          ADMAPPER_BIN: ./src/backend/target/release/admapper
+          NEO4J_HOST: localhost
+          NEO4J_PORT: 7687
+          NEO4J_USER: neo4j
+          NEO4J_PASSWORD: neo4j123
+          FALKORDB_HOST: localhost
+          FALKORDB_PORT: 6379
+        run: |
+          mkdir -p e2e/reports
+          python3 e2e/run_tests.py /tmp/e2e-data/graph.json crustdb || true
+
+      - name: Run E2E tests (Neo4j)
+        env:
+          ADMAPPER_BIN: ./src/backend/target/release/admapper
+          NEO4J_HOST: localhost
+          NEO4J_PORT: 7687
+          NEO4J_USER: neo4j
+          NEO4J_PASSWORD: neo4j123
+        run: |
+          python3 e2e/run_tests.py /tmp/e2e-data/graph.json neo4j || true
+
+      - name: Run E2E tests (FalkorDB)
+        env:
+          ADMAPPER_BIN: ./src/backend/target/release/admapper
+          FALKORDB_HOST: localhost
+          FALKORDB_PORT: 6379
+        run: |
+          python3 e2e/run_tests.py /tmp/e2e-data/graph.json falkordb || true
+
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-reports
+          path: e2e/reports/
+          retention-days: 7

@@ -1,0 +1,252 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Get version
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: ADMapper ${{ steps.get_version.outputs.version }}
+          draft: true
+          prerelease: false
+
+  build-linux:
+    name: Build Linux
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-bin
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Generate icons
+        run: bash scripts/generate-icons.sh
+
+      - name: Build Tauri app
+        run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: Upload DEB
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: src/backend/target/release/bundle/deb/admapper_${{ needs.create-release.outputs.version }}_amd64.deb
+          asset_name: admapper_${{ needs.create-release.outputs.version }}_amd64.deb
+          asset_content_type: application/vnd.debian.binary-package
+
+      - name: Upload RPM
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: src/backend/target/release/bundle/rpm/admapper-${{ needs.create-release.outputs.version }}-1.x86_64.rpm
+          asset_name: admapper-${{ needs.create-release.outputs.version }}-1.x86_64.rpm
+          asset_content_type: application/x-rpm
+
+      - name: Upload AppImage
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: src/backend/target/release/bundle/appimage/admapper_${{ needs.create-release.outputs.version }}_amd64.AppImage
+          asset_name: admapper_${{ needs.create-release.outputs.version }}_amd64.AppImage
+          asset_content_type: application/x-executable
+
+  build-windows:
+    name: Build Windows
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Generate icons
+        run: |
+          cargo install tauri-cli --version 2.2.5
+          cd src/backend
+          cargo tauri icon icons/icon.svg
+
+      - name: Build Tauri app
+        run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: Upload MSI
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: src/backend/target/release/bundle/msi/ADMapper_${{ needs.create-release.outputs.version }}_x64_en-US.msi
+          asset_name: ADMapper_${{ needs.create-release.outputs.version }}_x64.msi
+          asset_content_type: application/x-msi
+
+      - name: Upload NSIS
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: src/backend/target/release/bundle/nsis/ADMapper_${{ needs.create-release.outputs.version }}_x64-setup.exe
+          asset_name: ADMapper_${{ needs.create-release.outputs.version }}_x64-setup.exe
+          asset_content_type: application/x-executable
+
+  build-macos:
+    name: Build macOS
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Generate icons
+        run: |
+          cargo install tauri-cli --version 2.2.5
+          cd src/backend
+          cargo tauri icon icons/icon.svg
+
+      - name: Build Tauri app (Universal)
+        run: npm run tauri build -- --target universal-apple-darwin
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: Upload DMG
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: src/backend/target/universal-apple-darwin/release/bundle/dmg/ADMapper_${{ needs.create-release.outputs.version }}_universal.dmg
+          asset_name: ADMapper_${{ needs.create-release.outputs.version }}_universal.dmg
+          asset_content_type: application/x-apple-diskimage
+
+  build-headless:
+    name: Build Headless Binaries
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: admapper-linux-x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: admapper-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: admapper-macos-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: admapper-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build headless binary
+        run: cargo build --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb --release --target ${{ matrix.target }}
+
+      - name: Upload binary (Unix)
+        if: matrix.os != 'windows-latest'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: src/backend/target/${{ matrix.target }}/release/admapper
+          asset_name: ${{ matrix.artifact }}
+          asset_content_type: application/octet-stream
+
+      - name: Upload binary (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: src/backend/target/${{ matrix.target }}/release/admapper.exe
+          asset_name: ${{ matrix.artifact }}
+          asset_content_type: application/octet-stream

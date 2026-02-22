@@ -1,0 +1,64 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    tags:
+      - '*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src/backend
+            src/crustdb
+            src/crustdb-cli
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Prettier format check
+        run: npm run format:check
+
+      - name: Rust format check
+        run: |
+          cargo fmt --manifest-path src/backend/Cargo.toml --check
+          cargo fmt --manifest-path src/crustdb/Cargo.toml --check
+          cargo fmt --manifest-path src/crustdb-cli/Cargo.toml --check
+
+      - name: Clippy (backend)
+        run: cargo clippy --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb -- -D warnings
+
+      - name: Clippy (crustdb)
+        run: cargo clippy --manifest-path src/crustdb/Cargo.toml -- -D warnings
+
+      - name: Clippy (crustdb-cli)
+        run: cargo clippy --manifest-path src/crustdb-cli/Cargo.toml -- -D warnings
