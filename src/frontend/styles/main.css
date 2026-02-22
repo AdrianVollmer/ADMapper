@@ -26,6 +26,10 @@
     @apply bg-gray-700 text-white;
   }
 
+  .app-version {
+    @apply text-xs text-gray-500 px-2 self-center;
+  }
+
   .menu-dropdown {
     @apply absolute top-full left-0 min-w-[220px] py-1
            bg-gray-800 border border-gray-600 rounded shadow-xl z-50;
@@ -1657,6 +1661,10 @@ body[data-theme="light"] {
 
 [data-theme="light"] .menu-trigger[aria-expanded="true"] {
   @apply bg-gray-200 text-gray-900;
+}
+
+[data-theme="light"] .app-version {
+  @apply text-gray-400;
 }
 
 [data-theme="light"] .menu-dropdown {

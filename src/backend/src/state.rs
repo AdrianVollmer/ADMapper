@@ -13,6 +13,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
 #[cfg(feature = "desktop")]
+use serde::Serialize;
+#[cfg(feature = "desktop")]
 use tauri::{AppHandle, Emitter};
 
 #[cfg(feature = "cozo")]

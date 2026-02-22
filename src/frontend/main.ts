@@ -19,6 +19,7 @@ import { initManageQueries } from "./components/manage-queries";
 import { initQueryActivity } from "./components/query-activity";
 import { initSettings, applyInitialSettings } from "./components/settings";
 import { initListView } from "./components/list-view";
+import { isRunningInTauri } from "./api/client";
 
 /** Application state */
 export interface AppState {
@@ -51,6 +52,32 @@ function handleDocumentClick(e: MouseEvent): void {
   handleMenubarOutsideClick(e);
 }
 
+/** Fetch and display app version */
+async function initVersion(): Promise<void> {
+  const versionEl = document.getElementById("app-version");
+  if (!versionEl) return;
+
+  try {
+    let version: string | undefined;
+
+    if (isRunningInTauri()) {
+      version = await window.__TAURI__!.core.invoke<string>("app_version");
+    } else {
+      const response = await fetch("/api/health");
+      if (response.ok) {
+        const data = await response.json();
+        version = data.version;
+      }
+    }
+
+    if (version) {
+      versionEl.textContent = `v${version}`;
+    }
+  } catch {
+    // Ignore errors, version display is optional
+  }
+}
+
 /** Initialize the application */
 async function init(): Promise<void> {
   // Apply settings (especially theme) before UI renders
@@ -72,6 +99,7 @@ async function init(): Promise<void> {
   initQueryActivity();
   initSettings();
   initListView();
+  initVersion();
 
   // Single consolidated document click handler
   document.addEventListener("click", handleDocumentClick);

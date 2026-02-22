@@ -23,7 +23,6 @@ use tower_http::{
 use tracing::{error, info};
 
 #[cfg(feature = "desktop")]
-#[cfg(debug_assertions)]
 use tauri::Manager;
 
 // Re-export public types
@@ -85,6 +84,8 @@ pub fn run_desktop(database_url: Option<&str>) {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // App info
+            tauri_commands::app_version,
             // Database
             tauri_commands::database_status,
             tauri_commands::database_supported,

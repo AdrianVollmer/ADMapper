@@ -58,7 +58,10 @@ where
 // ============================================================================
 
 pub async fn health_check() -> Json<JsonValue> {
-    Json(json!({"status": "ok"}))
+    Json(json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION")
+    }))
 }
 
 // ============================================================================
