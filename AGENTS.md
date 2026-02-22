@@ -64,6 +64,8 @@ so never worry about backwards compatibility.
   the scripts in `scripts/`.
 - When fixing bugs, add test cases.
 - When adding features, update the docs and/or README.
+- Whenever you fix a bug, ask yourself: could we have caught this at
+  compile time by better typing or linting?
 
 ## Version Management
 
