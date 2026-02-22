@@ -105,11 +105,15 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install ImageMagick
+        run: choco install imagemagick -y
+
       - name: Install npm dependencies
         run: npm ci
 
       - name: Generate icons
-        run: npx tauri icon src/backend/icons/icon.svg --output src/backend/icons
+        shell: bash
+        run: bash scripts/generate-icons.sh
 
       - name: Build Tauri app
         run: npm run tauri build
@@ -156,11 +160,14 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      - name: Install librsvg
+        run: brew install librsvg
+
       - name: Install npm dependencies
         run: npm ci
 
       - name: Generate icons
-        run: npx tauri icon src/backend/icons/icon.svg --output src/backend/icons
+        run: bash scripts/generate-icons.sh
 
       - name: Build Tauri app (Universal)
         run: npm run tauri build -- --target universal-apple-darwin
