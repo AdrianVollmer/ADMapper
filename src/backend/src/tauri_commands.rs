@@ -554,7 +554,8 @@ pub fn write_file(path: String, contents: Vec<u8>) -> Result<(), String> {
 
     info!(path = %path, size = contents.len(), "Writing file (IPC)");
 
-    let mut file = std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {}", e))?;
+    let mut file =
+        std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {}", e))?;
 
     file.write_all(&contents)
         .map_err(|e| format!("Failed to write file: {}", e))?;
