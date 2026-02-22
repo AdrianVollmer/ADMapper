@@ -1,39 +1,26 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [created]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  create-release:
-    name: Create Release
+  prepare:
+    name: Prepare
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - name: Get version
+      - name: Get version from tag
         id: get_version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: ADMapper ${{ steps.get_version.outputs.version }}
-          draft: true
-          prerelease: false
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
   build-linux:
     name: Build Linux
-    needs: create-release
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -77,9 +64,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: src/backend/target/release/bundle/deb/admapper_${{ needs.create-release.outputs.version }}_amd64.deb
-          asset_name: admapper_${{ needs.create-release.outputs.version }}_amd64.deb
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: src/backend/target/release/bundle/deb/admapper_${{ needs.prepare.outputs.version }}_amd64.deb
+          asset_name: admapper_${{ needs.prepare.outputs.version }}_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload RPM
@@ -87,9 +74,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: src/backend/target/release/bundle/rpm/admapper-${{ needs.create-release.outputs.version }}-1.x86_64.rpm
-          asset_name: admapper-${{ needs.create-release.outputs.version }}-1.x86_64.rpm
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: src/backend/target/release/bundle/rpm/admapper-${{ needs.prepare.outputs.version }}-1.x86_64.rpm
+          asset_name: admapper-${{ needs.prepare.outputs.version }}-1.x86_64.rpm
           asset_content_type: application/x-rpm
 
       - name: Upload AppImage
@@ -97,14 +84,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: src/backend/target/release/bundle/appimage/admapper_${{ needs.create-release.outputs.version }}_amd64.AppImage
-          asset_name: admapper_${{ needs.create-release.outputs.version }}_amd64.AppImage
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: src/backend/target/release/bundle/appimage/admapper_${{ needs.prepare.outputs.version }}_amd64.AppImage
+          asset_name: admapper_${{ needs.prepare.outputs.version }}_amd64.AppImage
           asset_content_type: application/x-executable
 
   build-windows:
     name: Build Windows
-    needs: create-release
+    needs: prepare
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -139,9 +126,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: src/backend/target/release/bundle/msi/ADMapper_${{ needs.create-release.outputs.version }}_x64_en-US.msi
-          asset_name: ADMapper_${{ needs.create-release.outputs.version }}_x64.msi
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: src/backend/target/release/bundle/msi/ADMapper_${{ needs.prepare.outputs.version }}_x64_en-US.msi
+          asset_name: ADMapper_${{ needs.prepare.outputs.version }}_x64.msi
           asset_content_type: application/x-msi
 
       - name: Upload NSIS
@@ -149,14 +136,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: src/backend/target/release/bundle/nsis/ADMapper_${{ needs.create-release.outputs.version }}_x64-setup.exe
-          asset_name: ADMapper_${{ needs.create-release.outputs.version }}_x64-setup.exe
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: src/backend/target/release/bundle/nsis/ADMapper_${{ needs.prepare.outputs.version }}_x64-setup.exe
+          asset_name: ADMapper_${{ needs.prepare.outputs.version }}_x64-setup.exe
           asset_content_type: application/x-executable
 
   build-macos:
     name: Build macOS
-    needs: create-release
+    needs: prepare
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -193,14 +180,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: src/backend/target/universal-apple-darwin/release/bundle/dmg/ADMapper_${{ needs.create-release.outputs.version }}_universal.dmg
-          asset_name: ADMapper_${{ needs.create-release.outputs.version }}_universal.dmg
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: src/backend/target/universal-apple-darwin/release/bundle/dmg/ADMapper_${{ needs.prepare.outputs.version }}_universal.dmg
+          asset_name: ADMapper_${{ needs.prepare.outputs.version }}_universal.dmg
           asset_content_type: application/x-apple-diskimage
 
   build-headless:
     name: Build Headless Binaries
-    needs: create-release
+    needs: prepare
     strategy:
       matrix:
         include:
@@ -235,7 +222,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          upload_url: ${{ github.event.release.upload_url }}
           asset_path: src/backend/target/${{ matrix.target }}/release/admapper
           asset_name: ${{ matrix.artifact }}
           asset_content_type: application/octet-stream
@@ -246,7 +233,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          upload_url: ${{ github.event.release.upload_url }}
           asset_path: src/backend/target/${{ matrix.target }}/release/admapper.exe
           asset_name: ${{ matrix.artifact }}
           asset_content_type: application/octet-stream
