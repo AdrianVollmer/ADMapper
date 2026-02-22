@@ -5,7 +5,8 @@
  */
 
 import { getRenderer } from "./graph-view";
-import { showError, showInfo } from "../utils/notifications";
+import { showError, showInfo, showSuccess } from "../utils/notifications";
+import { isRunningInTauri } from "../api/client";
 
 /** Export the graph as PNG */
 export async function exportPNG(): Promise<void> {
@@ -208,7 +209,42 @@ export async function exportJSON(): Promise<void> {
 }
 
 /** Download a blob as a file */
-function downloadBlob(blob: Blob, filename: string): void {
+async function downloadBlob(blob: Blob, filename: string): Promise<void> {
+  // In Tauri mode, use native save dialog
+  if (isRunningInTauri() && window.__TAURI_PLUGIN_DIALOG__?.save && window.__TAURI__?.core.invoke) {
+    try {
+      // Determine file extension and filter
+      const ext = filename.split(".").pop() || "";
+      const filterName =
+        ext === "png" ? "PNG Image" : ext === "svg" ? "SVG Image" : ext === "json" ? "JSON File" : "File";
+
+      const savePath = await window.__TAURI_PLUGIN_DIALOG__.save({
+        defaultPath: filename,
+        filters: [{ name: filterName, extensions: [ext] }],
+        title: `Save ${filterName}`,
+      });
+
+      if (!savePath) return; // User cancelled
+
+      // Convert blob to base64 for transfer to Rust
+      const arrayBuffer = await blob.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(arrayBuffer));
+
+      // Write file using Tauri command
+      await window.__TAURI__.core.invoke("write_file", {
+        path: savePath,
+        contents: bytes,
+      });
+
+      showSuccess(`Exported to ${savePath}`);
+      return;
+    } catch (err) {
+      console.error("Tauri save failed:", err);
+      // Fall through to web download
+    }
+  }
+
+  // Web fallback: use download anchor
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

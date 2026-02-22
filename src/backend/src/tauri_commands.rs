@@ -295,9 +295,8 @@ pub fn graph_query(
     extract_graph: Option<bool>,
     background: Option<bool>,
 ) -> Result<QueryStartResponse, String> {
-    use crate::api::types::{NewQueryHistoryEntry, QueryProgress, QueryStatus};
-    use parking_lot::RwLock;
-    use std::sync::Arc;
+    use crate::api::types::{QueryProgress, QueryStatus};
+    use crate::db::NewQueryHistoryEntry;
 
     let db = state.db().ok_or("Not connected to database")?;
     info!(query = %query, "Starting async query (IPC)");
@@ -377,17 +376,21 @@ pub fn graph_query(
 
         match result {
             Ok(query_result) => {
-                let result_count = query_result.rows.len() as i64;
-                update_history("completed", Some(duration_ms), Some(result_count), None);
+                update_history(
+                    "completed",
+                    Some(duration_ms),
+                    query_result.result_count,
+                    None,
+                );
 
                 let progress = QueryProgress {
                     query_id: query_id_clone.clone(),
                     status: QueryStatus::Completed,
                     started_at: started_at_unix,
                     duration_ms: Some(duration_ms),
-                    result_count: Some(result_count as usize),
+                    result_count: query_result.result_count,
                     error: None,
-                    results: Some(query_result.rows),
+                    results: query_result.results,
                     graph: query_result.graph,
                 };
                 state_clone.emit_query_progress(&progress);
@@ -537,4 +540,24 @@ pub fn import_from_paths(
         job_id,
         status: "completed".to_string(),
     })
+}
+
+// ============================================================================
+// File Operations
+// ============================================================================
+
+/// Write bytes to a file.
+/// Used for exporting graphs to user-selected paths.
+#[tauri::command]
+pub fn write_file(path: String, contents: Vec<u8>) -> Result<(), String> {
+    use std::io::Write;
+
+    info!(path = %path, size = contents.len(), "Writing file (IPC)");
+
+    let mut file = std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {}", e))?;
+
+    file.write_all(&contents)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+
+    Ok(())
 }

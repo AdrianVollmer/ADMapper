@@ -105,7 +105,11 @@ build_backend_debug() {
 }
 
 generate_icons() {
-	if [ ! -f "src/backend/icons/32x32.png" ]; then
+	local svg_source="src/backend/icons/icon.svg"
+	local png_target="src/backend/icons/32x32.png"
+
+	# Regenerate if PNG doesn't exist or SVG is newer
+	if [ ! -f "$png_target" ] || [ "$svg_source" -nt "$png_target" ]; then
 		log_info "Generating icons..."
 		bash scripts/generate-icons.sh
 	fi

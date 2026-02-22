@@ -135,6 +135,8 @@ pub fn run_desktop(database_url: Option<&str>) {
             tauri_commands::health_check,
             // Import
             tauri_commands::import_from_paths,
+            // File operations
+            tauri_commands::write_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

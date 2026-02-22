@@ -18,6 +18,19 @@ declare global {
         listen: <T>(event: string, handler: (event: { payload: T }) => void) => Promise<() => void>;
       };
     };
+    __TAURI_PLUGIN_DIALOG__?: {
+      open: (options: {
+        multiple?: boolean;
+        directory?: boolean;
+        filters?: Array<{ name: string; extensions: string[] }>;
+        title?: string;
+      }) => Promise<string | string[] | null>;
+      save: (options: {
+        defaultPath?: string;
+        filters?: Array<{ name: string; extensions: string[] }>;
+        title?: string;
+      }) => Promise<string | null>;
+    };
   }
 }
 
@@ -126,9 +139,17 @@ function normalizeUrl(url: string): string {
 }
 
 /**
+ * Commands where the body should be wrapped in a named parameter
+ * instead of spreading flat into args.
+ */
+const BODY_WRAPPER_MAP: Record<string, string> = {
+  update_settings: "settings",
+};
+
+/**
  * Extract arguments from URL and body for Tauri command.
  */
-function extractArgs(url: string, body?: unknown): Record<string, unknown> {
+function extractArgs(url: string, body?: unknown, command?: string): Record<string, unknown> {
   const args: Record<string, unknown> = {};
 
   // Extract query params
@@ -166,7 +187,13 @@ function extractArgs(url: string, body?: unknown): Record<string, unknown> {
 
   // Merge body (for POST/PUT)
   if (body && typeof body === "object") {
-    Object.assign(args, body);
+    // Some commands expect the body wrapped in a named parameter
+    const wrapper = command ? BODY_WRAPPER_MAP[command] : undefined;
+    if (wrapper) {
+      args[wrapper] = body;
+    } else {
+      Object.assign(args, body);
+    }
   }
 
   return args;
@@ -186,7 +213,7 @@ async function invokeFromUrl<T>(method: string, url: string, body?: unknown): Pr
     throw new ApiClientError(501, `No Tauri command mapping for: ${key}`);
   }
 
-  const args = extractArgs(url, body);
+  const args = extractArgs(url, body, command);
 
   try {
     return await invoke<T>(command, args);

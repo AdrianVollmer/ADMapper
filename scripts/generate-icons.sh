@@ -2,13 +2,14 @@
 #
 # Generate Tauri icons from SVG
 #
-# Requires: rsvg-convert (librsvg2-bin) or ImageMagick (convert)
+# Prefers: cargo tauri icon (if tauri-cli installed)
+# Fallback: rsvg-convert (librsvg2-bin) or ImageMagick (convert)
 #
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-ICONS_DIR="$PROJECT_ROOT/src-backend/icons"
+ICONS_DIR="$PROJECT_ROOT/src/backend/icons"
 SVG_SOURCE="$ICONS_DIR/icon.svg"
 
 cd "$PROJECT_ROOT"
@@ -18,14 +19,27 @@ if [ ! -f "$SVG_SOURCE" ]; then
     exit 1
 fi
 
-# Prefer rsvg-convert for better SVG rendering, fall back to ImageMagick
+# Prefer cargo tauri icon if available (best quality, handles all formats)
+if command -v cargo &> /dev/null && cargo tauri --version &> /dev/null; then
+    echo "Using cargo tauri icon..."
+    cd "$PROJECT_ROOT/src/backend"
+    cargo tauri icon "$SVG_SOURCE"
+    echo "Icons generated successfully!"
+    ls -la "$ICONS_DIR"
+    exit 0
+fi
+
+# Fallback: use rsvg-convert or ImageMagick
 if command -v rsvg-convert &> /dev/null; then
     CONVERT_CMD="rsvg"
 elif command -v convert &> /dev/null; then
     CONVERT_CMD="imagemagick"
 else
-    echo "Error: Neither rsvg-convert nor ImageMagick found"
-    echo "Install with: apt-get install librsvg2-bin"
+    echo "Error: No icon generation tools found"
+    echo "Install one of:"
+    echo "  - cargo install tauri-cli"
+    echo "  - apt-get install librsvg2-bin"
+    echo "  - apt-get install imagemagick"
     exit 1
 fi
 

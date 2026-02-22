@@ -13,20 +13,6 @@ import { executeQuery } from "../utils/query";
 import { subscribeToImportProgress, type Unsubscribe } from "../api/events";
 import { isRunningInTauri } from "../api/client";
 
-// Tauri dialog types
-declare global {
-  interface Window {
-    __TAURI_PLUGIN_DIALOG__?: {
-      open: (options: {
-        multiple?: boolean;
-        directory?: boolean;
-        filters?: Array<{ name: string; extensions: string[] }>;
-        title?: string;
-      }) => Promise<string | string[] | null>;
-    };
-  }
-}
-
 // DOM element references
 let fileInput: HTMLInputElement | null = null;
 let modal: HTMLElement | null = null;

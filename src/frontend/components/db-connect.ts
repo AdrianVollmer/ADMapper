@@ -16,20 +16,6 @@ import { redactUrlCredentials } from "../utils/html";
 import { api, isRunningInTauri } from "../api/client";
 import type { DatabaseStatusResponse, SupportedDatabaseInfo, DatabaseType } from "../api/types";
 
-// Tauri dialog plugin types
-declare global {
-  interface Window {
-    __TAURI_PLUGIN_DIALOG__?: {
-      open: (options: {
-        multiple?: boolean;
-        directory?: boolean;
-        filters?: Array<{ name: string; extensions: string[] }>;
-        title?: string;
-      }) => Promise<string | string[] | null>;
-    };
-  }
-}
-
 /** Cached list of supported database types */
 let supportedDatabases: SupportedDatabaseInfo[] = [];
 
