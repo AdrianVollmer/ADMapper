@@ -294,10 +294,23 @@ pub struct QueryRequest {
     pub background: bool,
 }
 
-/// Response when starting an async query.
+/// Response when starting a query.
+/// Can be either sync (results inline) or async (query_id for progress subscription).
 #[derive(Serialize)]
-pub struct QueryStartResponse {
-    pub query_id: String,
+#[serde(tag = "mode")]
+pub enum QueryStartResponse {
+    /// Query completed synchronously - results are inline.
+    #[serde(rename = "sync")]
+    Sync {
+        query_id: String,
+        duration_ms: u64,
+        result_count: Option<i64>,
+        results: Option<JsonValue>,
+        graph: Option<FullGraph>,
+    },
+    /// Query is running asynchronously - subscribe to progress events.
+    #[serde(rename = "async")]
+    Async { query_id: String },
 }
 
 // ============================================================================

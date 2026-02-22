@@ -36,9 +36,10 @@ export interface QueryExecutionOptions {
 }
 
 /**
- * Execute a query via the async query API.
+ * Execute a query via the query API.
  *
- * This starts the query and waits for results via SSE or Tauri events.
+ * For fast queries (<50ms), results are returned inline (sync mode).
+ * For slower queries, waits for results via SSE or Tauri events (async mode).
  *
  * @param query The query string
  * @param options Query execution options
@@ -48,7 +49,7 @@ export interface QueryExecutionOptions {
 export async function executeQuery(query: string, options: QueryExecutionOptions = {}): Promise<QueryExecutionResult> {
   const { extractGraph = true, background = false } = options;
 
-  // Start the async query
+  // Start the query
   const startResponse = await api.post<QueryStartResponse>("/api/graph/query", {
     query,
     extract_graph: extractGraph,
@@ -62,7 +63,19 @@ export async function executeQuery(query: string, options: QueryExecutionOptions
 
   const queryId = startResponse.query_id;
 
-  // Wait for results via events
+  // Handle sync mode - results are inline
+  if (startResponse.mode === "sync") {
+    const result: QueryExecutionResult = {
+      resultCount: startResponse.result_count ?? 0,
+      queryId,
+    };
+    if (startResponse.graph) {
+      result.graph = startResponse.graph;
+    }
+    return result;
+  }
+
+  // Handle async mode - wait for results via events
   return new Promise((resolve, reject) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let unsubscribe: (() => void) | null = null;

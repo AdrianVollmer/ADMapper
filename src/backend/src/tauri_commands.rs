@@ -294,7 +294,7 @@ pub fn graph_query(
     language: Option<String>,
     extract_graph: Option<bool>,
     background: Option<bool>,
-) -> Result<QueryStartResponse, String> {
+) -> Result<crate::api::types::QueryStartResponse, String> {
     use crate::api::types::{QueryProgress, QueryStatus};
     use crate::db::NewQueryHistoryEntry;
 
@@ -413,13 +413,8 @@ pub fn graph_query(
         }
     });
 
-    Ok(QueryStartResponse { query_id })
-}
-
-/// Response when starting an async query.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct QueryStartResponse {
-    pub query_id: String,
+    // Tauri commands always use async mode (IPC is fast enough)
+    Ok(crate::api::types::QueryStartResponse::Async { query_id })
 }
 
 // ============================================================================

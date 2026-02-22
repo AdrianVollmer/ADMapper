@@ -78,8 +78,22 @@ export interface QueryResult {
 /** Status of a running or completed query */
 export type QueryStatus = "running" | "completed" | "failed" | "aborted";
 
-/** Response when starting an async query */
-export interface QueryStartResponse {
+/** Response when starting a query - can be sync (inline results) or async (query_id) */
+export type QueryStartResponse = QueryStartResponseSync | QueryStartResponseAsync;
+
+/** Sync response - query completed fast, results are inline */
+export interface QueryStartResponseSync {
+  mode: "sync";
+  query_id: string;
+  duration_ms: number;
+  result_count: number | null;
+  results?: QueryResult;
+  graph?: GraphData;
+}
+
+/** Async response - query is running, subscribe to progress events */
+export interface QueryStartResponseAsync {
+  mode: "async";
   query_id: string;
 }
 
