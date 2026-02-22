@@ -227,7 +227,7 @@ function createAddNodeModal(): void {
           </div>
 
           <div class="form-group">
-            <label for="add-node-type" class="form-label">Node Type</label>
+            <label for="add-node-type" class="form-label">Node Label</label>
             <select id="add-node-type" class="form-select" required>
               <option value="">Select node type...</option>
               ${nodeTypeOptions}
