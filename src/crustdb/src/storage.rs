@@ -1065,6 +1065,222 @@ impl SqliteStorage {
         Ok(edges)
     }
 
+    /// Get incoming connections to a node by object_id.
+    ///
+    /// Returns all nodes that have edges pointing TO the specified node,
+    /// along with those edges. This uses direct SQL with the object_id index
+    /// for optimal performance, avoiding full node scans.
+    ///
+    /// Returns (Vec<Node>, Vec<Edge>) where nodes are the source nodes of
+    /// incoming edges, and edges are the relationships.
+    pub fn get_incoming_connections_by_object_id(
+        &self,
+        object_id: &str,
+    ) -> Result<(Vec<Node>, Vec<Edge>)> {
+        // First find the target node's internal ID
+        let target_id: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM nodes WHERE json_extract(properties, '$.object_id') = ?1",
+                params![object_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let Some(target_id) = target_id else {
+            return Ok((Vec::new(), Vec::new()));
+        };
+
+        // Get incoming edges and source nodes in a single query
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                e.id AS edge_id,
+                e.source_id,
+                e.target_id,
+                et.name AS edge_type,
+                json(e.properties) AS edge_props,
+                src.id AS src_node_id,
+                json(src.properties) AS src_props,
+                GROUP_CONCAT(DISTINCT nl.name) AS src_labels
+             FROM edges e
+             JOIN edge_types et ON e.type_id = et.id
+             JOIN nodes src ON e.source_id = src.id
+             LEFT JOIN node_label_map nlm ON src.id = nlm.node_id
+             LEFT JOIN node_labels nl ON nlm.label_id = nl.id
+             WHERE e.target_id = ?1
+             GROUP BY e.id, src.id",
+        )?;
+
+        let mut nodes_map: std::collections::HashMap<i64, Node> = std::collections::HashMap::new();
+        let mut edges = Vec::new();
+
+        let rows = stmt.query_map(params![target_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,            // edge_id
+                row.get::<_, i64>(1)?,            // source_id
+                row.get::<_, i64>(2)?,            // target_id
+                row.get::<_, String>(3)?,         // edge_type
+                row.get::<_, String>(4)?,         // edge_props
+                row.get::<_, i64>(5)?,            // src_node_id
+                row.get::<_, String>(6)?,         // src_props
+                row.get::<_, Option<String>>(7)?, // src_labels
+            ))
+        })?;
+
+        for row_result in rows {
+            let (
+                edge_id,
+                source_id,
+                target_id_row,
+                edge_type,
+                edge_props,
+                src_node_id,
+                src_props,
+                src_labels,
+            ) = row_result?;
+
+            // Add edge
+            let edge_properties: std::collections::HashMap<String, PropertyValue> =
+                serde_json::from_str(&edge_props)?;
+            edges.push(Edge {
+                id: edge_id,
+                source: source_id,
+                target: target_id_row,
+                edge_type,
+                properties: edge_properties,
+            });
+
+            // Add source node if not already present
+            if let std::collections::hash_map::Entry::Vacant(e) = nodes_map.entry(src_node_id) {
+                let properties: std::collections::HashMap<String, PropertyValue> =
+                    serde_json::from_str(&src_props)?;
+                let labels: Vec<String> = src_labels
+                    .map(|s| s.split(',').map(|l| l.to_string()).collect())
+                    .unwrap_or_default();
+                e.insert(Node {
+                    id: src_node_id,
+                    labels,
+                    properties,
+                });
+            }
+        }
+
+        // Also fetch and add the target node itself
+        if let Some(target_node) = self.get_node(target_id)? {
+            nodes_map.insert(target_id, target_node);
+        }
+
+        Ok((nodes_map.into_values().collect(), edges))
+    }
+
+    /// Get outgoing connections from a node by object_id.
+    ///
+    /// Returns all nodes that the specified node has edges pointing TO,
+    /// along with those edges. This uses direct SQL with the object_id index
+    /// for optimal performance.
+    ///
+    /// Returns (Vec<Node>, Vec<Edge>) where nodes are the target nodes of
+    /// outgoing edges, and edges are the relationships.
+    pub fn get_outgoing_connections_by_object_id(
+        &self,
+        object_id: &str,
+    ) -> Result<(Vec<Node>, Vec<Edge>)> {
+        // First find the source node's internal ID
+        let source_id: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM nodes WHERE json_extract(properties, '$.object_id') = ?1",
+                params![object_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let Some(source_id) = source_id else {
+            return Ok((Vec::new(), Vec::new()));
+        };
+
+        // Get outgoing edges and target nodes in a single query
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                e.id AS edge_id,
+                e.source_id,
+                e.target_id,
+                et.name AS edge_type,
+                json(e.properties) AS edge_props,
+                tgt.id AS tgt_node_id,
+                json(tgt.properties) AS tgt_props,
+                GROUP_CONCAT(DISTINCT nl.name) AS tgt_labels
+             FROM edges e
+             JOIN edge_types et ON e.type_id = et.id
+             JOIN nodes tgt ON e.target_id = tgt.id
+             LEFT JOIN node_label_map nlm ON tgt.id = nlm.node_id
+             LEFT JOIN node_labels nl ON nlm.label_id = nl.id
+             WHERE e.source_id = ?1
+             GROUP BY e.id, tgt.id",
+        )?;
+
+        let mut nodes_map: std::collections::HashMap<i64, Node> = std::collections::HashMap::new();
+        let mut edges = Vec::new();
+
+        let rows = stmt.query_map(params![source_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,            // edge_id
+                row.get::<_, i64>(1)?,            // source_id
+                row.get::<_, i64>(2)?,            // target_id
+                row.get::<_, String>(3)?,         // edge_type
+                row.get::<_, String>(4)?,         // edge_props
+                row.get::<_, i64>(5)?,            // tgt_node_id
+                row.get::<_, String>(6)?,         // tgt_props
+                row.get::<_, Option<String>>(7)?, // tgt_labels
+            ))
+        })?;
+
+        for row_result in rows {
+            let (
+                edge_id,
+                source_id_row,
+                target_id,
+                edge_type,
+                edge_props,
+                tgt_node_id,
+                tgt_props,
+                tgt_labels,
+            ) = row_result?;
+
+            // Add edge
+            let edge_properties: std::collections::HashMap<String, PropertyValue> =
+                serde_json::from_str(&edge_props)?;
+            edges.push(Edge {
+                id: edge_id,
+                source: source_id_row,
+                target: target_id,
+                edge_type,
+                properties: edge_properties,
+            });
+
+            // Add target node if not already present
+            if let std::collections::hash_map::Entry::Vacant(e) = nodes_map.entry(tgt_node_id) {
+                let properties: std::collections::HashMap<String, PropertyValue> =
+                    serde_json::from_str(&tgt_props)?;
+                let labels: Vec<String> = tgt_labels
+                    .map(|s| s.split(',').map(|l| l.to_string()).collect())
+                    .unwrap_or_default();
+                e.insert(Node {
+                    id: tgt_node_id,
+                    labels,
+                    properties,
+                });
+            }
+        }
+
+        // Also fetch and add the source node itself
+        if let Some(source_node) = self.get_node(source_id)? {
+            nodes_map.insert(source_id, source_node);
+        }
+
+        Ok((nodes_map.into_values().collect(), edges))
+    }
+
     /// Get database statistics.
     pub fn stats(&self) -> Result<DatabaseStats> {
         let node_count: usize = self

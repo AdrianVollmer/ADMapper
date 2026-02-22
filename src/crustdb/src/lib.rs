@@ -360,6 +360,38 @@ impl Database {
         storage.get_node_edges_by_object_id(object_id)
     }
 
+    /// Get incoming connections to a node by object_id.
+    ///
+    /// Returns all nodes that have edges pointing TO the specified node,
+    /// along with those edges. Uses direct SQL with the object_id index
+    /// for optimal performance O(degree) instead of O(N) for full scans.
+    ///
+    /// Returns (Vec<Node>, Vec<Edge>) where nodes include both the target node
+    /// and all source nodes of incoming edges.
+    pub fn get_incoming_connections_by_object_id(
+        &self,
+        object_id: &str,
+    ) -> Result<(Vec<Node>, Vec<Edge>)> {
+        let storage = self.get_read_storage();
+        storage.get_incoming_connections_by_object_id(object_id)
+    }
+
+    /// Get outgoing connections from a node by object_id.
+    ///
+    /// Returns all nodes that the specified node has edges pointing TO,
+    /// along with those edges. Uses direct SQL with the object_id index
+    /// for optimal performance O(degree) instead of O(N) for full scans.
+    ///
+    /// Returns (Vec<Node>, Vec<Edge>) where nodes include both the source node
+    /// and all target nodes of outgoing edges.
+    pub fn get_outgoing_connections_by_object_id(
+        &self,
+        object_id: &str,
+    ) -> Result<(Vec<Node>, Vec<Edge>)> {
+        let storage = self.get_read_storage();
+        storage.get_outgoing_connections_by_object_id(object_id)
+    }
+
     /// Get counts for all node labels in a single efficient query.
     ///
     /// Returns a HashMap of label name to count.

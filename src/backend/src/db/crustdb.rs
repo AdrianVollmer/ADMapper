@@ -861,7 +861,10 @@ impl CrustDatabase {
     }
 
     /// Get node connections in a direction.
-    /// Uses indexed Cypher queries instead of loading all edges.
+    ///
+    /// For "incoming" and "outgoing" directions, uses direct SQL queries
+    /// with the object_id index for O(degree) performance instead of O(N)
+    /// full node scans. Other directions use Cypher queries.
     pub fn get_node_connections(
         &self,
         node_id: &str,
@@ -869,21 +872,20 @@ impl CrustDatabase {
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
         debug!(node_id = %node_id, direction = %direction, "Getting node connections");
 
-        // Escape single quotes in node_id for Cypher query
-        let escaped_id = node_id.replace('\'', "\\'");
+        // Use optimized SQL path for incoming/outgoing (the common case)
+        match direction {
+            "incoming" => {
+                return self.get_node_connections_sql(node_id, true);
+            }
+            "outgoing" => {
+                return self.get_node_connections_sql(node_id, false);
+            }
+            _ => {}
+        }
 
-        // Build targeted Cypher query based on direction
+        // For other directions (admin, memberof, members), use Cypher
+        let escaped_id = node_id.replace('\'', "\\'");
         let query = match direction {
-            "incoming" => format!(
-                "MATCH (a)-[r]->(b {{object_id: '{}'}}) \
-                 RETURN a.object_id, b.object_id, type(r), a, b",
-                escaped_id
-            ),
-            "outgoing" => format!(
-                "MATCH (a {{object_id: '{}'}})-[r]->(b) \
-                 RETURN a.object_id, b.object_id, type(r), a, b",
-                escaped_id
-            ),
             "admin" => format!(
                 "MATCH (a {{object_id: '{}'}})-[r]->(b) \
                  WHERE type(r) = 'AdminTo' OR type(r) = 'GenericAll' OR type(r) = 'GenericWrite' \
@@ -910,7 +912,107 @@ impl CrustDatabase {
             ),
         };
 
-        let result = self.execute(&query)?;
+        self.get_node_connections_cypher(&query, node_id)
+    }
+
+    /// Get node connections using optimized direct SQL.
+    ///
+    /// This bypasses Cypher parsing and uses indexed SQL queries for
+    /// O(degree) performance instead of O(N) full node scans.
+    fn get_node_connections_sql(
+        &self,
+        node_id: &str,
+        incoming: bool,
+    ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
+        let (crust_nodes, crust_edges) = if incoming {
+            self.db
+                .get_incoming_connections_by_object_id(node_id)
+                .map_err(|e| DbError::Database(e.to_string()))?
+        } else {
+            self.db
+                .get_outgoing_connections_by_object_id(node_id)
+                .map_err(|e| DbError::Database(e.to_string()))?
+        };
+
+        // Build map from internal node ID to object_id for edge conversion
+        let mut internal_to_object_id: std::collections::HashMap<i64, String> =
+            std::collections::HashMap::new();
+
+        // Convert crustdb::Node to DbNode and build ID map
+        let nodes: Vec<DbNode> = crust_nodes
+            .into_iter()
+            .map(|n| {
+                let object_id = n
+                    .properties
+                    .get("object_id")
+                    .and_then(|v| {
+                        if let crustdb::PropertyValue::String(s) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| n.id.to_string());
+
+                // Store mapping from internal ID to object_id
+                internal_to_object_id.insert(n.id, object_id.clone());
+
+                let name = n
+                    .properties
+                    .get("name")
+                    .and_then(|v| {
+                        if let crustdb::PropertyValue::String(s) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| object_id.clone());
+
+                let label = n
+                    .labels
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let properties = Self::properties_to_json(&n.properties);
+
+                DbNode {
+                    id: object_id,
+                    name,
+                    label,
+                    properties,
+                }
+            })
+            .collect();
+
+        // Convert crustdb::Edge to DbEdge using the ID map
+        let edges: Vec<DbEdge> = crust_edges
+            .into_iter()
+            .filter_map(|e| {
+                // Map internal IDs to object_ids
+                let source_obj_id = internal_to_object_id.get(&e.source)?;
+                let target_obj_id = internal_to_object_id.get(&e.target)?;
+
+                Some(DbEdge {
+                    source: source_obj_id.clone(),
+                    target: target_obj_id.clone(),
+                    edge_type: e.edge_type,
+                    properties: Self::properties_to_json(&e.properties),
+                    ..Default::default()
+                })
+            })
+            .collect();
+
+        Ok((nodes, edges))
+    }
+
+    /// Execute a Cypher query and extract node connections from the result.
+    fn get_node_connections_cypher(
+        &self,
+        query: &str,
+        node_id: &str,
+    ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
+        let result = self.execute(query)?;
 
         let mut edges = Vec::new();
         let mut nodes_map: std::collections::HashMap<String, DbNode> =
