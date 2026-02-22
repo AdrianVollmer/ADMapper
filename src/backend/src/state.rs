@@ -12,6 +12,9 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
+#[cfg(feature = "desktop")]
+use tauri::{AppHandle, Emitter};
+
 #[cfg(feature = "cozo")]
 use crate::db::CozoDatabase;
 #[cfg(feature = "crustdb")]
@@ -77,6 +80,9 @@ pub struct AppState {
     sync_query_count: Arc<std::sync::atomic::AtomicUsize>,
     /// Broadcast channel for query activity updates.
     pub query_activity_tx: broadcast::Sender<QueryActivity>,
+    /// Tauri app handle for emitting events (desktop mode only).
+    #[cfg(feature = "desktop")]
+    app_handle: Arc<RwLock<Option<AppHandle>>>,
 }
 
 impl AppState {
@@ -89,6 +95,8 @@ impl AppState {
             running_queries: Arc::new(DashMap::new()),
             sync_query_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             query_activity_tx,
+            #[cfg(feature = "desktop")]
+            app_handle: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -101,7 +109,66 @@ impl AppState {
             running_queries: Arc::new(DashMap::new()),
             sync_query_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             query_activity_tx,
+            #[cfg(feature = "desktop")]
+            app_handle: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Set the Tauri app handle for event emission (desktop mode only).
+    #[cfg(feature = "desktop")]
+    pub fn set_app_handle(&self, handle: AppHandle) {
+        *self.app_handle.write() = Some(handle);
+    }
+
+    /// Emit a Tauri event (desktop mode only).
+    /// In headless mode, this is a no-op.
+    #[cfg(feature = "desktop")]
+    pub fn emit_event<T: Serialize + Clone>(&self, event: &str, payload: T) {
+        if let Some(handle) = self.app_handle.read().as_ref() {
+            if let Err(e) = handle.emit(event, payload) {
+                debug!(event = %event, error = %e, "Failed to emit Tauri event");
+            }
+        }
+    }
+
+    /// Emit import progress event (works in both desktop and headless modes).
+    pub fn emit_import_progress(&self, job_id: &str, progress: &ImportProgress) {
+        #[cfg(feature = "desktop")]
+        {
+            #[derive(Serialize, Clone)]
+            struct ImportProgressEvent<'a> {
+                job_id: &'a str,
+                #[serde(flatten)]
+                progress: ImportProgress,
+            }
+            self.emit_event(
+                "import-progress",
+                ImportProgressEvent {
+                    job_id,
+                    progress: progress.clone(),
+                },
+            );
+        }
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = (job_id, progress); // Suppress unused warnings
+        }
+    }
+
+    /// Emit query progress event (works in both desktop and headless modes).
+    pub fn emit_query_progress(&self, progress: &QueryProgress) {
+        #[cfg(feature = "desktop")]
+        self.emit_event("query-progress", progress.clone());
+        #[cfg(not(feature = "desktop"))]
+        let _ = progress;
+    }
+
+    /// Emit query activity event (works in both desktop and headless modes).
+    pub fn emit_query_activity(&self, activity: &QueryActivity) {
+        #[cfg(feature = "desktop")]
+        self.emit_event("query-activity", activity.clone());
+        #[cfg(not(feature = "desktop"))]
+        let _ = activity;
     }
 
     /// Get total active query count (async + sync).
@@ -118,10 +185,12 @@ impl AppState {
                 .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Broadcast query activity update.
+    /// Broadcast query activity update (via both HTTP SSE and Tauri events).
     pub fn broadcast_query_activity(&self) {
         let active = self.active_query_count();
-        let _ = self.query_activity_tx.send(QueryActivity { active });
+        let activity = QueryActivity { active };
+        let _ = self.query_activity_tx.send(activity.clone());
+        self.emit_query_activity(&activity);
     }
 
     /// Increment sync query count and broadcast.

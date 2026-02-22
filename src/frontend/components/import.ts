@@ -9,6 +9,7 @@ import type { RawADGraph, ADNodeType, ADEdgeType } from "../graph/types";
 import type { ImportProgress } from "../api/types";
 import { showError as showNotification } from "../utils/notifications";
 import { executeQuery } from "../utils/query";
+import { subscribeToImportProgress, type Unsubscribe } from "../api/events";
 
 // DOM element references
 let fileInput: HTMLInputElement | null = null;
@@ -24,7 +25,7 @@ let doneBtn: HTMLElement | null = null;
 let cancelBtn: HTMLElement | null = null;
 
 // State
-let eventSource: EventSource | null = null;
+let unsubscribe: Unsubscribe | null = null;
 
 /** Initialize the import handler */
 export function initImport(): void {
@@ -108,7 +109,7 @@ async function handleFileSelect(event: Event): Promise<void> {
     const result = await response.json();
 
     // Subscribe to progress updates
-    subscribeToProgress(result.job_id);
+    subscribeToProgressUpdates(result.job_id);
   } catch (err) {
     showError(err instanceof Error ? err.message : "Import failed");
   }
@@ -117,39 +118,34 @@ async function handleFileSelect(event: Event): Promise<void> {
   input.value = "";
 }
 
-/** Subscribe to SSE progress updates */
-function subscribeToProgress(jobId: string): void {
-  if (eventSource) {
-    eventSource.close();
+/** Subscribe to progress updates (SSE or Tauri events) */
+function subscribeToProgressUpdates(jobId: string): void {
+  if (unsubscribe) {
+    unsubscribe();
   }
 
-  eventSource = new EventSource(`/api/import/progress/${jobId}`);
-
-  eventSource.onmessage = (event) => {
-    try {
-      const progress: ImportProgress = JSON.parse(event.data);
+  unsubscribe = subscribeToImportProgress(
+    jobId,
+    (progress: ImportProgress) => {
       updateProgressUI(progress);
 
       if (progress.status === "completed") {
-        eventSource?.close();
-        eventSource = null;
+        unsubscribe?.();
+        unsubscribe = null;
         showCompleted();
         loadDomainAdmins();
       } else if (progress.status === "failed") {
-        eventSource?.close();
-        eventSource = null;
+        unsubscribe?.();
+        unsubscribe = null;
         showError(progress.error || "Import failed");
       }
-    } catch (err) {
-      console.error("Failed to parse progress:", err);
+    },
+    () => {
+      // Connection closed/error, clean up
+      unsubscribe?.();
+      unsubscribe = null;
     }
-  };
-
-  eventSource.onerror = () => {
-    // SSE connection closed, check if import completed
-    eventSource?.close();
-    eventSource = null;
-  };
+  );
 }
 
 /** Update the progress UI */
@@ -241,11 +237,11 @@ function handleCancel(): void {
   cleanup();
 }
 
-/** Cleanup event source and state */
+/** Cleanup subscription and state */
 function cleanup(): void {
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
+  if (unsubscribe) {
+    unsubscribe();
+    unsubscribe = null;
   }
 }
 

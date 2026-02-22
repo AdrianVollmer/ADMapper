@@ -1,12 +1,14 @@
 /**
  * Query Activity Tracking
  *
- * Subscribes to the query activity SSE endpoint and controls
+ * Subscribes to query activity events (via SSE or Tauri) and controls
  * the query indicator in the menubar.
  */
 
-/** EventSource for query activity SSE */
-let activityEventSource: EventSource | null = null;
+import { subscribeToQueryActivity, type Unsubscribe } from "../api/events";
+
+/** Unsubscribe function for current connection */
+let unsubscribe: Unsubscribe | null = null;
 
 /** Current number of active queries */
 let activeQueryCount = 0;
@@ -17,37 +19,31 @@ export function initQueryActivity(): void {
   setTimeout(connectToActivityStream, 100);
 }
 
-/** Connect to the query activity SSE stream */
+/** Connect to the query activity stream */
 function connectToActivityStream(): void {
   // Clean up existing connection
-  if (activityEventSource) {
-    activityEventSource.close();
-    activityEventSource = null;
+  if (unsubscribe) {
+    unsubscribe();
+    unsubscribe = null;
   }
 
-  activityEventSource = new EventSource("/api/query/activity");
-
-  activityEventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data) as { active: number };
+  unsubscribe = subscribeToQueryActivity(
+    (data) => {
       activeQueryCount = data.active;
       updateQueryIndicator(activeQueryCount > 0);
-    } catch (err) {
-      console.error("[QueryActivity] Failed to parse event:", err);
+    },
+    () => {
+      // Connection lost, try to reconnect after a delay
+      if (unsubscribe) {
+        unsubscribe();
+        unsubscribe = null;
+      }
+      // Reset indicator to idle state
+      updateQueryIndicator(false);
+      // Reconnect after 5 seconds
+      setTimeout(connectToActivityStream, 5000);
     }
-  };
-
-  activityEventSource.onerror = () => {
-    // Connection lost, try to reconnect after a delay
-    if (activityEventSource) {
-      activityEventSource.close();
-      activityEventSource = null;
-    }
-    // Reset indicator to idle state
-    updateQueryIndicator(false);
-    // Reconnect after 5 seconds
-    setTimeout(connectToActivityStream, 5000);
-  };
+  );
 }
 
 /** Update the query indicator in the menubar */

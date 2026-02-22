@@ -14,6 +14,9 @@ declare global {
       core: {
         invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
       };
+      event: {
+        listen: <T>(event: string, handler: (event: { payload: T }) => void) => Promise<() => void>;
+      };
     };
   }
 }
@@ -21,9 +24,12 @@ declare global {
 /**
  * Check if running in Tauri environment.
  */
-function isTauri(): boolean {
+export function isRunningInTauri(): boolean {
   return typeof window !== "undefined" && !!window.__TAURI__;
 }
+
+// Internal alias for backward compatibility within this module
+const isTauri = isRunningInTauri;
 
 /**
  * Custom error class for API errors.
@@ -356,11 +362,3 @@ export class ApiClient {
 
 /** Singleton API client instance */
 export const api = new ApiClient();
-
-/**
- * Check if we're running in Tauri mode.
- * Useful for components that need to adjust behavior.
- */
-export function isRunningInTauri(): boolean {
-  return isTauri();
-}

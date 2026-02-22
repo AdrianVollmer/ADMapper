@@ -72,10 +72,14 @@ pub fn run_desktop(database_url: Option<&str>) {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(state)
-        .setup(|_app| {
+        .setup(|app| {
+            // Store app handle in state for event emission
+            let state: tauri::State<AppState> = app.state();
+            state.set_app_handle(app.handle().clone());
+
             #[cfg(debug_assertions)]
             {
-                let window = _app.get_webview_window("main").unwrap();
+                let window = app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
             Ok(())

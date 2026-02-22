@@ -221,8 +221,10 @@ pub async fn import_bloodhound(
 
     let db = state.require_db()?;
     let job_id_clone = job_id.clone();
+    let job_id_for_events = job_id.clone();
     let import_jobs = state.import_jobs.clone();
     let job_for_task = job.clone();
+    let state_for_task = state.clone();
 
     // Spawn import task
     tokio::task::spawn_blocking(move || {
@@ -257,6 +259,8 @@ pub async fn import_bloodhound(
                     // Write final_state immediately to avoid race with SSE subscribers
                     // who might connect after broadcast but before loop finishes
                     *job_for_task.final_state.write() = Some(progress.clone());
+                    // Emit Tauri event for desktop mode
+                    state_for_task.emit_import_progress(&job_id_for_events, progress);
                 }
                 Err(e) => {
                     error!(filename = %filename, error = %e, "Import failed");
@@ -1168,7 +1172,8 @@ pub async fn graph_query(
         results: None,
         graph: None,
     };
-    let _ = progress_tx.send(initial_progress);
+    let _ = progress_tx.send(initial_progress.clone());
+    state.emit_query_progress(&initial_progress);
 
     // Add query to history with "running" status
     let timestamp = started_at_unix;
@@ -1192,9 +1197,8 @@ pub async fn graph_query(
     let query_text = body.query.clone();
     let extract_graph = body.extract_graph;
     let language = body.language.clone();
-    let running_queries = state.running_queries.clone();
-    let query_activity_tx = state.query_activity_tx.clone();
     let running_query_for_task = running_query.clone();
+    let state_for_task = state.clone();
 
     tokio::task::spawn_blocking(move || {
         // Helper to update query status in history
@@ -1224,14 +1228,10 @@ pub async fn graph_query(
                 graph: None,
             };
             let _ = progress_tx.send(progress.clone());
+            state_for_task.emit_query_progress(&progress);
             *running_query_for_task.final_state.write() = Some(progress);
             *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
-            let _ = query_activity_tx.send(QueryActivity {
-                active: running_queries
-                    .iter()
-                    .filter(|e| e.value().completed_at.read().is_none())
-                    .count(),
-            });
+            state_for_task.broadcast_query_activity();
             return;
         }
 
@@ -1260,14 +1260,10 @@ pub async fn graph_query(
                 graph: None,
             };
             let _ = progress_tx.send(progress.clone());
+            state_for_task.emit_query_progress(&progress);
             *running_query_for_task.final_state.write() = Some(progress);
             *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
-            let _ = query_activity_tx.send(QueryActivity {
-                active: running_queries
-                    .iter()
-                    .filter(|e| e.value().completed_at.read().is_none())
-                    .count(),
-            });
+            state_for_task.broadcast_query_activity();
             return;
         }
 
@@ -1335,6 +1331,7 @@ pub async fn graph_query(
 
         // Broadcast final status
         let _ = progress_tx.send(progress.clone());
+        state_for_task.emit_query_progress(&progress);
         *running_query_for_task.final_state.write() = Some(progress);
 
         // Mark the query as completed with a timestamp for TTL-based cleanup.
@@ -1343,12 +1340,7 @@ pub async fn graph_query(
         *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
 
         // Broadcast activity update (query no longer "running" for UI purposes)
-        let _ = query_activity_tx.send(QueryActivity {
-            active: running_queries
-                .iter()
-                .filter(|e| e.value().completed_at.read().is_none())
-                .count(),
-        });
+        state_for_task.broadcast_query_activity();
     });
 
     Ok(Json(QueryStartResponse { query_id }))

@@ -12,6 +12,7 @@ import { api } from "../api/client";
 import type { QueryHistoryResponse, QueryStartResponse, QueryProgressEvent } from "../api/types";
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph } from "../graph/types";
+import { subscribeToQueryProgress, type Unsubscribe } from "../api/events";
 
 /** Modal element */
 let modalEl: HTMLElement | null = null;
@@ -25,8 +26,8 @@ let isExecuting = false;
 /** Current query ID (for abort) */
 let currentQueryId: string | null = null;
 
-/** EventSource for SSE progress */
-let progressEventSource: EventSource | null = null;
+/** Unsubscribe function for progress events */
+let unsubscribeProgress: Unsubscribe | null = null;
 
 /** Error message */
 let errorMessage = "";
@@ -119,10 +120,10 @@ export async function openRunQuery(): Promise<void> {
 export function closeRunQuery(): void {
   if (!modalEl) return;
 
-  // Clean up SSE connection
-  if (progressEventSource) {
-    progressEventSource.close();
-    progressEventSource = null;
+  // Clean up event subscription
+  if (unsubscribeProgress) {
+    unsubscribeProgress();
+    unsubscribeProgress = null;
   }
 
   // Clear duration interval
@@ -316,26 +317,21 @@ async function executeQuery(): Promise<void> {
 
     currentQueryId = startResponse.query_id;
 
-    // Subscribe to progress via SSE
-    progressEventSource = new EventSource(`/api/query/progress/${currentQueryId}`);
-
-    progressEventSource.onmessage = (event) => {
-      try {
-        const progress: QueryProgressEvent = JSON.parse(event.data);
-        handleQueryProgress(progress);
-      } catch (err) {
-        console.error("Failed to parse progress event:", err);
+    // Subscribe to progress events
+    unsubscribeProgress = subscribeToQueryProgress(
+      currentQueryId,
+      (progress) => {
+        handleQueryProgress(progress as QueryProgressEvent);
+      },
+      () => {
+        // Connection closed, check if we're still executing
+        if (isExecuting) {
+          cleanup();
+          errorMessage = "Lost connection to server";
+          renderModal();
+        }
       }
-    };
-
-    progressEventSource.onerror = () => {
-      // Connection closed, check if we're still executing
-      if (isExecuting) {
-        cleanup();
-        errorMessage = "Lost connection to server";
-        renderModal();
-      }
-    };
+    );
   } catch (err) {
     cleanup();
     errorMessage = getQueryErrorMessage(err);
@@ -399,9 +395,9 @@ function cleanup(): void {
   isExecuting = false;
   currentQueryId = null;
 
-  if (progressEventSource) {
-    progressEventSource.close();
-    progressEventSource = null;
+  if (unsubscribeProgress) {
+    unsubscribeProgress();
+    unsubscribeProgress = null;
   }
 
   if (durationInterval) {
