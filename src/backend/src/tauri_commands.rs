@@ -285,23 +285,138 @@ pub fn add_edge(
 // Query Commands
 // ============================================================================
 
-/// Execute a query synchronously.
-/// For long-running queries, consider using the async HTTP endpoint with SSE.
+/// Execute a query asynchronously with progress events.
+/// Returns a query_id immediately. Progress is emitted via Tauri events.
 #[tauri::command]
 pub fn graph_query(
     state: State<'_, AppState>,
     query: String,
     language: Option<String>,
     extract_graph: Option<bool>,
-) -> Result<core::QueryResult, String> {
+    background: Option<bool>,
+) -> Result<QueryStartResponse, String> {
+    use crate::api::types::{NewQueryHistoryEntry, QueryProgress, QueryStatus};
+    use parking_lot::RwLock;
+    use std::sync::Arc;
+
     let db = state.db().ok_or("Not connected to database")?;
-    info!(query = %query, "Executing query (IPC)");
-    core::execute_query(
-        db,
-        &query,
-        language.as_deref(),
-        extract_graph.unwrap_or(true),
-    )
+    info!(query = %query, "Starting async query (IPC)");
+
+    let query_id = uuid::Uuid::new_v4().to_string();
+    let extract_graph = extract_graph.unwrap_or(true);
+    let background = background.unwrap_or(false);
+
+    let started_at = std::time::Instant::now();
+    let started_at_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    // Emit initial "running" status
+    let initial_progress = QueryProgress {
+        query_id: query_id.clone(),
+        status: QueryStatus::Running,
+        started_at: started_at_unix,
+        duration_ms: None,
+        result_count: None,
+        error: None,
+        results: None,
+        graph: None,
+    };
+    state.emit_query_progress(&initial_progress);
+
+    // Add query to history with "running" status
+    if let Err(e) = db.add_query_history(NewQueryHistoryEntry {
+        id: &query_id,
+        name: &query,
+        query: &query,
+        timestamp: started_at_unix,
+        result_count: None,
+        status: "running",
+        started_at: started_at_unix,
+        duration_ms: None,
+        error: None,
+        background,
+    }) {
+        debug!(error = %e, "Failed to add query to history");
+    }
+
+    // Clone what we need for the background thread
+    let query_id_clone = query_id.clone();
+    let query_text = query.clone();
+    let language = language.clone();
+    let state_clone = state.inner().clone();
+    let db_clone = db.clone();
+
+    // Spawn background execution
+    std::thread::spawn(move || {
+        let update_history = |status: &str,
+                              duration_ms: Option<u64>,
+                              result_count: Option<i64>,
+                              error: Option<&str>| {
+            if let Err(e) = db_clone.update_query_status(
+                &query_id_clone,
+                status,
+                duration_ms,
+                result_count,
+                error,
+            ) {
+                debug!(error = %e, "Failed to update query history status");
+            }
+        };
+
+        // Execute query
+        let result = core::execute_query(
+            db_clone.clone(),
+            &query_text,
+            language.as_deref(),
+            extract_graph,
+        );
+
+        let duration_ms = started_at.elapsed().as_millis() as u64;
+
+        match result {
+            Ok(query_result) => {
+                let result_count = query_result.rows.len() as i64;
+                update_history("completed", Some(duration_ms), Some(result_count), None);
+
+                let progress = QueryProgress {
+                    query_id: query_id_clone.clone(),
+                    status: QueryStatus::Completed,
+                    started_at: started_at_unix,
+                    duration_ms: Some(duration_ms),
+                    result_count: Some(result_count as usize),
+                    error: None,
+                    results: Some(query_result.rows),
+                    graph: query_result.graph,
+                };
+                state_clone.emit_query_progress(&progress);
+            }
+            Err(e) => {
+                update_history("failed", Some(duration_ms), None, Some(&e));
+
+                let progress = QueryProgress {
+                    query_id: query_id_clone.clone(),
+                    status: QueryStatus::Failed,
+                    started_at: started_at_unix,
+                    duration_ms: Some(duration_ms),
+                    result_count: None,
+                    error: Some(e),
+                    results: None,
+                    graph: None,
+                };
+                state_clone.emit_query_progress(&progress);
+            }
+        }
+    });
+
+    Ok(QueryStartResponse { query_id })
+}
+
+/// Response when starting an async query.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct QueryStartResponse {
+    pub query_id: String,
 }
 
 // ============================================================================
