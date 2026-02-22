@@ -1434,7 +1434,7 @@
     @apply flex-1;
   }
 
-  .form-warning {
+  .form-warning:not([hidden]) {
     @apply flex items-start gap-2 text-sm text-yellow-400 p-3
            bg-yellow-900/20 border border-yellow-900/50 rounded mt-3;
   }
