@@ -707,7 +707,7 @@ impl SqliteStorage {
             serde_json::from_str(&props_json)?;
 
         // Get labels via join
-        let mut label_stmt = self.conn.prepare(
+        let mut label_stmt = self.conn.prepare_cached(
             "SELECT nl.name FROM node_labels nl
              JOIN node_label_map nlm ON nl.id = nlm.label_id
              WHERE nlm.node_id = ?1",
@@ -861,7 +861,7 @@ impl SqliteStorage {
 
     /// Find edges by type.
     pub fn find_edges_by_type(&self, edge_type: &str) -> Result<Vec<Edge>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
              FROM edges e
              JOIN edge_types et ON e.type_id = et.id
@@ -1047,7 +1047,7 @@ impl SqliteStorage {
 
     /// Find outgoing edges from a node.
     pub fn find_outgoing_edges(&self, node_id: i64) -> Result<Vec<Edge>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
              FROM edges e
              JOIN edge_types et ON e.type_id = et.id
@@ -1059,7 +1059,7 @@ impl SqliteStorage {
 
     /// Find incoming edges to a node.
     pub fn find_incoming_edges(&self, node_id: i64) -> Result<Vec<Edge>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
              FROM edges e
              JOIN edge_types et ON e.type_id = et.id
@@ -1124,7 +1124,7 @@ impl SqliteStorage {
         let mut edges = Vec::new();
 
         // Query for edges where node is source or target, joining to get object_ids
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT
                 json_extract(src.properties, '$.object_id') AS src_id,
                 json_extract(tgt.properties, '$.object_id') AS tgt_id,
@@ -1179,7 +1179,7 @@ impl SqliteStorage {
         };
 
         // Get incoming edges and source nodes in a single query
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT
                 e.id AS edge_id,
                 e.source_id,
@@ -1287,7 +1287,7 @@ impl SqliteStorage {
         };
 
         // Get outgoing edges and target nodes in a single query
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT
                 e.id AS edge_id,
                 e.source_id,
@@ -1415,7 +1415,7 @@ impl SqliteStorage {
     pub fn get_all_labels(&self) -> Result<Vec<String>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT name FROM node_labels ORDER BY name")?;
+            .prepare_cached("SELECT name FROM node_labels ORDER BY name")?;
         let labels: Vec<String> = stmt
             .query_map([], |row| row.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1426,7 +1426,7 @@ impl SqliteStorage {
     pub fn get_all_edge_types(&self) -> Result<Vec<String>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT name FROM edge_types ORDER BY name")?;
+            .prepare_cached("SELECT name FROM edge_types ORDER BY name")?;
         let types: Vec<String> = stmt
             .query_map([], |row| row.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1436,7 +1436,7 @@ impl SqliteStorage {
     /// Get counts for all node labels in a single query.
     /// Returns a HashMap of label name to count.
     pub fn get_label_counts(&self) -> Result<std::collections::HashMap<String, usize>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT nl.name, COUNT(*) as cnt
              FROM node_labels nl
              JOIN node_label_map nlm ON nl.id = nlm.label_id
@@ -1519,7 +1519,7 @@ impl SqliteStorage {
                 .query_row("SELECT COUNT(*) FROM query_history", [], |row| row.get(0))?;
 
         // Get paginated results
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT id, name, query, timestamp, result_count, status, started_at, duration_ms, error, background
              FROM query_history
              ORDER BY timestamp DESC
@@ -1671,7 +1671,7 @@ impl SqliteStorage {
     ///
     /// Returns a list of property names that have indexes.
     pub fn list_property_indexes(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT name FROM sqlite_master
              WHERE type = 'index' AND name LIKE 'idx_nodes_prop_%'",
         )?;
