@@ -10,6 +10,9 @@ mod import;
 mod settings;
 mod state;
 
+#[cfg(feature = "desktop")]
+mod tauri_commands;
+
 use api::handlers;
 use axum::{routing::get, routing::post, routing::put, Router};
 use std::net::SocketAddr;
@@ -36,9 +39,39 @@ pub use db::CrustDatabase;
 /// Run as Tauri desktop application.
 #[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run_desktop() {
+pub fn run_desktop(database_url: Option<&str>) {
+    // Initialize tracing
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_ansi(true)
+        .init();
+
+    // Create shared state
+    let state = AppState::new_disconnected();
+
+    // Connect to initial database if provided
+    if let Some(url) = database_url {
+        info!(url = %url, "Connecting to database from CLI argument");
+        match state.connect(url) {
+            Ok(db_type) => {
+                if let Some(db) = state.db() {
+                    let (nodes, edges) = db.get_stats().unwrap_or((0, 0));
+                    info!(database = %db_type.name(), nodes = nodes, edges = edges, "Database connected");
+                }
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to connect to database");
+            }
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .manage(state)
         .setup(|_app| {
             #[cfg(debug_assertions)]
             {
@@ -47,13 +80,60 @@ pub fn run_desktop() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![])
+        .invoke_handler(tauri::generate_handler![
+            // Database
+            tauri_commands::database_status,
+            tauri_commands::database_supported,
+            tauri_commands::database_connect,
+            tauri_commands::database_disconnect,
+            // Graph stats
+            tauri_commands::graph_stats,
+            tauri_commands::graph_detailed_stats,
+            tauri_commands::graph_clear,
+            tauri_commands::graph_clear_disabled,
+            // Graph data
+            tauri_commands::graph_nodes,
+            tauri_commands::graph_edges,
+            tauri_commands::graph_all,
+            tauri_commands::graph_search,
+            // Node operations
+            tauri_commands::node_get,
+            tauri_commands::node_counts,
+            tauri_commands::node_connections,
+            tauri_commands::node_status,
+            tauri_commands::node_set_owned,
+            // Path finding
+            tauri_commands::graph_path,
+            tauri_commands::paths_to_domain_admins,
+            // Insights
+            tauri_commands::graph_insights,
+            tauri_commands::graph_edge_types,
+            tauri_commands::graph_node_types,
+            // Mutations
+            tauri_commands::add_node,
+            tauri_commands::add_edge,
+            // Query
+            tauri_commands::graph_query,
+            // Query history
+            tauri_commands::get_query_history,
+            tauri_commands::delete_query_history,
+            tauri_commands::clear_query_history,
+            // Settings
+            tauri_commands::get_settings,
+            tauri_commands::update_settings,
+            // File browser
+            tauri_commands::browse_directory,
+            // Data generation
+            tauri_commands::generate_data,
+            // Health
+            tauri_commands::health_check,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 #[cfg(not(feature = "desktop"))]
-pub fn run_desktop() {
+pub fn run_desktop(_database_url: Option<&str>) {
     eprintln!("Error: Desktop mode not available. Build with --features desktop");
     eprintln!("Or use --headless to run as web server.");
     std::process::exit(1);

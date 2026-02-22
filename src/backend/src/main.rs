@@ -36,6 +36,6 @@ fn main() {
     if args.headless {
         admapper::run_service(&args.bind, args.port, args.database_url.as_deref());
     } else {
-        admapper::run_desktop();
+        admapper::run_desktop(args.database_url.as_deref());
     }
 }

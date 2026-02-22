@@ -56,6 +56,7 @@ export default [
         RequestInit: "readonly",
         AbortSignal: "readonly",
         AbortController: "readonly",
+        URLSearchParams: "readonly",
       },
     },
     plugins: {
