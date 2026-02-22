@@ -4,6 +4,7 @@
 
 mod api;
 mod db;
+mod generate;
 mod graph;
 mod import;
 mod settings;
@@ -112,6 +113,7 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/node", post(handlers::add_node))
         .route("/api/graph/edge", post(handlers::add_edge))
         .route("/api/graph/insights", get(handlers::graph_insights))
+        .route("/api/graph/generate", post(handlers::generate_data))
         .route("/api/graph/query", post(handlers::graph_query))
         // Query progress and abort
         .route("/api/query/progress/:id", get(handlers::query_progress))

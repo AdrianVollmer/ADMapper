@@ -2,10 +2,10 @@
 
 use crate::api::types::{
     AddEdgeRequest, AddHistoryRequest, AddNodeRequest, ApiError, BrowseEntry, BrowseParams,
-    BrowseResponse, ConnectRequest, DatabaseStatus, HistoryParams, NodeCounts, NodeStatus,
-    PathParams, PathResponse, PathStep, PathsToDaEntry, PathsToDaParams, PathsToDaResponse,
-    QueryActivity, QueryHistoryEntry, QueryHistoryResponse, QueryProgress, QueryRequest,
-    QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
+    BrowseResponse, ConnectRequest, DatabaseStatus, GenerateRequest, GenerateResponse,
+    HistoryParams, NodeCounts, NodeStatus, PathParams, PathResponse, PathStep, PathsToDaEntry,
+    PathsToDaParams, PathsToDaResponse, QueryActivity, QueryHistoryEntry, QueryHistoryResponse,
+    QueryProgress, QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
 };
 use crate::db::{
     DatabaseBackend, DbEdge, DbError, DbNode, NewQueryHistoryEntry, QueryLanguage,
@@ -377,6 +377,60 @@ pub async fn graph_clear_disabled(State(state): State<AppState>) -> Result<Statu
 
     info!("Cleared disabled objects from database");
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Generate sample Active Directory data.
+/// Only works if the database is empty.
+#[instrument(skip(state))]
+pub async fn generate_data(
+    State(state): State<AppState>,
+    Json(body): Json<GenerateRequest>,
+) -> Result<Json<GenerateResponse>, ApiError> {
+    let db = state.require_db()?;
+
+    // Check if database is empty
+    let (node_count, edge_count) = run_db(db.clone(), |db| db.get_stats()).await?;
+
+    if node_count > 0 || edge_count > 0 {
+        return Err(ApiError::BadRequest(
+            "Database must be empty to generate sample data".to_string(),
+        ));
+    }
+
+    info!(size = ?body.size, "Generating sample data");
+
+    // Generate data
+    let size = body.size;
+    let (nodes, edges) =
+        tokio::task::spawn_blocking(move || crate::generate::Generator::generate(size))
+            .await
+            .map_err(|e| ApiError::Internal(format!("Task join error: {e}")))?;
+
+    let node_count = nodes.len();
+    let edge_count = edges.len();
+
+    info!(
+        nodes = node_count,
+        edges = edge_count,
+        "Generated sample data, inserting..."
+    );
+
+    // Insert nodes
+    run_db(db.clone(), move |db| db.insert_nodes(&nodes)).await?;
+
+    // Insert edges
+    run_db(db, move |db| db.insert_edges(&edges)).await?;
+
+    info!(
+        nodes = node_count,
+        edges = edge_count,
+        "Sample data generation complete"
+    );
+
+    Ok(Json(GenerateResponse {
+        nodes: node_count,
+        edges: edge_count,
+    }))
 }
 
 // ============================================================================

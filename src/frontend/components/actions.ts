@@ -21,6 +21,7 @@ import { getRecentConnections, clearConnectionHistory } from "./connection-histo
 import { escapeHtml } from "../utils/html";
 import { openSettings, toggleTheme } from "./settings";
 import { openListView } from "./list-view";
+import { openGenerateData } from "./generate-data";
 
 /** Action name constants for type-safe dispatch */
 export const Actions = {
@@ -51,6 +52,7 @@ export const Actions = {
   TOGGLE_LABEL_VISIBILITY: "toggle-label-visibility",
   // Tools menu
   IMPORT_BLOODHOUND: "import-bloodhound",
+  GENERATE_DATA: "generate-data",
   RUN_QUERY: "run-query",
   MANAGE_QUERIES: "manage-queries",
   QUERY_HISTORY: "query-history",
@@ -129,6 +131,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   },
   // Tools menu
   "import-bloodhound": () => triggerBloodHoundImport(),
+  "generate-data": () => openGenerateData(),
   "run-query": () => openRunQuery(),
   "manage-queries": () => openManageQueries(),
   "query-history": () => openQueryHistory(),

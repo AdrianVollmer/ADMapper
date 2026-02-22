@@ -363,6 +363,32 @@ pub struct AddHistoryRequest {
 }
 
 // ============================================================================
+// Generate Data Types
+// ============================================================================
+
+/// Data generation size preset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GenerateSize {
+    Small,
+    Medium,
+    Large,
+}
+
+/// Request to generate sample data.
+#[derive(Debug, Deserialize)]
+pub struct GenerateRequest {
+    pub size: GenerateSize,
+}
+
+/// Response after generating sample data.
+#[derive(Debug, Serialize)]
+pub struct GenerateResponse {
+    pub nodes: usize,
+    pub edges: usize,
+}
+
+// ============================================================================
 // File Browser Types
 // ============================================================================
 

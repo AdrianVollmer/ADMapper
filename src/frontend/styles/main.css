@@ -2255,3 +2255,75 @@ body[data-theme="light"] {
 [data-theme="light"] .list-view-count {
   @apply text-gray-600;
 }
+
+/* ============================================
+   Generate Data Modal
+   ============================================ */
+@layer components {
+  .generate-size-option {
+    @apply flex items-start gap-3 p-3 rounded-lg border-2 border-gray-600
+           bg-gray-800 cursor-pointer transition-all;
+  }
+
+  .generate-size-option:hover {
+    @apply border-gray-500;
+  }
+
+  .generate-size-option:has(input:checked) {
+    @apply border-blue-500 bg-blue-900/30;
+  }
+
+  .generate-size-option input[type="radio"] {
+    @apply mt-1 w-4 h-4 text-blue-500 bg-gray-700 border-gray-600
+           focus:ring-blue-500 focus:ring-offset-0;
+  }
+
+  .generate-size-content {
+    @apply flex-1;
+  }
+
+  .generate-size-header {
+    @apply flex items-center justify-between mb-1;
+  }
+
+  .generate-size-name {
+    @apply font-semibold text-gray-200;
+  }
+
+  .generate-size-nodes {
+    @apply text-xs text-gray-500;
+  }
+
+  .generate-size-desc {
+    @apply text-sm text-gray-400;
+  }
+}
+
+/* Light theme overrides for generate data */
+[data-theme="light"] .generate-size-option {
+  @apply border-gray-300 bg-gray-50;
+}
+
+[data-theme="light"] .generate-size-option:hover {
+  @apply border-gray-400;
+}
+
+[data-theme="light"] .generate-size-option:has(input:checked) {
+  @apply border-blue-500 bg-blue-50;
+}
+
+[data-theme="light"] .generate-size-option input[type="radio"] {
+  @apply bg-white border-gray-400;
+}
+
+[data-theme="light"] .generate-size-name {
+  @apply text-gray-900;
+}
+
+[data-theme="light"] .generate-size-nodes {
+  @apply text-gray-500;
+}
+
+[data-theme="light"] .generate-size-desc {
+  @apply text-gray-600;
+}

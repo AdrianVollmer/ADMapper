@@ -34,6 +34,7 @@ rayon = "=1.10.0"  # Pin to avoid graph_builder incompatibility with 1.11
 zip = "2"
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
 dashmap = "6"
 dirs = "6"
 parking_lot = "0.12"
