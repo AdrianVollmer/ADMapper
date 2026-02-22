@@ -16,9 +16,6 @@ build/
 dist/
 target/
 
-# Rust
-Cargo.lock
-
 # Cache
 .mypy_cache/
 __pycache__/
