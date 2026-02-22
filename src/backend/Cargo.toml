@@ -47,10 +47,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Desktop mode (optional)
 tauri = { version = "2", features = [], optional = true }
 tauri-plugin-shell = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
 
 [features]
 default = ["desktop", "crustdb", "neo4j", "falkordb"]
-desktop = ["tauri", "tauri-plugin-shell", "tauri-build"]
+desktop = ["tauri", "tauri-plugin-shell", "tauri-plugin-dialog", "tauri-build"]
 # KuzuDB backend - Cypher-based, file storage.
 kuzu = ["dep:kuzu"]
 # CozoDB backend - Datalog-based, uses sled storage.

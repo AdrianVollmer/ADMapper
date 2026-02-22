@@ -399,3 +399,27 @@ pub fn generate_data(
 pub fn health_check() -> JsonValue {
     serde_json::json!({"status": "ok"})
 }
+
+// ============================================================================
+// Import Commands
+// ============================================================================
+
+/// Import BloodHound data from file paths.
+/// Used with native file dialog selection.
+#[tauri::command]
+pub fn import_from_paths(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<core::ImportResponse, String> {
+    info!(file_count = paths.len(), "Importing from paths (IPC)");
+
+    let state_clone = state.inner().clone();
+    let job_id = core::import_from_paths(&state, paths, move |progress| {
+        state_clone.emit_import_progress(&progress.job_id, progress);
+    })?;
+
+    Ok(core::ImportResponse {
+        job_id,
+        status: "completed".to_string(),
+    })
+}

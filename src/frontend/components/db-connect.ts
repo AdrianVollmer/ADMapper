@@ -13,8 +13,22 @@ import { showNoConnectionPlaceholder, updateGraphForConnectionState } from "./gr
 import { saveConnection, getDisplayName } from "./connection-history";
 import { openDbManager } from "./db-manager";
 import { redactUrlCredentials } from "../utils/html";
-import { api } from "../api/client";
+import { api, isRunningInTauri } from "../api/client";
 import type { DatabaseStatusResponse, SupportedDatabaseInfo, DatabaseType } from "../api/types";
+
+// Tauri dialog plugin types
+declare global {
+  interface Window {
+    __TAURI_PLUGIN_DIALOG__?: {
+      open: (options: {
+        multiple?: boolean;
+        directory?: boolean;
+        filters?: Array<{ name: string; extensions: string[] }>;
+        title?: string;
+      }) => Promise<string | string[] | null>;
+    };
+  }
+}
 
 /** Cached list of supported database types */
 let supportedDatabases: SupportedDatabaseInfo[] = [];
@@ -277,20 +291,21 @@ interface BrowseResponse {
 
 /** Browse for database path using Tauri dialog or web file browser */
 async function browseForPath(): Promise<void> {
-  // Check if Tauri is available
-  if ("__TAURI__" in window) {
+  // In Tauri mode, use native file dialog via plugin
+  if (isRunningInTauri() && window.__TAURI_PLUGIN_DIALOG__) {
     try {
-      // @ts-expect-error Tauri global
-      const { open } = await window.__TAURI__.dialog;
-
-      // KuzuDB uses a directory, CozoDB uses a file
+      // KuzuDB uses a directory, CozoDB/CrustDB use a file
       const isDirectory = selectedDbType === "kuzu";
 
-      const selected = await open({
+      const options: Parameters<typeof window.__TAURI_PLUGIN_DIALOG__.open>[0] = {
         directory: isDirectory,
         multiple: false,
         title: isDirectory ? "Select Database Directory" : "Select Database File",
-      });
+      };
+      if (!isDirectory) {
+        options.filters = [{ name: "Database Files", extensions: ["db", "sqlite", "sqlite3"] }];
+      }
+      const selected = await window.__TAURI_PLUGIN_DIALOG__.open(options);
 
       if (selected && typeof selected === "string") {
         const pathInput = document.getElementById("db-path") as HTMLInputElement | null;
@@ -305,7 +320,7 @@ async function browseForPath(): Promise<void> {
     }
   }
 
-  // Use web-based file browser
+  // Use web-based file browser (HTTP mode)
   openFileBrowser();
 }
 

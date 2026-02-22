@@ -2,6 +2,7 @@
  * BloodHound Import Handler
  *
  * Handles file selection, upload, and progress tracking for BloodHound data import.
+ * In desktop mode, uses native file dialogs and IPC. In headless mode, uses HTTP upload.
  */
 
 import { loadGraphData } from "./graph-view";
@@ -10,6 +11,21 @@ import type { ImportProgress } from "../api/types";
 import { showError as showNotification } from "../utils/notifications";
 import { executeQuery } from "../utils/query";
 import { subscribeToImportProgress, type Unsubscribe } from "../api/events";
+import { isRunningInTauri } from "../api/client";
+
+// Tauri dialog types
+declare global {
+  interface Window {
+    __TAURI_PLUGIN_DIALOG__?: {
+      open: (options: {
+        multiple?: boolean;
+        directory?: boolean;
+        filters?: Array<{ name: string; extensions: string[] }>;
+        title?: string;
+      }) => Promise<string | string[] | null>;
+    };
+  }
+}
 
 // DOM element references
 let fileInput: HTMLInputElement | null = null;
@@ -55,8 +71,14 @@ export function initImport(): void {
 }
 
 /** Trigger the file picker dialog */
-export function triggerBloodHoundImport(): void {
-  // Fallback: try to find element if not initialized
+export async function triggerBloodHoundImport(): Promise<void> {
+  // In Tauri mode, use native file dialog
+  if (isRunningInTauri()) {
+    await triggerTauriImport();
+    return;
+  }
+
+  // In HTTP mode, use HTML file input
   if (!fileInput) {
     fileInput = document.querySelector<HTMLInputElement>("#bloodhound-file-input");
   }
@@ -72,6 +94,67 @@ export function triggerBloodHoundImport(): void {
     fileInput.addEventListener("change", handleFileSelect);
     document.body.appendChild(fileInput);
     fileInput.click();
+  }
+}
+
+/** Trigger import using Tauri native file dialog */
+async function triggerTauriImport(): Promise<void> {
+  try {
+    // Use Tauri's dialog plugin for native file selection
+    const result = await window.__TAURI_PLUGIN_DIALOG__?.open({
+      multiple: true,
+      filters: [{ name: "BloodHound Data", extensions: ["json", "zip"] }],
+      title: "Select BloodHound Files",
+    });
+
+    if (!result) return; // User cancelled
+
+    // Normalize to array
+    const paths = Array.isArray(result) ? result : [result];
+    if (paths.length === 0) return;
+
+    // Show modal and reset progress
+    showModal();
+    resetProgress();
+
+    // Subscribe to progress events
+    // The import_from_paths command will emit events as it progresses
+    const jobId = `tauri-${Date.now()}`;
+    unsubscribe = subscribeToImportProgress(
+      jobId,
+      (progress: ImportProgress) => {
+        updateProgressUI(progress);
+        if (progress.status === "completed") {
+          unsubscribe?.();
+          unsubscribe = null;
+          showCompleted();
+          loadDomainAdmins();
+        } else if (progress.status === "failed") {
+          unsubscribe?.();
+          unsubscribe = null;
+          showError(progress.error || "Import failed");
+        }
+      },
+      () => {
+        unsubscribe?.();
+        unsubscribe = null;
+      }
+    );
+
+    // Call Tauri command to import files
+    const response = await window.__TAURI__!.core.invoke<{ job_id: string; status: string }>("import_from_paths", {
+      paths,
+    });
+
+    // If import completed synchronously (small files), handle completion
+    if (response.status === "completed") {
+      unsubscribe?.();
+      unsubscribe = null;
+      showCompleted();
+      loadDomainAdmins();
+    }
+  } catch (err) {
+    showError(err instanceof Error ? err.message : String(err));
   }
 }
 

@@ -70,6 +70,7 @@ pub fn run_desktop(database_url: Option<&str>) {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .setup(|app| {
             // Store app handle in state for event emission
@@ -132,6 +133,8 @@ pub fn run_desktop(database_url: Option<&str>) {
             tauri_commands::generate_data,
             // Health
             tauri_commands::health_check,
+            // Import
+            tauri_commands::import_from_paths,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

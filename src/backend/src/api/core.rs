@@ -10,11 +10,15 @@
 use crate::api::types::GenerateSize;
 use crate::db::{DatabaseBackend, DbEdge, DbNode, QueryLanguage};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
+use crate::import::{BloodHoundImporter, ImportProgress};
 use crate::settings::{self, Settings};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::path::Path;
 use std::sync::Arc;
+use tokio::sync::broadcast;
+use tracing::{error, info, warn};
 
 // ============================================================================
 // Shared Types
@@ -825,4 +829,85 @@ pub fn generate_data(
         nodes: node_count,
         edges: edge_count,
     })
+}
+
+// ============================================================================
+// Import Functions
+// ============================================================================
+
+/// Import response for path-based import.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportResponse {
+    pub job_id: String,
+    pub status: String,
+}
+
+/// Import BloodHound data from file paths.
+/// This is used by the Tauri command for desktop imports where files are selected
+/// via native file dialog rather than uploaded via HTTP.
+pub fn import_from_paths(
+    state: &AppState,
+    paths: Vec<String>,
+    progress_callback: impl Fn(&ImportProgress) + Send + 'static,
+) -> Result<String, String> {
+    if paths.is_empty() {
+        return Err("No files selected".to_string());
+    }
+
+    let db = state.require_db().map_err(|e| e.to_string())?;
+    let job_id = uuid::Uuid::new_v4().to_string();
+
+    info!(job_id = %job_id, file_count = paths.len(), "Starting import from paths");
+
+    // Create a broadcast channel for progress (unused but required by importer)
+    let (tx, _) = broadcast::channel::<ImportProgress>(100);
+
+    let mut importer = BloodHoundImporter::new(db, tx);
+
+    for path_str in &paths {
+        let path = Path::new(path_str);
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        info!(filename = %filename, path = %path_str, "Importing file");
+
+        let result = if path_str.ends_with(".zip") {
+            match std::fs::File::open(path) {
+                Ok(file) => importer.import_zip(file, &job_id),
+                Err(e) => {
+                    error!(error = %e, path = %path_str, "Failed to open file");
+                    Err(format!("Failed to open file: {e}"))
+                }
+            }
+        } else if path_str.ends_with(".json") {
+            importer.import_json_file(path, &job_id)
+        } else {
+            warn!(filename = %filename, "Unsupported file type");
+            Err(format!("Unsupported file type: {filename}"))
+        };
+
+        match &result {
+            Ok(progress) => {
+                info!(
+                    filename = %filename,
+                    nodes = progress.nodes_imported,
+                    edges = progress.edges_imported,
+                    "File imported successfully"
+                );
+                progress_callback(progress);
+            }
+            Err(e) => {
+                error!(filename = %filename, error = %e, "Import failed");
+                // Create error progress and notify
+                let mut error_progress = ImportProgress::new(job_id.clone());
+                error_progress.fail(e.clone());
+                progress_callback(&error_progress);
+                return Err(e.clone());
+            }
+        }
+    }
+
+    Ok(job_id)
 }
