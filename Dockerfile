@@ -81,5 +81,5 @@ ENV RUST_LOG=info
 ENV ADMAPPER_HOST="0.0.0.0"
 ENV ADMAPPER_PORT=9191
 
-ENTRYPOINT ["admapper", "--headless", "--bind", "$ADMAPPER_HOST", "--port", "$ADMAPPER_PORT"]
+ENTRYPOINT ["sh", "-c", "admapper --headless --bind $ADMAPPER_HOST --port $ADMAPPER_PORT"]
 CMD []
