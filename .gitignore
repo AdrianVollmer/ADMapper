@@ -40,3 +40,11 @@ admapper.db
 e2e/golden/
 e2e/reports/
 test_data.zip
+
+# Generated icons (from src/backend/icons/icon.svg)
+src/backend/icons/*.png
+src/backend/icons/*.ico
+src/backend/icons/*.icns
+src/backend/icons/android/
+src/backend/icons/ios/
+src/backend/gen/
