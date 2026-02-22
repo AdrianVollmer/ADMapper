@@ -517,7 +517,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let real_das: Vec<(String, String)> = real_da_rows
             .iter()
             .filter_map(|r| {
-                let id = r.get(0)?.as_str()?.to_string();
+                let id = r.first()?.as_str()?.to_string();
                 let name = r.get(1).and_then(|v| v.as_str()).unwrap_or(&id).to_string();
                 Some((id, name))
             })
@@ -535,7 +535,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let effective_das: Vec<(String, String, usize)> = effective_da_rows
             .iter()
             .filter_map(|r| {
-                let id = r.get(0)?.as_str()?.to_string();
+                let id = r.first()?.as_str()?.to_string();
                 let name = r.get(1).and_then(|v| v.as_str()).unwrap_or(&id).to_string();
                 let hops = r.get(2).and_then(|v| v.as_i64()).unwrap_or(1) as usize;
                 Some((id, name, hops))
@@ -565,7 +565,7 @@ impl DatabaseBackend for FalkorDbDatabase {
             let (principal_id, reachable_count) = rows
                 .first()
                 .map(|r| {
-                    let id = r.get(0).and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let id = r.first().and_then(|v| v.as_str()).map(|s| s.to_string());
                     let cnt = r.get(1).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
                     (id, cnt)
                 })
@@ -592,7 +592,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let nodes: Vec<DbNode> = rows
             .iter()
             .filter_map(|r| r.first())
-            .filter_map(|v| Self::parse_node(v))
+            .filter_map(Self::parse_node)
             .collect();
 
         Ok(nodes)
@@ -606,7 +606,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let edges: Vec<DbEdge> = rows
             .iter()
             .filter_map(|r| {
-                let src = r.get(0)?.as_str()?.to_string();
+                let src = r.first()?.as_str()?.to_string();
                 let tgt = r.get(1)?.as_str()?.to_string();
                 let typ = r.get(2)?.as_str()?.to_string();
                 let props = r
@@ -646,7 +646,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let nodes: Vec<DbNode> = rows
             .iter()
             .filter_map(|r| r.first())
-            .filter_map(|v| Self::parse_node(v))
+            .filter_map(Self::parse_node)
             .collect();
 
         Ok(nodes)
@@ -674,7 +674,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let edges: Vec<DbEdge> = rows
             .iter()
             .filter_map(|r| {
-                let src = r.get(0)?.as_str()?.to_string();
+                let src = r.first()?.as_str()?.to_string();
                 let tgt = r.get(1)?.as_str()?.to_string();
                 let typ = r.get(2)?.as_str()?.to_string();
                 let props = r
@@ -734,7 +734,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let nodes: Vec<DbNode> = rows
             .iter()
             .filter_map(|r| r.first())
-            .filter_map(|v| Self::parse_node(v))
+            .filter_map(Self::parse_node)
             .collect();
 
         debug!(query = %search_query, found = nodes.len(), "Search complete");
@@ -881,7 +881,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let rows = self.execute_query(&cypher)?;
 
         if let Some(row) = rows.first() {
-            let incoming = row.get(0).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
+            let incoming = row.first().and_then(|v| v.as_i64()).unwrap_or(0) as usize;
             let outgoing = row.get(1).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
             let admin_to = row.get(2).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
             let member_of = row.get(3).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
@@ -1107,7 +1107,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let history: Vec<QueryHistoryRow> = rows
             .iter()
             .filter_map(|r| {
-                let id = r.get(0)?.as_str()?.to_string();
+                let id = r.first()?.as_str()?.to_string();
                 let name = r.get(1)?.as_str()?.to_string();
                 let query = r.get(2)?.as_str()?.to_string();
                 let timestamp = r.get(3)?.as_i64()?;

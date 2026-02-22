@@ -79,15 +79,15 @@ impl Neo4jDatabase {
         // Convert all properties to JSON
         let mut properties = Map::new();
         for key in node.keys() {
-            if let Ok(val) = node.get::<String>(&key) {
+            if let Ok(val) = node.get::<String>(key) {
                 properties.insert(key.to_string(), JsonValue::String(val));
-            } else if let Ok(val) = node.get::<i64>(&key) {
+            } else if let Ok(val) = node.get::<i64>(key) {
                 properties.insert(key.to_string(), JsonValue::Number(val.into()));
-            } else if let Ok(val) = node.get::<f64>(&key) {
+            } else if let Ok(val) = node.get::<f64>(key) {
                 if let Some(n) = serde_json::Number::from_f64(val) {
                     properties.insert(key.to_string(), JsonValue::Number(n));
                 }
-            } else if let Ok(val) = node.get::<bool>(&key) {
+            } else if let Ok(val) = node.get::<bool>(key) {
                 properties.insert(key.to_string(), JsonValue::Bool(val));
             }
         }
@@ -107,11 +107,11 @@ impl Neo4jDatabase {
         // Convert properties to JSON
         let mut properties = Map::new();
         for key in rel.keys() {
-            if let Ok(val) = rel.get::<String>(&key) {
+            if let Ok(val) = rel.get::<String>(key) {
                 properties.insert(key.to_string(), JsonValue::String(val));
-            } else if let Ok(val) = rel.get::<i64>(&key) {
+            } else if let Ok(val) = rel.get::<i64>(key) {
                 properties.insert(key.to_string(), JsonValue::Number(val.into()));
-            } else if let Ok(val) = rel.get::<bool>(&key) {
+            } else if let Ok(val) = rel.get::<bool>(key) {
                 properties.insert(key.to_string(), JsonValue::Bool(val));
             }
         }
