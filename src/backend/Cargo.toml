@@ -49,17 +49,17 @@ tauri = { version = "2", features = [], optional = true }
 tauri-plugin-shell = { version = "2", optional = true }
 
 [features]
-default = ["desktop", "kuzu"]
+default = ["desktop", "crustdb", "neo4j", "falkordb"]
 desktop = ["tauri", "tauri-plugin-shell", "tauri-build"]
-# KuzuDB backend (default) - Cypher-based, file storage.
+# KuzuDB backend - Cypher-based, file storage.
 kuzu = ["dep:kuzu"]
 # CozoDB backend - Datalog-based, uses sled storage.
 cozo = ["dep:cozo"]
-# CrustDB backend - Cypher-based, SQLite storage.
+# CrustDB backend (default) - Cypher-based, SQLite storage.
 crustdb = ["dep:crustdb"]
-# Neo4j backend - Cypher-based, network.
+# Neo4j backend (default) - Cypher-based, network.
 neo4j = ["dep:neo4rs"]
-# FalkorDB backend - Cypher-based, Redis-based network.
+# FalkorDB backend (default) - Cypher-based, Redis-based network.
 falkordb = ["dep:falkordb"]
 
 [dev-dependencies]
