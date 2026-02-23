@@ -60,17 +60,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd -m -s /bin/bash admapper
-
 # Copy built artifacts
 COPY --from=backend-builder /app/src/backend/target/release/admapper /usr/local/bin/
 COPY --from=frontend-builder /app/build /app/build
 
-# Set ownership of static files
-RUN chown -R admapper:admapper /app/build
-
-USER admapper
 WORKDIR /app
 
 # Expose default port
