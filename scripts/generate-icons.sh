@@ -56,9 +56,9 @@ generate_png() {
     if [ "$CONVERT_CMD" = "rsvg" ]; then
         rsvg-convert -w "$size" -h "$size" "$SVG_SOURCE" -o "$output"
     elif [ "$CONVERT_CMD" = "magick" ]; then
-        magick -background none -resize "${size}x${size}" "$SVG_SOURCE" "$output"
+        magick "$SVG_SOURCE" -background none -resize "${size}x${size}" "$output"
     else
-        convert -background none -resize "${size}x${size}" "$SVG_SOURCE" "$output"
+        convert "$SVG_SOURCE" -background none -resize "${size}x${size}" "$output"
     fi
 }
 
