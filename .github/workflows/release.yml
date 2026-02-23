@@ -91,6 +91,16 @@ jobs:
           asset_name: ADMapper_${{ needs.prepare.outputs.version }}_amd64.AppImage
           asset_content_type: application/x-executable
 
+      - name: Upload binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: src/backend/target/release/admapper
+          asset_name: admapper-linux-x86_64
+          asset_content_type: application/octet-stream
+
   build-windows:
     name: Build Windows
     needs: prepare
@@ -144,6 +154,16 @@ jobs:
           asset_name: ADMapper_${{ needs.prepare.outputs.version }}_x64-setup.exe
           asset_content_type: application/x-executable
 
+      - name: Upload binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: src/backend/target/release/admapper.exe
+          asset_name: admapper-windows-x86_64.exe
+          asset_content_type: application/octet-stream
+
   build-macos:
     name: Build macOS
     needs: prepare
@@ -187,3 +207,13 @@ jobs:
           asset_path: src/backend/target/universal-apple-darwin/release/bundle/dmg/ADMapper_${{ needs.prepare.outputs.version }}_universal.dmg
           asset_name: ADMapper_${{ needs.prepare.outputs.version }}_universal.dmg
           asset_content_type: application/x-apple-diskimage
+
+      - name: Upload binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: src/backend/target/universal-apple-darwin/release/admapper
+          asset_name: admapper-macos-universal
+          asset_content_type: application/octet-stream
