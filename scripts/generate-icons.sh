@@ -32,7 +32,11 @@ fi
 # Fallback: use rsvg-convert or ImageMagick
 if command -v rsvg-convert &> /dev/null; then
     CONVERT_CMD="rsvg"
-elif command -v convert &> /dev/null; then
+elif command -v magick &> /dev/null; then
+    # Windows ImageMagick uses 'magick' command
+    CONVERT_CMD="magick"
+elif command -v convert &> /dev/null && convert --version 2>&1 | grep -q ImageMagick; then
+    # Unix ImageMagick uses 'convert' command (verify it's not Windows convert.exe)
     CONVERT_CMD="imagemagick"
 else
     echo "Error: No icon generation tools found"
@@ -51,6 +55,8 @@ generate_png() {
 
     if [ "$CONVERT_CMD" = "rsvg" ]; then
         rsvg-convert -w "$size" -h "$size" "$SVG_SOURCE" -o "$output"
+    elif [ "$CONVERT_CMD" = "magick" ]; then
+        magick -background none -resize "${size}x${size}" "$SVG_SOURCE" "$output"
     else
         convert -background none -resize "${size}x${size}" "$SVG_SOURCE" "$output"
     fi
@@ -62,7 +68,10 @@ generate_png 128 "$ICONS_DIR/128x128.png"
 generate_png 256 "$ICONS_DIR/128x128@2x.png"
 
 # Generate ICO for Windows (multi-size)
-if command -v convert &> /dev/null; then
+if command -v magick &> /dev/null; then
+    echo "Generating icon.ico..."
+    magick "$ICONS_DIR/32x32.png" "$ICONS_DIR/128x128.png" "$ICONS_DIR/icon.ico"
+elif command -v convert &> /dev/null && convert --version 2>&1 | grep -q ImageMagick; then
     echo "Generating icon.ico..."
     convert "$ICONS_DIR/32x32.png" "$ICONS_DIR/128x128.png" "$ICONS_DIR/icon.ico"
 else
