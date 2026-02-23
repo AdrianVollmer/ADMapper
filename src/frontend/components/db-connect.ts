@@ -20,7 +20,7 @@ import type { DatabaseStatusResponse, SupportedDatabaseInfo, DatabaseType } from
 let supportedDatabases: SupportedDatabaseInfo[] = [];
 
 /** Current selected database type */
-let selectedDbType: DatabaseType = "kuzu";
+let selectedDbType: DatabaseType = "crustdb";
 
 /** Update the connection status indicator */
 export function updateConnectionStatus(): void {
@@ -511,8 +511,8 @@ export function openDbConnect(): void {
   const form = document.getElementById("db-connect-form") as HTMLFormElement | null;
   form?.reset();
 
-  // Reset to default type
-  selectedDbType = "kuzu";
+  // Reset to first supported type (or crustdb as fallback)
+  selectedDbType = supportedDatabases.length > 0 ? supportedDatabases[0]!.id : "crustdb";
   const tabs = modal.querySelectorAll(".db-type-tab");
   for (const tab of tabs) {
     tab.classList.toggle("active", tab.getAttribute("data-type") === selectedDbType);
