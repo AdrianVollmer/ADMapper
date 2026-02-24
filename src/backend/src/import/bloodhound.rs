@@ -43,6 +43,8 @@ pub struct BloodHoundImporter {
     seen_nodes: HashSet<String>,
     /// Buffer edges across all files, flush at end when all nodes exist
     edge_buffer: Vec<DbEdge>,
+    /// Buffer domain nodes from trust relationships (for orphaned domains)
+    trust_domain_buffer: Vec<DbNode>,
 }
 
 impl BloodHoundImporter {
@@ -55,6 +57,7 @@ impl BloodHoundImporter {
             progress_tx,
             seen_nodes: HashSet::new(),
             edge_buffer: Vec::new(),
+            trust_domain_buffer: Vec::new(),
         }
     }
 
@@ -274,7 +277,7 @@ impl BloodHoundImporter {
     }
 
     /// Extract edges from a BloodHound entity.
-    fn extract_edges(&self, data_type: &str, entity: &JsonValue) -> Vec<DbEdge> {
+    fn extract_edges(&mut self, data_type: &str, entity: &JsonValue) -> Vec<DbEdge> {
         let object_id = match entity.get("ObjectIdentifier").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
             None => return Vec::new(),
@@ -517,8 +520,13 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Extract domain trust edges.
-    fn extract_trust_edges(&self, entity: &JsonValue, object_id: &str, edges: &mut Vec<DbEdge>) {
+    /// Extract domain trust edges and collect target domain nodes.
+    fn extract_trust_edges(
+        &mut self,
+        entity: &JsonValue,
+        object_id: &str,
+        edges: &mut Vec<DbEdge>,
+    ) {
         let Some(trusts) = entity.get("Trusts").and_then(|v| v.as_array()) else {
             return;
         };
@@ -526,6 +534,22 @@ impl BloodHoundImporter {
             let Some(target_sid) = trust.get("TargetDomainSid").and_then(|v| v.as_str()) else {
                 continue;
             };
+
+            // Extract target domain name if available, create a placeholder node
+            if let Some(target_name) = trust.get("TargetDomainName").and_then(|v| v.as_str()) {
+                if !self.seen_nodes.contains(target_sid) {
+                    self.trust_domain_buffer.push(DbNode {
+                        id: target_sid.to_string(),
+                        name: target_name.to_string(),
+                        label: "Domain".to_string(),
+                        properties: serde_json::json!({
+                            "name": target_name,
+                            "domainsid": target_sid,
+                            "collected": false
+                        }),
+                    });
+                }
+            }
 
             // Parse TrustDirection - supports both integer (legacy) and string (BloodHound CE) formats
             // Integer: 0=Disabled, 1=Inbound, 2=Outbound, 3=Bidirectional
@@ -649,9 +673,47 @@ impl BloodHoundImporter {
         Ok(())
     }
 
+    /// Flush buffered domain nodes from trust relationships.
+    /// Called before flushing edges to ensure target domains exist.
+    fn flush_trust_domains(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
+        if self.trust_domain_buffer.is_empty() {
+            return Ok(());
+        }
+
+        // Filter out domains we've already seen
+        let new_domains: Vec<_> = self
+            .trust_domain_buffer
+            .drain(..)
+            .filter(|n| !self.seen_nodes.contains(&n.id))
+            .collect();
+
+        if new_domains.is_empty() {
+            return Ok(());
+        }
+
+        info!(count = new_domains.len(), "Inserting domain nodes from trust relationships");
+
+        for chunk in new_domains.chunks(BATCH_SIZE) {
+            let count = self.db.insert_nodes(chunk).map_err(|e| {
+                error!(error = %e, "Failed to insert trust domain nodes");
+                format!("Failed to insert trust domain nodes: {e}")
+            })?;
+            progress.nodes_imported += count;
+            for node in chunk {
+                self.seen_nodes.insert(node.id.clone());
+            }
+        }
+
+        self.send_progress(progress);
+        Ok(())
+    }
+
     /// Flush all buffered edges in batches.
     /// Called at the end of import after all nodes from all files are inserted.
     fn flush_edge_buffer(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
+        // First flush any domain nodes from trust relationships
+        self.flush_trust_domains(progress)?;
+
         if self.edge_buffer.is_empty() {
             return Ok(());
         }
