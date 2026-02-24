@@ -93,34 +93,47 @@ export function loadGraph(data: RawADGraph): ADGraphType {
 /** Assign curvature values to edges to spread out parallel edges */
 function assignEdgeCurvatures(graph: ADGraphType): void {
   // Group edges by their node pair (ignoring direction for grouping)
-  const edgeGroups = new Map<string, string[]>();
+  const edgeGroups = new Map<string, Array<{ key: string; source: string; target: string }>>();
 
   graph.forEachEdge((edgeKey, _attrs, source, target) => {
     // Create a canonical key for the node pair (smaller id first)
     const pairKey = source < target ? `${source}|${target}` : `${target}|${source}`;
     const group = edgeGroups.get(pairKey) ?? [];
-    group.push(edgeKey);
+    group.push({ key: edgeKey, source, target });
     edgeGroups.set(pairKey, group);
   });
 
   // Assign curvature to edges in groups with multiple edges
-  for (const edges of edgeGroups.values()) {
+  for (const [pairKey, edges] of edgeGroups.entries()) {
     if (edges.length === 1) {
       // Single edge: triangle (tapered)
-      graph.setEdgeAttribute(edges[0], "type", "triangle");
-      graph.setEdgeAttribute(edges[0], "curvature", 0);
+      const edge = edges[0]!;
+      graph.setEdgeAttribute(edge.key, "type", "triangle");
+      graph.setEdgeAttribute(edge.key, "curvature", 0);
     } else {
-      // Multiple edges: spread them with curvature, use thinner lines
-      const count = edges.length;
-      for (let i = 0; i < count; i++) {
-        // Spread curvatures symmetrically around 0
-        // e.g., for 2 edges: -0.3, 0.3
-        // e.g., for 3 edges: -0.3, 0, 0.3
-        const curvature = ((i - (count - 1) / 2) / count) * 0.6;
-        graph.setEdgeAttribute(edges[i], "type", "curvedArrow");
-        graph.setEdgeAttribute(edges[i], "curvature", curvature);
-        graph.setEdgeAttribute(edges[i], "size", 3); // Thinner than tapered edges but still visible
-      }
+      // Multiple edges: separate by direction and spread with curvature
+      const [canonicalSource] = pairKey.split("|");
+
+      // Separate edges by direction
+      const forward = edges.filter((e) => e.source === canonicalSource);
+      const backward = edges.filter((e) => e.source !== canonicalSource);
+
+      // Assign curvatures: both directions get POSITIVE curvature
+      // Since backward edges go the opposite direction, positive curvature
+      // on them will visually curve to the opposite side of forward edges
+      const assignCurvatures = (edgeList: typeof edges) => {
+        let i = 0;
+        for (const edge of edgeList) {
+          const curvature = 0.2 + i * 0.15;
+          graph.setEdgeAttribute(edge.key, "type", "curvedArrow");
+          graph.setEdgeAttribute(edge.key, "curvature", curvature);
+          graph.setEdgeAttribute(edge.key, "size", 3);
+          i++;
+        }
+      };
+
+      assignCurvatures(forward);
+      assignCurvatures(backward);
     }
   }
 }
