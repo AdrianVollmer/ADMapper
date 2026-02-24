@@ -505,10 +505,13 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     },
 
     resetCamera(animate = true) {
+      // Use ratio > 1 to zoom out slightly, creating padding around the graph
+      // ratio 1.15 = content fills ~87% of viewport, leaving ~6-7% padding on each side
+      const paddedRatio = 1.15;
       if (animate) {
-        sigma.getCamera().animatedReset({ duration: 300 });
+        sigma.getCamera().animate({ x: 0.5, y: 0.5, ratio: paddedRatio, angle: 0 }, { duration: 300 });
       } else {
-        sigma.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+        sigma.getCamera().setState({ x: 0.5, y: 0.5, ratio: paddedRatio, angle: 0 });
       }
     },
 

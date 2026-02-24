@@ -213,6 +213,9 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
     },
   });
 
+  // Fit graph with padding (no animation on initial load)
+  renderer.resetCamera(false);
+
   // Update stats display
   const stats = getGraphStats(graph);
   const statsEl = document.getElementById("graph-stats");

@@ -249,20 +249,15 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
   // Run dagre layout
   dagre.layout(g);
 
-  // Collect positions and detect number of levels (unique X or Y values depending on direction)
+  // Collect positions from dagre layout
   const positions: Array<{ nodeId: string; x: number; y: number }> = [];
-  const levelValues = new Set<number>();
 
   g.nodes().forEach((nodeId) => {
     const node = g.node(nodeId);
     if (node) {
       positions.push({ nodeId, x: node.x, y: node.y });
-      // Track unique level positions (X for LR, Y for TB)
-      levelValues.add(direction === "left-to-right" ? Math.round(node.x) : Math.round(node.y));
     }
   });
-
-  const numLevels = levelValues.size;
 
   // Calculate bounds
   let minX = Infinity;
@@ -277,26 +272,16 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
     maxY = Math.max(maxY, pos.y);
   }
 
-  // Scale factor for stretching - more aggressive for fewer levels
-  // For 2 levels, stretch more; for many levels, less stretching needed
-  let scaleX = 1;
-  let scaleY = 1;
+  // Normalize positions to fill a standard coordinate space with 20% padding on all sides
+  // Target: fit within [-800, 800] leaving 20% padding (so full range is [-1000, 1000])
+  const targetSize = 800; // 80% of 1000, leaving 20% padding
+  const currentWidth = maxX - minX || 1;
+  const currentHeight = maxY - minY || 1;
 
-  if (numLevels <= 3 && numLevels > 1) {
-    const currentWidth = maxX - minX || 1;
-    const currentHeight = maxY - minY || 1;
-
-    if (direction === "left-to-right") {
-      // Stretch horizontally to make it wider
-      // Target aspect ratio ~2:1 (width:height) for few levels
-      const targetWidth = Math.max(currentWidth, currentHeight * 2.5);
-      scaleX = targetWidth / currentWidth;
-    } else {
-      // Stretch vertically for top-to-bottom
-      const targetHeight = Math.max(currentHeight, currentWidth * 2.5);
-      scaleY = targetHeight / currentHeight;
-    }
-  }
+  // Scale uniformly to fit within the target bounds (preserve aspect ratio)
+  // But also ensure we USE the available space in both dimensions
+  const scaleX = (targetSize * 2) / currentWidth;
+  const scaleY = (targetSize * 2) / currentHeight;
 
   // Apply positions with scaling, centered around origin
   const centerX = (minX + maxX) / 2;
