@@ -781,6 +781,40 @@
     @apply px-6 py-4 border-t border-gray-700 flex justify-end gap-3;
   }
 
+  /* About Modal */
+  .about-modal-content {
+    @apply relative max-w-sm p-8 flex flex-col items-center text-center;
+  }
+
+  .about-modal-content .modal-close {
+    @apply absolute top-3 right-3;
+  }
+
+  .about-logo {
+    @apply w-24 h-24 mb-4;
+  }
+
+  .about-logo svg {
+    @apply w-full h-full;
+  }
+
+  .about-title {
+    @apply text-2xl font-bold text-white mb-2;
+  }
+
+  .about-version {
+    @apply text-sm text-gray-400 mb-4;
+  }
+
+  .about-link {
+    @apply flex items-center gap-2 text-sm text-indigo-400 hover:text-indigo-300
+           transition-colors;
+  }
+
+  .about-github-icon {
+    @apply w-5 h-5;
+  }
+
   /* File Browser */
   .file-browser-list {
     @apply max-h-80 overflow-y-auto border border-gray-700 rounded-md bg-gray-900;

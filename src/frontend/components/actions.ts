@@ -74,6 +74,7 @@ export const Actions = {
   // Modals
   SHOW_PLACEHOLDER_MODAL: "show-placeholder-modal",
   HIDE_PLACEHOLDER_MODAL: "hide-placeholder-modal",
+  HIDE_ABOUT_MODAL: "hide-about-modal",
 } as const;
 
 /** Static action type derived from the Actions const */
@@ -157,7 +158,20 @@ const actionHandlers: Record<StaticAction, () => void> = {
     // TODO: Update checker
   },
   about: () => {
-    // TODO: About dialog
+    const modal = document.getElementById("about-modal");
+    const versionEl = document.getElementById("about-version");
+    const appVersionEl = document.getElementById("app-version");
+    if (modal) {
+      // Copy version from header to about modal
+      if (versionEl && appVersionEl) {
+        versionEl.textContent = appVersionEl.textContent || "";
+      }
+      modal.hidden = false;
+    }
+  },
+  "hide-about-modal": () => {
+    const modal = document.getElementById("about-modal");
+    if (modal) modal.hidden = true;
   },
   // Modals
   "show-placeholder-modal": () => {
