@@ -308,7 +308,34 @@ impl DatabaseBackend for FalkorDbDatabase {
         // Delete all relationships first, then all nodes
         self.run_query("MATCH ()-[r]->() DELETE r")?;
         self.run_query("MATCH (n) DELETE n")?;
-        debug!("Database cleared");
+
+        // Create indexes on objectid for fast MERGE lookups during import
+        // BloodHound node types that need indexes
+        debug!("Creating objectid indexes for faster imports");
+        let labels = [
+            "User",
+            "Computer",
+            "Group",
+            "Domain",
+            "OU",
+            "GPO",
+            "Container",
+            "CertTemplate",
+            "EnterpriseCA",
+            "RootCA",
+            "AIACA",
+            "NTAuthStore",
+            "Base", // For placeholder nodes
+        ];
+
+        for label in labels {
+            // FalkorDB uses CREATE INDEX syntax
+            let index_query = format!("CREATE INDEX FOR (n:{}) ON (n.objectid)", label);
+            // Ignore errors (index may already exist)
+            let _ = self.run_query(&index_query);
+        }
+
+        debug!("Database cleared and indexes created");
         Ok(())
     }
 

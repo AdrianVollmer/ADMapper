@@ -262,7 +262,41 @@ impl DatabaseBackend for Neo4jDatabase {
         // Delete all relationships first, then all nodes
         self.run_query(query("MATCH ()-[r]->() DELETE r"))?;
         self.run_query(query("MATCH (n) DELETE n"))?;
-        debug!("Database cleared");
+
+        // Create indexes on objectid for fast MERGE lookups during import
+        // BloodHound node types that need indexes
+        debug!("Creating objectid indexes for faster imports");
+        let labels = [
+            "User",
+            "Computer",
+            "Group",
+            "Domain",
+            "OU",
+            "GPO",
+            "Container",
+            "CertTemplate",
+            "EnterpriseCA",
+            "RootCA",
+            "AIACA",
+            "NTAuthStore",
+            "Base", // For placeholder nodes
+        ];
+
+        for label in labels {
+            // Try modern syntax first (Neo4j 4.0+)
+            let modern_query = format!(
+                "CREATE INDEX idx_{}_objectid IF NOT EXISTS FOR (n:{}) ON (n.objectid)",
+                label.to_lowercase(),
+                label
+            );
+            if self.run_query(query(&modern_query)).is_err() {
+                // Fall back to legacy syntax
+                let legacy_query = format!("CREATE INDEX ON :{}(objectid)", label);
+                let _ = self.run_query(query(&legacy_query));
+            }
+        }
+
+        debug!("Database cleared and indexes created");
         Ok(())
     }
 
