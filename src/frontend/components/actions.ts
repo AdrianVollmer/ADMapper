@@ -70,11 +70,14 @@ async function checkForUpdates(): Promise<void> {
         window.open(release.html_url, "_blank");
       }
     } else if (comparison > 0) {
-      await showConfirm(`You're running a newer version (v${currentVersion}) than the latest release (v${latestVersion}).`, {
-        title: "Check for Updates",
-        confirmText: "OK",
-        danger: false,
-      });
+      await showConfirm(
+        `You're running a newer version (v${currentVersion}) than the latest release (v${latestVersion}).`,
+        {
+          title: "Check for Updates",
+          confirmText: "OK",
+          danger: false,
+        }
+      );
     } else {
       await showConfirm(`You're running the latest version (v${currentVersion}).`, {
         title: "Check for Updates",

@@ -31,9 +31,7 @@ enum RuntimeHandle {
 impl RuntimeHandle {
     fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
         match self {
-            RuntimeHandle::Handle(h) => {
-                tokio::task::block_in_place(|| h.block_on(future))
-            }
+            RuntimeHandle::Handle(h) => tokio::task::block_in_place(|| h.block_on(future)),
             RuntimeHandle::Owned(rt) => rt.block_on(future),
         }
     }

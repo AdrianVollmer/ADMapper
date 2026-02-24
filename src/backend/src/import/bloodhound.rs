@@ -691,7 +691,10 @@ impl BloodHoundImporter {
             return Ok(());
         }
 
-        info!(count = new_domains.len(), "Inserting domain nodes from trust relationships");
+        info!(
+            count = new_domains.len(),
+            "Inserting domain nodes from trust relationships"
+        );
 
         for chunk in new_domains.chunks(BATCH_SIZE) {
             let count = self.db.insert_nodes(chunk).map_err(|e| {

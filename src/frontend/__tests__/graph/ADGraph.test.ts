@@ -153,7 +153,7 @@ describe("edge curvatures", () => {
     expect(graph.getEdgeAttribute(edge, "type")).toBe("triangle");
   });
 
-  it("assigns opposite curvatures to bidirectional edges", () => {
+  it("assigns same curvatures to bidirectional edges (visually opposite)", () => {
     const data: RawADGraph = {
       nodes: [
         { id: "a", name: "A", type: "User" },
@@ -170,10 +170,10 @@ describe("edge curvatures", () => {
     expect(edges).toHaveLength(2);
 
     const curvatures = edges.map((e) => graph.getEdgeAttribute(e, "curvature"));
-    // Should have opposite curvatures
-    expect(curvatures[0]).not.toBe(curvatures[1]);
-    // Sum should be close to 0 (symmetric spread)
-    expect(curvatures[0]! + curvatures[1]!).toBeCloseTo(0, 5);
+    // Both edges get the same positive curvature (0.2)
+    // Since they go opposite directions, same curvature = visually opposite arcs
+    expect(curvatures[0]).toBe(0.2);
+    expect(curvatures[1]).toBe(0.2);
   });
 
   it("distributes curvatures evenly for multiple parallel edges", () => {
