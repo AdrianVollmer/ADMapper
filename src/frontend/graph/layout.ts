@@ -205,8 +205,19 @@ function applyForceLayout(graph: ADGraphType, options: LayoutOptions): void {
  *
  * Dagre is a JavaScript library for laying out directed graphs.
  * It handles layer assignment, edge crossing minimization, and coordinate assignment.
+ *
+ * Falls back to grid layout if there are no edges (single level).
+ * Scales the layout wider for graphs with few levels.
+ *
+ * @returns true if hierarchical was applied, false if fell back to grid
  */
-function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettings = {}): void {
+function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettings = {}): boolean {
+  // If no edges, fall back to grid layout (all nodes would be on same level)
+  if (graph.size === 0) {
+    applyGridLayout(graph);
+    return false;
+  }
+
   const settings = { ...DEFAULT_HIERARCHICAL_SETTINGS, ...options };
   const { layerSpacing, nodeSpacing, direction } = settings;
 
@@ -238,33 +249,67 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
   // Run dagre layout
   dagre.layout(g);
 
-  // Apply positions back to graphology graph
-  // Center the layout around origin
+  // Collect positions and detect number of levels (unique X or Y values depending on direction)
+  const positions: Array<{ nodeId: string; x: number; y: number }> = [];
+  const levelValues = new Set<number>();
+
+  g.nodes().forEach((nodeId) => {
+    const node = g.node(nodeId);
+    if (node) {
+      positions.push({ nodeId, x: node.x, y: node.y });
+      // Track unique level positions (X for LR, Y for TB)
+      levelValues.add(direction === "left-to-right" ? Math.round(node.x) : Math.round(node.y));
+    }
+  });
+
+  const numLevels = levelValues.size;
+
+  // Calculate bounds
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
 
-  g.nodes().forEach((nodeId) => {
-    const node = g.node(nodeId);
-    if (node) {
-      minX = Math.min(minX, node.x);
-      minY = Math.min(minY, node.y);
-      maxX = Math.max(maxX, node.x);
-      maxY = Math.max(maxY, node.y);
-    }
-  });
+  for (const pos of positions) {
+    minX = Math.min(minX, pos.x);
+    minY = Math.min(minY, pos.y);
+    maxX = Math.max(maxX, pos.x);
+    maxY = Math.max(maxY, pos.y);
+  }
 
+  // Scale factor for stretching - more aggressive for fewer levels
+  // For 2 levels, stretch more; for many levels, less stretching needed
+  let scaleX = 1;
+  let scaleY = 1;
+
+  if (numLevels <= 3 && numLevels > 1) {
+    const currentWidth = maxX - minX || 1;
+    const currentHeight = maxY - minY || 1;
+
+    if (direction === "left-to-right") {
+      // Stretch horizontally to make it wider
+      // Target aspect ratio ~2:1 (width:height) for few levels
+      const targetWidth = Math.max(currentWidth, currentHeight * 2.5);
+      scaleX = targetWidth / currentWidth;
+    } else {
+      // Stretch vertically for top-to-bottom
+      const targetHeight = Math.max(currentHeight, currentWidth * 2.5);
+      scaleY = targetHeight / currentHeight;
+    }
+  }
+
+  // Apply positions with scaling, centered around origin
   const centerX = (minX + maxX) / 2;
   const centerY = (minY + maxY) / 2;
 
-  g.nodes().forEach((nodeId) => {
-    const node = g.node(nodeId);
-    if (node && graph.hasNode(nodeId)) {
-      graph.setNodeAttribute(nodeId, "x", node.x - centerX);
-      graph.setNodeAttribute(nodeId, "y", node.y - centerY);
+  for (const pos of positions) {
+    if (graph.hasNode(pos.nodeId)) {
+      graph.setNodeAttribute(pos.nodeId, "x", (pos.x - centerX) * scaleX);
+      graph.setNodeAttribute(pos.nodeId, "y", (pos.y - centerY) * scaleY);
     }
-  });
+  }
+
+  return true;
 }
 
 /**
