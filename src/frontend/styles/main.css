@@ -97,7 +97,7 @@
   }
 
   .menu-submenu-dropdown {
-    @apply absolute left-full top-0 min-w-[180px] py-1 ml-0.5
+    @apply absolute left-full top-0 w-max min-w-[180px] py-1 ml-0.5
            bg-gray-800 border border-gray-600 rounded shadow-xl z-50
            hidden;
   }
