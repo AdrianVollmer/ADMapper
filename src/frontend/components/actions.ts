@@ -22,6 +22,102 @@ import { escapeHtml } from "../utils/html";
 import { openSettings, toggleTheme } from "./settings";
 import { openListView } from "./list-view";
 import { openGenerateData } from "./generate-data";
+import { showConfirm } from "../utils/notifications";
+
+const GITHUB_REPO = "AdrianVollmer/ADMapper";
+
+/** Check for updates by fetching latest release from GitHub */
+async function checkForUpdates(): Promise<void> {
+  try {
+    // Get current version from the header
+    const currentVersionEl = document.getElementById("app-version");
+    const currentVersion = currentVersionEl?.textContent?.replace(/^v/, "") || "0.0.0";
+
+    // Fetch latest release from GitHub API
+    const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+      headers: { Accept: "application/vnd.github.v3+json" },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        await showConfirm("No releases found. You're running a development version.", {
+          title: "Check for Updates",
+          confirmText: "OK",
+          danger: false,
+        });
+        return;
+      }
+      throw new Error(`GitHub API error: ${response.status}`);
+    }
+
+    const release = await response.json();
+    const latestVersion = release.tag_name?.replace(/^v/, "") || "0.0.0";
+
+    // Compare versions
+    const comparison = compareVersions(currentVersion, latestVersion);
+
+    if (comparison < 0) {
+      // New version available
+      const confirmed = await showConfirm(
+        `A new version is available!\n\nCurrent: v${currentVersion}\nLatest: v${latestVersion}\n\nWould you like to view the release?`,
+        {
+          title: "Update Available",
+          confirmText: "View Release",
+          danger: false,
+        }
+      );
+      if (confirmed) {
+        window.open(release.html_url, "_blank");
+      }
+    } else if (comparison > 0) {
+      await showConfirm(`You're running a newer version (v${currentVersion}) than the latest release (v${latestVersion}).`, {
+        title: "Check for Updates",
+        confirmText: "OK",
+        danger: false,
+      });
+    } else {
+      await showConfirm(`You're running the latest version (v${currentVersion}).`, {
+        title: "Check for Updates",
+        confirmText: "OK",
+        danger: false,
+      });
+    }
+  } catch (err) {
+    await showConfirm(`Failed to check for updates: ${err instanceof Error ? err.message : String(err)}`, {
+      title: "Error",
+      confirmText: "OK",
+      danger: false,
+    });
+  }
+}
+
+/** Compare semantic versions. Returns -1 if a < b, 0 if equal, 1 if a > b */
+function compareVersions(a: string, b: string): number {
+  const partsA = a.split(/[.-]/).map((p) => (isNaN(Number(p)) ? p : Number(p)));
+  const partsB = b.split(/[.-]/).map((p) => (isNaN(Number(p)) ? p : Number(p)));
+
+  const maxLen = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < maxLen; i++) {
+    const partA = partsA[i] ?? 0;
+    const partB = partsB[i] ?? 0;
+
+    // Numbers compare numerically, strings compare lexically
+    if (typeof partA === "number" && typeof partB === "number") {
+      if (partA < partB) return -1;
+      if (partA > partB) return 1;
+    } else {
+      // Pre-release tags (strings) come before release versions (numbers)
+      if (typeof partA === "string" && typeof partB === "number") return -1;
+      if (typeof partA === "number" && typeof partB === "string") return 1;
+      // Both strings: compare lexically
+      const strA = String(partA);
+      const strB = String(partB);
+      if (strA < strB) return -1;
+      if (strA > strB) return 1;
+    }
+  }
+  return 0;
+}
 
 /** Action name constants for type-safe dispatch */
 export const Actions = {
@@ -154,11 +250,9 @@ const actionHandlers: Record<StaticAction, () => void> = {
   },
   "list-view": () => openListView(),
   // Help menu
-  documentation: () => window.open("https://github.com/admapper/admapper", "_blank"),
+  documentation: () => window.open(`https://github.com/${GITHUB_REPO}`, "_blank"),
   "keyboard-shortcuts": () => showKeyboardShortcuts(),
-  "check-updates": () => {
-    // TODO: Update checker
-  },
+  "check-updates": () => checkForUpdates(),
   about: () => {
     const modal = document.getElementById("about-modal");
     const versionEl = document.getElementById("about-version");
