@@ -103,11 +103,14 @@ async function triggerTauriImport(): Promise<void> {
     showModal();
     resetProgress();
 
-    // Subscribe to progress events
-    // The import_from_paths command will emit events as it progresses
-    const jobId = `tauri-${Date.now()}`;
+    // Call Tauri command to import files - get job ID first
+    const response = await window.__TAURI__!.core.invoke<{ job_id: string; status: string }>("import_from_paths", {
+      paths,
+    });
+
+    // Subscribe to progress events using the real job ID
     unsubscribe = subscribeToImportProgress(
-      jobId,
+      response.job_id,
       (progress: ImportProgress) => {
         updateProgressUI(progress);
         if (progress.status === "completed") {
@@ -126,11 +129,6 @@ async function triggerTauriImport(): Promise<void> {
         unsubscribe = null;
       }
     );
-
-    // Call Tauri command to import files
-    const response = await window.__TAURI__!.core.invoke<{ job_id: string; status: string }>("import_from_paths", {
-      paths,
-    });
 
     // If import completed synchronously (small files), handle completion
     if (response.status === "completed") {
