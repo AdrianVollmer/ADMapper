@@ -132,27 +132,12 @@ async function saveToTauriStorage(connections: ConnectionEntry[]): Promise<void>
   });
 }
 
-/** Get a display name from a connection URL */
-export function getDisplayName(url: string, dbType: string): string {
+/** Get a display name from a connection URL (redacts credentials) */
+export function getDisplayName(url: string, _dbType: string): string {
   try {
-    // For file-based databases, show the file/directory name
-    if (url.startsWith("kuzu://") || url.startsWith("cozodb://")) {
-      const path = url.replace(/^(kuzu|cozodb):\/\//, "");
-      const parts = path.split("/");
-      const name = parts.pop() || parts.pop() || path;
-      return `${name} (${dbType})`;
-    }
-
-    // For network databases, show host:port
-    const match = url.match(/:\/\/(?:[^@]+@)?([^/:]+)(?::(\d+))?/);
-    if (match) {
-      const host = match[1] ?? "localhost";
-      const port = match[2];
-      return port ? `${host}:${port} (${dbType})` : `${host} (${dbType})`;
-    }
-
-    return `${dbType} database`;
+    // Redact credentials from network URLs (user:pass@host -> host)
+    return url.replace(/:\/\/[^@]+@/, "://");
   } catch {
-    return `${dbType} database`;
+    return url;
   }
 }
