@@ -87,13 +87,13 @@
   }
 
   .menu-submenu-trigger::after {
-    content: "▶";
-    @apply text-xs text-gray-500;
+    content: "›";
+    @apply text-base text-gray-500 font-light;
   }
 
   .menu-submenu:hover .menu-submenu-trigger::after,
   .menu-submenu-trigger:focus::after {
-    @apply text-blue-200;
+    @apply text-white;
   }
 
   .menu-submenu-dropdown {
