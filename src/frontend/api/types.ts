@@ -219,3 +219,17 @@ export interface Settings {
   defaultGraphLayout: GraphLayout;
   forceLayout?: ForceLayoutSettings;
 }
+
+// ============================================================================
+// Cache Types
+// ============================================================================
+
+/** Query cache statistics */
+export interface CacheStats {
+  /** Whether the connected database supports caching */
+  supported: boolean;
+  /** Number of cached entries (if supported) */
+  entry_count: number | null;
+  /** Total size of cached data in bytes (if supported) */
+  size_bytes: number | null;
+}

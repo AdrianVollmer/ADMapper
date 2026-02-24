@@ -10,7 +10,7 @@ import { getRenderer, setLayout, relayoutGraph, toggleLabelVisibility, cycleLayo
 import { triggerBloodHoundImport } from "./import";
 import { openQueryHistory, goBackInHistory } from "./query-history";
 import { showKeyboardShortcuts } from "./keyboard";
-import { openDbManager, clearDatabase, clearDisabledObjects } from "./db-manager";
+import { openDbManager, clearDatabase, clearDisabledObjects, clearCache } from "./db-manager";
 import { exportPNG, exportSVG, exportJSON } from "./export";
 import { openInsights } from "./insights";
 import { openAddNode, openAddEdge } from "./add-node-edge";
@@ -39,6 +39,7 @@ export const Actions = {
   ADD_EDGE: "add-edge",
   CLEAR_DISABLED: "clear-disabled",
   CLEAR_DB: "clear-db",
+  CLEAR_CACHE: "clear-cache",
   // View menu
   TOGGLE_THEME: "toggle-theme",
   TOGGLE_SIDEBARS: "toggle-sidebars",
@@ -107,6 +108,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "add-edge": () => openAddEdge(),
   "clear-disabled": () => clearDisabledObjects(),
   "clear-db": () => clearDatabase(),
+  "clear-cache": () => clearCache(),
   // View menu
   "toggle-theme": () => toggleTheme(),
   "toggle-sidebars": () => toggleSidebars(),

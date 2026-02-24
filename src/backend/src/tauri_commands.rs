@@ -449,6 +449,45 @@ pub fn clear_query_history(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 // ============================================================================
+// Cache Commands
+// ============================================================================
+
+/// Cache statistics.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CacheStats {
+    pub supported: bool,
+    pub entry_count: Option<usize>,
+    pub size_bytes: Option<usize>,
+}
+
+/// Get cache statistics.
+#[tauri::command]
+pub fn get_cache_stats(state: State<'_, AppState>) -> Result<CacheStats, String> {
+    let db = state.db().ok_or("Not connected to database")?;
+    let stats = db.get_cache_stats().map_err(|e| e.to_string())?;
+    match stats {
+        Some((entry_count, size_bytes)) => Ok(CacheStats {
+            supported: true,
+            entry_count: Some(entry_count),
+            size_bytes: Some(size_bytes),
+        }),
+        None => Ok(CacheStats {
+            supported: false,
+            entry_count: None,
+            size_bytes: None,
+        }),
+    }
+}
+
+/// Clear query cache.
+#[tauri::command]
+pub fn clear_cache(state: State<'_, AppState>) -> Result<bool, String> {
+    let db = state.db().ok_or("Not connected to database")?;
+    info!("Clearing query cache (IPC)");
+    db.clear_cache().map_err(|e| e.to_string())
+}
+
+// ============================================================================
 // Settings Commands
 // ============================================================================
 

@@ -1644,4 +1644,14 @@ impl DatabaseBackend for CrustDatabase {
     fn clear_query_history(&self) -> Result<()> {
         CrustDatabase::clear_query_history(self)
     }
+
+    fn get_cache_stats(&self) -> Result<Option<(usize, usize)>> {
+        let stats = self.db.cache_stats()?;
+        Ok(Some((stats.entry_count, stats.total_size_bytes)))
+    }
+
+    fn clear_cache(&self) -> Result<bool> {
+        self.db.clear_cache()?;
+        Ok(true)
+    }
 }

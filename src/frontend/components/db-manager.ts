@@ -235,3 +235,68 @@ export async function clearDisabledObjects(): Promise<void> {
     });
   }
 }
+
+/** Cache stats response from API */
+interface CacheStats {
+  supported: boolean;
+  entry_count: number | null;
+  size_bytes: number | null;
+}
+
+/** Format bytes as human-readable size */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/** Clear the query cache (CrustDB only) */
+export async function clearCache(): Promise<void> {
+  try {
+    // First get cache stats to show size
+    const stats = await api.get<CacheStats>("/api/cache/stats");
+
+    if (!stats.supported) {
+      await showConfirm("Query caching is only supported by CrustDB. The current database does not have a cache.", {
+        title: "Cache Not Supported",
+        confirmText: "OK",
+        danger: false,
+      });
+      return;
+    }
+
+    const entryCount = stats.entry_count ?? 0;
+    const sizeBytes = stats.size_bytes ?? 0;
+
+    if (entryCount === 0) {
+      await showConfirm("The query cache is already empty.", {
+        title: "Cache Empty",
+        confirmText: "OK",
+        danger: false,
+      });
+      return;
+    }
+
+    const sizeStr = formatBytes(sizeBytes);
+    const confirmed = await showConfirm(
+      `Clear ${entryCount} cached ${entryCount === 1 ? "query" : "queries"} (${sizeStr})?`,
+      { title: "Clear Query Cache", confirmText: "Clear Cache", danger: true }
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    await api.postNoContent("/api/cache/clear");
+    await showConfirm("Query cache cleared successfully.", {
+      title: "Cache Cleared",
+      confirmText: "OK",
+      danger: false,
+    });
+  } catch (err) {
+    await showConfirm(`Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`, {
+      title: "Error",
+      confirmText: "OK",
+      danger: false,
+    });
+  }
+}

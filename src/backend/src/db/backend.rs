@@ -369,4 +369,20 @@ pub trait DatabaseBackend: Send + Sync {
 
     /// Clear all query history.
     fn clear_query_history(&self) -> Result<()>;
+
+    // ========================================================================
+    // Query Cache (optional, CrustDB only)
+    // ========================================================================
+
+    /// Get cache statistics (entry count, size in bytes).
+    /// Returns None if this backend doesn't support caching.
+    fn get_cache_stats(&self) -> Result<Option<(usize, usize)>> {
+        Ok(None)
+    }
+
+    /// Clear the query cache.
+    /// Returns Ok(false) if this backend doesn't support caching.
+    fn clear_cache(&self) -> Result<bool> {
+        Ok(false)
+    }
 }

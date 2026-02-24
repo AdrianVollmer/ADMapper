@@ -124,6 +124,9 @@ pub fn run_desktop(database_url: Option<&str>) {
             tauri_commands::get_query_history,
             tauri_commands::delete_query_history,
             tauri_commands::clear_query_history,
+            // Cache
+            tauri_commands::get_cache_stats,
+            tauri_commands::clear_cache,
             // Settings
             tauri_commands::get_settings,
             tauri_commands::update_settings,
@@ -220,6 +223,9 @@ pub fn create_api_router(state: AppState) -> Router {
             "/api/query-history/clear",
             post(handlers::clear_query_history),
         )
+        // Cache
+        .route("/api/cache/stats", get(handlers::get_cache_stats))
+        .route("/api/cache/clear", post(handlers::clear_cache))
         // Settings
         .route("/api/settings", get(handlers::get_settings))
         .route("/api/settings", put(handlers::update_settings))
