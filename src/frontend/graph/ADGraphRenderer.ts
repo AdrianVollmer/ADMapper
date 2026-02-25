@@ -308,7 +308,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     minCameraRatio: 0.01,
     maxCameraRatio: 10,
     // Improved edge rendering
-    enableEdgeEvents: false, // Disable for performance, we don't need edge clicks
+    enableEdgeEvents: true, // Enable for edge click handling
     // Smooth camera transitions
     stagePadding: 30,
 
