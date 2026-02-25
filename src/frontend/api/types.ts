@@ -218,6 +218,8 @@ export interface Settings {
   theme: Theme;
   defaultGraphLayout: GraphLayout;
   forceLayout?: ForceLayoutSettings;
+  /** If true, nodes and edges stay same visual size regardless of zoom level */
+  fixedNodeSizes?: boolean;
 }
 
 // ============================================================================

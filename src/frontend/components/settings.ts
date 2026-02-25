@@ -28,7 +28,21 @@ let currentSettings: Settings = {
   theme: "dark",
   defaultGraphLayout: "force",
   forceLayout: DEFAULT_FORCE_LAYOUT,
+  fixedNodeSizes: true,
 };
+
+/** Callback for when fixedNodeSizes changes */
+let onFixedNodeSizesChange: ((fixed: boolean) => void) | null = null;
+
+/** Register a callback for fixedNodeSizes changes */
+export function setFixedNodeSizesCallback(callback: (fixed: boolean) => void): void {
+  onFixedNodeSizesChange = callback;
+}
+
+/** Get current fixedNodeSizes setting */
+export function getFixedNodeSizes(): boolean {
+  return currentSettings.fixedNodeSizes ?? true;
+}
 
 /** Initialize the settings modal */
 export function initSettings(): void {
@@ -260,6 +274,19 @@ function createModal(): void {
               </label>
             </div>
           </div>
+
+          <!-- Graph Display Settings -->
+          <div class="form-group">
+            <label class="form-label">Graph Display</label>
+            <p class="form-help">Visual appearance of the graph</p>
+            <div class="settings-slider-group">
+              <label class="settings-checkbox">
+                <input type="checkbox" name="fixedNodeSizes" id="fixed-node-sizes-checkbox" checked>
+                <span class="settings-checkbox-label">Fixed node and edge sizes</span>
+              </label>
+              <p class="settings-slider-help">When enabled, nodes and edges stay the same visual size regardless of zoom level</p>
+            </div>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
@@ -334,6 +361,12 @@ function populateForm(): void {
   if (adjustSizesCheckbox) {
     adjustSizesCheckbox.checked = forceLayout.adjustSizes;
   }
+
+  // Fixed node sizes
+  const fixedNodeSizesCheckbox = modalEl.querySelector("#fixed-node-sizes-checkbox") as HTMLInputElement | null;
+  if (fixedNodeSizesCheckbox) {
+    fixedNodeSizesCheckbox.checked = currentSettings.fixedNodeSizes ?? true;
+  }
 }
 
 /** Handle click events */
@@ -372,6 +405,7 @@ async function saveSettings(): Promise<void> {
   const gravitySlider = modalEl.querySelector("#gravity-slider") as HTMLInputElement | null;
   const spreadSlider = modalEl.querySelector("#spread-slider") as HTMLInputElement | null;
   const adjustSizesCheckbox = modalEl.querySelector("#adjust-sizes-checkbox") as HTMLInputElement | null;
+  const fixedNodeSizesCheckbox = modalEl.querySelector("#fixed-node-sizes-checkbox") as HTMLInputElement | null;
 
   const forceLayout: ForceLayoutSettings = {
     gravity: gravitySlider ? parseFloat(gravitySlider.value) : DEFAULT_FORCE_LAYOUT.gravity,
@@ -379,10 +413,13 @@ async function saveSettings(): Promise<void> {
     adjustSizes: adjustSizesCheckbox ? adjustSizesCheckbox.checked : DEFAULT_FORCE_LAYOUT.adjustSizes,
   };
 
+  const fixedNodeSizes = fixedNodeSizesCheckbox ? fixedNodeSizesCheckbox.checked : true;
+
   const newSettings: Settings = {
     theme: (themeRadio?.value as Theme) || "dark",
     defaultGraphLayout: (layoutRadio?.value as GraphLayout) || "force",
     forceLayout,
+    fixedNodeSizes,
   };
 
   try {
@@ -393,6 +430,11 @@ async function saveSettings(): Promise<void> {
 
     // Apply force layout settings immediately
     setUserForceSettings(currentSettings.forceLayout ?? null);
+
+    // Apply fixed node sizes setting
+    if (onFixedNodeSizesChange) {
+      onFixedNodeSizesChange(currentSettings.fixedNodeSizes ?? true);
+    }
 
     showSuccess("Settings saved");
     closeModal();

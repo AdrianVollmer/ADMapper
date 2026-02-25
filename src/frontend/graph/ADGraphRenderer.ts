@@ -26,6 +26,7 @@ import {
   getCollapsedEdgeInfo,
 } from "./collapse";
 import { getLabelParts } from "./label-visibility";
+import { getFixedNodeSizes, setFixedNodeSizesCallback } from "../components/settings";
 
 /**
  * Check if canvas blur filter is supported.
@@ -315,6 +316,8 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     enableEdgeEvents: true, // Enable for edge click handling
     // Smooth camera transitions
     stagePadding: 30,
+    // Node/edge size behavior: "screen" = fixed visual size, "positions" = scales with zoom
+    itemSizesReference: getFixedNodeSizes() ? "screen" : "positions",
 
     // Node reducer: bring hovered/selected/path nodes to front, hide collapsed children
     nodeReducer: (nodeId, data) => {
@@ -428,7 +431,9 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const imageProgram = nodePrograms.image as any;
+      // eslint-disable-next-line no-undef
       const textures = imageProgram.textures as WebGLTexture[] | undefined;
+      // eslint-disable-next-line no-undef
       const gl = imageProgram.normalProgram?.gl as WebGLRenderingContext | undefined;
 
       if (!gl || !textures || textures.length === 0) {
@@ -451,6 +456,12 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
   // Schedule texture filtering after first render
   requestAnimationFrame(applyTextureFiltering);
+
+  // Register callback for fixed node sizes setting changes
+  setFixedNodeSizesCallback((fixed: boolean) => {
+    sigma.setSetting("itemSizesReference", fixed ? "screen" : "positions");
+    sigma.refresh();
+  });
 
   // Handle WebGL context loss and restoration
   // Browsers may reclaim WebGL contexts under memory pressure or when too many exist
