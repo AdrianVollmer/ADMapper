@@ -1,8 +1,9 @@
 name: Release
 
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -11,19 +12,51 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  prepare:
-    name: Prepare
+  create-release:
+    name: Create Release
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.get_version.outputs.version }}
+      version: ${{ steps.version.outputs.version }}
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - name: Get version from tag
-        id: get_version
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          # Get commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            echo "Commits since $PREV_TAG:"
+            NOTES=$(git log --pretty=format:"- %s" $PREV_TAG..HEAD | head -50)
+          else
+            echo "Initial release"
+            NOTES="Initial release"
+          fi
+          # Write to file for multi-line support
+          echo "$NOTES" > release_notes.txt
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ADMapper v${{ steps.version.outputs.version }}
+          body_path: release_notes.txt
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux:
     name: Build Linux
-    needs: prepare
+    needs: create-release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -62,48 +95,36 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
       - name: Upload DEB
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/backend/target/release/bundle/deb/ADMapper_${{ needs.create-release.outputs.version }}_amd64.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/release/bundle/deb/ADMapper_${{ needs.prepare.outputs.version }}_amd64.deb
-          asset_name: ADMapper_${{ needs.prepare.outputs.version }}_amd64.deb
-          asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload RPM
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/backend/target/release/bundle/rpm/ADMapper-${{ needs.create-release.outputs.version }}-1.x86_64.rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/release/bundle/rpm/ADMapper-${{ needs.prepare.outputs.version }}-1.x86_64.rpm
-          asset_name: ADMapper-${{ needs.prepare.outputs.version }}-1.x86_64.rpm
-          asset_content_type: application/x-rpm
 
       - name: Upload AppImage
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/backend/target/release/bundle/appimage/ADMapper_${{ needs.create-release.outputs.version }}_amd64.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/release/bundle/appimage/ADMapper_${{ needs.prepare.outputs.version }}_amd64.AppImage
-          asset_name: ADMapper_${{ needs.prepare.outputs.version }}_amd64.AppImage
-          asset_content_type: application/x-executable
 
       - name: Upload binary
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/backend/target/release/admapper
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/release/admapper
-          asset_name: admapper-linux-x86_64
-          asset_content_type: application/octet-stream
 
   build-windows:
     name: Build Windows
-    needs: prepare
+    needs: create-release
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -135,38 +156,29 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
       - name: Upload MSI
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/backend/target/release/bundle/msi/ADMapper_${{ needs.create-release.outputs.version }}_x64_en-US.msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/release/bundle/msi/ADMapper_${{ needs.prepare.outputs.version }}_x64_en-US.msi
-          asset_name: ADMapper_${{ needs.prepare.outputs.version }}_x64.msi
-          asset_content_type: application/x-msi
 
       - name: Upload NSIS
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/backend/target/release/bundle/nsis/ADMapper_${{ needs.create-release.outputs.version }}_x64-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/release/bundle/nsis/ADMapper_${{ needs.prepare.outputs.version }}_x64-setup.exe
-          asset_name: ADMapper_${{ needs.prepare.outputs.version }}_x64-setup.exe
-          asset_content_type: application/x-executable
 
       - name: Upload binary
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/backend/target/release/admapper.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/release/admapper.exe
-          asset_name: admapper-windows-x86_64.exe
-          asset_content_type: application/octet-stream
 
   build-macos:
     name: Build macOS
-    needs: prepare
+    needs: create-release
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -199,21 +211,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
       - name: Upload DMG
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/backend/target/universal-apple-darwin/release/bundle/dmg/ADMapper_${{ needs.create-release.outputs.version }}_universal.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/universal-apple-darwin/release/bundle/dmg/ADMapper_${{ needs.prepare.outputs.version }}_universal.dmg
-          asset_name: ADMapper_${{ needs.prepare.outputs.version }}_universal.dmg
-          asset_content_type: application/x-apple-diskimage
 
       - name: Upload binary
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/backend/target/universal-apple-darwin/release/admapper
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: src/backend/target/universal-apple-darwin/release/admapper
-          asset_name: admapper-macos-universal
-          asset_content_type: application/octet-stream
