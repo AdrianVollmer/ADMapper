@@ -789,7 +789,6 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   }
 
   const typeColor = NODE_COLORS[attrs.nodeType] || "#6c757d";
-  const typeLower = attrs.nodeType.toLowerCase();
 
   // Build status indicators placeholder (fetched asynchronously from backend)
   const indicatorsHtml = `<span id="node-status-indicators" class="user-indicators">
@@ -908,7 +907,7 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   content.innerHTML = `
     <div class="detail-header">
       <div class="detail-header-top">
-        <span class="detail-node-type node-badge ${typeLower}" style="background-color: ${typeColor}">
+        <span class="detail-node-type node-badge" style="background-color: ${typeColor}">
           ${escapeHtml(attrs.nodeType)}
         </span>
         ${indicatorsHtml}
