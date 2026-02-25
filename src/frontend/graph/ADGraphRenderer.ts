@@ -261,7 +261,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
   // Create node image program for rendering icons with high-quality settings
   // "background" mode draws the node color as a circle behind the icon
-  const NodeImageProgram = createNodeImageProgram({
+  const BaseNodeImageProgram = createNodeImageProgram({
     size: { mode: "force", value: 512 }, // Higher resolution for crisp icons
     drawingMode: "background",
     colorAttribute: "color",
@@ -269,6 +269,9 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     padding: 0.12, // Slightly less padding for better icon visibility
     keepWithinCircle: true,
   });
+
+  // Use the base program directly - texture filtering will be applied after first render
+  const NodeImageProgram = BaseNodeImageProgram;
 
   // Create curved edge program with smooth arrows
   const CurvedArrowProgram = createEdgeCurveProgram({
@@ -413,6 +416,41 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     sigma.refresh();
   }
   window.addEventListener("themechange", handleThemeChange);
+
+  // Apply trilinear texture filtering to node icons for better antialiasing
+  // The @sigma/node-image package generates mipmaps but uses default (nearest) filtering
+  function applyTextureFiltering() {
+    try {
+      // Access the node programs to get the textures
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nodePrograms = (sigma as any).nodePrograms;
+      if (!nodePrograms?.image) return;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const imageProgram = nodePrograms.image as any;
+      const textures = imageProgram.textures as WebGLTexture[] | undefined;
+      const gl = imageProgram.normalProgram?.gl as WebGLRenderingContext | undefined;
+
+      if (!gl || !textures || textures.length === 0) {
+        // Textures not ready yet, try again later
+        requestAnimationFrame(applyTextureFiltering);
+        return;
+      }
+
+      // Apply trilinear filtering to all textures
+      for (let i = 0; i < textures.length; i++) {
+        gl.activeTexture(gl.TEXTURE0 + i);
+        gl.bindTexture(gl.TEXTURE_2D, textures[i]);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      }
+    } catch {
+      // Ignore errors - texture filtering is an enhancement, not critical
+    }
+  }
+
+  // Schedule texture filtering after first render
+  requestAnimationFrame(applyTextureFiltering);
 
   // Handle WebGL context loss and restoration
   // Browsers may reclaim WebGL contexts under memory pressure or when too many exist
