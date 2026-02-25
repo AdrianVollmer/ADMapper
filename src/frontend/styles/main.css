@@ -1527,13 +1527,11 @@
 }
 
 /* ============================================
-   Layout Spinner
+   Layout Spinner (inside status badge)
    ============================================ */
 @layer components {
   .layout-spinner {
-    @apply fixed bottom-5 left-5 z-50 flex items-center gap-3
-           px-4 py-3 bg-gray-800/95 border border-gray-600 rounded-lg shadow-xl
-           backdrop-blur-sm;
+    @apply flex items-center gap-2;
   }
 
   .layout-spinner[hidden] {
@@ -1541,11 +1539,7 @@
   }
 
   .layout-spinner-icon {
-    @apply w-16 h-6;
-  }
-
-  .layout-spinner-text {
-    @apply text-sm text-gray-300;
+    @apply h-4 w-auto;
   }
 }
 

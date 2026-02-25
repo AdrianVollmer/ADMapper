@@ -17,16 +17,20 @@ import { showConfirm } from "../utils/notifications";
 let renderer: ADGraphRenderer | null = null;
 let currentLayout: LayoutType = "force";
 
-/** Show the layout spinner */
+/** Show the layout spinner (hides stats) */
 function showLayoutSpinner(): void {
   const spinner = document.getElementById("layout-spinner");
+  const stats = document.getElementById("graph-stats");
   if (spinner) spinner.hidden = false;
+  if (stats) stats.hidden = true;
 }
 
-/** Hide the layout spinner */
+/** Hide the layout spinner (shows stats) */
 function hideLayoutSpinner(): void {
   const spinner = document.getElementById("layout-spinner");
+  const stats = document.getElementById("graph-stats");
   if (spinner) spinner.hidden = true;
+  if (stats) stats.hidden = false;
 }
 
 /** Apply layout asynchronously with spinner for heavy computations */
