@@ -245,11 +245,10 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "layout-hierarchical": () => setLayout("hierarchical"),
   "layout-grid": () => setLayout("grid"),
   "layout-circular": () => setLayout("circular"),
-  "cycle-layout": () => {
-    const layoutName = cycleLayout();
-    import("../utils/notifications").then(({ showInfo }) => {
-      showInfo(`Layout: ${layoutName}`);
-    });
+  "cycle-layout": async () => {
+    const layoutName = await cycleLayout();
+    const { showInfo } = await import("../utils/notifications");
+    showInfo(`Layout: ${layoutName}`);
   },
   "list-view": () => openListView(),
   // Help menu

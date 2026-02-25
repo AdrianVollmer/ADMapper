@@ -1526,6 +1526,29 @@
   }
 }
 
+/* ============================================
+   Layout Spinner
+   ============================================ */
+@layer components {
+  .layout-spinner {
+    @apply fixed bottom-5 left-5 z-50 flex items-center gap-3
+           px-4 py-3 bg-gray-800/95 border border-gray-600 rounded-lg shadow-xl
+           backdrop-blur-sm;
+  }
+
+  .layout-spinner[hidden] {
+    display: none;
+  }
+
+  .layout-spinner-icon {
+    @apply w-16 h-6;
+  }
+
+  .layout-spinner-text {
+    @apply text-sm text-gray-300;
+  }
+}
+
 @keyframes slideIn {
   from {
     transform: translateX(100%);

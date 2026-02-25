@@ -17,6 +17,40 @@ import { showConfirm } from "../utils/notifications";
 let renderer: ADGraphRenderer | null = null;
 let currentLayout: LayoutType = "force";
 
+/** Show the layout spinner */
+function showLayoutSpinner(): void {
+  const spinner = document.getElementById("layout-spinner");
+  if (spinner) spinner.hidden = false;
+}
+
+/** Hide the layout spinner */
+function hideLayoutSpinner(): void {
+  const spinner = document.getElementById("layout-spinner");
+  if (spinner) spinner.hidden = true;
+}
+
+/** Apply layout asynchronously with spinner for heavy computations */
+async function applyLayoutAsync(graph: ReturnType<typeof loadGraph>, layout: LayoutType): Promise<void> {
+  // For hierarchical layout on larger graphs, show spinner and yield to UI
+  const nodeCount = graph.order;
+  const isHeavy = layout === "hierarchical" && nodeCount > 50;
+
+  if (isHeavy) {
+    showLayoutSpinner();
+    // Yield to allow spinner to render
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  try {
+    // Run layout (blocking but we've shown spinner first)
+    applyLayout(graph, { type: layout });
+  } finally {
+    if (isHeavy) {
+      hideLayoutSpinner();
+    }
+  }
+}
+
 /** Initialize the graph view */
 export function initGraph(): void {
   // Set initial layout from user's default setting (only once at startup)
@@ -190,7 +224,7 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
 
   // Load and layout the graph (uses currentLayout which persists across loads)
   const graph = loadGraph(data);
-  applyLayout(graph, { type: currentLayout });
+  await applyLayoutAsync(graph, currentLayout);
 
   // Auto-collapse nodes with many children for large graphs
   autoCollapseGraph(graph);
@@ -231,19 +265,19 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
 }
 
 /** Set the layout type and re-layout */
-export function setLayout(layout: LayoutType): void {
+export async function setLayout(layout: LayoutType): Promise<void> {
   currentLayout = layout;
-  relayoutGraph();
+  await relayoutGraph();
   updateLayoutIndicator();
 }
 
 /** Cycle through available layouts and return the new layout name */
-export function cycleLayout(): string {
+export async function cycleLayout(): Promise<string> {
   const layouts: LayoutType[] = ["force", "hierarchical", "grid", "circular"];
   const currentIndex = layouts.indexOf(currentLayout);
   const nextIndex = (currentIndex + 1) % layouts.length;
   currentLayout = layouts[nextIndex]!;
-  relayoutGraph();
+  await relayoutGraph();
   updateLayoutIndicator();
   return currentLayout.charAt(0).toUpperCase() + currentLayout.slice(1);
 }
@@ -263,11 +297,11 @@ export function updateLayoutIndicator(): void {
 }
 
 /** Re-run layout algorithm with current layout type */
-export function relayoutGraph(): void {
+export async function relayoutGraph(): Promise<void> {
   if (!renderer) return;
 
   const graph = renderer.sigma.getGraph();
-  applyLayout(graph, { type: currentLayout });
+  await applyLayoutAsync(graph, currentLayout);
   renderer.refresh();
   renderer.resetCamera();
 }
