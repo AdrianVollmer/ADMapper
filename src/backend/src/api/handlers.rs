@@ -241,22 +241,20 @@ pub async fn import_bloodhound(
     tokio::task::spawn_blocking(move || {
         let mut importer = BloodHoundImporter::new(db, tx);
 
-        for (filename, temp_path) in &files {
-            info!(filename = %filename, path = %temp_path.display(), "Importing file");
-            let result = if filename.ends_with(".zip") {
-                // Open temp file for reading
-                match std::fs::File::open(temp_path) {
-                    Ok(file) => importer.import_zip(file, &job_id_clone),
-                    Err(e) => {
-                        error!(error = %e, path = %temp_path.display(), "Failed to open temp file");
-                        Err(format!("Failed to open temp file: {e}"))
-                    }
+        // Separate files by type
+        let (zip_files, json_files): (Vec<_>, Vec<_>) = files
+            .iter()
+            .partition(|(filename, _)| filename.ends_with(".zip"));
+
+        // Process ZIP files one at a time (they handle multiple files internally)
+        for (filename, temp_path) in &zip_files {
+            info!(filename = %filename, path = %temp_path.display(), "Importing ZIP file");
+            let result = match std::fs::File::open(temp_path) {
+                Ok(file) => importer.import_zip(file, &job_id_clone),
+                Err(e) => {
+                    error!(error = %e, path = %temp_path.display(), "Failed to open temp file");
+                    Err(format!("Failed to open temp file: {e}"))
                 }
-            } else if filename.ends_with(".json") {
-                importer.import_json_file(temp_path, &job_id_clone)
-            } else {
-                warn!(filename = %filename, "Unsupported file type");
-                Err(format!("Unsupported file type: {filename}"))
             };
 
             match &result {
@@ -265,16 +263,43 @@ pub async fn import_bloodhound(
                         filename = %filename,
                         nodes = progress.nodes_imported,
                         edges = progress.edges_imported,
-                        "File imported successfully"
+                        "ZIP imported successfully"
                     );
-                    // Write final_state immediately to avoid race with SSE subscribers
-                    // who might connect after broadcast but before loop finishes
                     *job_for_task.final_state.write() = Some(progress.clone());
-                    // Emit Tauri event for desktop mode
                     state_for_task.emit_import_progress(&job_id_for_events, progress);
                 }
                 Err(e) => {
-                    error!(filename = %filename, error = %e, "Import failed");
+                    error!(filename = %filename, error = %e, "ZIP import failed");
+                }
+            }
+        }
+
+        // Process all JSON files together with unified progress tracking
+        if !json_files.is_empty() {
+            // Filter to only .json files (skip unsupported types)
+            let valid_json_files: Vec<(String, &std::path::PathBuf)> = json_files
+                .iter()
+                .filter(|(filename, _)| filename.ends_with(".json"))
+                .map(|(filename, path)| (filename.clone(), path))
+                .collect();
+
+            if !valid_json_files.is_empty() {
+                info!(file_count = valid_json_files.len(), "Importing JSON files");
+                let result = importer.import_json_files(&valid_json_files, &job_id_clone);
+
+                match &result {
+                    Ok(progress) => {
+                        info!(
+                            nodes = progress.nodes_imported,
+                            edges = progress.edges_imported,
+                            "JSON files imported successfully"
+                        );
+                        *job_for_task.final_state.write() = Some(progress.clone());
+                        state_for_task.emit_import_progress(&job_id_for_events, progress);
+                    }
+                    Err(e) => {
+                        error!(error = %e, "JSON import failed");
+                    }
                 }
             }
         }

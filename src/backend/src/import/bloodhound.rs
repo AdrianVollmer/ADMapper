@@ -172,6 +172,64 @@ impl BloodHoundImporter {
         Ok(progress)
     }
 
+    /// Import from multiple JSON files with unified progress tracking.
+    pub fn import_json_files<P: AsRef<Path>>(
+        &mut self,
+        paths: &[(String, P)],
+        job_id: &str,
+    ) -> Result<ImportProgress, String> {
+        info!(file_count = paths.len(), "Importing multiple JSON files");
+
+        let mut progress = ImportProgress::new(job_id.to_string()).with_total_files(paths.len());
+        self.send_progress(&progress);
+
+        // Clear existing data for fresh import
+        info!("Clearing existing database data");
+        self.db.clear().map_err(|e| {
+            error!(error = %e, "Failed to clear database");
+            format!("Failed to clear database: {e}")
+        })?;
+
+        for (filename, path) in paths {
+            debug!(file = %filename, "Processing file");
+            progress.set_current_file(filename.clone());
+            self.send_progress(&progress);
+
+            let contents = std::fs::read_to_string(path).map_err(|e| {
+                error!(file = %filename, error = %e, "Failed to read file");
+                format!("Failed to read {filename}: {e}")
+            })?;
+
+            match self.import_json_str(&contents, &mut progress) {
+                Ok(_) => {
+                    info!(
+                        file = %filename,
+                        nodes = progress.nodes_imported,
+                        edges = progress.edges_imported,
+                        "File processed"
+                    );
+                    progress.files_processed += 1;
+                    self.send_progress(&progress);
+                }
+                Err(e) => {
+                    warn!(file = %filename, error = %e, "Error importing file, continuing");
+                    progress.files_processed += 1;
+                }
+            }
+        }
+
+        // Flush all buffered edges now that all nodes from all files exist
+        info!(
+            edge_count = self.edge_buffer.len(),
+            "Flushing all buffered edges"
+        );
+        self.flush_edge_buffer(&mut progress)?;
+
+        progress.complete();
+        self.send_progress(&progress);
+        Ok(progress)
+    }
+
     /// Import from JSON string.
     fn import_json_str(
         &mut self,

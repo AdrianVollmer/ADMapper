@@ -599,7 +599,7 @@ pub fn import_from_paths(
     // Run import in background thread
     std::thread::spawn(move || {
         use crate::import::BloodHoundImporter;
-        use std::path::Path;
+        use std::path::{Path, PathBuf};
         use tokio::sync::broadcast;
 
         let (tx, _) = broadcast::channel::<ImportProgress>(100);
@@ -608,7 +608,12 @@ pub fn import_from_paths(
         let mut total_nodes = 0usize;
         let mut total_edges = 0usize;
 
-        for (index, path_str) in paths.iter().enumerate() {
+        // Separate ZIP files and JSON files
+        let (zip_paths, json_paths): (Vec<_>, Vec<_>) =
+            paths.iter().partition(|p| p.ends_with(".zip"));
+
+        // Process ZIP files one at a time (they handle multiple files internally)
+        for path_str in &zip_paths {
             let path = Path::new(path_str);
             let filename = path
                 .file_name()
@@ -621,7 +626,7 @@ pub fn import_from_paths(
                 job_id: job_id_clone.clone(),
                 status: "running".to_string(),
                 total_files: paths.len(),
-                files_processed: index,
+                files_processed: 0,
                 current_file: Some(filename.clone()),
                 nodes_imported: total_nodes,
                 edges_imported: total_edges,
@@ -629,30 +634,24 @@ pub fn import_from_paths(
             };
             state_clone.emit_import_progress(&job_id_clone, &progress);
 
-            // Import the file
-            let result = if path_str.ends_with(".zip") {
-                match std::fs::File::open(path) {
-                    Ok(file) => importer.import_zip(file, &job_id_clone),
-                    Err(e) => Err(format!("Failed to open file: {e}")),
-                }
-            } else if path_str.ends_with(".json") {
-                importer.import_json_file(path, &job_id_clone)
-            } else {
-                Err(format!("Unsupported file type: {filename}"))
+            let result = match std::fs::File::open(path) {
+                Ok(file) => importer.import_zip(file, &job_id_clone),
+                Err(e) => Err(format!("Failed to open file: {e}")),
             };
 
             match result {
                 Ok(file_progress) => {
                     total_nodes = file_progress.nodes_imported;
                     total_edges = file_progress.edges_imported;
+                    // Emit progress from importer
+                    state_clone.emit_import_progress(&job_id_clone, &file_progress);
                 }
                 Err(e) => {
-                    // Emit error progress
                     let error_progress = ImportProgress {
                         job_id: job_id_clone.clone(),
                         status: "failed".to_string(),
                         total_files: paths.len(),
-                        files_processed: index,
+                        files_processed: 0,
                         current_file: Some(filename),
                         nodes_imported: total_nodes,
                         edges_imported: total_edges,
@@ -660,6 +659,50 @@ pub fn import_from_paths(
                     };
                     state_clone.emit_import_progress(&job_id_clone, &error_progress);
                     return;
+                }
+            }
+        }
+
+        // Process all JSON files together with unified progress tracking
+        if !json_paths.is_empty() {
+            let json_files: Vec<(String, PathBuf)> = json_paths
+                .iter()
+                .filter(|p| p.ends_with(".json"))
+                .map(|p| {
+                    let path = Path::new(p);
+                    let filename = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    (filename, PathBuf::from(p))
+                })
+                .collect();
+
+            if !json_files.is_empty() {
+                let result = importer.import_json_files(&json_files, &job_id_clone);
+
+                match result {
+                    Ok(file_progress) => {
+                        total_nodes = file_progress.nodes_imported;
+                        total_edges = file_progress.edges_imported;
+                        // The importer already emits progress, but we need to forward to Tauri
+                        state_clone.emit_import_progress(&job_id_clone, &file_progress);
+                    }
+                    Err(e) => {
+                        let error_progress = ImportProgress {
+                            job_id: job_id_clone.clone(),
+                            status: "failed".to_string(),
+                            total_files: json_files.len(),
+                            files_processed: 0,
+                            current_file: None,
+                            nodes_imported: total_nodes,
+                            edges_imported: total_edges,
+                            error: Some(e),
+                        };
+                        state_clone.emit_import_progress(&job_id_clone, &error_progress);
+                        return;
+                    }
                 }
             }
         }
