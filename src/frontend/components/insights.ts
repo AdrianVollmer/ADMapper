@@ -304,14 +304,14 @@ async function loadDAAnalysis(): Promise<void> {
   try {
     // Run both queries in parallel - return distinct users to get accurate count
     const [effectiveResult, realResult] = await Promise.all([
-      executeQuery(
-        `MATCH (u:User)-[r*1..10]->(g:Group) WHERE g.object_id ENDS WITH '-512' RETURN DISTINCT u`,
-        { extractGraph: false, background: true }
-      ),
-      executeQuery(
-        `MATCH (u:User)-[:MemberOf*1..10]->(g:Group) WHERE g.object_id ENDS WITH '-512' RETURN DISTINCT u`,
-        { extractGraph: false, background: true }
-      ),
+      executeQuery(`MATCH (u:User)-[r*1..10]->(g:Group) WHERE g.object_id ENDS WITH '-512' RETURN DISTINCT u`, {
+        extractGraph: false,
+        background: true,
+      }),
+      executeQuery(`MATCH (u:User)-[:MemberOf*1..10]->(g:Group) WHERE g.object_id ENDS WITH '-512' RETURN DISTINCT u`, {
+        extractGraph: false,
+        background: true,
+      }),
     ]);
 
     const effectiveCount = effectiveResult.resultCount;
@@ -396,14 +396,14 @@ async function loadStaleObjects(): Promise<void> {
 
     // Run both queries in parallel
     const [usersResult, computersResult] = await Promise.all([
-      executeQuery(
-        `MATCH (u:User) WHERE u.enabled = true AND u.lastlogon < ${threshold} RETURN u`,
-        { extractGraph: false, background: true }
-      ),
-      executeQuery(
-        `MATCH (c:Computer) WHERE c.enabled = true AND c.lastlogon < ${threshold} RETURN c`,
-        { extractGraph: false, background: true }
-      ),
+      executeQuery(`MATCH (u:User) WHERE u.enabled = true AND u.lastlogon < ${threshold} RETURN u`, {
+        extractGraph: false,
+        background: true,
+      }),
+      executeQuery(`MATCH (c:Computer) WHERE c.enabled = true AND c.lastlogon < ${threshold} RETURN c`, {
+        extractGraph: false,
+        background: true,
+      }),
     ]);
 
     staleState = {
