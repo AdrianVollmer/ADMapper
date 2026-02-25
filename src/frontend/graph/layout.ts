@@ -586,10 +586,94 @@ function computeSinkBasedLayers(graph: ADGraphType): Map<string, number> {
 }
 
 /**
+ * Apply hierarchical layout asynchronously using a Web Worker.
+ *
+ * Runs dagre in a separate thread to avoid blocking the UI.
+ */
+async function applyHierarchicalLayoutAsync(graph: ADGraphType, options: HierarchicalSettings = {}): Promise<boolean> {
+  // If no edges, fall back to grid layout (all nodes would be on same level)
+  if (graph.size === 0) {
+    applyGridLayout(graph);
+    return false;
+  }
+
+  const settings = { ...DEFAULT_HIERARCHICAL_SETTINGS, ...options };
+
+  // Extract node and edge data for the worker
+  const nodes: Array<{ id: string }> = [];
+  const edges: Array<{ source: string; target: string }> = [];
+
+  graph.forEachNode((nodeId) => {
+    nodes.push({ id: nodeId });
+  });
+
+  graph.forEachEdge((_, _attrs, source, target) => {
+    edges.push({ source, target });
+  });
+
+  // Create worker and run layout
+  const worker = new Worker(new URL("./layout-worker.ts", import.meta.url), { type: "module" });
+
+  const positions = await new Promise<Array<{ nodeId: string; x: number; y: number }>>((resolve, reject) => {
+    worker.onmessage = (event) => {
+      resolve(event.data.positions);
+      worker.terminate();
+    };
+    worker.onerror = (error) => {
+      reject(error);
+      worker.terminate();
+    };
+
+    worker.postMessage({
+      nodes,
+      edges,
+      settings: {
+        layerSpacing: settings.layerSpacing,
+        nodeSpacing: settings.nodeSpacing,
+        direction: settings.direction,
+      },
+    });
+  });
+
+  // Calculate bounds
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const pos of positions) {
+    minX = Math.min(minX, pos.x);
+    minY = Math.min(minY, pos.y);
+    maxX = Math.max(maxX, pos.x);
+    maxY = Math.max(maxY, pos.y);
+  }
+
+  // Normalize positions to fill a standard coordinate space with 20% padding on all sides
+  const targetSize = 800;
+  const currentWidth = maxX - minX || 1;
+  const currentHeight = maxY - minY || 1;
+
+  const scaleX = (targetSize * 2) / currentWidth;
+  const scaleY = (targetSize * 2) / currentHeight;
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+
+  for (const pos of positions) {
+    if (graph.hasNode(pos.nodeId)) {
+      graph.setNodeAttribute(pos.nodeId, "x", (pos.x - centerX) * scaleX);
+      graph.setNodeAttribute(pos.nodeId, "y", (pos.y - centerY) * scaleY);
+    }
+  }
+
+  return true;
+}
+
+/**
  * Apply layout with progress callback.
  *
- * Runs layout in chunks to allow UI updates.
- * Only applicable for force layout; other layouts are fast enough to run synchronously.
+ * Runs layout asynchronously to allow UI updates.
+ * Hierarchical uses a Web Worker; force layout runs in chunks.
  */
 export async function applyLayoutAsync(
   graph: ADGraphType,
@@ -601,12 +685,14 @@ export async function applyLayoutAsync(
 
   const layoutType = options.type ?? "force";
 
-  // Non-force layouts are fast, run synchronously
+  // Hierarchical layout runs in a Web Worker
   if (layoutType === "hierarchical") {
-    applyHierarchicalLayout(graph, options.hierarchical);
+    await applyHierarchicalLayoutAsync(graph, options.hierarchical);
     if (onProgress) onProgress(1);
     return;
   }
+
+  // Grid and circular are fast enough to run synchronously
   if (layoutType === "grid") {
     applyGridLayout(graph, options.grid);
     if (onProgress) onProgress(1);

@@ -57,6 +57,11 @@ export default [
         AbortSignal: "readonly",
         AbortController: "readonly",
         URLSearchParams: "readonly",
+        // Web Worker globals
+        Worker: "readonly",
+        MessageEvent: "readonly",
+        DedicatedWorkerGlobalScope: "readonly",
+        self: "readonly",
       },
     },
     plugins: {
