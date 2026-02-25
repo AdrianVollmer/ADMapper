@@ -1026,7 +1026,8 @@
   }
 
   .query-error {
-    @apply flex items-start gap-3 p-3 rounded-lg bg-red-900/30 border border-red-700/50 text-red-200;
+    @apply flex items-start gap-3 p-3 rounded-lg bg-red-900/30 border border-red-700/50 text-red-200
+           max-h-40 overflow-y-auto;
   }
 
   .error-icon {
@@ -1096,7 +1097,7 @@
 
   .detail-error {
     @apply p-3 bg-red-900/30 border border-red-700/50 rounded text-sm text-red-200 font-mono
-           overflow-x-auto whitespace-pre-wrap break-all;
+           overflow-x-auto overflow-y-auto whitespace-pre-wrap break-all max-h-40;
   }
 }
 
@@ -1179,7 +1180,7 @@
 
   .import-error {
     @apply p-3 bg-red-900/50 border border-red-700 rounded-md
-           text-sm text-red-200;
+           text-sm text-red-200 max-h-40 overflow-y-auto;
   }
 
   .import-error[hidden] {
@@ -1416,7 +1417,8 @@
   }
 
   .form-error {
-    @apply text-sm text-red-400 p-2 bg-red-900/20 border border-red-900/50 rounded;
+    @apply text-sm text-red-400 p-2 bg-red-900/20 border border-red-900/50 rounded
+           max-h-32 overflow-y-auto;
   }
 
   .search-input-wrapper {
