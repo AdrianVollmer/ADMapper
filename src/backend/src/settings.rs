@@ -57,6 +57,13 @@ pub struct Settings {
     /// Force layout settings
     #[serde(default)]
     pub force_layout: ForceLayoutSettings,
+    /// Whether nodes and edges stay same visual size regardless of zoom level
+    #[serde(default = "default_fixed_node_sizes")]
+    pub fixed_node_sizes: bool,
+}
+
+fn default_fixed_node_sizes() -> bool {
+    true
 }
 
 fn default_query_caching() -> bool {
@@ -70,6 +77,7 @@ impl Default for Settings {
             default_graph_layout: "force".to_string(),
             query_caching: true,
             force_layout: ForceLayoutSettings::default(),
+            fixed_node_sizes: true,
         }
     }
 }
@@ -134,6 +142,7 @@ mod tests {
         assert!((settings.force_layout.gravity - 0.5).abs() < f64::EPSILON);
         assert!((settings.force_layout.scaling_ratio - 10.0).abs() < f64::EPSILON);
         assert!(settings.force_layout.adjust_sizes);
+        assert!(settings.fixed_node_sizes);
     }
 
     #[test]
@@ -147,6 +156,7 @@ mod tests {
                 scaling_ratio: 20.0,
                 adjust_sizes: false,
             },
+            fixed_node_sizes: false,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -154,6 +164,7 @@ mod tests {
         assert!(json.contains("\"defaultGraphLayout\":\"hierarchical\""));
         assert!(json.contains("\"queryCaching\":false"));
         assert!(json.contains("\"forceLayout\""));
+        assert!(json.contains("\"fixedNodeSizes\":false"));
 
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.theme, "light");
@@ -162,14 +173,16 @@ mod tests {
         assert!((parsed.force_layout.gravity - 1.0).abs() < f64::EPSILON);
         assert!((parsed.force_layout.scaling_ratio - 20.0).abs() < f64::EPSILON);
         assert!(!parsed.force_layout.adjust_sizes);
+        assert!(!parsed.fixed_node_sizes);
     }
 
     #[test]
     fn test_settings_backwards_compatibility() {
-        // Old settings files without query_caching should still parse
+        // Old settings files without query_caching or fixedNodeSizes should still parse
         let json = r#"{"theme":"dark","defaultGraphLayout":"force"}"#;
         let parsed: Settings = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.theme, "dark");
         assert!(parsed.query_caching); // Default to true
+        assert!(parsed.fixed_node_sizes); // Default to true
     }
 }
