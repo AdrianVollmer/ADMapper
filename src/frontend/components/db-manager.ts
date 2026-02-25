@@ -18,6 +18,9 @@ interface DetailedStats {
   domains: number;
   ous: number;
   gpos: number;
+  database_size_bytes?: number;
+  cache_entries?: number;
+  cache_size_bytes?: number;
 }
 
 /** Modal element */
@@ -115,6 +118,30 @@ async function loadStats(): Promise<void> {
 
 /** Render stats in the modal */
 function renderStats(body: HTMLElement, footer: HTMLElement, stats: DetailedStats): void {
+  // Build storage section HTML (only for CrustDB)
+  let storageSection = "";
+  if (stats.database_size_bytes !== undefined) {
+    storageSection = `
+    <div class="db-stats-breakdown">
+      <h3 class="db-stats-section-title">Storage</h3>
+      <div class="db-stats-grid-small">
+        <div class="db-stat-item">
+          <span class="db-stat-item-value">${formatBytes(stats.database_size_bytes)}</span>
+          <span class="db-stat-item-label">Database Size</span>
+        </div>
+        <div class="db-stat-item">
+          <span class="db-stat-item-value">${stats.cache_entries?.toLocaleString() ?? 0}</span>
+          <span class="db-stat-item-label">Cached Queries</span>
+        </div>
+        <div class="db-stat-item">
+          <span class="db-stat-item-value">${formatBytes(stats.cache_size_bytes ?? 0)}</span>
+          <span class="db-stat-item-label">Cache Size</span>
+        </div>
+      </div>
+    </div>
+    `;
+  }
+
   body.innerHTML = `
     <div class="db-stats-grid">
       <div class="db-stat-card db-stat-primary">
@@ -156,6 +183,8 @@ function renderStats(body: HTMLElement, footer: HTMLElement, stats: DetailedStat
         </div>
       </div>
     </div>
+
+    ${storageSection}
   `;
 
   footer.innerHTML = `

@@ -274,6 +274,18 @@ impl Database {
         storage.stats()
     }
 
+    /// Get database file size in bytes.
+    ///
+    /// Returns the total size of the database file (page_count * page_size).
+    /// Returns 0 for in-memory databases.
+    pub fn database_size(&self) -> Result<usize> {
+        let storage = self
+            .write_conn
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.database_size()
+    }
+
     /// Clear all data from the database.
     /// This is much faster than using Cypher DELETE queries.
     pub fn clear(&self) -> Result<()> {

@@ -44,6 +44,15 @@ pub struct DetailedStats {
     pub domains: usize,
     pub ous: usize,
     pub gpos: usize,
+    /// Database file size in bytes (CrustDB only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database_size_bytes: Option<usize>,
+    /// Number of cached queries (CrustDB only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_entries: Option<usize>,
+    /// Total size of cached queries in bytes (CrustDB only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_size_bytes: Option<usize>,
 }
 
 /// Security insight for a well-known principal reachability.

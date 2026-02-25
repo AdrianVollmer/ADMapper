@@ -1394,6 +1394,17 @@ impl SqliteStorage {
         })
     }
 
+    /// Get database file size in bytes (page_count * page_size).
+    pub fn database_size(&self) -> Result<usize> {
+        let page_count: i64 = self
+            .conn
+            .query_row("PRAGMA page_count", [], |row| row.get(0))?;
+        let page_size: i64 = self
+            .conn
+            .query_row("PRAGMA page_size", [], |row| row.get(0))?;
+        Ok((page_count * page_size) as usize)
+    }
+
     /// Clear all data from the database (nodes, edges, labels, types).
     /// This is much faster than deleting via Cypher queries.
     pub fn clear(&self) -> Result<()> {

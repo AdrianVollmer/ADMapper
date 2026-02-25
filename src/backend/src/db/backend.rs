@@ -385,4 +385,10 @@ pub trait DatabaseBackend: Send + Sync {
     fn clear_cache(&self) -> Result<bool> {
         Ok(false)
     }
+
+    /// Get database file size in bytes.
+    /// Returns None if not applicable (e.g., remote databases).
+    fn get_database_size(&self) -> Result<Option<usize>> {
+        Ok(None)
+    }
 }

@@ -518,6 +518,9 @@ impl DatabaseBackend for FalkorDbDatabase {
             domains: type_counts.get("Domain").copied().unwrap_or(0),
             ous: type_counts.get("OU").copied().unwrap_or(0),
             gpos: type_counts.get("GPO").copied().unwrap_or(0),
+            database_size_bytes: None,
+            cache_entries: None,
+            cache_size_bytes: None,
         })
     }
 

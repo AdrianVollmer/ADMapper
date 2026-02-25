@@ -412,6 +412,16 @@ impl CrustDatabase {
             .get_label_counts()
             .map_err(|e| DbError::Database(e.to_string()))?;
 
+        // Get database size and cache stats
+        let database_size = self
+            .db
+            .database_size()
+            .map_err(|e| DbError::Database(e.to_string()))?;
+        let cache_stats = self
+            .db
+            .cache_stats()
+            .map_err(|e| DbError::Database(e.to_string()))?;
+
         Ok(DetailedStats {
             total_nodes: stats.node_count,
             total_edges: stats.edge_count,
@@ -421,6 +431,9 @@ impl CrustDatabase {
             domains: label_counts.get("Domain").copied().unwrap_or(0),
             ous: label_counts.get("OU").copied().unwrap_or(0),
             gpos: label_counts.get("GPO").copied().unwrap_or(0),
+            database_size_bytes: Some(database_size),
+            cache_entries: Some(cache_stats.entry_count),
+            cache_size_bytes: Some(cache_stats.total_size_bytes),
         })
     }
 
@@ -1653,5 +1666,10 @@ impl DatabaseBackend for CrustDatabase {
     fn clear_cache(&self) -> Result<bool> {
         self.db.clear_cache()?;
         Ok(true)
+    }
+
+    fn get_database_size(&self) -> Result<Option<usize>> {
+        let size = self.db.database_size()?;
+        Ok(Some(size))
     }
 }
