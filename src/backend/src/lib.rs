@@ -14,7 +14,9 @@ mod state;
 mod tauri_commands;
 
 use api::handlers;
-use axum::{routing::delete, routing::get, routing::post, routing::put, Router};
+use axum::{
+    extract::DefaultBodyLimit, routing::delete, routing::get, routing::post, routing::put, Router,
+};
 use std::net::SocketAddr;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -167,8 +169,11 @@ pub fn create_api_router(state: AppState) -> Router {
             "/api/database/disconnect",
             post(handlers::database_disconnect),
         )
-        // Import
-        .route("/api/import", post(handlers::import_bloodhound))
+        // Import (allow up to 500MB for large BloodHound exports)
+        .route(
+            "/api/import",
+            post(handlers::import_bloodhound).layer(DefaultBodyLimit::max(500 * 1024 * 1024)),
+        )
         .route(
             "/api/import/progress/:job_id",
             get(handlers::import_progress),
