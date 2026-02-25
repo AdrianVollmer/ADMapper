@@ -236,7 +236,7 @@ async function performSearch(
           return `
           <div class="search-result-item" data-node-id="${escapeHtml(r.id)}" data-node-label="${escapeHtml(r.name)}" data-node-type="${escapeHtml(r.type)}" data-context="${context}">
             <span class="node-type-icon" style="background-color: ${color}" title="${escapeHtml(r.type)}">
-              <svg viewBox="0 0 24 24" fill="#fff">${iconPath}</svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>
             </span>
             <span class="node-name">${escapeHtml(r.name)}</span>
           </div>

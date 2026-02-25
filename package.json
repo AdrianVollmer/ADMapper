@@ -28,6 +28,7 @@
     "graphology-layout-forceatlas2": "^0.10.1",
     "graphology-layout-noverlap": "^0.4.2",
     "graphology-types": "^0.24.7",
+    "lucide": "^0.575.0",
     "sigma": "^3.0.0"
   },
   "devDependencies": {
