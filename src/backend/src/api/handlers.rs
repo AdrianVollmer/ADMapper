@@ -169,7 +169,15 @@ pub async fn import_bloodhound(
 
     while let Some(mut field) = multipart.next_field().await.map_err(|e| {
         error!(error = %e, "Multipart read error");
-        ApiError::BadRequest(format!("Multipart error: {e}"))
+        let msg = format!("{e}");
+        let hint = if msg.contains("boundary") || msg.contains("content-type") {
+            "Ensure Content-Type header is 'multipart/form-data' with a valid boundary"
+        } else if msg.contains("size") || msg.contains("limit") || msg.contains("too large") {
+            "File size exceeds the upload limit (500MB)"
+        } else {
+            "Check that files are sent as multipart/form-data with field name 'files'"
+        };
+        ApiError::BadRequest(format!("Failed to parse upload: {e}. Hint: {hint}"))
     })? {
         let filename = field.file_name().unwrap_or("unknown").to_string();
 
@@ -197,7 +205,7 @@ pub async fn import_bloodhound(
         // Stream chunks to temp file
         while let Some(chunk) = field.chunk().await.map_err(|e| {
             error!(error = %e, filename = %filename, "Failed to read chunk");
-            ApiError::BadRequest(format!("Read error: {e}"))
+            ApiError::BadRequest(format!("Failed to read file '{}': {}", filename, e))
         })? {
             total_bytes += chunk.len();
             async_file.write_all(&chunk).await.map_err(|e| {
