@@ -413,6 +413,26 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   }
   window.addEventListener("themechange", handleThemeChange);
 
+  // Handle WebGL context loss and restoration
+  // Browsers may reclaim WebGL contexts under memory pressure or when too many exist
+  const webglCanvases = Object.values(sigma.getCanvases());
+
+  function handleContextLost(event: Event) {
+    // Prevent default to signal we want the context restored
+    event.preventDefault();
+    console.warn("WebGL context lost, waiting for restoration...");
+  }
+
+  function handleContextRestored() {
+    console.info("WebGL context restored, refreshing renderer...");
+    sigma.refresh();
+  }
+
+  for (const canvas of webglCanvases) {
+    canvas.addEventListener("webglcontextlost", handleContextLost);
+    canvas.addEventListener("webglcontextrestored", handleContextRestored);
+  }
+
   // Event handlers
   if (enableHover) {
     sigma.on("enterNode", (event) => {
@@ -520,6 +540,10 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
     destroy() {
       window.removeEventListener("themechange", handleThemeChange);
+      for (const canvas of webglCanvases) {
+        canvas.removeEventListener("webglcontextlost", handleContextLost);
+        canvas.removeEventListener("webglcontextrestored", handleContextRestored);
+      }
       sigma.kill();
     },
 
