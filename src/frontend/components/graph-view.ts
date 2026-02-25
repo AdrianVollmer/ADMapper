@@ -226,9 +226,11 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
   // Clear previous collapse state
   clearCollapseState();
 
-  // Load and layout the graph (uses currentLayout which persists across loads)
+  // Load and layout the graph
+  // Use lattice layout for graphs with no edges (e.g., stale objects) to avoid label collision
   const graph = loadGraph(data);
-  await applyLayoutAsync(graph, currentLayout);
+  const layoutToUse = edgeCount === 0 ? "lattice" : currentLayout;
+  await applyLayoutAsync(graph, layoutToUse);
 
   // Auto-collapse nodes with many children for large graphs
   autoCollapseGraph(graph);
@@ -277,7 +279,7 @@ export async function setLayout(layout: LayoutType): Promise<void> {
 
 /** Cycle through available layouts and return the new layout name */
 export async function cycleLayout(): Promise<string> {
-  const layouts: LayoutType[] = ["force", "hierarchical", "grid", "circular"];
+  const layouts: LayoutType[] = ["force", "hierarchical", "grid", "circular", "lattice"];
   const currentIndex = layouts.indexOf(currentLayout);
   const nextIndex = (currentIndex + 1) % layouts.length;
   currentLayout = layouts[nextIndex]!;
@@ -295,7 +297,8 @@ export function updateLayoutIndicator(): void {
       (action === "layout-force" && currentLayout === "force") ||
       (action === "layout-hierarchical" && currentLayout === "hierarchical") ||
       (action === "layout-grid" && currentLayout === "grid") ||
-      (action === "layout-circular" && currentLayout === "circular");
+      (action === "layout-circular" && currentLayout === "circular") ||
+      (action === "layout-lattice" && currentLayout === "lattice");
     el.setAttribute("data-checked", isActive ? "true" : "false");
   }
 }

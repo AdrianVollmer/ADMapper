@@ -14,7 +14,7 @@ import dagre from "dagre";
 import type { ADGraphType } from "./ADGraph";
 
 /** Available layout algorithms */
-export type LayoutType = "force" | "hierarchical" | "grid" | "circular";
+export type LayoutType = "force" | "hierarchical" | "grid" | "circular" | "lattice";
 
 export interface LayoutOptions {
   /** Layout algorithm to use */
@@ -29,6 +29,8 @@ export interface LayoutOptions {
   grid?: GridSettings;
   /** Settings for circular layout */
   circular?: CircularSettings;
+  /** Settings for lattice layout */
+  lattice?: LatticeSettings;
 }
 
 export interface HierarchicalSettings {
@@ -54,6 +56,13 @@ export interface CircularSettings {
   ringSpacing?: number;
   /** Minimum radius for first ring (when center is empty) */
   minRadius?: number;
+}
+
+export interface LatticeSettings {
+  /** Spacing between nodes (before rotation) */
+  spacing?: number;
+  /** Rotation angle in degrees (default: 26.57 - arctan(0.5) for optimal label separation) */
+  angleDegrees?: number;
 }
 
 export interface ForceAtlas2Settings {
@@ -126,6 +135,14 @@ const DEFAULT_CIRCULAR_SETTINGS: CircularSettings = {
   minRadius: 100,
 };
 
+const DEFAULT_LATTICE_SETTINGS: LatticeSettings = {
+  spacing: 180,
+  // arctan(0.5) ≈ 26.57° - creates a 2:1 aspect ratio tilt
+  // This angle ensures nodes don't align horizontally or vertically,
+  // giving labels maximum separation
+  angleDegrees: 26.57,
+};
+
 /** Default iterations based on graph size */
 function getDefaultIterations(nodeCount: number): number {
   // ForceAtlas2 needs many iterations to converge properly
@@ -157,6 +174,9 @@ export function applyLayout(graph: ADGraphType, options: LayoutOptions = {}): vo
       break;
     case "circular":
       applyCircularLayout(graph, options.circular);
+      break;
+    case "lattice":
+      applyLatticeLayout(graph, options.lattice);
       break;
     default:
       applyForceLayout(graph, options);
@@ -206,15 +226,15 @@ function applyForceLayout(graph: ADGraphType, options: LayoutOptions): void {
  * Dagre is a JavaScript library for laying out directed graphs.
  * It handles layer assignment, edge crossing minimization, and coordinate assignment.
  *
- * Falls back to grid layout if there are no edges (single level).
+ * Falls back to lattice layout if there are no edges (single level).
  * Scales the layout wider for graphs with few levels.
  *
  * @returns true if hierarchical was applied, false if fell back to grid
  */
 function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettings = {}): boolean {
-  // If no edges, fall back to grid layout (all nodes would be on same level)
+  // If no edges, fall back to lattice layout (all nodes would be on same level)
   if (graph.size === 0) {
-    applyGridLayout(graph);
+    applyLatticeLayout(graph);
     return false;
   }
 
@@ -333,6 +353,63 @@ function applyGridLayout(graph: ADGraphType, options: GridSettings = {}): void {
     const row = Math.floor(i / columns);
     graph.setNodeAttribute(nodes[i], "x", startX + col * columnSpacing!);
     graph.setNodeAttribute(nodes[i], "y", startY + row * rowSpacing!);
+  }
+}
+
+/**
+ * Apply lattice layout - a tilted grid that prevents horizontal label collision.
+ *
+ * Creates a grid pattern rotated by ~26.57° (arctan(0.5)), which ensures
+ * nodes don't align horizontally or vertically, giving labels maximum separation.
+ * This is ideal for displaying isolated nodes (e.g., stale objects query results).
+ */
+function applyLatticeLayout(graph: ADGraphType, options: LatticeSettings = {}): void {
+  const settings = { ...DEFAULT_LATTICE_SETTINGS, ...options };
+  const { spacing, angleDegrees } = settings;
+
+  // Get all nodes and sort for consistent ordering
+  const nodes: string[] = [];
+  graph.forEachNode((nodeId) => nodes.push(nodeId));
+  nodes.sort((a, b) => {
+    // Sort by type first, then by label
+    const typeA = graph.getNodeAttribute(a, "nodeType") || "";
+    const typeB = graph.getNodeAttribute(b, "nodeType") || "";
+    if (typeA !== typeB) return typeA.localeCompare(typeB);
+    const labelA = graph.getNodeAttribute(a, "label") || a;
+    const labelB = graph.getNodeAttribute(b, "label") || b;
+    return labelA.localeCompare(labelB);
+  });
+
+  // Compute grid dimensions
+  const columns = Math.ceil(Math.sqrt(nodes.length));
+  const rows = Math.ceil(nodes.length / columns);
+
+  // Create grid positions centered at origin
+  const gridWidth = (columns - 1) * spacing!;
+  const gridHeight = (rows - 1) * spacing!;
+  const startX = -gridWidth / 2;
+  const startY = -gridHeight / 2;
+
+  // Convert angle to radians
+  const angle = (angleDegrees! * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  // Assign positions with rotation
+  for (let i = 0; i < nodes.length; i++) {
+    const col = i % columns;
+    const row = Math.floor(i / columns);
+
+    // Original grid position
+    const x = startX + col * spacing!;
+    const y = startY + row * spacing!;
+
+    // Apply rotation around origin
+    const rotatedX = x * cos - y * sin;
+    const rotatedY = x * sin + y * cos;
+
+    graph.setNodeAttribute(nodes[i], "x", rotatedX);
+    graph.setNodeAttribute(nodes[i], "y", rotatedY);
   }
 }
 
@@ -591,9 +668,9 @@ function computeSinkBasedLayers(graph: ADGraphType): Map<string, number> {
  * Runs dagre in a separate thread to avoid blocking the UI.
  */
 async function applyHierarchicalLayoutAsync(graph: ADGraphType, options: HierarchicalSettings = {}): Promise<boolean> {
-  // If no edges, fall back to grid layout (all nodes would be on same level)
+  // If no edges, fall back to lattice layout (all nodes would be on same level)
   if (graph.size === 0) {
-    applyGridLayout(graph);
+    applyLatticeLayout(graph);
     return false;
   }
 
@@ -692,7 +769,7 @@ export async function applyLayoutAsync(
     return;
   }
 
-  // Grid and circular are fast enough to run synchronously
+  // Grid, circular, and lattice are fast enough to run synchronously
   if (layoutType === "grid") {
     applyGridLayout(graph, options.grid);
     if (onProgress) onProgress(1);
@@ -700,6 +777,11 @@ export async function applyLayoutAsync(
   }
   if (layoutType === "circular") {
     applyCircularLayout(graph, options.circular);
+    if (onProgress) onProgress(1);
+    return;
+  }
+  if (layoutType === "lattice") {
+    applyLatticeLayout(graph, options.lattice);
     if (onProgress) onProgress(1);
     return;
   }

@@ -6,7 +6,7 @@
  */
 
 import { api, ApiClientError } from "../api/client";
-import type { QueryStartResponse, QueryProgressEvent, GraphData } from "../api/types";
+import type { QueryStartResponse, QueryProgressEvent, GraphData, QueryResult } from "../api/types";
 import { subscribeToQueryProgress } from "../api/events";
 
 /** Callback for when a foreground query starts */
@@ -23,6 +23,8 @@ export interface QueryExecutionResult {
   resultCount: number;
   /** Extracted graph data (if extract_graph was true) */
   graph?: GraphData;
+  /** Raw query results (headers and rows) */
+  results?: QueryResult;
   /** Query ID */
   queryId: string;
 }
@@ -72,6 +74,9 @@ export async function executeQuery(query: string, options: QueryExecutionOptions
     if (startResponse.graph) {
       result.graph = startResponse.graph;
     }
+    if (startResponse.results) {
+      result.results = startResponse.results;
+    }
     return result;
   }
 
@@ -114,6 +119,9 @@ export async function executeQuery(query: string, options: QueryExecutionOptions
             };
             if (progressEvent.graph) {
               result.graph = progressEvent.graph;
+            }
+            if (progressEvent.results) {
+              result.results = progressEvent.results;
             }
             resolve(result);
             break;

@@ -204,7 +204,7 @@ export interface ApiError {
 export type Theme = "dark" | "light";
 
 /** Graph layout options */
-export type GraphLayout = "force" | "hierarchical" | "grid" | "circular";
+export type GraphLayout = "force" | "hierarchical" | "grid" | "circular" | "lattice";
 
 /** Force layout settings */
 export interface ForceLayoutSettings {

@@ -1381,6 +1381,60 @@
   .insight-value {
     @apply text-sm font-semibold text-gray-200;
   }
+
+  .insight-value.clickable {
+    @apply cursor-pointer hover:text-blue-400 transition-colors inline-flex items-center gap-1;
+  }
+
+  .insight-value.clickable::after {
+    content: "";
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6'/%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M10 14L21 3'/%3E%3C/svg%3E");
+    background-size: contain;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+  }
+
+  .insight-value.clickable:hover::after {
+    opacity: 1;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2360a5fa' stroke-width='2'%3E%3Cpath d='M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6'/%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M10 14L21 3'/%3E%3C/svg%3E");
+  }
+
+  .insight-card-value.clickable {
+    @apply cursor-pointer hover:text-blue-400 transition-colors;
+  }
+
+  .insight-card-value.clickable::after {
+    content: " \2197"; /* ↗ arrow */
+    @apply text-gray-500 text-lg;
+  }
+
+  .insight-card-value.clickable:hover::after {
+    @apply text-blue-400;
+  }
+
+  .insight-tab-content {
+    @apply min-h-[200px];
+  }
+
+  .insight-tab-content[hidden] {
+    display: none;
+  }
+
+  .insight-loading {
+    @apply flex items-center justify-center py-8 gap-3 text-gray-400;
+  }
+
+  .insight-error {
+    @apply text-red-400 p-4 text-center;
+  }
+
+  .stale-threshold-select {
+    @apply px-2 py-1 text-sm bg-gray-700 border border-gray-600 rounded
+           text-gray-200 focus:outline-none focus:border-blue-500;
+  }
 }
 
 /* ============================================
@@ -2089,6 +2143,30 @@ body[data-theme="light"] {
 
 [data-theme="light"] .insight-value {
   @apply text-gray-900;
+}
+
+[data-theme="light"] .insight-value.clickable {
+  @apply hover:text-blue-600;
+}
+
+[data-theme="light"] .insight-value.clickable::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2'%3E%3Cpath d='M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6'/%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M10 14L21 3'/%3E%3C/svg%3E");
+}
+
+[data-theme="light"] .insight-value.clickable:hover::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2'%3E%3Cpath d='M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6'/%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M10 14L21 3'/%3E%3C/svg%3E");
+}
+
+[data-theme="light"] .insight-card-value.clickable::after {
+  @apply text-gray-400;
+}
+
+[data-theme="light"] .insight-card-value.clickable:hover::after {
+  @apply text-blue-600;
+}
+
+[data-theme="light"] .stale-threshold-select {
+  @apply bg-gray-100 border-gray-300 text-gray-900;
 }
 
 /* Keyboard Shortcuts */

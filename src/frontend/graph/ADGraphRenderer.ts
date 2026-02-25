@@ -27,6 +27,25 @@ import {
 } from "./collapse";
 import { getLabelParts } from "./label-visibility";
 
+/**
+ * Check if canvas blur filter is supported.
+ * Some webviews (e.g., Tauri on certain platforms) don't support it properly.
+ */
+const isBlurFilterSupported = (() => {
+  try {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return false;
+
+    // Try to set a blur filter
+    ctx.filter = "blur(1px)";
+    // Check if it was actually set (unsupported browsers may ignore it or set it to "none")
+    return ctx.filter === "blur(1px)";
+  } catch {
+    return false;
+  }
+})();
+
 export interface RendererOptions {
   /** Container element or selector */
   container: HTMLElement | string;
@@ -162,10 +181,15 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       x += clearWidth;
     }
 
-    // Draw blurred part with blur filter
+    // Draw blurred part with blur filter (or opacity fallback)
     if (parts.blurred) {
       context.save();
-      context.filter = "blur(3px)";
+      if (isBlurFilterSupported) {
+        context.filter = "blur(3px)";
+      } else {
+        // Fallback: use reduced opacity for webviews that don't support blur
+        context.globalAlpha = 0.4;
+      }
       context.textAlign = "left";
       context.fillText(parts.blurred, x, y);
       context.restore();

@@ -628,6 +628,14 @@ function createModal(): HTMLElement {
   modal.querySelector("#db-connect-btn")?.addEventListener("click", connectToDatabase);
   modal.querySelector("#db-path-browse")?.addEventListener("click", browseForPath);
 
+  // Submit on Enter key
+  modal.querySelector("#db-connect-form")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      connectToDatabase();
+    }
+  });
+
   // Populate database type tabs based on supported types
   const tabsContainer = modal.querySelector("#db-type-tabs");
   if (tabsContainer) {

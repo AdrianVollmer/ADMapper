@@ -164,6 +164,7 @@ export const Actions = {
   LAYOUT_HIERARCHICAL: "layout-hierarchical",
   LAYOUT_GRID: "layout-grid",
   LAYOUT_CIRCULAR: "layout-circular",
+  LAYOUT_LATTICE: "layout-lattice",
   CYCLE_LAYOUT: "cycle-layout",
   LIST_VIEW: "list-view",
   // Help menu
@@ -245,6 +246,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "layout-hierarchical": () => setLayout("hierarchical"),
   "layout-grid": () => setLayout("grid"),
   "layout-circular": () => setLayout("circular"),
+  "layout-lattice": () => setLayout("lattice"),
   "cycle-layout": async () => {
     const layoutName = await cycleLayout();
     const { showInfo } = await import("../utils/notifications");

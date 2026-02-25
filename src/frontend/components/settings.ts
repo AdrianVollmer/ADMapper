@@ -211,6 +211,20 @@ function createModal(): void {
                   <span class="settings-option-label">Circular</span>
                 </span>
               </label>
+              <label class="settings-option">
+                <input type="radio" name="layout" value="lattice">
+                <span class="settings-option-content">
+                  <svg class="settings-option-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="6" cy="8" r="2"/>
+                    <circle cx="14" cy="5" r="2"/>
+                    <circle cx="10" cy="14" r="2"/>
+                    <circle cx="18" cy="11" r="2"/>
+                    <circle cx="6" cy="20" r="2"/>
+                    <circle cx="14" cy="17" r="2"/>
+                  </svg>
+                  <span class="settings-option-label">Lattice</span>
+                </span>
+              </label>
             </div>
           </div>
 
