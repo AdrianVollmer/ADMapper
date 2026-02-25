@@ -91,7 +91,7 @@ export const NODE_SIZES: Record<ADNodeType, number> = {
   Unknown: 6,
 };
 
-/** Default edge size (larger = more pronounced tapering on triangle edges) */
+/** Default edge size (controls arrow head size) */
 export const DEFAULT_EDGE_SIZE = 5;
 
 /** Default edge color (uniform for all edge types) */

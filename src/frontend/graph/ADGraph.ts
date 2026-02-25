@@ -47,7 +47,7 @@ function rawEdgeToAttributes(edge: RawADEdge): ADEdgeAttributes {
     label: edge.label ?? edge.type, // Use edge type as label if not provided
     color: DEFAULT_EDGE_COLOR,
     size: DEFAULT_EDGE_SIZE,
-    type: "triangle", // Default to triangle (tapered), will be updated for multi-edges
+    type: "tapered", // Use tapered for antialiased cone-shaped edges
   };
   return attrs;
 }
@@ -106,9 +106,9 @@ function assignEdgeCurvatures(graph: ADGraphType): void {
   // Assign curvature to edges in groups with multiple edges
   for (const [pairKey, edges] of edgeGroups.entries()) {
     if (edges.length === 1) {
-      // Single edge: triangle (tapered)
+      // Single edge: tapered edge with antialiasing
       const edge = edges[0]!;
-      graph.setEdgeAttribute(edge.key, "type", "triangle");
+      graph.setEdgeAttribute(edge.key, "type", "tapered");
       graph.setEdgeAttribute(edge.key, "curvature", 0);
     } else {
       // Multiple edges: separate by direction and spread with curvature

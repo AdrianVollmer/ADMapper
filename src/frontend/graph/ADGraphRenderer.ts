@@ -5,9 +5,9 @@
  */
 
 import Sigma from "sigma";
-import { EdgeTriangleProgram } from "sigma/rendering";
 import { createNodeImageProgram } from "@sigma/node-image";
 import { createEdgeCurveProgram } from "@sigma/edge-curve";
+import { TaperedEdgeProgram } from "./TaperedEdgeProgram";
 import type { ADGraphType } from "./ADGraph";
 import type { ADNodeAttributes, ADEdgeAttributes } from "./types";
 import {
@@ -298,10 +298,11 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     nodeProgramClasses: {
       image: NodeImageProgram,
     },
-    // Use curved arrows for better visual appearance
-    defaultEdgeType: "curvedArrow",
+    // Use tapered edges for better visual appearance (cone-shaped with antialiasing)
+    defaultEdgeType: "tapered",
     edgeProgramClasses: {
-      triangle: EdgeTriangleProgram,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tapered: TaperedEdgeProgram as any,
       curvedArrow: CurvedArrowProgram,
     },
     // Better performance settings

@@ -150,7 +150,7 @@ describe("edge curvatures", () => {
     const graph = loadGraph(data);
     const edge = graph.edges()[0];
     expect(graph.getEdgeAttribute(edge, "curvature")).toBe(0);
-    expect(graph.getEdgeAttribute(edge, "type")).toBe("triangle");
+    expect(graph.getEdgeAttribute(edge, "type")).toBe("tapered");
   });
 
   it("assigns same curvatures to bidirectional edges (visually opposite)", () => {
