@@ -4,7 +4,7 @@
  * Integrates the Sigma.js graph renderer with the application UI.
  */
 
-import { loadGraph, createRenderer, applyLayout, getGraphStats } from "../graph";
+import { loadGraph, createRenderer, applyLayoutAsync as applyLayoutFromModule, getGraphStats } from "../graph";
 import type { ADGraphRenderer, LayoutType } from "../graph";
 import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel, updateDetailPanelForEdge } from "./sidebars";
@@ -33,23 +33,23 @@ function hideLayoutSpinner(): void {
   if (stats) stats.hidden = false;
 }
 
-/** Apply layout asynchronously with spinner for heavy computations */
+/** Apply layout asynchronously with spinner */
 async function applyLayoutAsync(graph: ReturnType<typeof loadGraph>, layout: LayoutType): Promise<void> {
-  // For hierarchical layout on larger graphs, show spinner and yield to UI
   const nodeCount = graph.order;
-  const isHeavy = layout === "hierarchical" && nodeCount > 50;
+  // Show spinner for larger graphs or heavy layouts
+  const showSpinner = nodeCount > 50 || layout === "hierarchical";
 
-  if (isHeavy) {
+  if (showSpinner) {
     showLayoutSpinner();
-    // Yield to allow spinner to render
+    // Yield to allow spinner to render before starting
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 
   try {
-    // Run layout (blocking but we've shown spinner first)
-    applyLayout(graph, { type: layout });
+    // Use the async layout that yields to UI during computation
+    await applyLayoutFromModule(graph, { type: layout });
   } finally {
-    if (isHeavy) {
+    if (showSpinner) {
       hideLayoutSpinner();
     }
   }
