@@ -129,14 +129,6 @@ async function triggerTauriImport(): Promise<void> {
         unsubscribe = null;
       }
     );
-
-    // If import completed synchronously (small files), handle completion
-    if (response.status === "completed") {
-      unsubscribe?.();
-      unsubscribe = null;
-      showCompleted();
-      loadDomainAdmins();
-    }
   } catch (err) {
     showError(err instanceof Error ? err.message : String(err));
   }

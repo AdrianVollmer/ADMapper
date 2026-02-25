@@ -558,21 +558,130 @@ pub fn health_check() -> JsonValue {
 
 /// Import BloodHound data from file paths.
 /// Used with native file dialog selection.
+/// Returns immediately with job_id; progress is emitted via Tauri events.
 #[tauri::command]
 pub fn import_from_paths(
     state: State<'_, AppState>,
     paths: Vec<String>,
 ) -> Result<core::ImportResponse, String> {
-    info!(file_count = paths.len(), "Importing from paths (IPC)");
+    use crate::import::ImportProgress;
 
+    if paths.is_empty() {
+        return Err("No files selected".to_string());
+    }
+
+    info!(
+        file_count = paths.len(),
+        "Starting async import from paths (IPC)"
+    );
+
+    // Generate job ID and return immediately
+    let job_id = uuid::Uuid::new_v4().to_string();
+    let job_id_clone = job_id.clone();
+
+    // Clone state for background thread
     let state_clone = state.inner().clone();
-    let job_id = core::import_from_paths(&state, paths, move |progress| {
-        state_clone.emit_import_progress(&progress.job_id, progress);
-    })?;
+    let db = state.db().ok_or("Not connected to database")?.clone();
 
+    // Emit initial progress
+    let initial_progress = ImportProgress {
+        job_id: job_id.clone(),
+        status: "running".to_string(),
+        total_files: paths.len(),
+        files_processed: 0,
+        current_file: None,
+        nodes_imported: 0,
+        edges_imported: 0,
+        error: None,
+    };
+    state_clone.emit_import_progress(&job_id, &initial_progress);
+
+    // Run import in background thread
+    std::thread::spawn(move || {
+        use crate::import::BloodHoundImporter;
+        use std::path::Path;
+        use tokio::sync::broadcast;
+
+        let (tx, _) = broadcast::channel::<ImportProgress>(100);
+        let mut importer = BloodHoundImporter::new(db, tx);
+
+        let mut total_nodes = 0usize;
+        let mut total_edges = 0usize;
+
+        for (index, path_str) in paths.iter().enumerate() {
+            let path = Path::new(path_str);
+            let filename = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            // Emit progress for current file
+            let progress = ImportProgress {
+                job_id: job_id_clone.clone(),
+                status: "running".to_string(),
+                total_files: paths.len(),
+                files_processed: index,
+                current_file: Some(filename.clone()),
+                nodes_imported: total_nodes,
+                edges_imported: total_edges,
+                error: None,
+            };
+            state_clone.emit_import_progress(&job_id_clone, &progress);
+
+            // Import the file
+            let result = if path_str.ends_with(".zip") {
+                match std::fs::File::open(path) {
+                    Ok(file) => importer.import_zip(file, &job_id_clone),
+                    Err(e) => Err(format!("Failed to open file: {e}")),
+                }
+            } else if path_str.ends_with(".json") {
+                importer.import_json_file(path, &job_id_clone)
+            } else {
+                Err(format!("Unsupported file type: {filename}"))
+            };
+
+            match result {
+                Ok(file_progress) => {
+                    total_nodes = file_progress.nodes_imported;
+                    total_edges = file_progress.edges_imported;
+                }
+                Err(e) => {
+                    // Emit error progress
+                    let error_progress = ImportProgress {
+                        job_id: job_id_clone.clone(),
+                        status: "failed".to_string(),
+                        total_files: paths.len(),
+                        files_processed: index,
+                        current_file: Some(filename),
+                        nodes_imported: total_nodes,
+                        edges_imported: total_edges,
+                        error: Some(e),
+                    };
+                    state_clone.emit_import_progress(&job_id_clone, &error_progress);
+                    return;
+                }
+            }
+        }
+
+        // Emit completion
+        let final_progress = ImportProgress {
+            job_id: job_id_clone.clone(),
+            status: "completed".to_string(),
+            total_files: paths.len(),
+            files_processed: paths.len(),
+            current_file: None,
+            nodes_imported: total_nodes,
+            edges_imported: total_edges,
+            error: None,
+        };
+        state_clone.emit_import_progress(&job_id_clone, &final_progress);
+    });
+
+    // Return immediately with job_id - import runs in background
     Ok(core::ImportResponse {
         job_id,
-        status: "completed".to_string(),
+        status: "running".to_string(),
     })
 }
 
