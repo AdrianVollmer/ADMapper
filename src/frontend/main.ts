@@ -26,6 +26,7 @@ export interface AppState {
   navSidebarCollapsed: boolean;
   detailSidebarCollapsed: boolean;
   selectedNodeId: string | null;
+  selectedEdgeId: string | null;
   databaseConnected: boolean;
   databaseType: string | null;
 }
@@ -34,6 +35,7 @@ export const appState: AppState = {
   navSidebarCollapsed: false,
   detailSidebarCollapsed: false,
   selectedNodeId: null,
+  selectedEdgeId: null,
   databaseConnected: false,
   databaseType: null,
 };

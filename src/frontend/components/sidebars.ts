@@ -5,8 +5,8 @@
  */
 
 import { appState } from "../main";
-import type { ADNodeAttributes, ADNodeType } from "../graph/types";
-import { NODE_COLORS } from "../graph/theme";
+import type { ADNodeAttributes, ADNodeType, ADEdgeAttributes } from "../graph/types";
+import { NODE_COLORS, EDGE_COLORS } from "../graph/theme";
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import { setPathStart, setPathEnd } from "./search";
@@ -357,6 +357,8 @@ export function handleSidebarClicks(e: MouseEvent): boolean {
   if (button && !button.classList.contains("overflow-trigger")) {
     const action = button.getAttribute("data-action");
     const nodeId = button.getAttribute("data-node-id");
+    const edgeId = button.getAttribute("data-edge-id");
+
     if (action && nodeId) {
       // Close overflow menu if clicking an overflow item
       const dropdown = button.closest(".overflow-dropdown");
@@ -364,6 +366,15 @@ export function handleSidebarClicks(e: MouseEvent): boolean {
         dropdown.setAttribute("hidden", "");
       }
       handleDetailAction(action, nodeId);
+      return true;
+    }
+
+    if (action && edgeId) {
+      // Handle edge actions
+      const sourceId = button.getAttribute("data-source-id") || "";
+      const targetId = button.getAttribute("data-target-id") || "";
+      const edgeType = button.getAttribute("data-edge-type") || "";
+      handleEdgeAction(action, edgeId, sourceId, targetId, edgeType);
       return true;
     }
   }
@@ -436,6 +447,49 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
 
     default:
       console.log(`Unknown detail action: ${action}`);
+  }
+}
+
+/** Handle edge panel actions */
+async function handleEdgeAction(
+  action: string,
+  edgeId: string,
+  sourceId: string,
+  targetId: string,
+  edgeType: string
+): Promise<void> {
+  const renderer = getRenderer();
+  const graph = renderer?.sigma.getGraph();
+
+  switch (action) {
+    case "delete-edge": {
+      const confirmed = await showConfirm(`Delete edge "${edgeType}" from "${sourceId}" to "${targetId}"?`, {
+        title: "Delete Edge",
+        confirmText: "Delete",
+        danger: true,
+      });
+      if (confirmed) {
+        try {
+          // Delete from backend
+          await api.delete(
+            `/api/graph/edges/${encodeURIComponent(sourceId)}/${encodeURIComponent(targetId)}/${encodeURIComponent(edgeType)}`
+          );
+          // Remove from graph view
+          if (graph?.hasEdge(edgeId)) {
+            graph.dropEdge(edgeId);
+          }
+          // Clear detail panel
+          updateDetailPanel(null, null);
+        } catch (err) {
+          console.error("Failed to delete edge:", err);
+          showError("Failed to delete edge");
+        }
+      }
+      break;
+    }
+
+    default:
+      console.log(`Unknown edge action: ${action}`);
   }
 }
 
@@ -885,6 +939,93 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   if (needsFetch) {
     fetchNodeProperties(nodeId);
   }
+}
+
+/** Update the detail sidebar with edge information */
+export function updateDetailPanelForEdge(
+  edgeId: string,
+  attrs: ADEdgeAttributes,
+  sourceId: string,
+  targetId: string,
+  sourceLabel: string,
+  targetLabel: string
+): void {
+  const content = document.getElementById("detail-content");
+  if (!content) return;
+
+  // Clear any selected node state
+  appState.selectedNodeId = null;
+  appState.selectedEdgeId = edgeId;
+
+  const edgeType = attrs.edgeType || "Unknown";
+  const edgeColor = EDGE_COLORS[edgeType] || "#6c757d";
+
+  // Build properties list
+  let propsHtml = `
+    <div class="detail-prop">
+      <span class="detail-prop-label">Source</span>
+      <span class="detail-prop-value" data-value="${escapeHtml(sourceId)}" title="Click to copy">
+        ${escapeHtml(sourceLabel)}
+      </span>
+    </div>
+    <div class="detail-prop">
+      <span class="detail-prop-label">Target</span>
+      <span class="detail-prop-value" data-value="${escapeHtml(targetId)}" title="Click to copy">
+        ${escapeHtml(targetLabel)}
+      </span>
+    </div>
+  `;
+
+  // Add any additional edge attributes (excluding internal sigma attributes)
+  const excludeKeys = new Set(["label", "edgeType", "color", "size", "highlighted", "type", "curvature"]);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (!excludeKeys.has(key) && value !== undefined && value !== null) {
+      const formatted = typeof value === "boolean" ? (value ? "Yes" : "No") : String(value);
+      propsHtml += `
+        <div class="detail-prop">
+          <span class="detail-prop-label">${escapeHtml(getPrettyLabel(key))}</span>
+          <span class="detail-prop-value" data-value="${escapeHtml(String(value))}" title="Click to copy">
+            ${escapeHtml(formatted)}
+          </span>
+        </div>
+      `;
+    }
+  }
+
+  content.innerHTML = `
+    <div class="detail-header">
+      <div class="detail-header-top">
+        <span class="detail-node-type edge-badge" style="background-color: ${edgeColor}">
+          Edge
+        </span>
+      </div>
+      <h2 class="detail-node-name">${escapeHtml(edgeType)}</h2>
+      <div class="detail-actions">
+        <button
+          class="detail-action-btn danger"
+          data-action="delete-edge"
+          data-edge-id="${escapeHtml(edgeId)}"
+          data-source-id="${escapeHtml(sourceId)}"
+          data-target-id="${escapeHtml(targetId)}"
+          data-edge-type="${escapeHtml(edgeType)}"
+          title="Delete Edge"
+          aria-label="Delete Edge"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/>
+            <path d="M10 11v6M14 11v6"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <h3 class="detail-section-title">Properties</h3>
+      <div class="detail-props">
+        ${propsHtml}
+      </div>
+    </div>
+  `;
 }
 
 /** Node response from API (with full properties) */

@@ -38,6 +38,8 @@ export interface RendererOptions {
   enableHover?: boolean;
   /** Callback when a node is clicked */
   onNodeClick?: (nodeId: string, attrs: ADNodeAttributes) => void;
+  /** Callback when an edge is clicked */
+  onEdgeClick?: (edgeId: string, attrs: ADEdgeAttributes, source: string, target: string) => void;
   /** Callback when the background is clicked */
   onBackgroundClick?: () => void;
   /** Callback when a node is hovered */
@@ -79,6 +81,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     theme = "dark",
     enableHover = true,
     onNodeClick,
+    onEdgeClick,
     onBackgroundClick,
     onNodeHover,
     onNodeDoubleClick,
@@ -413,6 +416,15 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     if (onNodeClick) {
       const attrs = graph.getNodeAttributes(event.node) as ADNodeAttributes;
       onNodeClick(event.node, attrs);
+    }
+  });
+
+  sigma.on("clickEdge", (event) => {
+    if (onEdgeClick) {
+      const attrs = graph.getEdgeAttributes(event.edge) as ADEdgeAttributes;
+      const source = graph.source(event.edge);
+      const target = graph.target(event.edge);
+      onEdgeClick(event.edge, attrs, source, target);
     }
   });
 

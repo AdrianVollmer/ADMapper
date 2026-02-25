@@ -7,7 +7,7 @@
 import { loadGraph, createRenderer, applyLayout, getGraphStats } from "../graph";
 import type { ADGraphRenderer, LayoutType } from "../graph";
 import type { RawADGraph } from "../graph/types";
-import { updateDetailPanel } from "./sidebars";
+import { updateDetailPanel, updateDetailPanelForEdge } from "./sidebars";
 import { autoCollapseGraph, clearCollapseState } from "../graph/collapse";
 import { dispatchAction, type Action } from "./actions";
 import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-visibility";
@@ -203,6 +203,12 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
     onNodeClick: (nodeId, attrs) => {
       updateDetailPanel(nodeId, attrs);
       renderer?.selectNode(nodeId);
+    },
+    onEdgeClick: (edgeId, attrs, source, target) => {
+      const sourceLabel = graph.getNodeAttribute(source, "label") || source;
+      const targetLabel = graph.getNodeAttribute(target, "label") || target;
+      updateDetailPanelForEdge(edgeId, attrs, source, target, sourceLabel, targetLabel);
+      renderer?.clearSelection();
     },
     onBackgroundClick: () => {
       updateDetailPanel(null, null);

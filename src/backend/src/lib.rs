@@ -14,7 +14,7 @@ mod state;
 mod tauri_commands;
 
 use api::handlers;
-use axum::{routing::get, routing::post, routing::put, Router};
+use axum::{routing::delete, routing::get, routing::post, routing::put, Router};
 use std::net::SocketAddr;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -205,6 +205,11 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/node-types", get(handlers::graph_node_types))
         .route("/api/graph/node", post(handlers::add_node))
         .route("/api/graph/edge", post(handlers::add_edge))
+        .route("/api/graph/nodes/:id", delete(handlers::delete_node))
+        .route(
+            "/api/graph/edges/:source/:target/:edge_type",
+            delete(handlers::delete_edge),
+        )
         .route("/api/graph/insights", get(handlers::graph_insights))
         .route("/api/graph/generate", post(handlers::generate_data))
         .route("/api/graph/query", post(handlers::graph_query))
