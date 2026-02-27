@@ -832,8 +832,31 @@ pub async fn graph_path(
         .unwrap_or_default()
         .as_secs() as i64;
 
+    // First resolve identifiers to get the actual object IDs for the Cypher query
+    let from_param = params.from.clone();
+    let to_param = params.to.clone();
+    let db_for_resolve = db.clone();
+    let (from_id, to_id) = run_db(db_for_resolve, move |db| {
+        let from_id = match db.resolve_node_identifier(&from_param)? {
+            Some(id) => id,
+            None => return Err(DbError::Database(format!("Node not found: {}", from_param))),
+        };
+        let to_id = match db.resolve_node_identifier(&to_param)? {
+            Some(id) => id,
+            None => return Err(DbError::Database(format!("Node not found: {}", to_param))),
+        };
+        Ok((from_id, to_id))
+    })
+    .await?;
+
+    // Generate proper Cypher query for history (can be re-run from query history)
+    let escaped_from = from_id.replace('\'', "\\'");
+    let escaped_to = to_id.replace('\'', "\\'");
     let query_name = format!("Path: {} → {}", params.from, params.to);
-    let query_text = format!("SHORTEST_PATH({}, {})", params.from, params.to);
+    let query_text = format!(
+        "MATCH p = SHORTEST 1 (a)-[]-+(b) WHERE a.object_id = '{}' AND b.object_id = '{}' RETURN p",
+        escaped_from, escaped_to
+    );
 
     // Add to history with "running" status
     if let Err(e) = db.add_query_history(NewQueryHistoryEntry {
@@ -853,26 +876,15 @@ pub async fn graph_path(
 
     state.start_sync_query();
 
-    let from_param = params.from.clone();
-    let to_param = params.to.clone();
+    let from_id_for_closure = from_id.clone();
+    let to_id_for_closure = to_id.clone();
     let db_for_query = db.clone();
     let result = run_db(db_for_query, move |db| {
-        // Resolve identifiers to object IDs (supports both IDs and labels)
-        let from_id = match db.resolve_node_identifier(&from_param)? {
-            Some(id) => id,
-            None => return Err(DbError::Database(format!("Node not found: {}", from_param))),
-        };
-
-        let to_id = match db.resolve_node_identifier(&to_param)? {
-            Some(id) => id,
-            None => return Err(DbError::Database(format!("Node not found: {}", to_param))),
-        };
-
-        let path_result = db.shortest_path(&from_id, &to_id)?;
+        let path_result = db.shortest_path(&from_id_for_closure, &to_id_for_closure)?;
 
         match path_result {
             None => {
-                debug!(from = %from_id, to = %to_id, "No path found");
+                debug!(from = %from_id_for_closure, to = %to_id_for_closure, "No path found");
                 Ok(PathResponse {
                     found: false,
                     path: Vec::new(),
@@ -924,8 +936,8 @@ pub async fn graph_path(
                 };
 
                 debug!(
-                    from = %from_param,
-                    to = %to_param,
+                    from = %from_id_for_closure,
+                    to = %to_id_for_closure,
                     path_len = path_steps.len(),
                     "Path found"
                 );
