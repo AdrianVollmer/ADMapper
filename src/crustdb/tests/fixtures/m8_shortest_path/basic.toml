@@ -57,3 +57,20 @@ cypher = "MATCH p = (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AN
 [test.expected]
 row_count = 1
 columns = ["result"]
+
+[[test]]
+name = "shortest_path_cycle"
+description = "Find shortest path in a cycle, should take the short way not the long way"
+[test.setup]
+cypher = [
+    # Create a cycle: A -> B -> C -> D -> A
+    # Shortest path from A to C should be 2 edges (A->B->C), not 2 edges going backwards (A<-D<-C)
+    "CREATE (a:Node {name: 'A'})-[:EDGE]->(b:Node {name: 'B'})-[:EDGE]->(c:Node {name: 'C'})-[:EDGE]->(d:Node {name: 'D'})-[:EDGE]->(a)",
+]
+[test.query]
+cypher = "MATCH p = SHORTEST 1 (src:Node)-[:EDGE]-+(dst:Node) WHERE src.name = 'A' AND dst.name = 'C' RETURN length(p) AS len"
+[test.expected]
+row_count = 1
+columns = ["len"]
+# length(p) returns 2 because there are 2 edges: A->B->C
+values = [[2]]
