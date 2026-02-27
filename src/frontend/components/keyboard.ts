@@ -45,7 +45,6 @@ const shortcuts: ShortcutDef[] = [
   { key: "l", ctrl: true, shift: true, action: "cycle-layout", label: "Cycle Layout", category: "Tools" },
 
   // Help menu
-  { key: "F1", action: "documentation", label: "Documentation", category: "Help" },
   { key: "?", ctrl: true, action: "keyboard-shortcuts", label: "Keyboard Shortcuts", category: "Help" },
 ];
 
