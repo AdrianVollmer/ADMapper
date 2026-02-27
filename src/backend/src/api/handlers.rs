@@ -660,8 +660,10 @@ pub async fn node_status(
             .find_membership_by_sid_suffix(&node_id_clone, "-512")?
             .is_some();
 
-        // High-value RIDs to check membership for
-        let high_value_rids = ["-512", "-519", "-518", "-516", "-498", "-544"];
+        // High-value RIDs to check membership for (same as path finding)
+        let high_value_rids = [
+            "-512", "-519", "-518", "-516", "-498", "-544", "-548", "-549", "-551",
+        ];
         let is_high_value_member = high_value_rids.iter().any(|rid| {
             db.find_membership_by_sid_suffix(&node_id_clone, rid)
                 .unwrap_or(None)
@@ -696,6 +698,21 @@ pub async fn node_status(
     }
 
     // Second pass: path finding (expensive, with query tracking)
+    // Use proper Cypher to find ANY path to high-value targets
+    // Well-known high-value RIDs:
+    //   -512: Domain Admins
+    //   -519: Enterprise Admins
+    //   -518: Schema Admins
+    //   -516: Domain Controllers
+    //   -498: Enterprise Read-Only Domain Controllers
+    //   -544: Administrators (local)
+    //   -548: Account Operators
+    //   -549: Server Operators
+    //   -551: Backup Operators
+    const HIGH_VALUE_RIDS: &[&str] = &[
+        "-512", "-519", "-518", "-516", "-498", "-544", "-548", "-549", "-551",
+    ];
+
     let query_id = uuid::Uuid::new_v4().to_string();
     let started_at = std::time::Instant::now();
     let started_at_unix = std::time::SystemTime::now()
@@ -703,8 +720,17 @@ pub async fn node_status(
         .unwrap_or_default()
         .as_secs() as i64;
 
+    let escaped_id = node_id.replace('\'', "\\'");
+    let rid_conditions: Vec<String> = HIGH_VALUE_RIDS
+        .iter()
+        .map(|rid| format!("b.object_id ENDS WITH '{}'", rid))
+        .collect();
     let query_name = format!("Path check: {}", node_id);
-    let query_text = format!("FIND_PATH_TO_HIGH_VALUE({})", node_id);
+    let query_text = format!(
+        "MATCH p = (a)-[]-+(b) WHERE a.object_id = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
+        escaped_id,
+        rid_conditions.join(" OR ")
+    );
 
     // Add to history with "running" status (background query)
     if let Err(e) = db.add_query_history(NewQueryHistoryEntry {
@@ -724,15 +750,19 @@ pub async fn node_status(
 
     state.start_sync_query();
 
-    let node_id_clone2 = node_id.clone();
+    let query_text_clone = query_text.clone();
     let db_for_path = db.clone();
     let path_result: Result<(bool, Option<usize>), ApiError> = run_db(db_for_path, move |db| {
-        let paths = db.find_paths_to_domain_admins(&[])?;
-        let path_info = paths.iter().find(|(id, _, _, _)| id == &node_id_clone2);
-        match path_info {
-            Some((_, _, _, hops)) => Ok((true, Some(*hops))),
-            None => Ok((false, None)),
+        let result = db.run_custom_query(&query_text_clone)?;
+        // Parse the result: {"headers": ["hops"], "rows": [[2]]} or empty rows
+        if let Some(rows) = result.get("rows").and_then(|v| v.as_array()) {
+            if let Some(first_row) = rows.first().and_then(|r| r.as_array()) {
+                if let Some(hops) = first_row.first().and_then(|h| h.as_i64()) {
+                    return Ok((true, Some(hops as usize)));
+                }
+            }
         }
+        Ok((false, None))
     })
     .await;
 
