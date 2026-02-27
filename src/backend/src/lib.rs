@@ -15,14 +15,69 @@ mod tauri_commands;
 
 use api::handlers;
 use axum::{
-    extract::DefaultBodyLimit, routing::delete, routing::get, routing::post, routing::put, Router,
+    extract::DefaultBodyLimit,
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
+    routing::delete,
+    routing::get,
+    routing::post,
+    routing::put,
+    Router,
 };
+use rust_embed::Embed;
 use std::net::SocketAddr;
-use tower_http::{
-    cors::{Any, CorsLayer},
-    services::ServeDir,
-};
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
+
+/// Embedded frontend assets (compiled into the binary).
+#[derive(Embed)]
+#[folder = "../../build"]
+struct Assets;
+
+/// Serve embedded static files.
+async fn serve_embedded(uri: axum::http::Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+
+    // Try the exact path first
+    if let Some(content) = Assets::get(path) {
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        return (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, mime.as_ref())],
+            content.data.into_owned(),
+        )
+            .into_response();
+    }
+
+    // For directory-like paths, try index.html
+    let index_path = if path.is_empty() {
+        "index.html".to_string()
+    } else {
+        format!("{}/index.html", path)
+    };
+
+    if let Some(content) = Assets::get(&index_path) {
+        let mime = mime_guess::from_path(&index_path).first_or_octet_stream();
+        return (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, mime.as_ref())],
+            content.data.into_owned(),
+        )
+            .into_response();
+    }
+
+    // SPA fallback: serve root index.html for non-API routes
+    if let Some(content) = Assets::get("index.html") {
+        return (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/html")],
+            content.data.into_owned(),
+        )
+            .into_response();
+    }
+
+    (StatusCode::NOT_FOUND, "Not found").into_response()
+}
 
 #[cfg(feature = "desktop")]
 use tauri::Manager;
@@ -246,12 +301,7 @@ pub fn create_api_router(state: AppState) -> Router {
 
 /// Run as standalone web service.
 #[tokio::main]
-pub async fn run_service(
-    bind: &str,
-    port: u16,
-    database_url: Option<&str>,
-    static_dir: Option<&str>,
-) {
+pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
     // Initialize tracing with colors
     // RUST_LOG env var controls log level (e.g., RUST_LOG=debug or RUST_LOG=admapper=debug)
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -306,48 +356,14 @@ pub async fn run_service(
     // Start background cleanup task for completed queries
     state.spawn_query_cleanup_task();
 
-    // Determine static files directory
-    let static_path = if let Some(dir) = static_dir {
-        std::path::PathBuf::from(dir)
-    } else {
-        // Default: look in current working directory
-        let cwd_build = std::path::PathBuf::from("build");
-        if cwd_build.exists() {
-            cwd_build
-        } else if let Ok(exe_path) = std::env::current_exe() {
-            // Try relative to executable (for installed binaries)
-            if let Some(exe_dir) = exe_path.parent() {
-                let exe_build = exe_dir.join("build");
-                if exe_build.exists() {
-                    exe_build
-                } else {
-                    // Try one level up (e.g., /usr/local/bin/../share/admapper/build)
-                    let share_build = exe_dir.join("../share/admapper/build");
-                    if share_build.exists() {
-                        share_build
-                    } else {
-                        cwd_build
-                    }
-                }
-            } else {
-                cwd_build
-            }
-        } else {
-            cwd_build
-        }
-    };
-    info!(path = ?static_path, "Serving static files");
-
-    // Serve static files from the build directory
-    let static_files = ServeDir::new(&static_path).append_index_html_on_directories(true);
-
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Serve embedded static files as fallback
     let app = create_api_router(state)
-        .fallback_service(static_files)
+        .fallback(serve_embedded)
         .layer(cors);
 
     println!("ADMapper running at http://{}", addr);

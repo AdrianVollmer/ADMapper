@@ -28,24 +28,13 @@ struct Args {
     /// Bind address for service mode (default: 127.0.0.1)
     #[arg(long, default_value = "127.0.0.1")]
     bind: String,
-
-    /// Directory containing static files (default: ./build)
-    ///
-    /// Can also be set via ADMAPPER_STATIC_DIR environment variable.
-    #[arg(long, env = "ADMAPPER_STATIC_DIR")]
-    static_dir: Option<String>,
 }
 
 fn main() {
     let args = Args::parse();
 
     if args.headless {
-        admapper::run_service(
-            &args.bind,
-            args.port,
-            args.database_url.as_deref(),
-            args.static_dir.as_deref(),
-        );
+        admapper::run_service(&args.bind, args.port, args.database_url.as_deref());
     } else {
         admapper::run_desktop(args.database_url.as_deref());
     }
