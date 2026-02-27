@@ -4,4 +4,4 @@ mod bloodhound;
 mod types;
 
 pub use bloodhound::BloodHoundImporter;
-pub use types::ImportProgress;
+pub use types::{ImportProgress, ImportStatus};

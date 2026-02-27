@@ -564,7 +564,7 @@ pub fn import_from_paths(
     state: State<'_, AppState>,
     paths: Vec<String>,
 ) -> Result<core::ImportResponse, String> {
-    use crate::import::ImportProgress;
+    use crate::import::{ImportProgress, ImportStatus};
 
     if paths.is_empty() {
         return Err("No files selected".to_string());
@@ -586,7 +586,7 @@ pub fn import_from_paths(
     // Emit initial progress
     let initial_progress = ImportProgress {
         job_id: job_id.clone(),
-        status: "running".to_string(),
+        status: ImportStatus::Running,
         total_files: paths.len(),
         files_processed: 0,
         current_file: None,
@@ -624,7 +624,7 @@ pub fn import_from_paths(
             // Emit progress for current file
             let progress = ImportProgress {
                 job_id: job_id_clone.clone(),
-                status: "running".to_string(),
+                status: ImportStatus::Running,
                 total_files: paths.len(),
                 files_processed: 0,
                 current_file: Some(filename.clone()),
@@ -649,7 +649,7 @@ pub fn import_from_paths(
                 Err(e) => {
                     let error_progress = ImportProgress {
                         job_id: job_id_clone.clone(),
-                        status: "failed".to_string(),
+                        status: ImportStatus::Failed,
                         total_files: paths.len(),
                         files_processed: 0,
                         current_file: Some(filename),
@@ -692,7 +692,7 @@ pub fn import_from_paths(
                     Err(e) => {
                         let error_progress = ImportProgress {
                             job_id: job_id_clone.clone(),
-                            status: "failed".to_string(),
+                            status: ImportStatus::Failed,
                             total_files: json_files.len(),
                             files_processed: 0,
                             current_file: None,
@@ -710,7 +710,7 @@ pub fn import_from_paths(
         // Emit completion
         let final_progress = ImportProgress {
             job_id: job_id_clone.clone(),
-            status: "completed".to_string(),
+            status: ImportStatus::Completed,
             total_files: paths.len(),
             files_processed: paths.len(),
             current_file: None,
