@@ -316,7 +316,15 @@ impl BloodHoundImporter {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())?;
 
-        let properties = entity.get("Properties").cloned().unwrap_or(JsonValue::Null);
+        let mut properties = entity.get("Properties").cloned().unwrap_or(JsonValue::Null);
+
+        // Ensure objectid (SID) is always present in properties
+        // Some BloodHound exports don't include it, but we need it for queries
+        if let Some(props) = properties.as_object_mut() {
+            if !props.contains_key("objectid") {
+                props.insert("objectid".to_string(), JsonValue::String(id.clone()));
+            }
+        }
 
         let label = properties
             .get("name")
