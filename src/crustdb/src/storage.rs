@@ -1417,6 +1417,16 @@ impl SqliteStorage {
         Ok(())
     }
 
+    /// Checkpoint the WAL file, merging it into the main database file.
+    ///
+    /// This is called during graceful shutdown to ensure WAL files are cleaned up.
+    /// Uses TRUNCATE mode which merges WAL and then truncates it to zero size.
+    pub fn checkpoint(&self) -> Result<()> {
+        self.conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
     /// Begin a transaction.
     pub fn transaction(&mut self) -> Result<Transaction<'_>> {
         Ok(self.conn.transaction()?)

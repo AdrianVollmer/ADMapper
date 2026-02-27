@@ -478,6 +478,21 @@ impl Database {
     }
 }
 
+impl Drop for Database {
+    fn drop(&mut self) {
+        // Checkpoint WAL and close connections gracefully.
+        // This ensures WAL files are merged back into the main database file.
+        if self.db_path.is_some() {
+            if let Ok(storage) = self.write_conn.lock() {
+                // PRAGMA wal_checkpoint(TRUNCATE) merges WAL into main DB and truncates WAL file
+                let _ = storage.checkpoint();
+            }
+        }
+        // Read pool connections will be dropped automatically.
+        // SqliteStorage drops its Connection which closes the SQLite handle.
+    }
+}
+
 /// Compute a hash of the given string for use as a cache key.
 fn compute_hash(s: &str) -> String {
     let mut hasher = DefaultHasher::new();
