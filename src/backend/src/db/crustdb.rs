@@ -8,6 +8,27 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info};
 
+/// Normalize BloodHound type name to standard format.
+/// This ensures consistent labeling regardless of case in source data.
+fn normalize_node_type(data_type: &str) -> String {
+    match data_type.to_lowercase().as_str() {
+        "users" | "user" => "User",
+        "groups" | "group" => "Group",
+        "computers" | "computer" => "Computer",
+        "domains" | "domain" => "Domain",
+        "gpos" | "gpo" => "GPO",
+        "ous" | "ou" => "OU",
+        "containers" | "container" => "Container",
+        "certtemplates" | "certtemplate" => "CertTemplate",
+        "enterprisecas" | "enterpriseca" => "EnterpriseCA",
+        "rootcas" | "rootca" => "RootCA",
+        "aiacas" | "aiaca" => "AIACA",
+        "ntauthstores" | "ntauthstore" => "NTAuthStore",
+        _ => "Base",
+    }
+    .to_string()
+}
+
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
     DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow,
@@ -246,7 +267,8 @@ impl CrustDatabase {
             if source_id.is_none() {
                 let node_type = edge
                     .source_type
-                    .clone()
+                    .as_deref()
+                    .map(normalize_node_type)
                     .unwrap_or_else(|| "Base".to_string());
                 placeholder_set.insert((edge.source.clone(), node_type));
             }
@@ -254,7 +276,8 @@ impl CrustDatabase {
             if target_id.is_none() {
                 let node_type = edge
                     .target_type
-                    .clone()
+                    .as_deref()
+                    .map(normalize_node_type)
                     .unwrap_or_else(|| "Base".to_string());
                 placeholder_set.insert((edge.target.clone(), node_type));
             }
@@ -271,6 +294,7 @@ impl CrustDatabase {
                     let labels = vec![node_type.clone()];
                     let props = serde_json::json!({
                         "object_id": object_id,
+                        "name": object_id,  // Use object_id as name for placeholder
                         "placeholder": true,
                         "node_type": node_type,
                     });
