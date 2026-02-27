@@ -246,7 +246,12 @@ pub fn create_api_router(state: AppState) -> Router {
 
 /// Run as standalone web service.
 #[tokio::main]
-pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
+pub async fn run_service(
+    bind: &str,
+    port: u16,
+    database_url: Option<&str>,
+    static_dir: Option<&str>,
+) {
     // Initialize tracing with colors
     // RUST_LOG env var controls log level (e.g., RUST_LOG=debug or RUST_LOG=admapper=debug)
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -301,8 +306,40 @@ pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
     // Start background cleanup task for completed queries
     state.spawn_query_cleanup_task();
 
+    // Determine static files directory
+    let static_path = if let Some(dir) = static_dir {
+        std::path::PathBuf::from(dir)
+    } else {
+        // Default: look in current working directory
+        let cwd_build = std::path::PathBuf::from("build");
+        if cwd_build.exists() {
+            cwd_build
+        } else if let Ok(exe_path) = std::env::current_exe() {
+            // Try relative to executable (for installed binaries)
+            if let Some(exe_dir) = exe_path.parent() {
+                let exe_build = exe_dir.join("build");
+                if exe_build.exists() {
+                    exe_build
+                } else {
+                    // Try one level up (e.g., /usr/local/bin/../share/admapper/build)
+                    let share_build = exe_dir.join("../share/admapper/build");
+                    if share_build.exists() {
+                        share_build
+                    } else {
+                        cwd_build
+                    }
+                }
+            } else {
+                cwd_build
+            }
+        } else {
+            cwd_build
+        }
+    };
+    info!(path = ?static_path, "Serving static files");
+
     // Serve static files from the build directory
-    let static_files = ServeDir::new("build").append_index_html_on_directories(true);
+    let static_files = ServeDir::new(&static_path).append_index_html_on_directories(true);
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
