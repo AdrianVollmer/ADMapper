@@ -1434,6 +1434,7 @@
   .stale-threshold-select {
     @apply px-2 py-1 text-sm bg-gray-700 border border-gray-600 rounded
            text-gray-200 focus:outline-none focus:border-blue-500;
+    color-scheme: dark;
   }
 }
 
@@ -2167,6 +2168,7 @@ body[data-theme="light"] {
 
 [data-theme="light"] .stale-threshold-select {
   @apply bg-gray-100 border-gray-300 text-gray-900;
+  color-scheme: light;
 }
 
 /* Keyboard Shortcuts */
