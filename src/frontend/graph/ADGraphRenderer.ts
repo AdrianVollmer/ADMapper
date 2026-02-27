@@ -444,10 +444,13 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
       // Apply trilinear filtering to all textures
       for (let i = 0; i < textures.length; i++) {
-        gl.activeTexture(gl.TEXTURE0 + i);
-        gl.bindTexture(gl.TEXTURE_2D, textures[i]);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        const texture = textures[i];
+        if (texture) {
+          gl.activeTexture(gl.TEXTURE0 + i);
+          gl.bindTexture(gl.TEXTURE_2D, texture);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        }
       }
     } catch {
       // Ignore errors - texture filtering is an enhancement, not critical

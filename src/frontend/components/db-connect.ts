@@ -630,7 +630,7 @@ function createModal(): HTMLElement {
 
   // Submit on Enter key
   modal.querySelector("#db-connect-form")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
+    if ((e as KeyboardEvent).key === "Enter") {
       e.preventDefault();
       connectToDatabase();
     }

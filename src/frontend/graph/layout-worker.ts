@@ -7,7 +7,7 @@
 import dagre from "dagre";
 
 // TypeScript: declare worker global scope
-declare const self: DedicatedWorkerGlobalScope;
+declare const self: Worker;
 
 export interface LayoutWorkerInput {
   nodes: Array<{ id: string }>;
