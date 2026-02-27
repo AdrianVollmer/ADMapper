@@ -60,6 +60,7 @@ pub struct NodeCounts {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeStatus {
     pub owned: bool,
+    pub is_disabled: bool,
     pub is_enterprise_admin: bool,
     pub is_domain_admin: bool,
     pub is_high_value: bool,
@@ -351,6 +352,19 @@ pub fn node_status_quick(db: &dyn DatabaseBackend, node_id: &str) -> Result<Node
         })
         .unwrap_or(false);
 
+    // Check if disabled (enabled=false means disabled)
+    let is_disabled = node
+        .and_then(|n| {
+            let props = &n.properties;
+            props.get("enabled").or(props.get("Enabled")).and_then(|v| {
+                v.as_bool()
+                    .or_else(|| v.as_i64().map(|i| i == 1))
+                    .or_else(|| v.as_str().map(|s| s == "true"))
+            })
+        })
+        .map(|enabled| !enabled) // disabled = NOT enabled
+        .unwrap_or(false); // if no enabled property, assume not disabled
+
     // Check high value property
     let high_value_prop = node
         .and_then(|n| {
@@ -389,6 +403,7 @@ pub fn node_status_quick(db: &dyn DatabaseBackend, node_id: &str) -> Result<Node
 
     Ok(NodeStatus {
         owned,
+        is_disabled,
         is_enterprise_admin,
         is_domain_admin,
         is_high_value,

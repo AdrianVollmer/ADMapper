@@ -607,7 +607,15 @@ pub async fn node_connections(
 }
 
 /// Get security status for a node.
-/// Checks group memberships and paths to high-value targets.
+///
+/// Checks in order (aborting early when a condition is met):
+/// 1. Independent properties: owned, disabled
+/// 2. Membership in Enterprise Admins (-519)
+/// 3. Membership in Domain Admins (-512)
+/// 4. Membership in other high-value groups
+/// 5. Path to Enterprise Admins
+/// 6. Path to Domain Admins
+/// 7. Path to other high-value groups
 #[instrument(skip(state))]
 pub async fn node_status(
     State(state): State<AppState>,
@@ -616,15 +624,26 @@ pub async fn node_status(
     let db = state.require_db()?;
     info!(node_id = %node_id, "Checking node security status");
 
-    // First pass: quick checks (properties and group memberships)
+    // Well-known high-value RIDs (excluding -512 DA and -519 EA which are checked separately):
+    //   -518: Schema Admins
+    //   -516: Domain Controllers
+    //   -498: Enterprise Read-Only Domain Controllers
+    //   -544: Administrators (local)
+    //   -548: Account Operators
+    //   -549: Server Operators
+    //   -551: Backup Operators
+    const OTHER_HIGH_VALUE_RIDS: &[&str] =
+        &["-518", "-516", "-498", "-544", "-548", "-549", "-551"];
+
+    // === Step 1: Get node type and independent properties (owned, disabled) ===
     let node_id_clone = node_id.clone();
-    let db_for_quick = db.clone();
-    let quick_status: (bool, bool, bool, bool, bool) = run_db(db_for_quick, move |db| {
-        // Get the node to check its properties
+    let db_for_props = db.clone();
+    let (node_label, owned, is_disabled) = run_db(db_for_props, move |db| {
         let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
         let node = nodes.first();
 
-        // Check owned status from properties
+        let label = node.map(|n| n.label.to_lowercase()).unwrap_or_default();
+
         let owned = node
             .and_then(|n| {
                 let props = &n.properties;
@@ -636,83 +655,217 @@ pub async fn node_status(
             })
             .unwrap_or(false);
 
-        // Check high value from properties
-        let high_value_prop = node
+        // Check if disabled (enabled=false means disabled)
+        // Only applicable to users, computers, groups
+        let is_disabled = node
             .and_then(|n| {
                 let props = &n.properties;
-                props
-                    .get("highvalue")
-                    .or(props.get("HighValue"))
-                    .or(props.get("highValue"))
-                    .and_then(|v| {
-                        v.as_bool()
-                            .or_else(|| v.as_i64().map(|i| i == 1))
-                            .or_else(|| v.as_str().map(|s| s == "true"))
-                    })
+                props.get("enabled").or(props.get("Enabled")).and_then(|v| {
+                    v.as_bool()
+                        .or_else(|| v.as_i64().map(|i| i == 1))
+                        .or_else(|| v.as_str().map(|s| s == "true"))
+                })
             })
+            .map(|enabled| !enabled) // disabled = NOT enabled
             .unwrap_or(false);
 
-        // Check group memberships using graph traversal
-        let is_enterprise_admin = db
-            .find_membership_by_sid_suffix(&node_id_clone, "-519")?
-            .is_some();
-        let is_domain_admin = db
-            .find_membership_by_sid_suffix(&node_id_clone, "-512")?
-            .is_some();
-
-        // High-value RIDs to check membership for (same as path finding)
-        let high_value_rids = [
-            "-512", "-519", "-518", "-516", "-498", "-544", "-548", "-549", "-551",
-        ];
-        let is_high_value_member = high_value_rids.iter().any(|rid| {
-            db.find_membership_by_sid_suffix(&node_id_clone, rid)
-                .unwrap_or(None)
-                .is_some()
-        });
-
-        let is_high_value = high_value_prop || is_high_value_member;
-
-        Ok((
-            owned,
-            is_enterprise_admin,
-            is_domain_admin,
-            is_high_value,
-            high_value_prop,
-        ))
+        Ok((label, owned, is_disabled))
     })
     .await?;
 
-    let (owned, is_enterprise_admin, is_domain_admin, is_high_value, _high_value_prop) =
-        quick_status;
-
-    // If already high value, no need to check paths
-    if is_enterprise_admin || is_domain_admin || is_high_value {
+    // Only run expensive membership/path checks for users, computers, and groups
+    let dominated_types = ["user", "computer", "group"];
+    if !dominated_types.contains(&node_label.as_str()) {
         return Ok(Json(NodeStatus {
             owned,
-            is_enterprise_admin,
-            is_domain_admin,
-            is_high_value,
+            is_disabled: false, // Not applicable to domains, OUs, etc.
+            is_enterprise_admin: false,
+            is_domain_admin: false,
+            is_high_value: false,
             has_path_to_high_value: false,
             path_length: None,
         }));
     }
 
-    // Second pass: path finding (expensive, with query tracking)
-    // Use proper Cypher to find ANY path to high-value targets
-    // Well-known high-value RIDs:
-    //   -512: Domain Admins
-    //   -519: Enterprise Admins
-    //   -518: Schema Admins
-    //   -516: Domain Controllers
-    //   -498: Enterprise Read-Only Domain Controllers
-    //   -544: Administrators (local)
-    //   -548: Account Operators
-    //   -549: Server Operators
-    //   -551: Backup Operators
-    const HIGH_VALUE_RIDS: &[&str] = &[
-        "-512", "-519", "-518", "-516", "-498", "-544", "-548", "-549", "-551",
-    ];
+    // === Step 2: Check membership in Enterprise Admins (-519) ===
+    let node_id_clone = node_id.clone();
+    let db_for_ea = db.clone();
+    let is_enterprise_admin = run_db(db_for_ea, move |db| {
+        Ok(db
+            .find_membership_by_sid_suffix(&node_id_clone, "-519")?
+            .is_some())
+    })
+    .await?;
 
+    if is_enterprise_admin {
+        return Ok(Json(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: true,
+            is_domain_admin: false,
+            is_high_value: true,
+            has_path_to_high_value: false,
+            path_length: None,
+        }));
+    }
+
+    // === Step 3: Check membership in Domain Admins (-512) ===
+    let node_id_clone = node_id.clone();
+    let db_for_da = db.clone();
+    let is_domain_admin = run_db(db_for_da, move |db| {
+        Ok(db
+            .find_membership_by_sid_suffix(&node_id_clone, "-512")?
+            .is_some())
+    })
+    .await?;
+
+    if is_domain_admin {
+        return Ok(Json(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: false,
+            is_domain_admin: true,
+            is_high_value: true,
+            has_path_to_high_value: false,
+            path_length: None,
+        }));
+    }
+
+    // === Step 4: Check membership in other high-value groups ===
+    let node_id_clone = node_id.clone();
+    let db_for_hv = db.clone();
+    let is_high_value = run_db(db_for_hv, move |db| {
+        // Check highvalue property first
+        let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
+        if let Some(node) = nodes.first() {
+            let props = &node.properties;
+            let high_value_prop = props
+                .get("highvalue")
+                .or(props.get("HighValue"))
+                .or(props.get("highValue"))
+                .and_then(|v| {
+                    v.as_bool()
+                        .or_else(|| v.as_i64().map(|i| i == 1))
+                        .or_else(|| v.as_str().map(|s| s == "true"))
+                })
+                .unwrap_or(false);
+            if high_value_prop {
+                return Ok(true);
+            }
+        }
+
+        // Check membership in other high-value groups
+        for rid in OTHER_HIGH_VALUE_RIDS {
+            if db
+                .find_membership_by_sid_suffix(&node_id_clone, rid)?
+                .is_some()
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    })
+    .await?;
+
+    if is_high_value {
+        return Ok(Json(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: false,
+            is_domain_admin: false,
+            is_high_value: true,
+            has_path_to_high_value: false,
+            path_length: None,
+        }));
+    }
+
+    // === Step 5: Check path to Enterprise Admins (-519) ===
+    let path_to_ea = check_path_to_rid(&state, &db, &node_id, "-519", "Enterprise Admins").await?;
+    if let Some(hops) = path_to_ea {
+        return Ok(Json(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: false,
+            is_domain_admin: false,
+            is_high_value: false,
+            has_path_to_high_value: true,
+            path_length: Some(hops),
+        }));
+    }
+
+    // === Step 6: Check path to Domain Admins (-512) ===
+    let path_to_da = check_path_to_rid(&state, &db, &node_id, "-512", "Domain Admins").await?;
+    if let Some(hops) = path_to_da {
+        return Ok(Json(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: false,
+            is_domain_admin: false,
+            is_high_value: false,
+            has_path_to_high_value: true,
+            path_length: Some(hops),
+        }));
+    }
+
+    // === Step 7: Check path to other high-value groups ===
+    let rid_conditions: Vec<String> = OTHER_HIGH_VALUE_RIDS
+        .iter()
+        .map(|rid| format!("b.object_id ENDS WITH '{}'", rid))
+        .collect();
+    let path_to_hv = check_path_to_condition(
+        &state,
+        &db,
+        &node_id,
+        &rid_conditions.join(" OR "),
+        "high-value",
+    )
+    .await?;
+    if let Some(hops) = path_to_hv {
+        return Ok(Json(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: false,
+            is_domain_admin: false,
+            is_high_value: false,
+            has_path_to_high_value: true,
+            path_length: Some(hops),
+        }));
+    }
+
+    // No high-value status or paths found
+    Ok(Json(NodeStatus {
+        owned,
+        is_disabled,
+        is_enterprise_admin: false,
+        is_domain_admin: false,
+        is_high_value: false,
+        has_path_to_high_value: false,
+        path_length: None,
+    }))
+}
+
+/// Helper: Check if there's a path to a group with given RID suffix.
+/// Returns Some(hops) if path found, None otherwise.
+async fn check_path_to_rid(
+    state: &AppState,
+    db: &Arc<dyn DatabaseBackend>,
+    node_id: &str,
+    rid: &str,
+    target_name: &str,
+) -> Result<Option<usize>, ApiError> {
+    let condition = format!("b.object_id ENDS WITH '{}'", rid);
+    check_path_to_condition(state, db, node_id, &condition, target_name).await
+}
+
+/// Helper: Check if there's a path matching a WHERE condition.
+/// Returns Some(hops) if path found, None otherwise.
+async fn check_path_to_condition(
+    state: &AppState,
+    db: &Arc<dyn DatabaseBackend>,
+    node_id: &str,
+    condition: &str,
+    target_name: &str,
+) -> Result<Option<usize>, ApiError> {
     let query_id = uuid::Uuid::new_v4().to_string();
     let started_at = std::time::Instant::now();
     let started_at_unix = std::time::SystemTime::now()
@@ -721,15 +874,10 @@ pub async fn node_status(
         .as_secs() as i64;
 
     let escaped_id = node_id.replace('\'', "\\'");
-    let rid_conditions: Vec<String> = HIGH_VALUE_RIDS
-        .iter()
-        .map(|rid| format!("b.object_id ENDS WITH '{}'", rid))
-        .collect();
-    let query_name = format!("Path check: {}", node_id);
+    let query_name = format!("Path to {}: {}", target_name, node_id);
     let query_text = format!(
         "MATCH p = (a)-[]-+(b) WHERE a.object_id = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
-        escaped_id,
-        rid_conditions.join(" OR ")
+        escaped_id, condition
     );
 
     // Add to history with "running" status (background query)
@@ -751,18 +899,17 @@ pub async fn node_status(
     state.start_sync_query();
 
     let query_text_clone = query_text.clone();
-    let db_for_path = db.clone();
-    let path_result: Result<(bool, Option<usize>), ApiError> = run_db(db_for_path, move |db| {
+    let db_clone = db.clone();
+    let result: Result<Option<usize>, ApiError> = run_db(db_clone, move |db| {
         let result = db.run_custom_query(&query_text_clone)?;
-        // Parse the result: {"headers": ["hops"], "rows": [[2]]} or empty rows
         if let Some(rows) = result.get("rows").and_then(|v| v.as_array()) {
             if let Some(first_row) = rows.first().and_then(|r| r.as_array()) {
                 if let Some(hops) = first_row.first().and_then(|h| h.as_i64()) {
-                    return Ok((true, Some(hops as usize)));
+                    return Ok(Some(hops as usize));
                 }
             }
         }
-        Ok((false, None))
+        Ok(None)
     })
     .await;
 
@@ -770,13 +917,9 @@ pub async fn node_status(
 
     let duration_ms = started_at.elapsed().as_millis() as u64;
 
-    match &path_result {
-        Ok((has_path, path_len)) => {
-            let result_count: Option<i64> = if *has_path {
-                path_len.map(|l| l as i64)
-            } else {
-                Some(0)
-            };
+    match &result {
+        Ok(path_len) => {
+            let result_count = path_len.map(|l| l as i64).or(Some(0));
             if let Err(e) = db.update_query_status(
                 &query_id,
                 "completed",
@@ -801,16 +944,7 @@ pub async fn node_status(
         }
     }
 
-    let (has_path_to_high_value, path_length) = path_result?;
-
-    Ok(Json(NodeStatus {
-        owned,
-        is_enterprise_admin,
-        is_domain_admin,
-        is_high_value,
-        has_path_to_high_value,
-        path_length,
-    }))
+    result
 }
 
 /// Request body for setting owned status.

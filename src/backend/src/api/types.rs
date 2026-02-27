@@ -182,6 +182,9 @@ pub struct NodeCounts {
 pub struct NodeStatus {
     /// Is the node owned by the attacker
     pub owned: bool,
+    /// Is the node disabled (account disabled in AD)
+    #[serde(rename = "isDisabled")]
+    pub is_disabled: bool,
     /// Is the node a member of Enterprise Admins (SID -519)
     #[serde(rename = "isEnterpriseAdmin")]
     pub is_enterprise_admin: bool,
