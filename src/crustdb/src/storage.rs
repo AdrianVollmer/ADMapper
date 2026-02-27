@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
 
 /// Current schema version.
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
 
 /// Validate a property name to prevent JSON path injection.
 ///
@@ -139,8 +139,12 @@ impl SqliteStorage {
             -- Nodes table
             CREATE TABLE nodes (
                 id INTEGER PRIMARY KEY,
+                object_id TEXT UNIQUE,
                 properties TEXT NOT NULL DEFAULT '{}'
             );
+
+            -- Index on object_id for fast lookups
+            CREATE INDEX IF NOT EXISTS idx_nodes_object_id ON nodes(object_id);
 
             -- Node to label mapping (many-to-many)
             CREATE TABLE node_label_map (
@@ -228,6 +232,9 @@ impl SqliteStorage {
         }
         if old_version < 5 {
             self.migrate_v4_to_v5()?;
+        }
+        if old_version < 6 {
+            self.migrate_v5_to_v6()?;
         }
         Ok(())
     }
@@ -345,6 +352,47 @@ impl SqliteStorage {
         Ok(())
     }
 
+    /// Migration from v5 to v6: Add dedicated object_id column to nodes table.
+    ///
+    /// This provides a proper indexed column for node identity lookups instead of
+    /// relying on JSON property extraction.
+    fn migrate_v5_to_v6(&self) -> Result<()> {
+        // Check if object_id column already exists
+        let has_object_id: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('nodes') WHERE name = 'object_id'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .map(|c| c > 0)
+            .unwrap_or(false);
+
+        if !has_object_id {
+            // Add the object_id column
+            self.conn
+                .execute("ALTER TABLE nodes ADD COLUMN object_id TEXT UNIQUE", [])?;
+
+            // Populate from existing JSON properties
+            self.conn.execute(
+                "UPDATE nodes SET object_id = json_extract(properties, '$.object_id') WHERE object_id IS NULL",
+                [],
+            )?;
+
+            // Create index for fast lookups
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nodes_object_id ON nodes(object_id)",
+                [],
+            )?;
+        }
+
+        self.conn.execute(
+            "UPDATE meta SET value = '6' WHERE key = 'schema_version'",
+            [],
+        )?;
+        Ok(())
+    }
+
     /// Get or create a node label ID.
     fn get_or_create_label(&self, label: &str) -> Result<i64> {
         // Try to get existing
@@ -392,9 +440,14 @@ impl SqliteStorage {
     /// Insert a node into the database.
     pub fn insert_node(&self, labels: &[String], properties: &serde_json::Value) -> Result<i64> {
         let props_json = serde_json::to_string(properties)?;
+        // Extract object_id from properties for the dedicated column
+        let object_id = properties
+            .get("object_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         self.conn.execute(
-            "INSERT INTO nodes (properties) VALUES (jsonb(?1))",
-            params![props_json],
+            "INSERT INTO nodes (object_id, properties) VALUES (?1, jsonb(?2))",
+            params![object_id, props_json],
         )?;
         let node_id = self.conn.last_insert_rowid();
 
@@ -470,13 +523,19 @@ impl SqliteStorage {
 
         // Insert nodes using prepared statement
         {
-            let mut node_stmt = tx.prepare("INSERT INTO nodes (properties) VALUES (jsonb(?1))")?;
+            let mut node_stmt =
+                tx.prepare("INSERT INTO nodes (object_id, properties) VALUES (?1, jsonb(?2))")?;
             let mut label_stmt =
                 tx.prepare("INSERT INTO node_label_map (node_id, label_id) VALUES (?1, ?2)")?;
 
             for (labels, properties) in nodes {
                 let props_json = serde_json::to_string(properties)?;
-                node_stmt.execute(params![props_json])?;
+                // Extract object_id from properties for the dedicated column
+                let object_id = properties
+                    .get("object_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                node_stmt.execute(params![object_id, props_json])?;
                 let node_id = tx.last_insert_rowid();
                 node_ids.push(node_id);
 
@@ -555,13 +614,19 @@ impl SqliteStorage {
     ///
     /// Searches for nodes where the JSON properties contain the specified key-value pair.
     /// Property names must contain only alphanumeric characters and underscores.
+    /// Optimized path for object_id which uses a dedicated indexed column.
     pub fn find_node_by_property(&self, property: &str, value: &str) -> Result<Option<i64>> {
         validate_property_name(property)?;
 
-        let query = format!(
-            "SELECT id FROM nodes WHERE json_extract(properties, '$.{}') = ?1 LIMIT 1",
-            property
-        );
+        // Use the dedicated object_id column for faster lookups
+        let query = if property == "object_id" {
+            "SELECT id FROM nodes WHERE object_id = ?1 LIMIT 1".to_string()
+        } else {
+            format!(
+                "SELECT id FROM nodes WHERE json_extract(properties, '$.{}') = ?1 LIMIT 1",
+                property
+            )
+        };
         let result: Option<i64> = self
             .conn
             .query_row(&query, params![value], |row| row.get(0))
@@ -660,16 +725,22 @@ impl SqliteStorage {
     ///
     /// Returns a HashMap from property value to node ID.
     /// Property names must contain only alphanumeric characters and underscores.
+    /// Optimized path for object_id which uses a dedicated indexed column.
     pub fn build_property_index(
         &self,
         property: &str,
     ) -> Result<std::collections::HashMap<String, i64>> {
         validate_property_name(property)?;
 
-        let query = format!(
-            "SELECT id, json_extract(properties, '$.{}') FROM nodes WHERE json_extract(properties, '$.{}') IS NOT NULL",
-            property, property
-        );
+        // Use the dedicated object_id column for faster lookups
+        let query = if property == "object_id" {
+            "SELECT id, object_id FROM nodes WHERE object_id IS NOT NULL".to_string()
+        } else {
+            format!(
+                "SELECT id, json_extract(properties, '$.{}') FROM nodes WHERE json_extract(properties, '$.{}') IS NOT NULL",
+                property, property
+            )
+        };
         let mut stmt = self.conn.prepare(&query)?;
         let mut index = std::collections::HashMap::new();
 
@@ -1089,26 +1160,26 @@ impl SqliteStorage {
         Ok(count as usize)
     }
 
-    /// Count incoming edges to a node by object_id property.
-    /// Uses a join to find the node and count edges efficiently.
+    /// Count incoming edges to a node by object_id.
+    /// Uses the dedicated object_id column for efficient indexed lookup.
     pub fn count_incoming_edges_by_object_id(&self, object_id: &str) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM edges e \
              JOIN nodes n ON e.target_id = n.id \
-             WHERE json_extract(n.properties, '$.object_id') = ?1",
+             WHERE n.object_id = ?1",
             params![object_id],
             |row| row.get(0),
         )?;
         Ok(count as usize)
     }
 
-    /// Count outgoing edges from a node by object_id property.
-    /// Uses a join to find the node and count edges efficiently.
+    /// Count outgoing edges from a node by object_id.
+    /// Uses the dedicated object_id column for efficient indexed lookup.
     pub fn count_outgoing_edges_by_object_id(&self, object_id: &str) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM edges e \
              JOIN nodes n ON e.source_id = n.id \
-             WHERE json_extract(n.properties, '$.object_id') = ?1",
+             WHERE n.object_id = ?1",
             params![object_id],
             |row| row.get(0),
         )?;
@@ -1117,24 +1188,25 @@ impl SqliteStorage {
 
     /// Get all edges for a node by object_id (both incoming and outgoing).
     /// Returns (source_object_id, target_object_id, edge_type) tuples.
+    /// Uses the dedicated object_id column for efficient indexed lookup.
     pub fn get_node_edges_by_object_id(
         &self,
         object_id: &str,
     ) -> Result<Vec<(String, String, String)>> {
         let mut edges = Vec::new();
 
-        // Query for edges where node is source or target, joining to get object_ids
+        // Query for edges where node is source or target, using dedicated object_id column
         let mut stmt = self.conn.prepare_cached(
             "SELECT
-                json_extract(src.properties, '$.object_id') AS src_id,
-                json_extract(tgt.properties, '$.object_id') AS tgt_id,
+                src.object_id AS src_id,
+                tgt.object_id AS tgt_id,
                 et.name AS edge_type
              FROM edges e
              JOIN nodes src ON e.source_id = src.id
              JOIN nodes tgt ON e.target_id = tgt.id
              JOIN edge_types et ON e.type_id = et.id
-             WHERE json_extract(src.properties, '$.object_id') = ?1
-                OR json_extract(tgt.properties, '$.object_id') = ?1",
+             WHERE src.object_id = ?1
+                OR tgt.object_id = ?1",
         )?;
 
         let rows = stmt.query_map(params![object_id], |row| {
@@ -1164,11 +1236,11 @@ impl SqliteStorage {
         &self,
         object_id: &str,
     ) -> Result<(Vec<Node>, Vec<Edge>)> {
-        // First find the target node's internal ID
+        // First find the target node's internal ID using the dedicated object_id column
         let target_id: Option<i64> = self
             .conn
             .query_row(
-                "SELECT id FROM nodes WHERE json_extract(properties, '$.object_id') = ?1",
+                "SELECT id FROM nodes WHERE object_id = ?1",
                 params![object_id],
                 |row| row.get(0),
             )
@@ -1272,11 +1344,11 @@ impl SqliteStorage {
         &self,
         object_id: &str,
     ) -> Result<(Vec<Node>, Vec<Edge>)> {
-        // First find the source node's internal ID
+        // First find the source node's internal ID using the dedicated object_id column
         let source_id: Option<i64> = self
             .conn
             .query_row(
-                "SELECT id FROM nodes WHERE json_extract(properties, '$.object_id') = ?1",
+                "SELECT id FROM nodes WHERE object_id = ?1",
                 params![object_id],
                 |row| row.get(0),
             )
