@@ -16,6 +16,31 @@ use zip::ZipArchive;
 /// Batch size for database inserts.
 const BATCH_SIZE: usize = 1000;
 
+/// User Account Control flags from Active Directory.
+/// See: https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/useraccountcontrol-manipulate-account-properties
+#[allow(dead_code)]
+mod uac_flags {
+    pub const SCRIPT: i64 = 0x0001;
+    pub const ACCOUNTDISABLE: i64 = 0x0002;
+    pub const HOMEDIR_REQUIRED: i64 = 0x0008;
+    pub const LOCKOUT: i64 = 0x0010;
+    pub const PASSWD_NOTREQD: i64 = 0x0020;
+    pub const PASSWD_CANT_CHANGE: i64 = 0x0040;
+    pub const ENCRYPTED_TEXT_PWD_ALLOWED: i64 = 0x0080;
+    pub const NORMAL_ACCOUNT: i64 = 0x0200;
+    pub const INTERDOMAIN_TRUST_ACCOUNT: i64 = 0x0800;
+    pub const WORKSTATION_TRUST_ACCOUNT: i64 = 0x1000;
+    pub const SERVER_TRUST_ACCOUNT: i64 = 0x2000;
+    pub const DONT_EXPIRE_PASSWORD: i64 = 0x10000;
+    pub const SMARTCARD_REQUIRED: i64 = 0x40000;
+    pub const TRUSTED_FOR_DELEGATION: i64 = 0x80000;
+    pub const NOT_DELEGATED: i64 = 0x100000;
+    pub const USE_DES_KEY_ONLY: i64 = 0x200000;
+    pub const DONT_REQ_PREAUTH: i64 = 0x400000;
+    pub const PASSWORD_EXPIRED: i64 = 0x800000;
+    pub const TRUSTED_TO_AUTH_FOR_DELEGATION: i64 = 0x1000000;
+}
+
 /// BloodHound file metadata.
 #[derive(Debug, Deserialize)]
 struct BloodHoundMeta {
@@ -324,6 +349,9 @@ impl BloodHoundImporter {
             if !props.contains_key("objectid") {
                 props.insert("objectid".to_string(), JsonValue::String(id.clone()));
             }
+
+            // Expand useraccountcontrol into individual boolean properties
+            Self::expand_uac_flags(props);
         }
 
         let label = properties
@@ -340,6 +368,110 @@ impl BloodHoundImporter {
             label: node_type.to_string(),
             properties,
         })
+    }
+
+    /// Expand useraccountcontrol bitmask into individual boolean properties.
+    /// Also converts the raw UAC value to hex format for display.
+    fn expand_uac_flags(props: &mut serde_json::Map<String, JsonValue>) {
+        // Look for useraccountcontrol (case-insensitive)
+        let uac_value = props
+            .get("useraccountcontrol")
+            .or_else(|| props.get("UserAccountControl"))
+            .and_then(|v| v.as_i64());
+
+        let Some(uac) = uac_value else {
+            return;
+        };
+
+        // Convert to hex string for display (e.g., "0x10200")
+        props.insert(
+            "useraccountcontrol_hex".to_string(),
+            JsonValue::String(format!("0x{:X}", uac)),
+        );
+
+        // Extract security-relevant flags as individual boolean properties
+        // Only set properties if they don't already exist (BloodHound may have them)
+
+        // enabled = NOT ACCOUNTDISABLE (most important flag)
+        if !props.contains_key("enabled") {
+            let enabled = (uac & uac_flags::ACCOUNTDISABLE) == 0;
+            props.insert("enabled".to_string(), JsonValue::Bool(enabled));
+        }
+
+        // password_not_required - security risk
+        if !props.contains_key("password_not_required") {
+            let flag = (uac & uac_flags::PASSWD_NOTREQD) != 0;
+            if flag {
+                props.insert("password_not_required".to_string(), JsonValue::Bool(true));
+            }
+        }
+
+        // password_never_expires - common misconfiguration
+        if !props.contains_key("password_never_expires") {
+            let flag = (uac & uac_flags::DONT_EXPIRE_PASSWORD) != 0;
+            if flag {
+                props.insert("password_never_expires".to_string(), JsonValue::Bool(true));
+            }
+        }
+
+        // smartcard_required
+        if !props.contains_key("smartcard_required") {
+            let flag = (uac & uac_flags::SMARTCARD_REQUIRED) != 0;
+            if flag {
+                props.insert("smartcard_required".to_string(), JsonValue::Bool(true));
+            }
+        }
+
+        // trusted_for_delegation - unconstrained delegation (high risk)
+        if !props.contains_key("trusted_for_delegation") {
+            let flag = (uac & uac_flags::TRUSTED_FOR_DELEGATION) != 0;
+            if flag {
+                props.insert("trusted_for_delegation".to_string(), JsonValue::Bool(true));
+            }
+        }
+
+        // not_delegated - protected from delegation
+        if !props.contains_key("not_delegated") {
+            let flag = (uac & uac_flags::NOT_DELEGATED) != 0;
+            if flag {
+                props.insert("not_delegated".to_string(), JsonValue::Bool(true));
+            }
+        }
+
+        // dont_require_preauth - AS-REP roastable (critical for attackers)
+        if !props.contains_key("dont_require_preauth") {
+            let flag = (uac & uac_flags::DONT_REQ_PREAUTH) != 0;
+            if flag {
+                props.insert("dont_require_preauth".to_string(), JsonValue::Bool(true));
+            }
+        }
+
+        // password_expired
+        if !props.contains_key("password_expired") {
+            let flag = (uac & uac_flags::PASSWORD_EXPIRED) != 0;
+            if flag {
+                props.insert("password_expired".to_string(), JsonValue::Bool(true));
+            }
+        }
+
+        // trusted_to_auth_for_delegation - constrained delegation with protocol transition
+        if !props.contains_key("trusted_to_auth_for_delegation") {
+            let flag = (uac & uac_flags::TRUSTED_TO_AUTH_FOR_DELEGATION) != 0;
+            if flag {
+                props.insert(
+                    "trusted_to_auth_for_delegation".to_string(),
+                    JsonValue::Bool(true),
+                );
+            }
+        }
+
+        // account_locked_out
+        if !props.contains_key("account_locked_out") {
+            let flag = (uac & uac_flags::LOCKOUT) != 0;
+            if flag {
+                props.insert("account_locked_out".to_string(), JsonValue::Bool(true));
+            }
+        }
     }
 
     /// Extract edges from a BloodHound entity.
@@ -857,7 +989,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_user() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-1234-USER",
@@ -880,7 +1012,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_computer() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-1234-COMP",
@@ -901,7 +1033,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_group() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-1234-GROUP",
@@ -920,7 +1052,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_missing_id() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "Properties": {
@@ -934,7 +1066,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_missing_name() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         // If name is missing, should use ObjectIdentifier as label
         let entity = serde_json::json!({
@@ -949,13 +1081,94 @@ mod tests {
         assert_eq!(node.name, "S-1-5-21-1234-USER");
     }
 
+    #[test]
+    fn test_extract_node_expands_uac_flags() {
+        let mut importer = test_importer();
+
+        // UAC = 0x10200 = NORMAL_ACCOUNT (0x200) + DONT_EXPIRE_PASSWORD (0x10000)
+        // Account is enabled (ACCOUNTDISABLE bit not set)
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-USER",
+            "Properties": {
+                "name": "testuser@corp.local",
+                "useraccountcontrol": 0x10200
+            }
+        });
+
+        let node = importer.extract_node("users", &entity).unwrap();
+
+        // Check hex representation
+        assert_eq!(node.properties["useraccountcontrol_hex"], "0x10200");
+
+        // Check expanded flags
+        assert_eq!(node.properties["enabled"], true); // ACCOUNTDISABLE not set
+        assert_eq!(node.properties["password_never_expires"], true); // DONT_EXPIRE_PASSWORD set
+    }
+
+    #[test]
+    fn test_extract_node_uac_disabled_account() {
+        let mut importer = test_importer();
+
+        // UAC = 0x202 = ACCOUNTDISABLE (0x2) + NORMAL_ACCOUNT (0x200)
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-DISABLED",
+            "Properties": {
+                "name": "disabled@corp.local",
+                "useraccountcontrol": 0x202
+            }
+        });
+
+        let node = importer.extract_node("users", &entity).unwrap();
+
+        assert_eq!(node.properties["enabled"], false); // ACCOUNTDISABLE is set
+    }
+
+    #[test]
+    fn test_extract_node_uac_asrep_roastable() {
+        let mut importer = test_importer();
+
+        // UAC = 0x400200 = NORMAL_ACCOUNT (0x200) + DONT_REQ_PREAUTH (0x400000)
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-ASREP",
+            "Properties": {
+                "name": "asrep@corp.local",
+                "useraccountcontrol": 0x400200
+            }
+        });
+
+        let node = importer.extract_node("users", &entity).unwrap();
+
+        assert_eq!(node.properties["enabled"], true);
+        assert_eq!(node.properties["dont_require_preauth"], true); // AS-REP roastable
+    }
+
+    #[test]
+    fn test_extract_node_uac_preserves_existing_enabled() {
+        let mut importer = test_importer();
+
+        // If BloodHound already provides 'enabled', don't overwrite it
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-USER",
+            "Properties": {
+                "name": "testuser@corp.local",
+                "useraccountcontrol": 0x202, // Would normally mean disabled
+                "enabled": true // But BloodHound says enabled
+            }
+        });
+
+        let node = importer.extract_node("users", &entity).unwrap();
+
+        // Should preserve the existing 'enabled' value
+        assert_eq!(node.properties["enabled"], true);
+    }
+
     // ========================================================================
     // Edge Extraction Tests
     // ========================================================================
 
     #[test]
     fn test_extract_edges_memberof() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-GROUP1",
@@ -979,7 +1192,7 @@ mod tests {
 
     #[test]
     fn test_extract_edges_sessions() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-COMP1",
@@ -1007,7 +1220,7 @@ mod tests {
 
     #[test]
     fn test_extract_edges_aces() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-TARGET",
@@ -1043,7 +1256,7 @@ mod tests {
 
     #[test]
     fn test_extract_edges_trusts() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-DOMAIN1",
@@ -1070,7 +1283,7 @@ mod tests {
     #[test]
     fn test_extract_edges_trusts_string_format() {
         // Test BloodHound CE format which uses string values for TrustDirection
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-DOMAIN1",
@@ -1116,7 +1329,7 @@ mod tests {
 
     #[test]
     fn test_extract_edges_containedby() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-USER1",
@@ -1136,7 +1349,7 @@ mod tests {
 
     #[test]
     fn test_extract_edges_delegation() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-USER1",
@@ -1161,7 +1374,7 @@ mod tests {
 
     #[test]
     fn test_extract_edges_local_groups() {
-        let importer = test_importer();
+        let mut importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-COMP1",

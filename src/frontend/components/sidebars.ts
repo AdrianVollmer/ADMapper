@@ -5,13 +5,14 @@
  */
 
 import { appState } from "../main";
-import type { ADNodeAttributes, ADNodeType, ADEdgeAttributes } from "../graph/types";
+import type { ADNodeAttributes, ADNodeType, ADEdgeAttributes, RawADGraph, ADEdgeType } from "../graph/types";
 import { NODE_COLORS, EDGE_COLORS } from "../graph/theme";
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import { setPathStart, setPathEnd } from "./search";
 import { getRenderer, loadGraphData } from "./graph-view";
 import { showError, showConfirm } from "../utils/notifications";
+import { executeQuery } from "../utils/query";
 
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
@@ -1082,7 +1083,7 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
     } else if (status.hasPathToHighValue) {
       const hops = status.pathLength ?? 0;
       indicators.push(
-        `<span class="user-indicator cursor-pointer" title="${USER_INDICATORS.hasPath.tooltip} (${hops} hops)">${USER_INDICATORS.hasPath.icon}</span>`
+        `<span class="user-indicator cursor-pointer" data-action="show-path-to-hv" data-node-id="${nodeId}" title="${USER_INDICATORS.hasPath.tooltip} (${hops} hops) - click to show path">${USER_INDICATORS.hasPath.icon}</span>`
       );
     } else {
       indicators.push(
@@ -1091,6 +1092,12 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
     }
 
     container.innerHTML = indicators.join("");
+
+    // Attach click handler for "path to high value" indicator
+    const pathIndicator = container.querySelector('[data-action="show-path-to-hv"]');
+    if (pathIndicator) {
+      pathIndicator.addEventListener("click", () => showPathToHighValue(nodeId));
+    }
 
     // Update the overflow menu button text based on owned status
     const toggleBtn = document.querySelector(`[data-action="toggle-owned"][data-node-id="${nodeId}"]`);
@@ -1105,6 +1112,49 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
     if (appState.selectedNodeId === nodeId) {
       container.innerHTML = `<span class="user-indicator" title="Status check failed">${USER_INDICATORS.noPath.icon}</span>`;
     }
+  }
+}
+
+/** Show path to high-value target when indicator is clicked */
+async function showPathToHighValue(nodeId: string): Promise<void> {
+  // High-value RIDs to check (same as backend)
+  const HIGH_VALUE_RIDS = ["-519", "-512", "-518", "-516", "-498", "-544", "-548", "-549", "-551"];
+  const ridConditions = HIGH_VALUE_RIDS.map((rid) => `b.object_id ENDS WITH '${rid}'`).join(" OR ");
+
+  const escapedId = nodeId.replace(/'/g, "\\'");
+  const query = `MATCH p = (a)-[]-+(b) WHERE a.object_id = '${escapedId}' AND (${ridConditions}) RETURN p LIMIT 1`;
+
+  try {
+    const result = await executeQuery(query, { extractGraph: true });
+
+    if (result.graph && result.graph.nodes.length > 0) {
+      const pathGraph: RawADGraph = {
+        nodes: result.graph.nodes.map((n) => ({
+          id: n.id,
+          name: n.name,
+          type: n.type as ADNodeType,
+          properties: n.properties,
+        })),
+        edges: result.graph.edges.map((e) => ({
+          source: e.source,
+          target: e.target,
+          type: e.type as ADEdgeType,
+        })),
+      };
+      loadGraphData(pathGraph);
+
+      // Highlight the path after graph is loaded
+      requestAnimationFrame(() => {
+        const renderer = getRenderer();
+        if (renderer) {
+          const nodeIds = result.graph!.nodes.map((n) => n.id);
+          renderer.highlightPath(nodeIds);
+        }
+      });
+    }
+  } catch (err) {
+    console.error("Failed to show path to high-value target:", err);
+    showError("Failed to load path to high-value target");
   }
 }
 
