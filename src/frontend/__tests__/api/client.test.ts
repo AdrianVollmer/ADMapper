@@ -1,14 +1,20 @@
 /**
- * Integration tests for the API client.
+ * Tests for the API client's error handling and HTTP behavior.
  *
- * Uses MSW to mock server responses and test error handling.
+ * Uses MSW to mock server responses. These tests verify that the API client:
+ * - Correctly throws ApiClientError for non-2xx responses
+ * - Handles empty response bodies
+ * - Sends JSON bodies in POST requests
+ * - Handles network failures gracefully
+ *
+ * Note: Endpoint-specific integration tests (graph data, search, queries, etc.)
+ * are covered by the E2E test suite in /e2e which runs against a real backend.
  */
 
 import { describe, it, expect, beforeAll, afterEach, afterAll } from "vitest";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { api, ApiClientError } from "../../api/client";
-import type { GraphData, SearchResult, PathResponse, QueryResponse, QueryHistoryResponse } from "../../api/types";
 
 // Create MSW server
 const server = setupServer();
@@ -134,255 +140,6 @@ describe("api.delete", () => {
     await expect(api.delete("/api/items/missing")).rejects.toMatchObject({
       status: 404,
     });
-  });
-});
-
-// ============================================================================
-// Graph endpoints
-// ============================================================================
-
-describe("GET /api/graph/all", () => {
-  it("returns graph data", async () => {
-    const graphData: GraphData = {
-      nodes: [
-        { id: "user-1", name: "admin@corp.local", type: "User" },
-        { id: "group-1", name: "Domain Admins", type: "Group" },
-      ],
-      edges: [{ source: "user-1", target: "group-1", type: "MemberOf" }],
-    };
-
-    server.use(
-      http.get("/api/graph/all", () => {
-        return HttpResponse.json(graphData);
-      })
-    );
-
-    const result = await api.get<GraphData>("/api/graph/all");
-    expect(result.nodes).toHaveLength(2);
-    expect(result.edges).toHaveLength(1);
-  });
-
-  it("handles server error", async () => {
-    server.use(
-      http.get("/api/graph/all", () => {
-        return new HttpResponse("Database connection failed", { status: 500 });
-      })
-    );
-
-    await expect(api.get("/api/graph/all")).rejects.toMatchObject({
-      status: 500,
-      message: "Database connection failed",
-    });
-  });
-});
-
-// ============================================================================
-// Search endpoint
-// ============================================================================
-
-describe("GET /api/graph/search", () => {
-  it("returns matching nodes", async () => {
-    server.use(
-      http.get("/api/graph/search", ({ request }) => {
-        const url = new URL(request.url);
-        const query = url.searchParams.get("q");
-
-        if (query === "admin") {
-          return HttpResponse.json([
-            { id: "user-1", name: "admin@corp.local", type: "User" },
-            { id: "group-1", name: "Domain Admins", type: "Group" },
-          ]);
-        }
-
-        return HttpResponse.json([]);
-      })
-    );
-
-    const results = await api.get<SearchResult[]>("/api/graph/search?q=admin");
-    expect(results).toHaveLength(2);
-    expect(results[0]!.name).toBe("admin@corp.local");
-  });
-
-  it("returns empty array for no matches", async () => {
-    server.use(
-      http.get("/api/graph/search", () => {
-        return HttpResponse.json([]);
-      })
-    );
-
-    const results = await api.get<SearchResult[]>("/api/graph/search?q=nonexistent");
-    expect(results).toEqual([]);
-  });
-});
-
-// ============================================================================
-// Path finding endpoint
-// ============================================================================
-
-describe("GET /api/graph/path", () => {
-  it("returns path when found", async () => {
-    const pathResponse: PathResponse = {
-      found: true,
-      path: [
-        { node: { id: "a", name: "A", type: "User" }, edge_type: "MemberOf" },
-        { node: { id: "b", name: "B", type: "Group" } },
-      ],
-      graph: { nodes: [], edges: [] },
-    };
-
-    server.use(
-      http.get("/api/graph/path", () => {
-        return HttpResponse.json(pathResponse);
-      })
-    );
-
-    const result = await api.get<PathResponse>("/api/graph/path?from=a&to=b");
-    expect(result.found).toBe(true);
-    expect(result.path).toHaveLength(2);
-  });
-
-  it("returns found=false when no path exists", async () => {
-    server.use(
-      http.get("/api/graph/path", () => {
-        return HttpResponse.json({
-          found: false,
-          path: [],
-          graph: { nodes: [], edges: [] },
-        });
-      })
-    );
-
-    const result = await api.get<PathResponse>("/api/graph/path?from=a&to=z");
-    expect(result.found).toBe(false);
-    expect(result.path).toEqual([]);
-  });
-});
-
-// ============================================================================
-// Query endpoint
-// ============================================================================
-
-describe("POST /api/graph/query", () => {
-  it("executes valid query", async () => {
-    server.use(
-      http.post("/api/graph/query", () => {
-        return HttpResponse.json({
-          results: {
-            headers: ["x"],
-            rows: [[2]],
-          },
-        });
-      })
-    );
-
-    const result = await api.post<QueryResponse>("/api/graph/query", {
-      query: "MATCH (n:Node) RETURN n + 1",
-      extract_graph: false,
-    });
-
-    expect(result.results.rows[0]![0]).toBe(2);
-  });
-
-  it("returns 400 for invalid syntax", async () => {
-    server.use(
-      http.post("/api/graph/query", () => {
-        return new HttpResponse("Parse error: unexpected token", { status: 400 });
-      })
-    );
-
-    await expect(
-      api.post("/api/graph/query", {
-        query: "invalid syntax",
-        extract_graph: false,
-      })
-    ).rejects.toMatchObject({
-      status: 400,
-      message: "Parse error: unexpected token",
-    });
-  });
-
-  it("returns graph when extract_graph=true", async () => {
-    server.use(
-      http.post("/api/graph/query", () => {
-        return HttpResponse.json({
-          results: { headers: ["id"], rows: [["user-1"]] },
-          graph: {
-            nodes: [{ id: "user-1", label: "admin", type: "User" }],
-            edges: [],
-          },
-        });
-      })
-    );
-
-    const result = await api.post<QueryResponse>("/api/graph/query", {
-      query: "MATCH (n:Node) WHERE n.node_type = 'User' RETURN n.object_id",
-      extract_graph: true,
-    });
-
-    expect(result.graph).toBeDefined();
-    expect(result.graph!.nodes).toHaveLength(1);
-  });
-});
-
-// ============================================================================
-// Query history endpoints
-// ============================================================================
-
-describe("Query History API", () => {
-  it("GET /api/query-history returns paginated results", async () => {
-    server.use(
-      http.get("/api/query-history", () => {
-        return HttpResponse.json({
-          entries: [
-            {
-              id: "1",
-              name: "Test Query",
-              query: "MATCH (n:Node) RETURN n",
-              timestamp: Date.now(),
-              result_count: 1,
-            },
-          ],
-          total: 1,
-          page: 1,
-          per_page: 10,
-        });
-      })
-    );
-
-    const result = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=10");
-    expect(result.entries).toHaveLength(1);
-    expect(result.total).toBe(1);
-  });
-
-  it("POST /api/query-history adds entry", async () => {
-    server.use(
-      http.post("/api/query-history", async ({ request }) => {
-        const body = (await request.json()) as Record<string, unknown>;
-        return HttpResponse.json({
-          id: "new-id",
-          ...body,
-          timestamp: Date.now(),
-        });
-      })
-    );
-
-    const result = await api.post("/api/query-history", {
-      name: "New Query",
-      query: "MATCH (n:Node) RETURN n",
-      result_count: 1,
-    });
-
-    expect(result).toHaveProperty("id", "new-id");
-  });
-
-  it("DELETE /api/query-history/:id removes entry", async () => {
-    server.use(
-      http.delete("/api/query-history/123", () => {
-        return new HttpResponse(null, { status: 204 });
-      })
-    );
-
-    await expect(api.delete("/api/query-history/123")).resolves.toBeUndefined();
   });
 });
 

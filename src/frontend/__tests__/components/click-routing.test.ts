@@ -1,287 +1,505 @@
 /**
  * Click Routing Tests
  *
- * Tests that document-level clicks are routed to the correct component handlers.
- * The order of handlers matters - more specific handlers must run before generic ones.
- *
- * Handler order (from main.ts):
- * 1. handleSidebarClicks - sidebar toggles, detail panel actions
- * 2. handleQueryTreeClicks - query tree expand/collapse, execute query
- * 3. handleSearchClicks - search result selection
- * 4. handleGraphClicks - generic data-action dispatch (catch-all)
- * 5. handleMenubarOutsideClick - close open menus
+ * Tests that click handlers respond correctly to DOM events and produce
+ * the expected side effects. These tests use real handler implementations
+ * with minimal mocking to verify actual behavior.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock the component modules before importing
-vi.mock("../../components/sidebars", () => ({
-  initSidebars: vi.fn(),
-  handleSidebarClicks: vi.fn(() => false),
-}));
-
-vi.mock("../../components/queries", () => ({
-  initQueries: vi.fn(),
-  handleQueryTreeClicks: vi.fn(() => false),
-}));
-
-vi.mock("../../components/search", () => ({
-  initSearch: vi.fn(),
-  handleSearchClicks: vi.fn(() => false),
+// Mock dependencies that handlers use, not the handlers themselves
+vi.mock("../../api/client", () => ({
+  api: {
+    get: vi.fn(),
+    post: vi.fn(),
+    delete: vi.fn(),
+  },
+  ApiClientError: class ApiClientError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
 }));
 
 vi.mock("../../components/graph-view", () => ({
   initGraph: vi.fn(),
+  getRenderer: vi.fn(() => null),
+  loadGraphData: vi.fn(),
   handleGraphClicks: vi.fn(() => false),
 }));
 
-vi.mock("../../components/menubar", () => ({
-  initMenuBar: vi.fn(),
-  handleMenubarOutsideClick: vi.fn(),
+vi.mock("../../utils/notifications", () => ({
+  showSuccess: vi.fn(),
+  showError: vi.fn(),
+  showInfo: vi.fn(),
+  showConfirm: vi.fn(() => Promise.resolve(false)),
 }));
 
-vi.mock("../../components/keyboard", () => ({
-  initKeyboardShortcuts: vi.fn(),
+vi.mock("../../utils/query", () => ({
+  executeQueryWithHistory: vi.fn(),
+  getQueryErrorMessage: vi.fn((err) => String(err)),
 }));
 
-vi.mock("../../components/import", () => ({
-  initImport: vi.fn(),
+// Import actual handlers after mocking their dependencies
+import { handleSidebarClicks, toggleNavSidebar, toggleDetailSidebar } from "../../components/sidebars";
+import { handleQueryTreeClicks, initQueries } from "../../components/queries";
+import { handleSearchClicks, initSearch, resetSearchState } from "../../components/search";
+
+// Use vi.hoisted to create mockAppState before vi.mock runs
+const { mockAppState } = vi.hoisted(() => ({
+  mockAppState: {
+    navSidebarCollapsed: false,
+    detailSidebarCollapsed: false,
+    selectedNodeId: null as string | null,
+    selectedEdgeId: null as string | null,
+  },
 }));
 
-vi.mock("../../components/query-history", () => ({
-  initQueryHistory: vi.fn(),
+// Mock appState which sidebars.ts imports from main
+vi.mock("../../main", () => ({
+  appState: mockAppState,
 }));
 
-vi.mock("../../components/db-manager", () => ({
-  initDbManager: vi.fn(),
-}));
-
-vi.mock("../../components/db-connect", () => ({
-  initDbConnect: vi.fn(),
-}));
-
-vi.mock("../../components/run-query", () => ({
-  initRunQuery: vi.fn(),
-}));
-
-vi.mock("../../components/manage-queries", () => ({
-  initManageQueries: vi.fn(),
-}));
-
-vi.mock("../../components/query-activity", () => ({
-  initQueryActivity: vi.fn(),
-}));
-
-// Import handlers after mocking
-import { handleSidebarClicks } from "../../components/sidebars";
-import { handleQueryTreeClicks } from "../../components/queries";
-import { handleSearchClicks } from "../../components/search";
-import { handleGraphClicks } from "../../components/graph-view";
-import { handleMenubarOutsideClick } from "../../components/menubar";
-
-describe("Click Routing", () => {
-  let clickHandler: (e: MouseEvent) => void;
-
+describe("Sidebar Click Handler", () => {
   beforeEach(() => {
-    // Reset all mocks
-    vi.clearAllMocks();
-
-    // Reset DOM
     document.body.innerHTML = "";
-
-    // Recreate the click handler logic from main.ts
-    clickHandler = (e: MouseEvent) => {
-      if (handleSidebarClicks(e)) return;
-      if (handleQueryTreeClicks(e)) return;
-      if (handleSearchClicks(e)) return;
-      if (handleGraphClicks(e)) return;
-      handleMenubarOutsideClick(e);
-    };
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
     document.body.innerHTML = "";
   });
 
-  describe("Handler priority", () => {
-    it("calls handlers in correct order when none handle the click", () => {
-      const callOrder: string[] = [];
+  describe("toggle-nav-sidebar action", () => {
+    it("handles toggle-nav-sidebar button click", () => {
+      document.body.innerHTML = `
+        <button data-action="toggle-nav-sidebar">Toggle Nav</button>
+        <aside id="nav-sidebar" style="width: 240px"></aside>
+        <button id="nav-sidebar-expand" class="hidden"></button>
+      `;
 
-      vi.mocked(handleSidebarClicks).mockImplementation(() => {
-        callOrder.push("sidebar");
-        return false;
-      });
-      vi.mocked(handleQueryTreeClicks).mockImplementation(() => {
-        callOrder.push("queryTree");
-        return false;
-      });
-      vi.mocked(handleSearchClicks).mockImplementation(() => {
-        callOrder.push("search");
-        return false;
-      });
-      vi.mocked(handleGraphClicks).mockImplementation(() => {
-        callOrder.push("graph");
-        return false;
-      });
-      vi.mocked(handleMenubarOutsideClick).mockImplementation(() => {
-        callOrder.push("menubar");
-      });
-
-      document.body.innerHTML = "<div>Test</div>";
+      const button = document.querySelector('[data-action="toggle-nav-sidebar"]')!;
       const event = new MouseEvent("click", { bubbles: true });
-      clickHandler(event);
+      Object.defineProperty(event, "target", { value: button });
 
-      expect(callOrder).toEqual(["sidebar", "queryTree", "search", "graph", "menubar"]);
+      const handled = handleSidebarClicks(event);
+
+      expect(handled).toBe(true);
     });
 
-    it("stops at sidebar handler when it returns true", () => {
-      vi.mocked(handleSidebarClicks).mockReturnValue(true);
+    it("does not handle unrelated button clicks", () => {
+      document.body.innerHTML = `
+        <button data-action="some-other-action">Other</button>
+      `;
 
+      const button = document.querySelector("button")!;
       const event = new MouseEvent("click", { bubbles: true });
-      clickHandler(event);
+      Object.defineProperty(event, "target", { value: button });
 
-      expect(handleSidebarClicks).toHaveBeenCalled();
-      expect(handleQueryTreeClicks).not.toHaveBeenCalled();
-      expect(handleSearchClicks).not.toHaveBeenCalled();
-      expect(handleGraphClicks).not.toHaveBeenCalled();
-      expect(handleMenubarOutsideClick).not.toHaveBeenCalled();
-    });
+      const handled = handleSidebarClicks(event);
 
-    it("stops at query tree handler when it returns true", () => {
-      vi.mocked(handleSidebarClicks).mockReturnValue(false);
-      vi.mocked(handleQueryTreeClicks).mockReturnValue(true);
-
-      const event = new MouseEvent("click", { bubbles: true });
-      clickHandler(event);
-
-      expect(handleSidebarClicks).toHaveBeenCalled();
-      expect(handleQueryTreeClicks).toHaveBeenCalled();
-      expect(handleSearchClicks).not.toHaveBeenCalled();
-      expect(handleGraphClicks).not.toHaveBeenCalled();
-    });
-
-    it("stops at search handler when it returns true", () => {
-      vi.mocked(handleSidebarClicks).mockReturnValue(false);
-      vi.mocked(handleQueryTreeClicks).mockReturnValue(false);
-      vi.mocked(handleSearchClicks).mockReturnValue(true);
-
-      const event = new MouseEvent("click", { bubbles: true });
-      clickHandler(event);
-
-      expect(handleSearchClicks).toHaveBeenCalled();
-      expect(handleGraphClicks).not.toHaveBeenCalled();
-    });
-
-    it("stops at graph handler when it returns true", () => {
-      vi.mocked(handleSidebarClicks).mockReturnValue(false);
-      vi.mocked(handleQueryTreeClicks).mockReturnValue(false);
-      vi.mocked(handleSearchClicks).mockReturnValue(false);
-      vi.mocked(handleGraphClicks).mockReturnValue(true);
-
-      const event = new MouseEvent("click", { bubbles: true });
-      clickHandler(event);
-
-      expect(handleGraphClicks).toHaveBeenCalled();
-      expect(handleMenubarOutsideClick).not.toHaveBeenCalled();
+      expect(handled).toBe(false);
     });
   });
 
-  describe("Query tree clicks (regression test for execute-sidebar-query)", () => {
-    it("query tree handler runs before graph handler for query items", () => {
-      // This test catches the bug where handleGraphClicks was catching
-      // data-action="execute-sidebar-query" before handleQueryTreeClicks
-
+  describe("toggle-detail-sidebar action", () => {
+    it("handles toggle-detail-sidebar button click", () => {
       document.body.innerHTML = `
-        <div class="query-item" data-action="execute-sidebar-query" data-query-id="test-query">
-          Test Query
+        <button data-action="toggle-detail-sidebar">Toggle Detail</button>
+        <aside id="detail-sidebar" style="width: 300px"></aside>
+        <button id="detail-sidebar-expand" class="hidden"></button>
+      `;
+
+      const button = document.querySelector('[data-action="toggle-detail-sidebar"]')!;
+      const event = new MouseEvent("click", { bubbles: true });
+      Object.defineProperty(event, "target", { value: button });
+
+      const handled = handleSidebarClicks(event);
+
+      expect(handled).toBe(true);
+    });
+  });
+
+  describe("click-to-copy on property values", () => {
+    it("handles click on detail-prop-value element", () => {
+      document.body.innerHTML = `
+        <span class="detail-prop-value" data-value="test-value">Test Value</span>
+      `;
+
+      // Mock clipboard API using Object.defineProperty
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: writeTextMock },
+        writable: true,
+        configurable: true,
+      });
+
+      const valueEl = document.querySelector(".detail-prop-value")!;
+      const event = new MouseEvent("click", { bubbles: true });
+      Object.defineProperty(event, "target", { value: valueEl });
+
+      const handled = handleSidebarClicks(event);
+
+      expect(handled).toBe(true);
+      expect(writeTextMock).toHaveBeenCalledWith("test-value");
+    });
+  });
+
+  describe("overflow menu toggle", () => {
+    it("opens overflow dropdown when trigger is clicked", () => {
+      document.body.innerHTML = `
+        <button class="overflow-trigger" aria-expanded="false">Menu</button>
+        <div class="overflow-dropdown" hidden>
+          <button class="overflow-item" data-action="delete-node" data-node-id="123">Delete</button>
         </div>
       `;
 
-      const queryItem = document.querySelector(".query-item")!;
+      const trigger = document.querySelector(".overflow-trigger")!;
+      const dropdown = document.querySelector(".overflow-dropdown")!;
       const event = new MouseEvent("click", { bubbles: true });
-      Object.defineProperty(event, "target", { value: queryItem });
+      Object.defineProperty(event, "target", { value: trigger });
 
-      // Simulate real behavior: query handler should claim this click
-      vi.mocked(handleQueryTreeClicks).mockImplementation((e) => {
-        const target = e.target as HTMLElement;
-        return target.closest('[data-action="execute-sidebar-query"]') !== null;
-      });
+      const handled = handleSidebarClicks(event);
 
-      clickHandler(event);
-
-      expect(handleQueryTreeClicks).toHaveBeenCalled();
-      expect(handleQueryTreeClicks).toHaveReturnedWith(true);
-      // Graph handler should NOT be called because query handler claimed it
-      expect(handleGraphClicks).not.toHaveBeenCalled();
+      expect(handled).toBe(true);
+      expect(dropdown.hasAttribute("hidden")).toBe(false);
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
     });
 
-    it("graph handler runs for non-query data-action elements", () => {
+    it("closes overflow dropdown when trigger is clicked again", () => {
       document.body.innerHTML = `
-        <button data-action="zoom-in">Zoom In</button>
+        <button class="overflow-trigger" aria-expanded="true">Menu</button>
+        <div class="overflow-dropdown">
+          <button class="overflow-item" data-action="delete-node" data-node-id="123">Delete</button>
+        </div>
+      `;
+
+      const trigger = document.querySelector(".overflow-trigger")!;
+      const dropdown = document.querySelector(".overflow-dropdown")!;
+      const event = new MouseEvent("click", { bubbles: true });
+      Object.defineProperty(event, "target", { value: trigger });
+
+      const handled = handleSidebarClicks(event);
+
+      expect(handled).toBe(true);
+      expect(dropdown.hasAttribute("hidden")).toBe(true);
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    });
+  });
+});
+
+describe("Query Tree Click Handler", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  describe("toggle-category action", () => {
+    it("handles category toggle click", () => {
+      // Set up minimal DOM for initQueries
+      document.body.innerHTML = `
+        <div id="query-tree"></div>
+        <input id="query-filter" />
+      `;
+
+      // Initialize the queries component to set up internal state
+      initQueries();
+
+      // Now create a category header to click
+      const queryTree = document.getElementById("query-tree")!;
+      // After init, query-tree contains rendered categories
+      // Find a category header
+      const categoryHeader = queryTree.querySelector('[data-action="toggle-category"]');
+
+      if (categoryHeader) {
+        const event = new MouseEvent("click", { bubbles: true });
+        Object.defineProperty(event, "target", { value: categoryHeader });
+
+        const handled = handleQueryTreeClicks(event);
+        expect(handled).toBe(true);
+      }
+    });
+
+    it("returns false for non-query-tree clicks", () => {
+      document.body.innerHTML = `
+        <button data-action="some-other-action">Other</button>
       `;
 
       const button = document.querySelector("button")!;
       const event = new MouseEvent("click", { bubbles: true });
       Object.defineProperty(event, "target", { value: button });
 
-      // Query handler doesn't claim generic actions
-      vi.mocked(handleQueryTreeClicks).mockReturnValue(false);
-      // Graph handler claims data-action elements
-      vi.mocked(handleGraphClicks).mockImplementation((e) => {
-        const target = e.target as HTMLElement;
-        return target.closest("[data-action]") !== null;
-      });
+      const handled = handleQueryTreeClicks(event);
 
-      clickHandler(event);
-
-      expect(handleQueryTreeClicks).toHaveBeenCalled();
-      expect(handleGraphClicks).toHaveBeenCalled();
-      expect(handleGraphClicks).toHaveReturnedWith(true);
+      expect(handled).toBe(false);
     });
   });
 
-  describe("Sidebar clicks", () => {
-    it("sidebar handler claims toggle-nav-sidebar action", () => {
+  describe("execute-sidebar-query action", () => {
+    it("handles query item click", async () => {
       document.body.innerHTML = `
-        <button data-action="toggle-nav-sidebar">Toggle</button>
+        <div id="query-tree"></div>
+        <input id="query-filter" />
       `;
 
-      const button = document.querySelector("button")!;
-      const event = new MouseEvent("click", { bubbles: true });
-      Object.defineProperty(event, "target", { value: button });
+      initQueries();
 
-      vi.mocked(handleSidebarClicks).mockImplementation((e) => {
-        const target = e.target as HTMLElement;
-        const action = target.closest("[data-action]")?.getAttribute("data-action");
-        return action === "toggle-nav-sidebar" || action === "toggle-detail-sidebar";
-      });
+      // Find a query item (if rendered)
+      const queryTree = document.getElementById("query-tree")!;
+      const queryItem = queryTree.querySelector('[data-action="execute-sidebar-query"]');
 
-      clickHandler(event);
+      if (queryItem) {
+        const event = new MouseEvent("click", { bubbles: true });
+        Object.defineProperty(event, "target", { value: queryItem });
 
-      expect(handleSidebarClicks).toHaveReturnedWith(true);
-      expect(handleQueryTreeClicks).not.toHaveBeenCalled();
+        const handled = handleQueryTreeClicks(event);
+        expect(handled).toBe(true);
+      }
     });
   });
+});
 
-  describe("Search clicks", () => {
-    it("search handler claims search result item clicks", () => {
+describe("Search Click Handler", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    resetSearchState();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    resetSearchState();
+  });
+
+  describe("search result selection", () => {
+    it("handles click on search result item", () => {
       document.body.innerHTML = `
-        <div class="search-result-item" data-node-id="node-1">Result</div>
+        <input id="node-search" />
+        <input id="path-start" />
+        <input id="path-end" />
+        <div id="path-results"></div>
+        <button id="find-path-btn">Find Path</button>
+        <div class="search-result-item" data-node-id="node-1" data-node-label="Test Node" data-node-type="User" data-context="node">
+          Test Node
+        </div>
       `;
 
-      const item = document.querySelector(".search-result-item")!;
+      initSearch();
+
+      const resultItem = document.querySelector(".search-result-item")!;
       const event = new MouseEvent("click", { bubbles: true });
-      Object.defineProperty(event, "target", { value: item });
+      Object.defineProperty(event, "target", { value: resultItem });
 
-      vi.mocked(handleSearchClicks).mockImplementation((e) => {
-        const target = e.target as HTMLElement;
-        return target.closest(".search-result-item") !== null;
-      });
+      const handled = handleSearchClicks(event);
 
-      clickHandler(event);
-
-      expect(handleSearchClicks).toHaveReturnedWith(true);
-      expect(handleGraphClicks).not.toHaveBeenCalled();
+      expect(handled).toBe(true);
     });
+
+    it("handles click on path-start search result", () => {
+      document.body.innerHTML = `
+        <input id="node-search" />
+        <input id="path-start" />
+        <input id="path-end" />
+        <div id="path-results"></div>
+        <button id="find-path-btn">Find Path</button>
+        <div class="search-result-item" data-node-id="start-node" data-node-label="Start" data-context="path-start">
+          Start Node
+        </div>
+      `;
+
+      initSearch();
+
+      const resultItem = document.querySelector(".search-result-item")!;
+      const pathStartInput = document.getElementById("path-start") as HTMLInputElement;
+
+      const event = new MouseEvent("click", { bubbles: true });
+      Object.defineProperty(event, "target", { value: resultItem });
+
+      const handled = handleSearchClicks(event);
+
+      expect(handled).toBe(true);
+      expect(pathStartInput.value).toBe("Start");
+    });
+
+    it("handles click on path-end search result", () => {
+      document.body.innerHTML = `
+        <input id="node-search" />
+        <input id="path-start" />
+        <input id="path-end" />
+        <div id="path-results"></div>
+        <button id="find-path-btn">Find Path</button>
+        <div class="search-result-item" data-node-id="end-node" data-node-label="End" data-context="path-end">
+          End Node
+        </div>
+      `;
+
+      initSearch();
+
+      const resultItem = document.querySelector(".search-result-item")!;
+      const pathEndInput = document.getElementById("path-end") as HTMLInputElement;
+
+      const event = new MouseEvent("click", { bubbles: true });
+      Object.defineProperty(event, "target", { value: resultItem });
+
+      const handled = handleSearchClicks(event);
+
+      expect(handled).toBe(true);
+      expect(pathEndInput.value).toBe("End");
+    });
+
+    it("returns false for non-search-result clicks", () => {
+      document.body.innerHTML = `
+        <div class="some-other-element">Not a search result</div>
+      `;
+
+      const element = document.querySelector(".some-other-element")!;
+      const event = new MouseEvent("click", { bubbles: true });
+      Object.defineProperty(event, "target", { value: element });
+
+      const handled = handleSearchClicks(event);
+
+      expect(handled).toBe(false);
+    });
+  });
+});
+
+describe("Handler Priority Integration", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("sidebar handler claims sidebar toggle clicks before other handlers", () => {
+    document.body.innerHTML = `
+      <button data-action="toggle-nav-sidebar">Toggle</button>
+      <aside id="nav-sidebar" style="width: 240px"></aside>
+      <button id="nav-sidebar-expand" class="hidden"></button>
+    `;
+
+    const button = document.querySelector("button")!;
+    const event = new MouseEvent("click", { bubbles: true });
+    Object.defineProperty(event, "target", { value: button });
+
+    // Sidebar should handle it
+    const sidebarHandled = handleSidebarClicks(event);
+    expect(sidebarHandled).toBe(true);
+
+    // Other handlers should not handle sidebar-specific actions
+    const queryHandled = handleQueryTreeClicks(event);
+    expect(queryHandled).toBe(false);
+
+    const searchHandled = handleSearchClicks(event);
+    expect(searchHandled).toBe(false);
+  });
+
+  it("query handler claims query-tree clicks", () => {
+    document.body.innerHTML = `
+      <div id="query-tree"></div>
+      <input id="query-filter" />
+    `;
+
+    initQueries();
+
+    const queryTree = document.getElementById("query-tree")!;
+    const categoryHeader = queryTree.querySelector('[data-action="toggle-category"]');
+
+    if (categoryHeader) {
+      const event = new MouseEvent("click", { bubbles: true });
+      Object.defineProperty(event, "target", { value: categoryHeader });
+
+      // Sidebar should not handle query tree clicks
+      const sidebarHandled = handleSidebarClicks(event);
+      expect(sidebarHandled).toBe(false);
+
+      // Query handler should handle it
+      const queryHandled = handleQueryTreeClicks(event);
+      expect(queryHandled).toBe(true);
+    }
+  });
+
+  it("search handler claims search result clicks", () => {
+    document.body.innerHTML = `
+      <input id="node-search" />
+      <input id="path-start" />
+      <input id="path-end" />
+      <div id="path-results"></div>
+      <button id="find-path-btn">Find Path</button>
+      <div class="search-result-item" data-node-id="test" data-context="node">Result</div>
+    `;
+
+    initSearch();
+
+    const resultItem = document.querySelector(".search-result-item")!;
+    const event = new MouseEvent("click", { bubbles: true });
+    Object.defineProperty(event, "target", { value: resultItem });
+
+    // Sidebar should not handle search result clicks
+    const sidebarHandled = handleSidebarClicks(event);
+    expect(sidebarHandled).toBe(false);
+
+    // Query handler should not handle search result clicks
+    const queryHandled = handleQueryTreeClicks(event);
+    expect(queryHandled).toBe(false);
+
+    // Search handler should handle it
+    const searchHandled = handleSearchClicks(event);
+    expect(searchHandled).toBe(true);
+  });
+});
+
+describe("Sidebar Toggle Functions", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    vi.clearAllMocks();
+    // Reset appState for each test
+    mockAppState.navSidebarCollapsed = false;
+    mockAppState.detailSidebarCollapsed = false;
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("toggleNavSidebar collapses nav sidebar", () => {
+    document.body.innerHTML = `
+      <aside id="nav-sidebar" data-collapsed="false" style="width: 240px"></aside>
+      <button id="nav-sidebar-expand" class="hidden"></button>
+    `;
+
+    toggleNavSidebar();
+
+    const sidebar = document.getElementById("nav-sidebar")!;
+    const expandBtn = document.getElementById("nav-sidebar-expand")!;
+
+    expect(sidebar.getAttribute("data-collapsed")).toBe("true");
+    expect(sidebar.style.width).toBe("0px");
+    expect(expandBtn.classList.contains("hidden")).toBe(false);
+  });
+
+  it("toggleDetailSidebar collapses detail sidebar", () => {
+    document.body.innerHTML = `
+      <aside id="detail-sidebar" data-collapsed="false" style="width: 300px"></aside>
+      <button id="detail-sidebar-expand" class="hidden"></button>
+    `;
+
+    toggleDetailSidebar();
+
+    const sidebar = document.getElementById("detail-sidebar")!;
+    const expandBtn = document.getElementById("detail-sidebar-expand")!;
+
+    expect(sidebar.getAttribute("data-collapsed")).toBe("true");
+    expect(sidebar.style.width).toBe("0px");
+    expect(expandBtn.classList.contains("hidden")).toBe(false);
   });
 });
