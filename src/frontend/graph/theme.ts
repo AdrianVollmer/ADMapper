@@ -15,7 +15,7 @@ export const NODE_COLORS: Record<ADNodeType, string> = {
   Domain: "#7950f2", // Vivid purple - domains are high-value
   GPO: "#fd7e14", // Bright orange - GPOs control configuration
   OU: "#20c997", // Mint green - organizational containers
-  Container: "#868e96", // Medium gray - generic containers
+  Container: "#db2777", // Pink - generic containers (matches CSS bg-pink-600)
   CertTemplate: "#f06595", // Rose pink - certificate templates (PKI)
   EnterpriseCA: "#f06595", // Rose pink - enterprise CAs (PKI)
   RootCA: "#f06595", // Rose pink - root CAs (PKI)

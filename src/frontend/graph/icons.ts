@@ -66,7 +66,7 @@ const ICON_COLORS: Record<ADNodeType, string> = {
   Domain: "#7950f2",
   GPO: "#fd7e14",
   OU: "#20c997",
-  Container: "#868e96",
+  Container: "#db2777",
   CertTemplate: "#f06595",
   EnterpriseCA: "#f06595",
   RootCA: "#f06595",
