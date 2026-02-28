@@ -1038,15 +1038,15 @@ class TestRunner:
             body = response.body
             if not isinstance(body, dict):
                 return False, f"Expected dict, got {type(body)}", proof
-            # Should have is_high_value and has_path_to_high_value fields
-            if "is_high_value" not in body:
-                return False, "Missing is_high_value field", proof
-            if "has_path_to_high_value" not in body:
-                return False, "Missing has_path_to_high_value field", proof
+            # Should have isHighValue and hasPathToHighValue fields (camelCase)
+            if "isHighValue" not in body:
+                return False, "Missing isHighValue field", proof
+            if "hasPathToHighValue" not in body:
+                return False, "Missing hasPathToHighValue field", proof
             self.logger.info(
                 f"Node status: {elapsed_ms:.0f}ms, "
-                f"is_high_value={body.get('is_high_value')}, "
-                f"has_path={body.get('has_path_to_high_value')}"
+                f"isHighValue={body.get('isHighValue')}, "
+                f"hasPath={body.get('hasPathToHighValue')}"
             )
             return True, "", proof
 
@@ -1190,7 +1190,14 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             result_data = self._body_get(response.body, "results", {})
-            if isinstance(result_data, list) and result_data:
+            # Handle different result formats
+            if isinstance(result_data, dict) and "rows" in result_data:
+                # Format: {headers: [...], rows: [[...]]}
+                rows = result_data.get("rows", [])
+                if rows and len(rows[0]) >= 2:
+                    source_id = str(rows[0][0])
+                    target_id = str(rows[0][1])
+            elif isinstance(result_data, list) and result_data:
                 first = result_data[0]
                 if isinstance(first, dict):
                     source_id = first.get("user_id")
