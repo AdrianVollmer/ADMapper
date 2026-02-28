@@ -266,6 +266,11 @@ class E2ETestRunner:
             ("Query Execution", runner.test_queries),
             ("Search", runner.test_search),
             ("Query History", runner.test_query_history),
+            ("Node APIs", runner.test_node_apis),
+            ("Security Insights", runner.test_insights),
+            ("Choke Points", runner.test_choke_points),
+            ("Shortest Path", runner.test_shortest_path),
+            ("Cache and Settings", runner.test_cache_and_settings),
             ("Performance", runner.test_performance),
         ]
 

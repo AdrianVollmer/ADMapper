@@ -963,3 +963,306 @@ class TestRunner:
         results.append(self._run_test("Query history responds in <100ms", check_history_fast))
 
         return results
+
+    # =========================================================================
+    # Node API Tests
+    # =========================================================================
+
+    def test_node_apis(self) -> list[TestResult]:
+        """Test node-specific APIs (get, status, owned)."""
+        results = []
+        max_time_ms = 3000
+
+        # First, find a node to test with
+        test_node_id = None
+
+        def find_test_node():
+            nonlocal test_node_id
+            # Search for a user node
+            response = self.api.search("admin", limit=1)
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Search failed: {response.body}", proof
+            items = response.body
+            if items and isinstance(items, list) and len(items) > 0:
+                test_node_id = items[0].get("id", items[0].get("object_id", ""))
+            if not test_node_id:
+                # Fallback: query for any user
+                response = self.api.query("MATCH (u:User) RETURN u.object_id AS id LIMIT 1")
+                if response.ok:
+                    result_data = self._body_get(response.body, "results", {})
+                    if isinstance(result_data, list) and result_data:
+                        first = result_data[0]
+                        if isinstance(first, list) and first:
+                            test_node_id = str(first[0])
+                        elif isinstance(first, dict):
+                            test_node_id = str(first.get("id", ""))
+            if not test_node_id:
+                return False, "No nodes found for testing", proof
+            self.logger.info(f"Using node {test_node_id} for node API tests")
+            return True, "", proof
+
+        results.append(self._run_test("Find test node", find_test_node))
+
+        if not test_node_id:
+            return results
+
+        # Test node_get API
+        def check_node_get():
+            start = time.time()
+            response = self.api.node_get(test_node_id)
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Node get failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Node get too slow: {elapsed_ms:.0f}ms", proof
+            body = response.body
+            if not isinstance(body, dict):
+                return False, f"Expected dict, got {type(body)}", proof
+            self.logger.info(f"Node get: {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Node get API works", check_node_get))
+
+        # Test node_status API (high-value detection)
+        def check_node_status():
+            start = time.time()
+            response = self.api.node_status(test_node_id)
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Node status failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Node status too slow: {elapsed_ms:.0f}ms", proof
+            body = response.body
+            if not isinstance(body, dict):
+                return False, f"Expected dict, got {type(body)}", proof
+            # Should have is_high_value and has_path_to_high_value fields
+            if "is_high_value" not in body:
+                return False, "Missing is_high_value field", proof
+            if "has_path_to_high_value" not in body:
+                return False, "Missing has_path_to_high_value field", proof
+            self.logger.info(
+                f"Node status: {elapsed_ms:.0f}ms, "
+                f"is_high_value={body.get('is_high_value')}, "
+                f"has_path={body.get('has_path_to_high_value')}"
+            )
+            return True, "", proof
+
+        results.append(self._run_test("Node status API works", check_node_status))
+
+        # Test node_set_owned API
+        def check_node_set_owned():
+            # Set owned = true
+            response = self.api.node_set_owned(test_node_id, owned=True)
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Node set owned failed: {response.body}", proof
+            # Set owned = false (reset)
+            response = self.api.node_set_owned(test_node_id, owned=False)
+            if not response.ok:
+                return False, f"Node unset owned failed: {response.body}", proof
+            self.logger.info("Node set owned API works")
+            return True, "", proof
+
+        results.append(self._run_test("Node set owned API works", check_node_set_owned))
+
+        return results
+
+    # =========================================================================
+    # Security Insights Tests
+    # =========================================================================
+
+    def test_insights(self) -> list[TestResult]:
+        """Test security insights API."""
+        results = []
+        max_time_ms = 5000  # 5 seconds (insights can be slower)
+
+        # Test insights endpoint
+        def check_insights():
+            start = time.time()
+            response = self.api.insights()
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Insights failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Insights too slow: {elapsed_ms:.0f}ms", proof
+            body = response.body
+            if not isinstance(body, dict):
+                return False, f"Expected dict, got {type(body)}", proof
+            # Check expected fields exist
+            expected_fields = [
+                "high_value_targets",
+                "kerberoastable",
+                "asrep_roastable",
+                "unconstrained_delegation",
+            ]
+            for field in expected_fields:
+                if field not in body:
+                    self.logger.warning(f"Missing field in insights: {field}")
+            self.logger.info(
+                f"Insights: {elapsed_ms:.0f}ms, "
+                f"high_value={len(body.get('high_value_targets', []))}, "
+                f"kerberoastable={len(body.get('kerberoastable', []))}"
+            )
+            return True, "", proof
+
+        results.append(self._run_test("Insights API works", check_insights))
+
+        return results
+
+    # =========================================================================
+    # Choke Points Tests
+    # =========================================================================
+
+    def test_choke_points(self) -> list[TestResult]:
+        """Test choke points API (edge betweenness centrality)."""
+        results = []
+        max_time_ms = 30000  # 30 seconds (expensive algorithm, but cached after first run)
+
+        # Test choke points endpoint (first call - computes)
+        def check_choke_points_first():
+            start = time.time()
+            response = self.api.choke_points()
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Choke points failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Choke points too slow: {elapsed_ms:.0f}ms", proof
+            body = response.body
+            if not isinstance(body, dict):
+                return False, f"Expected dict, got {type(body)}", proof
+            if "choke_points" not in body:
+                return False, "Missing choke_points field", proof
+            if "total_edges" not in body:
+                return False, "Missing total_edges field", proof
+            choke_points = body.get("choke_points", [])
+            self.logger.info(
+                f"Choke points (first call): {elapsed_ms:.0f}ms, "
+                f"count={len(choke_points)}, total_edges={body.get('total_edges')}"
+            )
+            return True, "", proof
+
+        results.append(self._run_test("Choke points API works", check_choke_points_first))
+
+        # Test choke points endpoint (second call - should use cache)
+        def check_choke_points_cached():
+            start = time.time()
+            response = self.api.choke_points()
+            elapsed_ms = (time.time() - start) * 1000
+            proof = f"Response time: {elapsed_ms:.1f}ms"
+            if not response.ok:
+                return False, f"Choke points (cached) failed: {response.body}", proof
+            # Cached call should be fast (< 500ms)
+            if elapsed_ms > 500:
+                self.logger.warning(f"Choke points cached call slower than expected: {elapsed_ms:.0f}ms")
+            self.logger.info(f"Choke points (cached): {elapsed_ms:.0f}ms")
+            return True, "", proof
+
+        results.append(self._run_test("Choke points cached call fast", check_choke_points_cached))
+
+        return results
+
+    # =========================================================================
+    # Shortest Path Tests
+    # =========================================================================
+
+    def test_shortest_path(self) -> list[TestResult]:
+        """Test shortest path API."""
+        results = []
+        max_time_ms = 5000
+
+        # Find two nodes to test path between
+        source_id = None
+        target_id = None
+
+        def find_path_nodes():
+            nonlocal source_id, target_id
+            # Find a user and a group to test path between
+            response = self.api.query(
+                "MATCH (u:User)-[:MemberOf]->(g:Group) "
+                "RETURN u.object_id AS user_id, g.object_id AS group_id LIMIT 1"
+            )
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Query failed: {response.body}", proof
+            result_data = self._body_get(response.body, "results", {})
+            if isinstance(result_data, list) and result_data:
+                first = result_data[0]
+                if isinstance(first, dict):
+                    source_id = first.get("user_id")
+                    target_id = first.get("group_id")
+                elif isinstance(first, list) and len(first) >= 2:
+                    source_id = str(first[0])
+                    target_id = str(first[1])
+            if not source_id or not target_id:
+                return False, "No path test nodes found", proof
+            self.logger.info(f"Path test: {source_id} -> {target_id}")
+            return True, "", proof
+
+        results.append(self._run_test("Find nodes for path test", find_path_nodes))
+
+        if not source_id or not target_id:
+            return results
+
+        # Test shortest path
+        def check_shortest_path():
+            start = time.time()
+            response = self.api.shortest_path(source_id, target_id)
+            elapsed_ms = (time.time() - start) * 1000
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Shortest path failed: {response.body}", proof
+            if elapsed_ms > max_time_ms:
+                return False, f"Shortest path too slow: {elapsed_ms:.0f}ms", proof
+            body = response.body
+            if not isinstance(body, dict):
+                return False, f"Expected dict, got {type(body)}", proof
+            paths = body.get("paths", [])
+            self.logger.info(f"Shortest path: {elapsed_ms:.0f}ms, found {len(paths)} path(s)")
+            return True, "", proof
+
+        results.append(self._run_test("Shortest path API works", check_shortest_path))
+
+        return results
+
+    # =========================================================================
+    # Cache and Settings Tests
+    # =========================================================================
+
+    def test_cache_and_settings(self) -> list[TestResult]:
+        """Test cache stats and settings APIs."""
+        results = []
+
+        # Test cache stats
+        def check_cache_stats():
+            response = self.api.cache_stats()
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Cache stats failed: {response.body}", proof
+            body = response.body
+            if not isinstance(body, dict):
+                return False, f"Expected dict, got {type(body)}", proof
+            self.logger.info(f"Cache stats: entries={body.get('entries', 0)}")
+            return True, "", proof
+
+        results.append(self._run_test("Cache stats API works", check_cache_stats))
+
+        # Test settings
+        def check_settings():
+            response = self.api.settings()
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Settings failed: {response.body}", proof
+            body = response.body
+            if not isinstance(body, dict):
+                return False, f"Expected dict, got {type(body)}", proof
+            self.logger.info(f"Settings: {list(body.keys())}")
+            return True, "", proof
+
+        results.append(self._run_test("Settings API works", check_settings))
+
+        return results

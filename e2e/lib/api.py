@@ -144,6 +144,51 @@ class APIClient:
         """Clear the graph."""
         return self.post("/api/graph/clear")
 
+    def node_get(self, node_id: str) -> APIResponse:
+        """Get a node by ID."""
+        return self.get(f"/api/graph/node/{node_id}")
+
+    def node_status(self, node_id: str) -> APIResponse:
+        """Get status for a node (high-value, paths to HVT, etc)."""
+        return self.get(f"/api/graph/node/{node_id}/status")
+
+    def node_set_owned(self, node_id: str, owned: bool = True) -> APIResponse:
+        """Mark a node as owned."""
+        return self.post(f"/api/graph/node/{node_id}/owned", {"owned": owned})
+
+    def choke_points(self) -> APIResponse:
+        """Get graph choke points (edge betweenness centrality)."""
+        return self.get("/api/graph/choke-points")
+
+    def insights(self) -> APIResponse:
+        """Get security insights (high-value targets, kerberoastable, etc)."""
+        return self.get("/api/graph/insights")
+
+    def shortest_path(
+        self,
+        source_id: str,
+        target_id: str,
+        edge_types: list[str] | None = None,
+        limit: int = 1,
+    ) -> APIResponse:
+        """Find shortest path between nodes."""
+        params: dict[str, Any] = {
+            "source": source_id,
+            "target": target_id,
+            "limit": limit,
+        }
+        if edge_types:
+            params["edge_types"] = ",".join(edge_types)
+        return self.get(f"/api/graph/path?{urlencode(params)}")
+
+    def cache_stats(self) -> APIResponse:
+        """Get cache statistics."""
+        return self.get("/api/cache/stats")
+
+    def settings(self) -> APIResponse:
+        """Get application settings."""
+        return self.get("/api/settings")
+
     def import_file(self, file_path: Path) -> APIResponse:
         """
         Import a file via multipart form upload.
