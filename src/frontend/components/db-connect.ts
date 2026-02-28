@@ -192,6 +192,7 @@ async function connectToDatabase(): Promise<void> {
     appState.databaseConnected = result.connected;
     appState.databaseType = result.database_type;
     updateConnectionStatus();
+    updateGraphForConnectionState(result.connected);
 
     // Save to connection history
     const dbType = result.database_type || selectedDbType;
@@ -219,6 +220,7 @@ export async function connectToUrl(url: string): Promise<boolean> {
     appState.databaseConnected = result.connected;
     appState.databaseType = result.database_type;
     updateConnectionStatus();
+    updateGraphForConnectionState(result.connected);
 
     // Save to connection history (moves it to top)
     const dbType = result.database_type || "unknown";
