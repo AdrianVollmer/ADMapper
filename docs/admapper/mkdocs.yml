@@ -75,5 +75,14 @@ nav:
     - Graph Navigation: guide/navigation.md
     - Running Queries: guide/queries.md
     - Security Insights: guide/insights.md
+  - API Reference:
+    - Overview: api/index.md
+    - Database: api/database.md
+    - Import: api/import.md
+    - Graph: api/graph.md
+    - Query: api/query.md
+    - Cache: api/cache.md
+    - Settings: api/settings.md
+    - Query History: api/history.md
   - Database Backends: backends.md
   - CLI Reference: cli.md
