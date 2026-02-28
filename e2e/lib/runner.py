@@ -35,11 +35,13 @@ class TestRunner:
         test_data: Path,
         golden_file: Path,
         logger: logging.Logger,
+        backend: str = "crustdb",
     ):
         self.api = api
         self.test_data = test_data
         self.golden_file = golden_file
         self.logger = logger
+        self.backend = backend
         self._expected_stats: dict[str, Any] | None = None
 
     @property
@@ -747,53 +749,57 @@ class TestRunner:
         results.append(self._run_test("Perf: Complex WHERE with OR", check_complex_where_or))
 
         # Test 8: Shortest path (user 0 to user 10 via KNOWS chain)
-        def check_shortest_path():
-            start = time.time()
-            response = self.api.query(
-                "MATCH p = SHORTEST 1 (src:PerfUser)-[:PERF_KNOWS]-+(dst:PerfUser) "
-                "WHERE src.index = 0 AND dst.index = 10 "
-                "RETURN length(p) AS hops"
-            )
-            elapsed_ms = (time.time() - start) * 1000
-            proof = self._to_proof(response.body)
-            if not response.ok:
-                return False, f"Query failed: {response.body}", proof
-            if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+        # Uses SHORTEST syntax which is only supported by CrustDB
+        if self.backend == "crustdb":
+            def check_shortest_path():
+                start = time.time()
+                response = self.api.query(
+                    "MATCH p = SHORTEST (src:PerfUser)-[:PERF_KNOWS]-+(dst:PerfUser) "
+                    "WHERE src.index = 0 AND dst.index = 10 "
+                    "RETURN length(p) AS hops"
+                )
+                elapsed_ms = (time.time() - start) * 1000
+                proof = self._to_proof(response.body)
+                if not response.ok:
+                    return False, f"Query failed: {response.body}", proof
+                if elapsed_ms > max_time_ms:
+                    return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            hops = self._extract_count(result_data, "hops")
-            # user0 -> user1 -> ... -> user10 = 10 hops
-            if hops != 10:
-                return False, f"Expected 10 hops, got {hops}", proof
-            self.logger.info(f"Shortest path (10 hops): {elapsed_ms:.0f}ms")
-            return True, "", proof
+                result_data = self._body_get(response.body, "results", {})
+                hops = self._extract_count(result_data, "hops")
+                # user0 -> user1 -> ... -> user10 = 10 hops
+                if hops != 10:
+                    return False, f"Expected 10 hops, got {hops}", proof
+                self.logger.info(f"Shortest path (10 hops): {elapsed_ms:.0f}ms")
+                return True, "", proof
 
-        results.append(self._run_test("Perf: Shortest path (10 hops)", check_shortest_path))
+            results.append(self._run_test("Perf: Shortest path (10 hops)", check_shortest_path))
 
-        # Test 9: Longer shortest path (user 0 to user 19)
-        def check_longer_shortest_path():
-            start = time.time()
-            response = self.api.query(
-                "MATCH p = SHORTEST 1 (src:PerfUser)-[:PERF_KNOWS]-+(dst:PerfUser) "
-                "WHERE src.index = 0 AND dst.index = 19 "
-                "RETURN length(p) AS hops"
-            )
-            elapsed_ms = (time.time() - start) * 1000
-            proof = self._to_proof(response.body)
-            if not response.ok:
-                return False, f"Query failed: {response.body}", proof
-            if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+            # Test 9: Longer shortest path (user 0 to user 19)
+            def check_longer_shortest_path():
+                start = time.time()
+                response = self.api.query(
+                    "MATCH p = SHORTEST (src:PerfUser)-[:PERF_KNOWS]-+(dst:PerfUser) "
+                    "WHERE src.index = 0 AND dst.index = 19 "
+                    "RETURN length(p) AS hops"
+                )
+                elapsed_ms = (time.time() - start) * 1000
+                proof = self._to_proof(response.body)
+                if not response.ok:
+                    return False, f"Query failed: {response.body}", proof
+                if elapsed_ms > max_time_ms:
+                    return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            hops = self._extract_count(result_data, "hops")
-            if hops != 19:
-                return False, f"Expected 19 hops, got {hops}", proof
-            self.logger.info(f"Shortest path (19 hops): {elapsed_ms:.0f}ms")
-            return True, "", proof
+                result_data = self._body_get(response.body, "results", {})
+                hops = self._extract_count(result_data, "hops")
+                if hops != 19:
+                    return False, f"Expected 19 hops, got {hops}", proof
+                self.logger.info(f"Shortest path (19 hops): {elapsed_ms:.0f}ms")
+                return True, "", proof
 
-        results.append(self._run_test("Perf: Shortest path (19 hops)", check_longer_shortest_path))
+            results.append(self._run_test("Perf: Shortest path (19 hops)", check_longer_shortest_path))
+        else:
+            self.logger.info("Skipping SHORTEST path tests (not supported by this backend)")
 
         # Test 10: Combined pattern - path traversal with property filter
         def check_combined_pattern():

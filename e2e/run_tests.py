@@ -256,6 +256,7 @@ class E2ETestRunner:
             test_data=self.test_data,
             golden_file=self.golden_file,
             logger=self.logger,
+            backend=backend,
         )
 
         # Run each test module
