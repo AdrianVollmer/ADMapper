@@ -157,22 +157,22 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
     name: "High Value Targets",
     queries: [
       {
+        id: "high-value-groups",
+        name: "High Value Groups",
+        description: "Privileged groups by well-known SID",
+        query: `MATCH (g:Group) WHERE g.object_id ENDS WITH '-512' OR g.object_id ENDS WITH '-519' OR g.object_id ENDS WITH '-518' OR g.object_id ENDS WITH '-516' OR g.object_id ENDS WITH '-498' OR g.object_id ENDS WITH '-544' OR g.object_id ENDS WITH '-548' OR g.object_id ENDS WITH '-549' OR g.object_id ENDS WITH '-551' RETURN g`,
+      },
+      {
         id: "high-value-users",
         name: "High Value Users",
-        description: "Users marked as high value",
-        query: `MATCH (u:User) WHERE u.properties CONTAINS 'highvalue' RETURN u`,
+        description: "Users who are members of high-value groups",
+        query: `MATCH p = (u:User)-[:MemberOf]-+(g:Group) WHERE g.object_id ENDS WITH '-512' OR g.object_id ENDS WITH '-519' OR g.object_id ENDS WITH '-518' OR g.object_id ENDS WITH '-544' OR g.object_id ENDS WITH '-548' OR g.object_id ENDS WITH '-549' OR g.object_id ENDS WITH '-551' RETURN p`,
       },
       {
         id: "high-value-computers",
         name: "High Value Computers",
-        description: "Computers marked as high value",
-        query: `MATCH (c:Computer) WHERE c.properties CONTAINS 'highvalue' RETURN c`,
-      },
-      {
-        id: "high-value-groups",
-        name: "High Value Groups",
-        description: "Groups marked as high value",
-        query: `MATCH (g:Group) WHERE g.properties CONTAINS 'highvalue' RETURN g`,
+        description: "Computers who are members of high-value groups (e.g., Domain Controllers)",
+        query: `MATCH p = (c:Computer)-[:MemberOf]-+(g:Group) WHERE g.object_id ENDS WITH '-516' OR g.object_id ENDS WITH '-498' OR g.object_id ENDS WITH '-521' RETURN p`,
       },
     ],
   },

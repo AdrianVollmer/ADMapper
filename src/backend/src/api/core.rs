@@ -365,20 +365,30 @@ pub fn node_status_quick(db: &dyn DatabaseBackend, node_id: &str) -> Result<Node
         .map(|enabled| !enabled) // disabled = NOT enabled
         .unwrap_or(false); // if no enabled property, assume not disabled
 
-    // Check high value property
-    let high_value_prop = node
+    // High-value RIDs (well-known privileged groups)
+    const HIGH_VALUE_RIDS: &[&str] = &[
+        "-512", // Domain Admins
+        "-519", // Enterprise Admins
+        "-518", // Schema Admins
+        "-516", // Domain Controllers
+        "-498", // Enterprise Domain Controllers
+        "-544", // Administrators (Builtin)
+        "-548", // Account Operators
+        "-549", // Server Operators
+        "-551", // Backup Operators
+    ];
+
+    // Check if the node itself is a high-value target by its SID
+    let is_high_value_self = node
         .and_then(|n| {
             let props = &n.properties;
             props
-                .get("highvalue")
-                .or(props.get("HighValue"))
-                .or(props.get("highValue"))
-                .and_then(|v| {
-                    v.as_bool()
-                        .or_else(|| v.as_i64().map(|i| i == 1))
-                        .or_else(|| v.as_str().map(|s| s == "true"))
-                })
+                .get("objectsid")
+                .or(props.get("objectid"))
+                .or(props.get("object_id"))
+                .and_then(|v| v.as_str())
         })
+        .map(|sid| HIGH_VALUE_RIDS.iter().any(|rid| sid.ends_with(rid)))
         .unwrap_or(false);
 
     // Check group memberships
@@ -391,15 +401,14 @@ pub fn node_status_quick(db: &dyn DatabaseBackend, node_id: &str) -> Result<Node
         .map_err(|e| e.to_string())?
         .is_some();
 
-    // High-value RIDs
-    let high_value_rids = ["-512", "-519", "-518", "-516", "-498", "-544"];
-    let is_high_value_member = high_value_rids.iter().any(|rid| {
+    // Check if member of a high-value group
+    let is_high_value_member = HIGH_VALUE_RIDS.iter().any(|rid| {
         db.find_membership_by_sid_suffix(node_id, rid)
             .unwrap_or(None)
             .is_some()
     });
 
-    let is_high_value = high_value_prop || is_high_value_member;
+    let is_high_value = is_high_value_self || is_high_value_member;
 
     Ok(NodeStatus {
         owned,
