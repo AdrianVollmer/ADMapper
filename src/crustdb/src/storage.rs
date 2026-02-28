@@ -1084,6 +1084,17 @@ impl SqliteStorage {
         self.collect_edges_from_stmt(&mut stmt, params![edge_type])
     }
 
+    /// Scan all edges in the database.
+    pub fn scan_all_edges(&self) -> Result<Vec<Edge>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
+             FROM edges e
+             JOIN edge_types et ON e.type_id = et.id",
+        )?;
+
+        self.collect_edges_from_stmt(&mut stmt, [])
+    }
+
     /// Helper: collect edges from a prepared statement that returns
     /// (id, source_id, target_id, edge_type, properties).
     fn collect_edges_from_stmt<P: rusqlite::Params>(

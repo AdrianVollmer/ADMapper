@@ -4,6 +4,7 @@
 //! which are then interpreted by the plan executor.
 
 mod aggregate;
+pub mod algorithms;
 mod create;
 mod eval;
 mod mutation;

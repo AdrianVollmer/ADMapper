@@ -34,6 +34,7 @@ mod storage;
 
 pub use error::{Error, Result};
 pub use graph::{Edge, Node, PropertyValue};
+pub use query::executor::algorithms::EdgeBetweenness;
 pub use query::{QueryResult, QueryStats, ResultValue, Row};
 
 use std::collections::hash_map::DefaultHasher;
@@ -516,6 +517,70 @@ impl Database {
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.clear_query_history()
+    }
+
+    // ========================================================================
+    // Graph Algorithms
+    // ========================================================================
+
+    /// Compute edge betweenness centrality for the graph.
+    ///
+    /// Edge betweenness centrality measures how many shortest paths pass through
+    /// each edge. Edges with high betweenness are "choke points" - removing them
+    /// would disrupt many paths through the graph.
+    ///
+    /// This is useful for Active Directory security analysis to identify:
+    /// - Critical permissions that enable many attack paths
+    /// - High-impact remediation targets
+    /// - Structural vulnerabilities in the permission graph
+    ///
+    /// # Arguments
+    ///
+    /// * `edge_types` - Optional filter to only consider specific edge types
+    ///   (e.g., `Some(&["MemberOf", "GenericAll"])`)
+    /// * `directed` - Whether to treat edges as directed (true) or undirected (false).
+    ///   For AD graphs, directed is usually appropriate since permissions are directional.
+    ///
+    /// # Returns
+    ///
+    /// An `EdgeBetweenness` struct containing:
+    /// - `scores`: HashMap of edge ID to betweenness score
+    /// - `nodes_processed`: Number of nodes in the graph
+    /// - `edges_count`: Number of edges analyzed
+    ///
+    /// Use `result.top_k(10)` to get the top 10 edges by betweenness.
+    ///
+    /// # Complexity
+    ///
+    /// O(V * E) where V is the number of nodes and E is the number of edges.
+    /// For large graphs, this may take significant time.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let db = Database::open("graph.db")?;
+    /// let result = db.edge_betweenness_centrality(None, true)?;
+    ///
+    /// // Get top 10 choke points
+    /// for (edge_id, score) in result.top_k(10) {
+    ///     println!("Edge {} has betweenness {}", edge_id, score);
+    /// }
+    /// ```
+    pub fn edge_betweenness_centrality(
+        &self,
+        edge_types: Option<&[&str]>,
+        directed: bool,
+    ) -> Result<EdgeBetweenness> {
+        let storage = self.get_read_storage();
+        query::executor::algorithms::edge_betweenness_centrality(&storage, edge_types, directed)
+    }
+
+    /// Get an edge by its ID.
+    ///
+    /// Useful for resolving edge IDs returned by algorithms like edge betweenness.
+    pub fn get_edge(&self, edge_id: i64) -> Result<Option<Edge>> {
+        let storage = self.get_read_storage();
+        storage.get_edge(edge_id)
     }
 }
 
