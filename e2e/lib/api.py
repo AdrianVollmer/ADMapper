@@ -169,13 +169,11 @@ class APIClient:
         source_id: str,
         target_id: str,
         edge_types: list[str] | None = None,
-        limit: int = 1,
     ) -> APIResponse:
         """Find shortest path between nodes."""
         params: dict[str, Any] = {
-            "source": source_id,
-            "target": target_id,
-            "limit": limit,
+            "from": source_id,
+            "to": target_id,
         }
         if edge_types:
             params["edge_types"] = ",".join(edge_types)
