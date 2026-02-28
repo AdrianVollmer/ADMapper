@@ -19,6 +19,7 @@ src/crustdb/Cargo.lock
 build/
 dist/
 target/
+docs/**/site/
 
 # Cache
 .mypy_cache/
