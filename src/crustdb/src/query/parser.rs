@@ -817,7 +817,7 @@ fn build_pattern_part(
     ))
 }
 
-/// Build the SHORTEST k modifier.
+/// Build the SHORTEST k modifier. Defaults to k=1 if not specified.
 fn build_shortest_path_modifier(pair: Pair<Rule>) -> Result<u32> {
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::IntegerLiteral {
@@ -825,7 +825,8 @@ fn build_shortest_path_modifier(pair: Pair<Rule>) -> Result<u32> {
             return Ok(n as u32);
         }
     }
-    Err(Error::Parse("SHORTEST requires integer".into()))
+    // Default to 1 if no k specified (e.g., "SHORTEST (a)-[]->(b)")
+    Ok(1)
 }
 
 /// Build pattern elements from an AnonymousPatternPart.
@@ -2516,6 +2517,19 @@ mod tests {
         match stmt {
             Statement::Match(m) => {
                 assert_eq!(m.pattern.shortest_k, Some(5));
+            }
+            _ => panic!("Expected MATCH statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_shortest_path_no_k() {
+        // SHORTEST without k defaults to 1 (compatible with Neo4j/FalkorDB)
+        let stmt = parse("MATCH p = SHORTEST (a)-[:KNOWS]-+(b) RETURN p").unwrap();
+        match stmt {
+            Statement::Match(m) => {
+                assert_eq!(m.pattern.shortest_k, Some(1));
+                assert_eq!(m.pattern.path_variable.as_deref(), Some("p"));
             }
             _ => panic!("Expected MATCH statement"),
         }
