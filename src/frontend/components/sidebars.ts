@@ -70,8 +70,7 @@ const PROPERTY_PRIORITY: Record<string, number> = {
 /** Pretty labels for common AD properties */
 const PROPERTY_LABELS: Record<string, string> = {
   // Identity
-  objectid: "Object ID",
-  objectsid: "Object SID",
+  objectid: "Object SID",
   distinguishedname: "Distinguished Name",
   samaccountname: "SAM Account Name",
   userprincipalname: "User Principal Name",
