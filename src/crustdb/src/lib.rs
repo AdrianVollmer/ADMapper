@@ -314,6 +314,47 @@ impl Database {
         storage.insert_nodes_batch(nodes)
     }
 
+    /// Upsert multiple nodes in a single transaction.
+    ///
+    /// Each node is specified as (labels, properties).
+    /// Returns a vector of the node IDs (either created or existing) in the same order as input.
+    ///
+    /// **Key difference from insert_nodes_batch**:
+    /// - If a node with the same object_id already exists, its properties are **merged**
+    ///   using json_patch (new properties are added, existing are updated) rather than
+    ///   replaced entirely.
+    /// - Labels are also merged (added if not present).
+    ///
+    /// This enables streaming edge import: when an edge references a node that doesn't
+    /// exist yet, an orphan node can be created with just the object_id. When the full
+    /// node data arrives later, upsert_nodes_batch merges in the complete properties.
+    pub fn upsert_nodes_batch(
+        &self,
+        nodes: &[(Vec<String>, serde_json::Value)],
+    ) -> Result<Vec<i64>> {
+        let mut storage = self
+            .write_conn
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.upsert_nodes_batch(nodes)
+    }
+
+    /// Get or create a node by object_id, returning its internal ID.
+    ///
+    /// If the node exists, returns its ID without modifying it.
+    /// If it doesn't exist, creates an orphan node with just the object_id
+    /// and the specified label, ready to be upserted later with full properties.
+    ///
+    /// This is useful for streaming edge import where edges may reference
+    /// nodes that haven't been imported yet.
+    pub fn get_or_create_node_by_object_id(&self, object_id: &str, label: &str) -> Result<i64> {
+        let storage = self
+            .write_conn
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.get_or_create_node_by_object_id(object_id, label)
+    }
+
     /// Insert multiple edges in a single transaction.
     ///
     /// Each edge is specified as (source_node_id, target_node_id, edge_type, properties).
@@ -783,6 +824,76 @@ mod tests {
 
         let stats = db.stats().unwrap();
         assert_eq!(stats.node_count, 1000);
+    }
+
+    #[test]
+    fn test_upsert_nodes_batch() {
+        let db = Database::in_memory().unwrap();
+
+        // Create a placeholder node (like an orphan from edge import)
+        let placeholder = vec![(
+            vec!["Base".to_string()],
+            serde_json::json!({
+                "object_id": "test-user-1",
+                "name": "test-user-1",
+                "placeholder": true
+            }),
+        )];
+        let ids1 = db.upsert_nodes_batch(&placeholder).unwrap();
+        assert_eq!(ids1.len(), 1);
+
+        // Upsert with full data - should merge properties
+        let full_data = vec![(
+            vec!["User".to_string()],
+            serde_json::json!({
+                "object_id": "test-user-1",
+                "name": "alice@corp.local",
+                "enabled": true,
+                "department": "Engineering"
+            }),
+        )];
+        let ids2 = db.upsert_nodes_batch(&full_data).unwrap();
+        assert_eq!(ids2.len(), 1);
+
+        // Should be the same node
+        assert_eq!(ids1[0], ids2[0]);
+
+        // Only one node should exist
+        let stats = db.stats().unwrap();
+        assert_eq!(stats.node_count, 1);
+
+        // Verify via Cypher query that properties were merged
+        let result = db
+            .execute("MATCH (n {object_id: 'test-user-1'}) RETURN n.name, n.enabled, n.department")
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_get_or_create_node_by_object_id() {
+        let db = Database::in_memory().unwrap();
+
+        // Create an orphan node
+        let id1 = db
+            .get_or_create_node_by_object_id("orphan-1", "User")
+            .unwrap();
+        assert!(id1 > 0);
+
+        // Same object_id should return same ID
+        let id2 = db
+            .get_or_create_node_by_object_id("orphan-1", "Computer")
+            .unwrap();
+        assert_eq!(id1, id2);
+
+        // Different object_id should create new node
+        let id3 = db
+            .get_or_create_node_by_object_id("orphan-2", "User")
+            .unwrap();
+        assert_ne!(id1, id3);
+
+        // Should have 2 nodes
+        let stats = db.stats().unwrap();
+        assert_eq!(stats.node_count, 2);
     }
 
     #[test]

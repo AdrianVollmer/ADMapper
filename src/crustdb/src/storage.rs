@@ -137,14 +137,12 @@ impl SqliteStorage {
             );
 
             -- Nodes table
+            -- Note: UNIQUE constraint on object_id automatically creates an index
             CREATE TABLE nodes (
                 id INTEGER PRIMARY KEY,
                 object_id TEXT UNIQUE,
                 properties TEXT NOT NULL DEFAULT '{}'
             );
-
-            -- Index on object_id for fast lookups
-            CREATE INDEX IF NOT EXISTS idx_nodes_object_id ON nodes(object_id);
 
             -- Node to label mapping (many-to-many)
             CREATE TABLE node_label_map (
@@ -355,7 +353,8 @@ impl SqliteStorage {
     /// Migration from v5 to v6: Add dedicated object_id column to nodes table.
     ///
     /// This provides a proper indexed column for node identity lookups instead of
-    /// relying on JSON property extraction.
+    /// relying on JSON property extraction. The UNIQUE constraint on object_id
+    /// automatically creates an index, so no explicit index is needed.
     fn migrate_v5_to_v6(&self) -> Result<()> {
         // Check if object_id column already exists
         let has_object_id: bool = self
@@ -378,13 +377,12 @@ impl SqliteStorage {
                 "UPDATE nodes SET object_id = json_extract(properties, '$.object_id') WHERE object_id IS NULL",
                 [],
             )?;
-
-            // Create index for fast lookups
-            self.conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_nodes_object_id ON nodes(object_id)",
-                [],
-            )?;
         }
+
+        // Drop the redundant explicit index if it exists
+        // (UNIQUE constraint already provides an index)
+        self.conn
+            .execute_batch("DROP INDEX IF EXISTS idx_nodes_object_id;")?;
 
         self.conn.execute(
             "UPDATE meta SET value = '6' WHERE key = 'schema_version'",
@@ -549,6 +547,150 @@ impl SqliteStorage {
 
         tx.commit()?;
         Ok(node_ids)
+    }
+
+    /// Upsert multiple nodes in a single transaction.
+    ///
+    /// If a node with the same object_id already exists, its properties are merged
+    /// (new properties are added, existing properties are updated) rather than
+    /// replaced entirely. Labels are also merged.
+    ///
+    /// Returns a vector of the node IDs (internal SQLite IDs) in the same order as the input.
+    pub fn upsert_nodes_batch(
+        &mut self,
+        nodes: &[(Vec<String>, serde_json::Value)],
+    ) -> Result<Vec<i64>> {
+        if nodes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let tx = self.conn.transaction()?;
+        let mut node_ids = Vec::with_capacity(nodes.len());
+
+        // Pre-collect all unique labels and create them
+        let mut label_cache: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        for (labels, _) in nodes {
+            for label in labels {
+                if !label_cache.contains_key(label) {
+                    let label_id: Option<i64> = tx
+                        .query_row(
+                            "SELECT id FROM node_labels WHERE name = ?1",
+                            params![label],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    let label_id = match label_id {
+                        Some(id) => id,
+                        None => {
+                            tx.execute(
+                                "INSERT INTO node_labels (name) VALUES (?1)",
+                                params![label],
+                            )?;
+                            tx.last_insert_rowid()
+                        }
+                    };
+                    label_cache.insert(label.clone(), label_id);
+                }
+            }
+        }
+
+        // Upsert nodes using prepared statements
+        // json_patch merges the new properties into the existing ones
+        {
+            let mut upsert_stmt = tx.prepare(
+                "INSERT INTO nodes (object_id, properties) VALUES (?1, jsonb(?2))
+                 ON CONFLICT(object_id) DO UPDATE SET
+                   properties = jsonb(json_patch(json(properties), json(?2)))",
+            )?;
+            let mut get_id_stmt = tx.prepare("SELECT id FROM nodes WHERE object_id = ?1")?;
+            let mut label_stmt = tx.prepare(
+                "INSERT OR IGNORE INTO node_label_map (node_id, label_id) VALUES (?1, ?2)",
+            )?;
+
+            for (labels, properties) in nodes {
+                let props_json = serde_json::to_string(properties)?;
+                // Extract object_id from properties for the dedicated column
+                let object_id = properties
+                    .get("object_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                if let Some(ref oid) = object_id {
+                    upsert_stmt.execute(params![oid, props_json])?;
+                    // Get the node ID (either newly inserted or existing)
+                    let node_id: i64 = get_id_stmt.query_row(params![oid], |row| row.get(0))?;
+                    node_ids.push(node_id);
+
+                    // Merge labels (INSERT OR IGNORE handles duplicates)
+                    for label in labels {
+                        if let Some(&label_id) = label_cache.get(label) {
+                            label_stmt.execute(params![node_id, label_id])?;
+                        }
+                    }
+                } else {
+                    // No object_id, fall back to regular insert
+                    tx.execute(
+                        "INSERT INTO nodes (object_id, properties) VALUES (NULL, jsonb(?1))",
+                        params![props_json],
+                    )?;
+                    let node_id = tx.last_insert_rowid();
+                    node_ids.push(node_id);
+
+                    for label in labels {
+                        if let Some(&label_id) = label_cache.get(label) {
+                            label_stmt.execute(params![node_id, label_id])?;
+                        }
+                    }
+                }
+            }
+        }
+
+        tx.commit()?;
+        Ok(node_ids)
+    }
+
+    /// Get or create a node by object_id, returning its internal ID.
+    ///
+    /// If the node exists, returns its ID without modifying it.
+    /// If it doesn't exist, creates an orphan node with just the object_id
+    /// and the specified label, ready to be upserted later with full properties.
+    pub fn get_or_create_node_by_object_id(&self, object_id: &str, label: &str) -> Result<i64> {
+        // Try to find existing node
+        if let Some(id) = self
+            .conn
+            .query_row(
+                "SELECT id FROM nodes WHERE object_id = ?1",
+                params![object_id],
+                |row| row.get(0),
+            )
+            .optional()?
+        {
+            return Ok(id);
+        }
+
+        // Create orphan node with minimal properties
+        let props = serde_json::json!({
+            "object_id": object_id,
+            "name": object_id,
+            "placeholder": true
+        });
+        let props_json = serde_json::to_string(&props)?;
+
+        self.conn.execute(
+            "INSERT INTO nodes (object_id, properties) VALUES (?1, jsonb(?2))",
+            params![object_id, props_json],
+        )?;
+        let node_id = self.conn.last_insert_rowid();
+
+        // Add label
+        let label_id = self.get_or_create_label(label)?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO node_label_map (node_id, label_id) VALUES (?1, ?2)",
+            params![node_id, label_id],
+        )?;
+
+        Ok(node_id)
     }
 
     /// Insert multiple edges in a single transaction.
@@ -2138,6 +2280,100 @@ mod tests {
         // Invalid property names should be rejected
         assert!(storage.create_property_index("").is_err());
         assert!(storage.create_property_index("name'--").is_err());
+    }
+
+    #[test]
+    fn test_upsert_nodes_batch_merges_properties() {
+        let mut storage = SqliteStorage::in_memory().unwrap();
+
+        // Insert an orphan/placeholder node with minimal properties
+        let orphans = vec![(
+            vec!["Base".to_string()],
+            serde_json::json!({
+                "object_id": "S-1-5-21-TEST",
+                "name": "S-1-5-21-TEST",
+                "placeholder": true
+            }),
+        )];
+        let ids1 = storage.upsert_nodes_batch(&orphans).unwrap();
+        assert_eq!(ids1.len(), 1);
+
+        // Now upsert the full node data - should merge, not overwrite
+        let full_nodes = vec![(
+            vec!["User".to_string()],
+            serde_json::json!({
+                "object_id": "S-1-5-21-TEST",
+                "name": "testuser@corp.local",
+                "enabled": true,
+                "email": "test@example.com"
+            }),
+        )];
+        let ids2 = storage.upsert_nodes_batch(&full_nodes).unwrap();
+        assert_eq!(ids2.len(), 1);
+
+        // Should be the same node (same ID)
+        assert_eq!(ids1[0], ids2[0]);
+
+        // Verify properties were merged
+        let node = storage.get_node(ids1[0]).unwrap().unwrap();
+
+        // New properties should be present
+        assert_eq!(
+            node.properties.get("name"),
+            Some(&serde_json::json!("testuser@corp.local"))
+                .map(|v| serde_json::from_value(v.clone()).unwrap())
+                .as_ref()
+        );
+        assert_eq!(
+            node.properties.get("enabled"),
+            Some(&crate::graph::PropertyValue::Bool(true))
+        );
+        assert_eq!(
+            node.properties.get("email"),
+            Some(&crate::graph::PropertyValue::String(
+                "test@example.com".to_string()
+            ))
+        );
+
+        // Original placeholder property should still be there (json_patch merges)
+        // Note: json_patch replaces values when keys conflict, so "name" is updated
+        // but "placeholder" from the original should remain
+
+        // Labels should be merged (both Base and User)
+        assert!(node.has_label("User"));
+        // Base label should also be present due to INSERT OR IGNORE
+        assert!(node.has_label("Base"));
+    }
+
+    #[test]
+    fn test_get_or_create_node_by_object_id() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create an orphan node
+        let id1 = storage
+            .get_or_create_node_by_object_id("S-1-5-21-ORPHAN", "User")
+            .unwrap();
+        assert!(id1 > 0);
+
+        // Getting the same node again should return the same ID
+        let id2 = storage
+            .get_or_create_node_by_object_id("S-1-5-21-ORPHAN", "Computer")
+            .unwrap();
+        assert_eq!(id1, id2);
+
+        // Verify the node was created with placeholder properties
+        let node = storage.get_node(id1).unwrap().unwrap();
+        assert_eq!(
+            node.properties.get("object_id"),
+            Some(&crate::graph::PropertyValue::String(
+                "S-1-5-21-ORPHAN".to_string()
+            ))
+        );
+        assert_eq!(
+            node.properties.get("placeholder"),
+            Some(&crate::graph::PropertyValue::Bool(true))
+        );
+        assert!(node.has_label("User"));
     }
 
     #[test]

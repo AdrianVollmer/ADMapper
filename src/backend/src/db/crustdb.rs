@@ -108,16 +108,20 @@ impl CrustDatabase {
         Ok(())
     }
 
-    /// Insert a batch of nodes using efficient batch insert.
+    /// Insert a batch of nodes using efficient batch upsert.
     ///
-    /// This uses CrustDB's native batch insert which wraps all inserts
+    /// This uses CrustDB's native batch upsert which wraps all upserts
     /// in a single transaction with prepared statements.
+    ///
+    /// If a node with the same object_id already exists (e.g., an orphan placeholder
+    /// created during edge insertion), its properties are **merged** rather than
+    /// replaced. This enables streaming edge import.
     pub fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
         if nodes.is_empty() {
             return Ok(0);
         }
 
-        // Convert DbNodes to the format expected by CrustDB batch insert
+        // Convert DbNodes to the format expected by CrustDB batch upsert
         let batch: Vec<(Vec<String>, serde_json::Value)> = nodes
             .iter()
             .map(|node| {
@@ -128,14 +132,15 @@ impl CrustDatabase {
             })
             .collect();
 
-        match self.db.insert_nodes_batch(&batch) {
+        // Use upsert to merge with any existing placeholder nodes
+        match self.db.upsert_nodes_batch(&batch) {
             Ok(ids) => {
-                debug!("Batch inserted {} nodes", ids.len());
+                debug!("Batch upserted {} nodes", ids.len());
                 Ok(ids.len())
             }
             Err(e) => {
                 debug!(
-                    "Batch insert failed, falling back to individual inserts: {}",
+                    "Batch upsert failed, falling back to individual inserts: {}",
                     e
                 );
                 // Fallback to individual inserts if batch fails
