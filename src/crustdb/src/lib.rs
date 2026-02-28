@@ -534,6 +534,8 @@ impl Database {
     /// - High-impact remediation targets
     /// - Structural vulnerabilities in the permission graph
     ///
+    /// Results are cached and automatically invalidated when graph data changes.
+    ///
     /// # Arguments
     ///
     /// * `edge_types` - Optional filter to only consider specific edge types
@@ -571,8 +573,41 @@ impl Database {
         edge_types: Option<&[&str]>,
         directed: bool,
     ) -> Result<EdgeBetweenness> {
-        let storage = self.get_read_storage();
-        query::executor::algorithms::edge_betweenness_centrality(&storage, edge_types, directed)
+        let read_storage = self.get_read_storage();
+
+        // Generate cache key based on algorithm parameters
+        let cache_key = format!(
+            "algo:edge_betweenness:directed={}:types={}",
+            directed,
+            edge_types
+                .map(|t| t.join(","))
+                .unwrap_or_else(|| "all".to_string())
+        );
+        let cache_hash = compute_hash(&cache_key);
+
+        // Check cache
+        if let Some(cached_bytes) = read_storage.get_cached_result(&cache_hash)? {
+            if let Ok(cached_result) = serde_json::from_slice(&cached_bytes) {
+                return Ok(cached_result);
+            }
+        }
+
+        // Compute (expensive)
+        let result = query::executor::algorithms::edge_betweenness_centrality(
+            &read_storage,
+            edge_types,
+            directed,
+        )?;
+
+        // Cache the result
+        let result_bytes = serde_json::to_vec(&result)
+            .map_err(|e| Error::Internal(format!("Failed to serialize result: {}", e)))?;
+        if let Ok(write_storage) = self.write_conn.lock() {
+            // Best-effort caching - don't fail if we can't cache
+            let _ = write_storage.cache_result(&cache_hash, &cache_key, &result_bytes);
+        }
+
+        Ok(result)
     }
 
     /// Get an edge by its ID.

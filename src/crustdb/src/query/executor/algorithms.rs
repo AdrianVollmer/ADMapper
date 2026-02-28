@@ -9,7 +9,7 @@ use crate::storage::SqliteStorage;
 use std::collections::{HashMap, VecDeque};
 
 /// Result of edge betweenness centrality computation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EdgeBetweenness {
     /// Edge ID to betweenness score mapping.
     pub scores: HashMap<i64, f64>,

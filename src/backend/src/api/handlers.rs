@@ -1241,17 +1241,20 @@ pub async fn graph_node_types(
 ///
 /// Returns the top edges through which the most shortest paths pass.
 /// These are critical "choke point" edges whose removal would disrupt many attack paths.
+///
+/// Results are cached at the database level and automatically invalidated when data changes.
 #[instrument(skip(state))]
 pub async fn graph_choke_points(
     State(state): State<AppState>,
 ) -> Result<Json<crate::db::ChokePointsResponse>, ApiError> {
     let db = state.require_db()?;
     // Return top 10 choke points by default
+    // CrustDB caches the result and auto-invalidates on data changes
     let result = run_db(db, |db| db.get_choke_points(10)).await?;
     info!(
         count = result.choke_points.len(),
         total_edges = result.total_edges,
-        "Choke points computed"
+        "Choke points retrieved"
     );
     Ok(Json(result))
 }
