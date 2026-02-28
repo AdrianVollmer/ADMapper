@@ -1,0 +1,24 @@
+/* ADMapper documentation custom styles */
+
+/* Hero section on landing page */
+.hero-logo {
+  display: block;
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 1rem;
+}
+
+/* Node type color indicators */
+.node-user { color: #22b8cf; }
+.node-group { color: #fab005; }
+.node-computer { color: #f03e3e; }
+.node-domain { color: #7950f2; }
+.node-gpo { color: #fd7e14; }
+.node-ou { color: #20c997; }
+
+/* Edge type color indicators */
+.edge-membership { color: #6c757d; }
+.edge-session { color: #0d6efd; }
+.edge-dangerous { color: #dc3545; }
+.edge-delegation { color: #6f42c1; }
+.edge-dcsync { color: #ff0040; }
