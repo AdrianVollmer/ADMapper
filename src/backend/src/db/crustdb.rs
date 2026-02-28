@@ -31,8 +31,9 @@ fn normalize_node_type(data_type: &str) -> String {
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow,
-    ReachabilityInsight, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry,
+    QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX,
+    WELL_KNOWN_PRINCIPALS,
 };
 
 /// A graph database backed by CrustDB.
@@ -1416,6 +1417,133 @@ impl CrustDatabase {
         false
     }
 
+    /// Get choke points using edge betweenness centrality.
+    ///
+    /// Uses Brandes' algorithm to compute which edges have the most shortest
+    /// paths passing through them. These are critical "choke point" edges.
+    pub fn get_choke_points(&self, top_k: usize) -> Result<ChokePointsResponse> {
+        use super::types::ChokePoint;
+
+        debug!(top_k = top_k, "Computing choke points via edge betweenness");
+
+        // Run the edge betweenness centrality algorithm
+        // Use directed=true since AD permissions are directional
+        let result = self
+            .db
+            .edge_betweenness_centrality(None, true)
+            .map_err(|e| DbError::Database(e.to_string()))?;
+
+        let total_edges = result.edges_count;
+        let total_nodes = result.nodes_processed;
+
+        // Get top k edges by betweenness
+        let top_edges = result.top_k(top_k);
+
+        // Resolve edge IDs to full edge/node info
+        let mut choke_points = Vec::with_capacity(top_edges.len());
+        for (edge_id, betweenness) in top_edges {
+            // Get the edge
+            let edge = match self
+                .db
+                .get_edge(edge_id)
+                .map_err(|e| DbError::Database(e.to_string()))?
+            {
+                Some(e) => e,
+                None => continue,
+            };
+
+            // Get source and target node info
+            let source_info = self.get_node_info_by_internal_id(edge.source)?;
+            let target_info = self.get_node_info_by_internal_id(edge.target)?;
+
+            if let (
+                Some((source_id, source_name, source_label)),
+                Some((target_id, target_name, target_label)),
+            ) = (source_info, target_info)
+            {
+                choke_points.push(ChokePoint {
+                    source_id,
+                    source_name,
+                    source_label,
+                    target_id,
+                    target_name,
+                    target_label,
+                    edge_type: edge.edge_type,
+                    betweenness,
+                });
+            }
+        }
+
+        info!(
+            count = choke_points.len(),
+            total_edges = total_edges,
+            "Choke points computed"
+        );
+
+        Ok(ChokePointsResponse {
+            choke_points,
+            total_edges,
+            total_nodes,
+        })
+    }
+
+    /// Helper to get node info (object_id, name, label) by internal database ID.
+    fn get_node_info_by_internal_id(
+        &self,
+        internal_id: i64,
+    ) -> Result<Option<(String, String, String)>> {
+        // Query for node by internal ID
+        let query = format!(
+            "MATCH (n) WHERE id(n) = {} RETURN n.object_id, n.name, labels(n)",
+            internal_id
+        );
+        let result = self.execute(&query)?;
+
+        if result.rows.is_empty() {
+            return Ok(None);
+        }
+
+        let row = &result.rows[0];
+
+        let object_id = row
+            .values
+            .get("n.object_id")
+            .and_then(|v| match v {
+                crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => {
+                    Some(s.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| format!("unknown-{}", internal_id));
+
+        let name = row
+            .values
+            .get("n.name")
+            .and_then(|v| match v {
+                crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => {
+                    Some(s.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        let label = row
+            .values
+            .get("labels(n)")
+            .and_then(|v| match v {
+                crustdb::ResultValue::Property(crustdb::PropertyValue::List(labels)) => {
+                    labels.first().and_then(|l| match l {
+                        crustdb::PropertyValue::String(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| "Base".to_string());
+
+        Ok(Some((object_id, name, label)))
+    }
+
     // Query history methods - delegates to CrustDB's SQLite storage
     pub fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
         self.db
@@ -1538,6 +1666,10 @@ impl DatabaseBackend for CrustDatabase {
 
     fn get_security_insights(&self) -> Result<SecurityInsights> {
         CrustDatabase::get_security_insights(self)
+    }
+
+    fn get_choke_points(&self, top_k: usize) -> Result<ChokePointsResponse> {
+        CrustDatabase::get_choke_points(self, top_k)
     }
 
     fn get_all_nodes(&self) -> Result<Vec<DbNode>> {

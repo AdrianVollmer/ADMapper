@@ -1237,6 +1237,25 @@ pub async fn graph_node_types(
     Ok(Json(types))
 }
 
+/// Get choke points in the graph using edge betweenness centrality.
+///
+/// Returns the top edges through which the most shortest paths pass.
+/// These are critical "choke point" edges whose removal would disrupt many attack paths.
+#[instrument(skip(state))]
+pub async fn graph_choke_points(
+    State(state): State<AppState>,
+) -> Result<Json<crate::db::ChokePointsResponse>, ApiError> {
+    let db = state.require_db()?;
+    // Return top 10 choke points by default
+    let result = run_db(db, |db| db.get_choke_points(10)).await?;
+    info!(
+        count = result.choke_points.len(),
+        total_edges = result.total_edges,
+        "Choke points computed"
+    );
+    Ok(Json(result))
+}
+
 // ============================================================================
 // Node/Edge Mutation Endpoints
 // ============================================================================

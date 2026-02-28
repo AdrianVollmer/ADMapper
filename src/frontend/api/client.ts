@@ -98,6 +98,7 @@ const COMMAND_MAPPING: Record<string, string> = {
   "GET /api/graph/insights": "graph_insights",
   "GET /api/graph/edge-types": "graph_edge_types",
   "GET /api/graph/node-types": "graph_node_types",
+  "GET /api/graph/choke-points": "graph_choke_points",
   // Mutations
   "POST /api/graph/node": "add_node",
   "POST /api/graph/edge": "add_edge",

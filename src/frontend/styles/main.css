@@ -1591,6 +1591,56 @@
     @apply text-red-400 p-4 text-center;
   }
 
+  /* Choke Points styles */
+  .choke-points-list {
+    @apply space-y-2 mt-4;
+  }
+
+  .choke-point-row {
+    @apply flex items-center gap-3 p-3 bg-gray-800 rounded-lg cursor-pointer
+           hover:bg-gray-750 transition-colors;
+  }
+
+  .choke-point-rank {
+    @apply text-sm font-bold text-blue-400 w-8 flex-shrink-0;
+  }
+
+  .choke-point-details {
+    @apply flex-1 min-w-0;
+  }
+
+  .choke-point-path {
+    @apply flex items-center gap-1 text-sm flex-wrap;
+  }
+
+  .choke-point-node {
+    @apply font-medium text-gray-200 truncate max-w-[150px];
+  }
+
+  .choke-point-edge {
+    @apply text-gray-500 text-xs;
+  }
+
+  .choke-point-meta {
+    @apply text-xs text-gray-500 mt-1;
+  }
+
+  .choke-point-labels {
+    @apply text-gray-500;
+  }
+
+  .choke-point-score {
+    @apply flex items-center gap-2 w-32 flex-shrink-0;
+  }
+
+  .choke-point-bar {
+    @apply h-2 bg-gradient-to-r from-yellow-500 to-red-500 rounded-full;
+  }
+
+  .choke-point-value {
+    @apply text-xs text-gray-400 w-12 text-right;
+  }
+
   .stale-threshold-select {
     @apply px-2 py-1 text-sm bg-gray-700 border border-gray-600 rounded
            text-gray-200 focus:outline-none focus:border-blue-500;
@@ -2329,6 +2379,31 @@ body[data-theme="light"] {
 [data-theme="light"] .stale-threshold-select {
   @apply bg-gray-100 border-gray-300 text-gray-900;
   color-scheme: light;
+}
+
+/* Choke Points light theme */
+[data-theme="light"] .choke-point-row {
+  @apply bg-gray-100 hover:bg-gray-200;
+}
+
+[data-theme="light"] .choke-point-rank {
+  @apply text-blue-600;
+}
+
+[data-theme="light"] .choke-point-node {
+  @apply text-gray-800;
+}
+
+[data-theme="light"] .choke-point-edge {
+  @apply text-gray-500;
+}
+
+[data-theme="light"] .choke-point-meta {
+  @apply text-gray-500;
+}
+
+[data-theme="light"] .choke-point-value {
+  @apply text-gray-600;
 }
 
 /* Keyboard Shortcuts */

@@ -16,7 +16,7 @@ import { loadGraphData } from "./graph-view";
 import type { RawADGraph } from "../graph/types";
 
 /** Tab identifiers */
-type TabId = "da-analysis" | "reachability" | "stale-objects";
+type TabId = "da-analysis" | "reachability" | "stale-objects" | "choke-points";
 
 /** Domain Admin Analysis data */
 interface DAAnalysisData {
@@ -39,6 +39,25 @@ interface StaleObjectsData {
   thresholdDays: number;
 }
 
+/** Choke Point data */
+interface ChokePointData {
+  source_id: string;
+  source_name: string;
+  source_label: string;
+  target_id: string;
+  target_name: string;
+  target_label: string;
+  edge_type: string;
+  betweenness: number;
+}
+
+/** Choke Points response */
+interface ChokePointsData {
+  choke_points: ChokePointData[];
+  total_edges: number;
+  total_nodes: number;
+}
+
 /** Tab state */
 interface TabState<T> {
   loading: boolean;
@@ -56,6 +75,7 @@ let activeTab: TabId = "da-analysis";
 let daState: TabState<DAAnalysisData> = { loading: false, error: null, data: null };
 let reachabilityState: TabState<ReachabilityData[]> = { loading: false, error: null, data: null };
 let staleState: TabState<StaleObjectsData> = { loading: false, error: null, data: null };
+let chokePointsState: TabState<ChokePointsData> = { loading: false, error: null, data: null };
 
 /** Stale threshold in days */
 let staleThresholdDays = 90;
@@ -75,6 +95,7 @@ export async function openInsights(): Promise<void> {
   daState = { loading: true, error: null, data: null };
   reachabilityState = { loading: true, error: null, data: null };
   staleState = { loading: true, error: null, data: null };
+  chokePointsState = { loading: true, error: null, data: null };
   activeTab = "da-analysis";
 
   modalEl!.hidden = false;
@@ -84,6 +105,7 @@ export async function openInsights(): Promise<void> {
   loadDAAnalysis();
   loadReachability();
   loadStaleObjects();
+  loadChokePoints();
 }
 
 /** Close the modal */
@@ -144,6 +166,9 @@ function renderModal(): void {
       <button class="db-type-tab ${activeTab === "stale-objects" ? "active" : ""}" data-tab="stale-objects">
         Stale Objects
       </button>
+      <button class="db-type-tab ${activeTab === "choke-points" ? "active" : ""}" data-tab="choke-points">
+        Choke Points
+      </button>
     </div>
     <div class="insight-tab-content" ${activeTab !== "da-analysis" ? "hidden" : ""} id="tab-da-analysis">
       ${renderDAAnalysisTab()}
@@ -153,6 +178,9 @@ function renderModal(): void {
     </div>
     <div class="insight-tab-content" ${activeTab !== "stale-objects" ? "hidden" : ""} id="tab-stale-objects">
       ${renderStaleObjectsTab()}
+    </div>
+    <div class="insight-tab-content" ${activeTab !== "choke-points" ? "hidden" : ""} id="tab-choke-points">
+      ${renderChokePointsTab()}
     </div>
   `;
 }
@@ -296,6 +324,77 @@ function renderStaleObjectsTab(): string {
   `;
 }
 
+/** Render Choke Points tab */
+function renderChokePointsTab(): string {
+  if (chokePointsState.loading) {
+    return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing choke points...</span></div>`;
+  }
+  if (chokePointsState.error) {
+    return `<div class="insight-error">${escapeHtml(chokePointsState.error)}</div>`;
+  }
+  if (!chokePointsState.data) {
+    return `<div class="insight-error">No data available</div>`;
+  }
+
+  const { choke_points, total_edges, total_nodes } = chokePointsState.data;
+
+  if (choke_points.length === 0) {
+    return `
+      <div class="insights-container">
+        <div class="insight-section">
+          <h3 class="insight-section-title">Choke Points</h3>
+          <p class="text-gray-500">No choke points found. The graph may be too small or disconnected.</p>
+        </div>
+      </div>
+    `;
+  }
+
+  // Find max betweenness for normalization
+  const maxBetweenness = Math.max(...choke_points.map((cp) => cp.betweenness));
+
+  let rowsHtml = "";
+  for (const [i, cp] of choke_points.entries()) {
+    const normalizedScore = maxBetweenness > 0 ? (cp.betweenness / maxBetweenness) * 100 : 0;
+    const barWidth = Math.max(normalizedScore, 5); // Minimum 5% for visibility
+
+    rowsHtml += `
+      <div class="choke-point-row" data-query="choke-point" data-index="${i}" title="Click to view in graph">
+        <div class="choke-point-rank">#${i + 1}</div>
+        <div class="choke-point-details">
+          <div class="choke-point-path">
+            <span class="choke-point-node">${escapeHtml(cp.source_name)}</span>
+            <span class="choke-point-edge">&rarr; ${escapeHtml(cp.edge_type)} &rarr;</span>
+            <span class="choke-point-node">${escapeHtml(cp.target_name)}</span>
+          </div>
+          <div class="choke-point-meta">
+            <span class="choke-point-labels">${escapeHtml(cp.source_label)} to ${escapeHtml(cp.target_label)}</span>
+          </div>
+        </div>
+        <div class="choke-point-score">
+          <div class="choke-point-bar" style="width: ${barWidth}%"></div>
+          <span class="choke-point-value">${cp.betweenness.toFixed(1)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="insights-container">
+      <div class="insight-section">
+        <h3 class="insight-section-title">Choke Points</h3>
+        <p class="insight-desc">
+          Edges with the highest betweenness centrality - removing these would disrupt the most attack paths.
+          Analyzed ${total_nodes.toLocaleString()} nodes and ${total_edges.toLocaleString()} edges.
+        </p>
+        <div class="choke-points-list">
+          ${rowsHtml}
+        </div>
+        <p class="text-xs text-gray-500 mt-3">Click on a row to view the edge in the graph. Higher scores indicate more paths pass through this edge.</p>
+      </div>
+    </div>
+  `;
+}
+
 /** Load Domain Admin Analysis data */
 async function loadDAAnalysis(): Promise<void> {
   daState = { loading: true, error: null, data: null };
@@ -422,6 +521,27 @@ async function loadStaleObjects(): Promise<void> {
   renderModal();
 }
 
+/** Load Choke Points data */
+async function loadChokePoints(): Promise<void> {
+  chokePointsState = { loading: true, error: null, data: null };
+  renderModal();
+
+  try {
+    const response = await fetch("/api/graph/choke-points");
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: response.statusText }));
+      throw new Error(errorData.message || `HTTP ${response.status}`);
+    }
+    const data = (await response.json()) as ChokePointsData;
+    chokePointsState = { loading: false, error: null, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to load choke points";
+    chokePointsState = { loading: false, error: message, data: null };
+  }
+
+  renderModal();
+}
+
 /** Execute a graph query and render the result */
 async function executeGraphQuery(queryType: string, extraData?: string): Promise<void> {
   let query: string;
@@ -449,6 +569,15 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
     case "stale-computers": {
       const threshold = daysToWindowsFileTime(staleThresholdDays);
       query = `MATCH (c:Computer) WHERE c.enabled = true AND c.lastlogon < ${threshold} RETURN c LIMIT 500`;
+      break;
+    }
+    case "choke-point": {
+      // extraData contains the index into choke_points array
+      const index = parseInt(extraData ?? "0", 10);
+      const cp = chokePointsState.data?.choke_points[index];
+      if (!cp) return;
+      // Query for the edge and its connected nodes
+      query = `MATCH p=(a)-[r]->(b) WHERE a.object_id = '${cp.source_id}' AND b.object_id = '${cp.target_id}' AND type(r) = '${cp.edge_type}' RETURN p`;
       break;
     }
     default:
@@ -498,8 +627,9 @@ function handleClick(e: Event): void {
   if (clickableValue) {
     const queryType = clickableValue.getAttribute("data-query");
     const sid = clickableValue.getAttribute("data-sid");
+    const index = clickableValue.getAttribute("data-index");
     if (queryType) {
-      executeGraphQuery(queryType, sid ?? undefined);
+      executeGraphQuery(queryType, sid ?? index ?? undefined);
     }
     return;
   }
@@ -519,6 +649,7 @@ function handleClick(e: Event): void {
       loadDAAnalysis();
       loadReachability();
       loadStaleObjects();
+      loadChokePoints();
       break;
   }
 }

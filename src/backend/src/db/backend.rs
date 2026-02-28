@@ -6,8 +6,8 @@ use serde_json::Value as JsonValue;
 use std::str::FromStr;
 
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow, Result,
-    SecurityInsights,
+    ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry,
+    QueryHistoryRow, Result, SecurityInsights,
 };
 
 /// Query language supported by a database backend.
@@ -77,6 +77,20 @@ pub trait DatabaseBackend: Send + Sync {
 
     /// Get security insights from the graph.
     fn get_security_insights(&self) -> Result<SecurityInsights>;
+
+    /// Get choke points using edge betweenness centrality.
+    ///
+    /// Returns the top edges through which the most shortest paths pass.
+    /// These are critical edges whose removal would disrupt the most attack paths.
+    ///
+    /// Default implementation returns an empty result for backends that don't support it.
+    fn get_choke_points(&self, _top_k: usize) -> Result<ChokePointsResponse> {
+        Ok(ChokePointsResponse {
+            choke_points: Vec::new(),
+            total_edges: 0,
+            total_nodes: 0,
+        })
+    }
 
     // ========================================================================
     // Node/Edge Retrieval
