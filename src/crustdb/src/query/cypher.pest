@@ -162,7 +162,7 @@ PatternPart = {
 }
 
 ShortestPathModifier = {
-    SHORTEST ~ SP ~ IntegerLiteral ~ SP?
+    SHORTEST ~ (SP ~ IntegerLiteral)? ~ SP?
 }
 
 AnonymousPatternPart = { PatternElement }
