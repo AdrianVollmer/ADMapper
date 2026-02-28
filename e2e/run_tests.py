@@ -555,7 +555,7 @@ proof::before {
         timestamp = self.report_dir.name
         previous_reports = self._load_previous_reports()
 
-        # Build current summary data
+        # Build current summary data with per-test results
         current_summary = {
             "timestamp": timestamp,
             "commit": commit,
@@ -563,11 +563,18 @@ proof::before {
         }
 
         for suite in suites:
+            tests = {}
+            for result in suite.results:
+                tests[result.name] = {
+                    "passed": result.passed,
+                    "duration_ms": result.duration_ms,
+                }
             current_summary["backends"][suite.backend] = {
                 "total": suite.total,
                 "passed": suite.passed,
                 "failed": suite.failed,
                 "duration_ms": suite.total_duration_ms,
+                "tests": tests,
             }
 
         # Save JSON summary for future comparisons
@@ -579,13 +586,60 @@ proof::before {
         # Get previous report for comparison (most recent)
         prev_report = previous_reports[0] if previous_reports else None
 
+        # Load previous per-test data from XML if not in JSON
+        prev_tests = self._load_previous_test_details(prev_report)
+
         # Generate HTML summary
-        html = self._build_summary_html(suites, commit, commit_short, timestamp, prev_report, previous_reports)
+        html = self._build_summary_html(suites, commit, commit_short, timestamp, prev_report, previous_reports, prev_tests)
 
         html_file = self.report_dir / "summary.html"
         with open(html_file, "w") as f:
             f.write(html)
         self.logger.info(f"Generated summary report: {html_file}")
+
+    def _load_previous_test_details(self, prev_report: dict | None) -> dict[str, dict[str, dict]]:
+        """Load per-test details from previous report (JSON or XML fallback)."""
+        prev_tests: dict[str, dict[str, dict]] = {}
+        if not prev_report:
+            return prev_tests
+
+        # Check if JSON has per-test data
+        for backend, data in prev_report.get("backends", {}).items():
+            if "tests" in data:
+                prev_tests[backend] = data["tests"]
+
+        # If we have data for all backends, return it
+        if prev_tests:
+            return prev_tests
+
+        # Fallback: parse XML reports from previous run
+        prev_timestamp = prev_report.get("timestamp")
+        if not prev_timestamp:
+            return prev_tests
+
+        prev_dir = self.report_dir.parent / prev_timestamp
+        if not prev_dir.exists():
+            return prev_tests
+
+        for xml_file in prev_dir.glob("report-*.xml"):
+            backend = xml_file.stem.replace("report-", "")
+            try:
+                tree = ET.parse(xml_file)
+                root = tree.getroot()
+                tests = {}
+                for testcase in root.iter("testcase"):
+                    name = testcase.get("name", "")
+                    time_s = float(testcase.get("time", "0"))
+                    passed = testcase.get("status") == "passed"
+                    tests[name] = {
+                        "passed": passed,
+                        "duration_ms": int(time_s * 1000),
+                    }
+                prev_tests[backend] = tests
+            except Exception:
+                pass
+
+        return prev_tests
 
     def _build_summary_html(
         self,
@@ -595,6 +649,7 @@ proof::before {
         timestamp: str,
         prev_report: dict | None,
         history: list[dict],
+        prev_tests: dict[str, dict[str, dict]],
     ) -> str:
         """Build the HTML content for the summary report."""
         total_passed = sum(s.passed for s in suites)
@@ -638,6 +693,67 @@ proof::before {
                 <td>{duration_s:.2f}s {comparison}</td>
             </tr>''')
 
+        # Build detailed test comparison table
+        # Collect all unique test names across all backends
+        all_test_names: list[str] = []
+        seen_names: set[str] = set()
+        for suite in suites:
+            for result in suite.results:
+                if result.name not in seen_names:
+                    all_test_names.append(result.name)
+                    seen_names.add(result.name)
+
+        # Build per-test data for each backend
+        backend_test_data: dict[str, dict[str, TestResult]] = {}
+        for suite in suites:
+            backend_test_data[suite.backend] = {r.name: r for r in suite.results}
+
+        # Build header row with backend names
+        backend_names = [s.backend for s in suites]
+        detail_header = "<th>Test</th>" + "".join(f"<th>{b}</th>" for b in backend_names)
+
+        # Build detail rows
+        detail_rows = []
+        for test_name in all_test_names:
+            cells = [f"<td>{test_name}</td>"]
+            for backend in backend_names:
+                result = backend_test_data.get(backend, {}).get(test_name)
+                if result is None:
+                    cells.append('<td class="na">—</td>')
+                else:
+                    status_class = "pass" if result.passed else "fail"
+                    status_icon = "✓" if result.passed else "✗"
+                    duration_ms = result.duration_ms
+
+                    # Compare with previous
+                    delta = ""
+                    prev_backend_tests = prev_tests.get(backend, {})
+                    if test_name in prev_backend_tests:
+                        prev_data = prev_backend_tests[test_name]
+                        prev_duration = prev_data.get("duration_ms", 0)
+                        diff = duration_ms - prev_duration
+                        if diff > 50:  # Only show significant changes (>50ms)
+                            delta = f' <span class="slower">+{diff}ms</span>'
+                        elif diff < -50:
+                            delta = f' <span class="faster">{diff}ms</span>'
+
+                    cells.append(f'<td class="{status_class}"><span class="icon">{status_icon}</span> {duration_ms}ms{delta}</td>')
+
+            detail_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+        details_section = f'''
+        <details class="test-details">
+            <summary>Detailed Test Results ({len(all_test_names)} tests)</summary>
+            <table class="details-table">
+                <thead>
+                    <tr>{detail_header}</tr>
+                </thead>
+                <tbody>
+                    {"".join(detail_rows)}
+                </tbody>
+            </table>
+        </details>'''
+
         # Build history table
         history_rows = []
         for report in history[:5]:
@@ -658,19 +774,21 @@ proof::before {
         history_section = ""
         if history_rows:
             history_section = f'''
-        <h2>Recent History</h2>
-        <table class="history-table">
-            <thead>
-                <tr>
-                    <th>Commit</th>
-                    <th>Timestamp</th>
-                    <th>Results</th>
-                </tr>
-            </thead>
-            <tbody>
-                {"".join(history_rows)}
-            </tbody>
-        </table>'''
+        <details class="history-details">
+            <summary>Recent History ({len(history_rows)} runs)</summary>
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Commit</th>
+                        <th>Timestamp</th>
+                        <th>Results</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {"".join(history_rows)}
+                </tbody>
+            </table>
+        </details>'''
 
         overall_status = "PASSED" if total_failed == 0 else "FAILED"
         overall_class = "pass" if total_failed == 0 else "fail"
@@ -701,7 +819,7 @@ proof::before {
             line-height: 1.6;
             padding: 2rem;
         }}
-        .container {{ max-width: 900px; margin: 0 auto; }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
         h1 {{ margin-bottom: 0.5rem; }}
         h2 {{ margin: 2rem 0 1rem; color: var(--text-dim); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.1em; }}
         .meta {{ color: var(--text-dim); margin-bottom: 2rem; }}
@@ -750,7 +868,28 @@ proof::before {
         .stat-label {{ color: var(--text-dim); font-size: 0.85rem; }}
         .stat-value.pass {{ color: var(--pass); }}
         .stat-value.fail {{ color: var(--fail); }}
-        .history-table {{ margin-top: 1rem; }}
+        details {{
+            margin: 1.5rem 0;
+            background: var(--card-bg);
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        summary {{
+            padding: 1rem;
+            cursor: pointer;
+            font-weight: 500;
+            background: rgba(0,0,0,0.2);
+            user-select: none;
+        }}
+        summary:hover {{ background: rgba(0,0,0,0.3); }}
+        details[open] summary {{ border-bottom: 1px solid var(--border); }}
+        .details-table {{ border-radius: 0; }}
+        .details-table td {{ font-size: 0.9em; padding: 0.5rem 0.75rem; }}
+        .details-table td.pass {{ color: var(--pass); }}
+        .details-table td.fail {{ color: var(--fail); }}
+        .details-table td.na {{ color: var(--text-dim); }}
+        .details-table .icon {{ margin-right: 0.25rem; }}
+        .history-table {{ margin-top: 0; border-radius: 0; }}
         .history-table .pass {{ color: var(--pass); }}
         .history-table .fail {{ color: var(--fail); }}
     </style>
@@ -799,6 +938,8 @@ proof::before {
                 {"".join(backend_rows)}
             </tbody>
         </table>
+
+        {details_section}
 
         {history_section}
     </div>
