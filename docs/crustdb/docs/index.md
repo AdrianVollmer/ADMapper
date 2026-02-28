@@ -5,11 +5,30 @@ CrustDB is an embedded graph database written in Rust. It uses SQLite as its sto
 ## Key Features
 
 - **Embedded**: Links directly into your application. No separate server process.
-- **Cypher Support**: Industry-standard query language for property graphs.
+- **Cypher Compatible**: Supports standard Cypher syntax for queries.
 - **SQLite Backend**: ACID transactions, reliability, and zero configuration.
 - **Connection Pooling**: Concurrent read queries with a configurable connection pool.
 - **Query Caching**: Optional result caching with automatic invalidation.
-- **Graph Algorithms**: Built-in algorithms like edge betweenness centrality.
+- **Graph Algorithms**: Built-in edge betweenness centrality for choke point analysis.
+
+## Cypher Support
+
+CrustDB implements a practical subset of Cypher. For full details, see [Feature Support](features.md).
+
+**Supported:**
+
+- `CREATE`, `MATCH`, `WHERE`, `RETURN`, `SET`, `DELETE`
+- Variable-length paths and shortest path queries
+- Property filtering, boolean operators, string predicates
+- `ORDER BY`, `LIMIT`, `SKIP`, `DISTINCT`
+- `count()` aggregation
+
+**Not yet supported:**
+
+- `OPTIONAL MATCH`, `WITH`, `UNWIND`, `UNION`
+- `CASE` expressions and list comprehensions
+- `sum()`, `avg()`, `min()`, `max()` aggregations
+- String and math functions
 
 ## Quick Example
 
@@ -44,7 +63,7 @@ CrustDB is designed for applications that need:
 - Low latency for interactive graph exploration
 - Embedded analytics on relationship data
 
-It is particularly suited for security analysis tools, knowledge graphs, and applications where deploying a full graph database server is impractical.
+It is suited for security analysis tools, knowledge graphs, and applications where deploying a full graph database server is impractical.
 
 ## Architecture
 

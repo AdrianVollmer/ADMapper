@@ -63,10 +63,10 @@ plugins:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Feature Support: features.md
   - Use Cases: use-cases.md
   - API Reference:
     - Overview: api/index.md
     - Database: api/database.md
-    - Cypher Queries: api/cypher.md
     - Graph Algorithms: api/algorithms.md
   - Query Caching: caching.md
