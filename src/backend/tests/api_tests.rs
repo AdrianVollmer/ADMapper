@@ -32,7 +32,7 @@ impl TestApp {
         let db_arc: Arc<dyn DatabaseBackend> = Arc::new(db);
         // Clone Arc before passing to state so we keep a reference for seeding
         let db_clone = Arc::clone(&db_arc);
-        let state = AppState::new_connected(db_arc, DatabaseType::CrustDB);
+        let state = AppState::new_connected(db_arc, DatabaseType::CrustDB, None);
         let router = create_api_router(state);
         Self {
             router,
@@ -53,7 +53,7 @@ impl TestApp {
 fn create_test_app() -> Router {
     let db = CrustDatabase::in_memory().unwrap();
     let db_arc: Arc<dyn DatabaseBackend> = Arc::new(db);
-    let state = AppState::new_connected(db_arc, DatabaseType::CrustDB);
+    let state = AppState::new_connected(db_arc, DatabaseType::CrustDB, None);
     create_api_router(state)
 }
 

@@ -31,9 +31,8 @@ fn normalize_node_type(data_type: &str) -> String {
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry,
-    QueryHistoryRow, ReachabilityInsight, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX,
-    WELL_KNOWN_PRINCIPALS,
+    ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result,
+    SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// A graph database backed by CrustDB.
@@ -1554,80 +1553,6 @@ impl CrustDatabase {
 
         Ok(Some((object_id, name, label)))
     }
-
-    // Query history methods - delegates to CrustDB's SQLite storage
-    pub fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
-        self.db
-            .add_query_history(crustdb::NewQueryHistoryEntry {
-                id: entry.id,
-                name: entry.name,
-                query: entry.query,
-                timestamp: entry.timestamp,
-                result_count: entry.result_count,
-                status: entry.status,
-                started_at: entry.started_at,
-                duration_ms: entry.duration_ms,
-                error: entry.error,
-                background: entry.background,
-            })
-            .map_err(|e| DbError::Database(e.to_string()))
-    }
-
-    pub fn update_query_status(
-        &self,
-        id: &str,
-        status: &str,
-        duration_ms: Option<u64>,
-        result_count: Option<i64>,
-        error: Option<&str>,
-    ) -> Result<()> {
-        self.db
-            .update_query_status(id, status, duration_ms, result_count, error)
-            .map_err(|e| DbError::Database(e.to_string()))
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub fn get_query_history(
-        &self,
-        limit: usize,
-        offset: usize,
-    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
-        let (rows, total) = self
-            .db
-            .get_query_history(limit, offset)
-            .map_err(|e| DbError::Database(e.to_string()))?;
-
-        // Convert crustdb::QueryHistoryRow to backend QueryHistoryRow
-        let converted: Vec<QueryHistoryRow> = rows
-            .into_iter()
-            .map(|r| QueryHistoryRow {
-                id: r.id,
-                name: r.name,
-                query: r.query,
-                timestamp: r.timestamp,
-                result_count: r.result_count,
-                status: r.status,
-                started_at: r.started_at,
-                duration_ms: r.duration_ms,
-                error: r.error,
-                background: r.background,
-            })
-            .collect();
-
-        Ok((converted, total))
-    }
-
-    pub fn delete_query_history(&self, id: &str) -> Result<()> {
-        self.db
-            .delete_query_history(id)
-            .map_err(|e| DbError::Database(e.to_string()))
-    }
-
-    pub fn clear_query_history(&self) -> Result<()> {
-        self.db
-            .clear_query_history()
-            .map_err(|e| DbError::Database(e.to_string()))
-    }
 }
 
 // ============================================================================
@@ -1797,37 +1722,6 @@ impl DatabaseBackend for CrustDatabase {
 
     fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
         CrustDatabase::run_custom_query(self, query)
-    }
-
-    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
-        CrustDatabase::add_query_history(self, entry)
-    }
-
-    fn update_query_status(
-        &self,
-        id: &str,
-        status: &str,
-        duration_ms: Option<u64>,
-        result_count: Option<i64>,
-        error: Option<&str>,
-    ) -> Result<()> {
-        CrustDatabase::update_query_status(self, id, status, duration_ms, result_count, error)
-    }
-
-    fn get_query_history(
-        &self,
-        limit: usize,
-        offset: usize,
-    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
-        CrustDatabase::get_query_history(self, limit, offset)
-    }
-
-    fn delete_query_history(&self, id: &str) -> Result<()> {
-        CrustDatabase::delete_query_history(self, id)
-    }
-
-    fn clear_query_history(&self) -> Result<()> {
-        CrustDatabase::clear_query_history(self)
     }
 
     fn get_cache_stats(&self) -> Result<Option<(usize, usize)>> {

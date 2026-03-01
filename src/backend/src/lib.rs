@@ -6,6 +6,7 @@ mod api;
 mod db;
 mod generate;
 mod graph;
+mod history;
 mod import;
 mod settings;
 mod state;

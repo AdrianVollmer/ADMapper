@@ -32,6 +32,8 @@ kuzu = { version = "0.11.2", optional = true }
 crustdb = { path = "../crustdb", optional = true }
 neo4rs = { version = "0.8", optional = true }
 falkordb = { version = "0.1", optional = true }
+# SQLite for query history (always on, matches crustdb version)
+rusqlite = { version = "0.31", features = ["bundled"] }
 rayon = "=1.10.0"  # Pin to avoid graph_builder incompatibility with 1.11
 zip = "2"
 tempfile = "3"

@@ -44,6 +44,7 @@ dependencies = [
  "parking_lot 0.12.5",
  "rand 0.8.5",
  "rayon",
+ "rusqlite",
  "rust-embed",
  "serde",
  "serde_json",

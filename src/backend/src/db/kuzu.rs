@@ -10,8 +10,8 @@ use tracing::{debug, info, trace};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow, ReachabilityInsight,
-    Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
+    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// A graph database backed by KuzuDB.
@@ -120,26 +120,6 @@ impl KuzuDatabase {
         match conn.query(&create_edges) {
             Ok(_) => debug!("Created Relationship relationship table group"),
             Err(e) => trace!("Relationship table might already exist: {}", e),
-        }
-
-        // Create QueryHistory table for storing query history
-        let create_query_history = r#"
-            CREATE NODE TABLE IF NOT EXISTS QueryHistory(
-                id STRING PRIMARY KEY,
-                name STRING,
-                query STRING,
-                timestamp INT64,
-                result_count INT64,
-                status STRING,
-                started_at INT64,
-                duration_ms INT64,
-                error STRING
-            )
-        "#;
-
-        match conn.query(create_query_history) {
-            Ok(_) => debug!("Created QueryHistory table"),
-            Err(e) => trace!("QueryHistory table might already exist: {}", e),
         }
 
         Ok(())
@@ -1257,138 +1237,6 @@ impl KuzuDatabase {
         }
         results
     }
-
-    // Query history methods
-    pub fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
-        let conn = self.conn()?;
-        let id_escaped = entry.id.replace('\'', "''");
-        let name_escaped = entry.name.replace('\'', "''");
-        let query_escaped = entry.query.replace('\'', "''");
-        let status_escaped = entry.status.replace('\'', "''");
-        let error_escaped = entry
-            .error
-            .map(|e| e.replace('\'', "''"))
-            .unwrap_or_default();
-        let count = entry.result_count.unwrap_or(0);
-        let duration = entry.duration_ms.unwrap_or(0) as i64;
-
-        let cypher = format!(
-            "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}, status: '{}', started_at: {}, duration_ms: {}, error: '{}', background: {}}})",
-            id_escaped, name_escaped, query_escaped, entry.timestamp, count, status_escaped, entry.started_at, duration, error_escaped, entry.background
-        );
-
-        conn.query(&cypher)?;
-        Ok(())
-    }
-
-    pub fn update_query_status(
-        &self,
-        id: &str,
-        status: &str,
-        duration_ms: Option<u64>,
-        result_count: Option<i64>,
-        error: Option<&str>,
-    ) -> Result<()> {
-        let conn = self.conn()?;
-        let id_escaped = id.replace('\'', "''");
-        let status_escaped = status.replace('\'', "''");
-        let error_escaped = error.map(|e| e.replace('\'', "''")).unwrap_or_default();
-
-        let mut set_parts = vec![format!("h.status = '{}'", status_escaped)];
-        if let Some(duration) = duration_ms {
-            set_parts.push(format!("h.duration_ms = {}", duration as i64));
-        }
-        if let Some(count) = result_count {
-            set_parts.push(format!("h.result_count = {}", count));
-        }
-        if error.is_some() {
-            set_parts.push(format!("h.error = '{}'", error_escaped));
-        }
-
-        let cypher = format!(
-            "MATCH (h:QueryHistory {{id: '{}'}}) SET {}",
-            id_escaped,
-            set_parts.join(", ")
-        );
-
-        conn.query(&cypher)?;
-        Ok(())
-    }
-
-    pub fn get_query_history(
-        &self,
-        limit: usize,
-        offset: usize,
-    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
-        let conn = self.conn()?;
-
-        // Get total count
-        let count_result = conn.query("MATCH (h:QueryHistory) RETURN count(h)")?;
-        let total = self.extract_count(&count_result);
-
-        // Get paginated results
-        let query = format!(
-            "MATCH (h:QueryHistory) \
-             RETURN h.id, h.name, h.query, h.timestamp, h.result_count, h.status, h.started_at, h.duration_ms, h.error, h.background \
-             ORDER BY h.started_at DESC \
-             SKIP {} LIMIT {}",
-            offset, limit
-        );
-
-        let result = conn.query(&query)?;
-        let mut history = Vec::new();
-        let result_str = result.to_string();
-
-        for line in result_str.lines().skip(1) {
-            let parts: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
-            if parts.len() >= 9 {
-                let timestamp: i64 = parts[3].parse().unwrap_or(0);
-                let result_count: Option<i64> = parts[4].parse().ok();
-                let status = parts[5].to_string();
-                let started_at: i64 = parts[6].parse().unwrap_or(0);
-                let duration_ms: Option<u64> = parts[7].parse().ok();
-                let error = if parts[8].is_empty() {
-                    None
-                } else {
-                    Some(parts[8].to_string())
-                };
-                let background = parts
-                    .get(9)
-                    .map(|s| *s == "true" || *s == "True")
-                    .unwrap_or(false);
-                history.push(QueryHistoryRow {
-                    id: parts[0].to_string(),
-                    name: parts[1].to_string(),
-                    query: parts[2].to_string(),
-                    timestamp,
-                    result_count,
-                    status,
-                    started_at,
-                    duration_ms,
-                    error,
-                    background,
-                });
-            }
-        }
-
-        Ok((history, total))
-    }
-
-    pub fn delete_query_history(&self, id: &str) -> Result<()> {
-        let conn = self.conn()?;
-        let id_escaped = id.replace('\'', "''");
-        conn.query(&format!(
-            "MATCH (h:QueryHistory {{id: '{}'}}) DELETE h",
-            id_escaped
-        ))?;
-        Ok(())
-    }
-
-    pub fn clear_query_history(&self) -> Result<()> {
-        let conn = self.conn()?;
-        conn.query("MATCH (h:QueryHistory) DELETE h")?;
-        Ok(())
-    }
 }
 
 // ============================================================================
@@ -1505,36 +1353,5 @@ impl DatabaseBackend for KuzuDatabase {
 
     fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
         KuzuDatabase::run_custom_query(self, query)
-    }
-
-    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
-        KuzuDatabase::add_query_history(self, entry)
-    }
-
-    fn update_query_status(
-        &self,
-        id: &str,
-        status: &str,
-        duration_ms: Option<u64>,
-        result_count: Option<i64>,
-        error: Option<&str>,
-    ) -> Result<()> {
-        KuzuDatabase::update_query_status(self, id, status, duration_ms, result_count, error)
-    }
-
-    fn get_query_history(
-        &self,
-        limit: usize,
-        offset: usize,
-    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
-        KuzuDatabase::get_query_history(self, limit, offset)
-    }
-
-    fn delete_query_history(&self, id: &str) -> Result<()> {
-        KuzuDatabase::delete_query_history(self, id)
-    }
-
-    fn clear_query_history(&self) -> Result<()> {
-        KuzuDatabase::clear_query_history(self)
     }
 }

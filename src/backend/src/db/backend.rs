@@ -6,8 +6,7 @@ use serde_json::Value as JsonValue;
 use std::str::FromStr;
 
 use super::types::{
-    ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry,
-    QueryHistoryRow, Result, SecurityInsights,
+    ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, Result, SecurityInsights,
 };
 
 /// Query language supported by a database backend.
@@ -352,37 +351,6 @@ pub trait DatabaseBackend: Send + Sync {
         }
         self.run_custom_query(query)
     }
-
-    // ========================================================================
-    // Query History
-    // ========================================================================
-
-    /// Add a query to history with status tracking.
-    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()>;
-
-    /// Update a query's status in history.
-    fn update_query_status(
-        &self,
-        id: &str,
-        status: &str,
-        duration_ms: Option<u64>,
-        result_count: Option<i64>,
-        error: Option<&str>,
-    ) -> Result<()>;
-
-    /// Get query history with pagination.
-    /// Returns: (history_rows, total_count)
-    fn get_query_history(
-        &self,
-        limit: usize,
-        offset: usize,
-    ) -> Result<(Vec<QueryHistoryRow>, usize)>;
-
-    /// Delete a query from history.
-    fn delete_query_history(&self, id: &str) -> Result<()>;
-
-    /// Clear all query history.
-    fn clear_query_history(&self) -> Result<()>;
 
     // ========================================================================
     // Query Cache (optional, CrustDB only)

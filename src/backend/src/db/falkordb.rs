@@ -11,8 +11,8 @@ use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow,
-    ReachabilityInsight, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
+    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// FalkorDB database backend.
@@ -243,25 +243,22 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
             obj.insert("properties".to_string(), JsonValue::Object(props));
             JsonValue::Object(obj)
         }
-        falkordb::FalkorValue::Relationship(relationship) => {
+        falkordb::FalkorValue::Edge(edge) => {
             let mut obj = Map::new();
-            obj.insert(
-                "id".to_string(),
-                JsonValue::Number(relationship.entity_id.into()),
-            );
+            obj.insert("id".to_string(), JsonValue::Number(edge.entity_id.into()));
             obj.insert(
                 "type".to_string(),
-                JsonValue::String(relationship.relationship_type),
+                JsonValue::String(edge.relationship_type),
             );
             obj.insert(
                 "source".to_string(),
-                JsonValue::Number(relationship.src_node_id.into()),
+                JsonValue::Number(edge.src_node_id.into()),
             );
             obj.insert(
                 "target".to_string(),
-                JsonValue::Number(relationship.dst_node_id.into()),
+                JsonValue::Number(edge.dst_node_id.into()),
             );
-            let props: Map<String, JsonValue> = relationship
+            let props: Map<String, JsonValue> = edge
                 .properties
                 .into_iter()
                 .map(|(k, v)| (k, falkor_value_to_json(v)))
@@ -278,7 +275,7 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
             let relationships: Vec<JsonValue> = path
                 .relationships
                 .into_iter()
-                .map(|e| falkor_value_to_json(falkordb::FalkorValue::Relationship(e)))
+                .map(|e| falkor_value_to_json(falkordb::FalkorValue::Edge(e)))
                 .collect();
             json!({ "nodes": nodes, "relationships": relationships })
         }
@@ -1070,119 +1067,5 @@ impl DatabaseBackend for FalkorDbDatabase {
         let rows = self.execute_query(cypher)?;
 
         Ok(json!({ "results": rows }))
-    }
-
-    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
-        let id_escaped = entry.id.replace('\'', "\\'");
-        let name_escaped = entry.name.replace('\'', "\\'");
-        let query_escaped = entry.query.replace('\'', "\\'");
-        let status_escaped = entry.status.replace('\'', "\\'");
-        let error_escaped = entry
-            .error
-            .map(|e| e.replace('\'', "\\'"))
-            .unwrap_or_default();
-
-        let cypher = format!(
-            "CREATE (h:QueryHistory {{id: '{}', name: '{}', query: '{}', timestamp: {}, result_count: {}, status: '{}', started_at: {}, duration_ms: {}, error: '{}', background: {}}})",
-            id_escaped, name_escaped, query_escaped, entry.timestamp, entry.result_count.unwrap_or(0),
-            status_escaped, entry.started_at, entry.duration_ms.unwrap_or(0), error_escaped, entry.background
-        );
-
-        self.run_query(&cypher)
-    }
-
-    fn update_query_status(
-        &self,
-        id: &str,
-        status: &str,
-        duration_ms: Option<u64>,
-        result_count: Option<i64>,
-        error: Option<&str>,
-    ) -> Result<()> {
-        let id_escaped = id.replace('\'', "\\'");
-        let status_escaped = status.replace('\'', "\\'");
-        let error_escaped = error.map(|e| e.replace('\'', "\\'")).unwrap_or_default();
-
-        let cypher = format!(
-            "MATCH (h:QueryHistory {{id: '{}'}}) SET h.status = '{}', h.duration_ms = {}, h.result_count = {}, h.error = '{}'",
-            id_escaped, status_escaped, duration_ms.unwrap_or(0), result_count.unwrap_or(0), error_escaped
-        );
-
-        self.run_query(&cypher)
-    }
-
-    fn get_query_history(
-        &self,
-        limit: usize,
-        offset: usize,
-    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
-        // Get total count
-        let count_rows = self.execute_query("MATCH (h:QueryHistory) RETURN count(h) AS count")?;
-        let total = count_rows
-            .first()
-            .and_then(|r| r.first())
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as usize;
-
-        // Get paginated results
-        let cypher = format!(
-            "MATCH (h:QueryHistory) \
-             RETURN h.id AS id, h.name AS name, h.query AS query, h.timestamp AS ts, h.result_count AS cnt, \
-                    h.status AS status, h.started_at AS started_at, h.duration_ms AS duration_ms, h.error AS error, \
-                    h.background AS background \
-             ORDER BY h.timestamp DESC \
-             SKIP {} LIMIT {}",
-            offset, limit
-        );
-
-        let rows = self.execute_query(&cypher)?;
-
-        let history: Vec<QueryHistoryRow> = rows
-            .iter()
-            .filter_map(|r| {
-                let id = r.first()?.as_str()?.to_string();
-                let name = r.get(1)?.as_str()?.to_string();
-                let query = r.get(2)?.as_str()?.to_string();
-                let timestamp = r.get(3)?.as_i64()?;
-                let result_count = r.get(4).and_then(|v| v.as_i64());
-                let status = r
-                    .get(5)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("completed")
-                    .to_string();
-                let started_at = r.get(6).and_then(|v| v.as_i64()).unwrap_or(timestamp);
-                let duration_ms = r.get(7).and_then(|v| v.as_u64());
-                let error = r
-                    .get(8)
-                    .and_then(|v| v.as_str())
-                    .filter(|e| !e.is_empty())
-                    .map(String::from);
-                let background = r.get(9).and_then(|v| v.as_bool()).unwrap_or(false);
-                Some(QueryHistoryRow {
-                    id,
-                    name,
-                    query,
-                    timestamp,
-                    result_count,
-                    status,
-                    started_at,
-                    duration_ms,
-                    error,
-                    background,
-                })
-            })
-            .collect();
-
-        Ok((history, total))
-    }
-
-    fn delete_query_history(&self, id: &str) -> Result<()> {
-        let id_escaped = id.replace('\'', "\\'");
-        let cypher = format!("MATCH (h:QueryHistory {{id: '{}'}}) DELETE h", id_escaped);
-        self.run_query(&cypher)
-    }
-
-    fn clear_query_history(&self) -> Result<()> {
-        self.run_query("MATCH (h:QueryHistory) DELETE h")
     }
 }

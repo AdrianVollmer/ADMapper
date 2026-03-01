@@ -2,11 +2,13 @@
 
 use crate::api::types::{QueryActivity, QueryProgress};
 use crate::db::{DatabaseBackend, DatabaseType, DatabaseUrl};
+use crate::history::QueryHistoryService;
 use crate::import::ImportProgress;
 #[cfg(feature = "crustdb")]
 use crate::settings;
 use dashmap::DashMap;
 use parking_lot::RwLock;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -63,6 +65,9 @@ pub struct ImportJob {
 struct DatabaseConnection {
     backend: Arc<dyn DatabaseBackend>,
     db_type: DatabaseType,
+    /// Database path (for file-based backends like CrustDB, KuzuDB, CozoDB).
+    #[allow(dead_code)]
+    db_path: Option<PathBuf>,
 }
 
 // ============================================================================
@@ -74,6 +79,8 @@ struct DatabaseConnection {
 pub struct AppState {
     /// Current database connection (if any).
     connection: Arc<RwLock<Option<DatabaseConnection>>>,
+    /// Query history service (created on connect, persists across queries).
+    history_service: Arc<RwLock<Option<Arc<QueryHistoryService>>>>,
     /// Active import jobs and their progress channels.
     pub import_jobs: Arc<DashMap<String, Arc<ImportJob>>>,
     /// Active running queries for tracking and cancellation.
@@ -93,6 +100,7 @@ impl AppState {
         let (query_activity_tx, _) = broadcast::channel(16);
         Self {
             connection: Arc::new(RwLock::new(None)),
+            history_service: Arc::new(RwLock::new(None)),
             import_jobs: Arc::new(DashMap::new()),
             running_queries: Arc::new(DashMap::new()),
             sync_query_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -103,16 +111,62 @@ impl AppState {
     }
 
     /// Create a new AppState with an initial database connection.
-    pub fn new_connected(backend: Arc<dyn DatabaseBackend>, db_type: DatabaseType) -> Self {
+    pub fn new_connected(
+        backend: Arc<dyn DatabaseBackend>,
+        db_type: DatabaseType,
+        db_path: Option<PathBuf>,
+    ) -> Self {
         let (query_activity_tx, _) = broadcast::channel(16);
+
+        // Create history service based on database type
+        let history_service = Self::create_history_service(db_type, db_path.as_deref());
+
         Self {
-            connection: Arc::new(RwLock::new(Some(DatabaseConnection { backend, db_type }))),
+            connection: Arc::new(RwLock::new(Some(DatabaseConnection {
+                backend,
+                db_type,
+                db_path,
+            }))),
+            history_service: Arc::new(RwLock::new(Some(Arc::new(history_service)))),
             import_jobs: Arc::new(DashMap::new()),
             running_queries: Arc::new(DashMap::new()),
             sync_query_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             query_activity_tx,
             #[cfg(feature = "desktop")]
             app_handle: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Create a history service based on database type.
+    fn create_history_service(
+        db_type: DatabaseType,
+        db_path: Option<&std::path::Path>,
+    ) -> QueryHistoryService {
+        match db_type {
+            // File-based backends: use SQLite storage in the same directory
+            DatabaseType::CrustDB | DatabaseType::KuzuDB | DatabaseType::CozoDB => {
+                if let Some(path) = db_path {
+                    // For CrustDB, use the same .db file
+                    // For KuzuDB/CozoDB, create a separate history.db in the same directory
+                    let history_path = if db_type == DatabaseType::CrustDB {
+                        path.to_path_buf()
+                    } else {
+                        path.join("history.db")
+                    };
+                    match QueryHistoryService::new_sqlite(&history_path) {
+                        Ok(service) => return service,
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to create SQLite history storage: {}. Falling back to in-memory.",
+                                e
+                            );
+                        }
+                    }
+                }
+                QueryHistoryService::new_in_memory()
+            }
+            // Remote backends: use in-memory storage
+            DatabaseType::Neo4j | DatabaseType::FalkorDB => QueryHistoryService::new_in_memory(),
         }
     }
 
@@ -261,10 +315,15 @@ impl AppState {
     pub fn connect(&self, url: &str) -> Result<DatabaseType, String> {
         let parsed = DatabaseUrl::parse(url).map_err(|e| e.to_string())?;
 
+        // Track the database path for file-based backends
+        #[allow(unused_mut)]
+        let mut db_path: Option<PathBuf> = None;
+
         let backend: Arc<dyn DatabaseBackend> = match parsed.db_type {
             #[cfg(feature = "kuzu")]
             DatabaseType::KuzuDB => {
                 let path = parsed.path.ok_or("Missing path for KuzuDB")?;
+                db_path = Some(PathBuf::from(&path));
                 let db = KuzuDatabase::new(&path).map_err(|e| e.to_string())?;
                 Arc::new(db)
             }
@@ -275,6 +334,7 @@ impl AppState {
             #[cfg(feature = "cozo")]
             DatabaseType::CozoDB => {
                 let path = parsed.path.ok_or("Missing path for CozoDB")?;
+                db_path = Some(PathBuf::from(&path));
                 let db = CozoDatabase::new(&path).map_err(|e| e.to_string())?;
                 Arc::new(db)
             }
@@ -316,6 +376,7 @@ impl AppState {
             #[cfg(feature = "crustdb")]
             DatabaseType::CrustDB => {
                 let path = parsed.path.ok_or("Missing path for CrustDB")?;
+                db_path = Some(PathBuf::from(&path));
                 let app_settings = settings::load();
                 let db = CrustDatabase::new(&path, app_settings.query_caching)
                     .map_err(|e: crate::db::DbError| e.to_string())?;
@@ -330,7 +391,17 @@ impl AppState {
         };
 
         let db_type = parsed.db_type;
-        *self.connection.write() = Some(DatabaseConnection { backend, db_type });
+
+        // Create history service based on backend type
+        let history_service = Self::create_history_service(db_type, db_path.as_deref());
+
+        *self.connection.write() = Some(DatabaseConnection {
+            backend,
+            db_type,
+            db_path,
+        });
+        *self.history_service.write() = Some(Arc::new(history_service));
+
         info!(database_type = %db_type.name(), "Connected to database");
         Ok(db_type)
     }
@@ -338,7 +409,19 @@ impl AppState {
     /// Disconnect from the current database.
     pub fn disconnect(&self) {
         *self.connection.write() = None;
+        *self.history_service.write() = None;
         info!("Disconnected from database");
+    }
+
+    /// Get a reference to the history service if connected.
+    pub fn history(&self) -> Option<Arc<QueryHistoryService>> {
+        self.history_service.read().clone()
+    }
+
+    /// Get the history service, returning an error if not connected.
+    pub fn require_history(&self) -> Result<Arc<QueryHistoryService>, crate::api::types::ApiError> {
+        self.history()
+            .ok_or(crate::api::types::ApiError::NotConnected)
     }
 
     /// Get the database, returning an error if not connected.

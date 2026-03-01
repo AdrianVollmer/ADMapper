@@ -10,6 +10,7 @@
 use crate::api::types::GenerateSize;
 use crate::db::{DatabaseBackend, DbEdge, DbNode, QueryLanguage};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
+use crate::history::QueryHistoryService;
 use crate::import::{BloodHoundImporter, ImportProgress};
 use crate::settings::{self, Settings};
 use crate::state::AppState;
@@ -692,7 +693,7 @@ pub fn execute_query(
 
 /// Get query history.
 pub fn get_query_history(
-    db: &dyn DatabaseBackend,
+    history: &QueryHistoryService,
     page: usize,
     per_page: usize,
 ) -> Result<QueryHistoryResponse, String> {
@@ -700,11 +701,9 @@ pub fn get_query_history(
     let per_page = per_page.clamp(1, 100);
     let offset = (page - 1) * per_page;
 
-    let (history, total) = db
-        .get_query_history(per_page, offset)
-        .map_err(|e| e.to_string())?;
+    let (history_rows, total) = history.get(per_page, offset).map_err(|e| e.to_string())?;
 
-    let entries: Vec<QueryHistoryEntry> = history
+    let entries: Vec<QueryHistoryEntry> = history_rows
         .into_iter()
         .map(|row| QueryHistoryEntry {
             id: row.id,
@@ -729,13 +728,13 @@ pub fn get_query_history(
 }
 
 /// Delete query history entry.
-pub fn delete_query_history(db: &dyn DatabaseBackend, id: &str) -> Result<(), String> {
-    db.delete_query_history(id).map_err(|e| e.to_string())
+pub fn delete_query_history(history: &QueryHistoryService, id: &str) -> Result<(), String> {
+    history.delete(id).map_err(|e| e.to_string())
 }
 
 /// Clear all query history.
-pub fn clear_query_history(db: &dyn DatabaseBackend) -> Result<(), String> {
-    db.clear_query_history().map_err(|e| e.to_string())
+pub fn clear_query_history(history: &QueryHistoryService) -> Result<(), String> {
+    history.clear().map_err(|e| e.to_string())
 }
 
 // ============================================================================

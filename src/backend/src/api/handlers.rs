@@ -7,11 +7,9 @@ use crate::api::types::{
     PathsToDaParams, PathsToDaResponse, QueryActivity, QueryHistoryEntry, QueryHistoryResponse,
     QueryProgress, QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
 };
-use crate::db::{
-    DatabaseBackend, DbEdge, DbError, DbNode, NewQueryHistoryEntry, QueryLanguage,
-    Result as DbResult,
-};
+use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, NewQueryHistoryEntry, QueryLanguage};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
+use crate::history::QueryHistoryService;
 use crate::import::{BloodHoundImporter, ImportProgress};
 use crate::settings::{self, Settings};
 use crate::state::{AppState, ImportJob, RunningQuery};
@@ -44,13 +42,25 @@ use tracing::{debug, error, info, instrument, warn};
 /// synchronous database operations in an async context.
 async fn run_db<T, F>(db: Arc<dyn DatabaseBackend>, f: F) -> Result<T, ApiError>
 where
-    F: FnOnce(&dyn DatabaseBackend) -> DbResult<T> + Send + 'static,
+    F: FnOnce(&dyn DatabaseBackend) -> crate::db::Result<T> + Send + 'static,
     T: Send + 'static,
 {
     tokio::task::spawn_blocking(move || f(db.as_ref()))
         .await
         .map_err(|e| ApiError::Internal(format!("Task join error: {e}")))?
         .map_err(Into::into)
+}
+
+/// Run a blocking history operation in a spawn_blocking task.
+async fn run_history<T, F>(history: Arc<QueryHistoryService>, f: F) -> Result<T, ApiError>
+where
+    F: FnOnce(&QueryHistoryService) -> crate::history::Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || f(history.as_ref()))
+        .await
+        .map_err(|e| ApiError::Internal(format!("Task join error: {e}")))?
+        .map_err(|e| ApiError::Internal(e.to_string()))
 }
 
 // ============================================================================
@@ -881,19 +891,21 @@ async fn check_path_to_condition(
     );
 
     // Add to history with "running" status (background query)
-    if let Err(e) = db.add_query_history(NewQueryHistoryEntry {
-        id: &query_id,
-        name: &query_name,
-        query: &query_text,
-        timestamp: started_at_unix,
-        result_count: None,
-        status: "running",
-        started_at: started_at_unix,
-        duration_ms: None,
-        error: None,
-        background: true,
-    }) {
-        warn!(error = %e, "Failed to add path check to history");
+    if let Some(history) = state.history() {
+        if let Err(e) = history.add(NewQueryHistoryEntry {
+            id: &query_id,
+            name: &query_name,
+            query: &query_text,
+            timestamp: started_at_unix,
+            result_count: None,
+            status: "running",
+            started_at: started_at_unix,
+            duration_ms: None,
+            error: None,
+            background: true,
+        }) {
+            warn!(error = %e, "Failed to add path check to history");
+        }
     }
 
     state.start_sync_query();
@@ -917,29 +929,31 @@ async fn check_path_to_condition(
 
     let duration_ms = started_at.elapsed().as_millis() as u64;
 
-    match &result {
-        Ok(path_len) => {
-            let result_count = path_len.map(|l| l as i64).or(Some(0));
-            if let Err(e) = db.update_query_status(
-                &query_id,
-                "completed",
-                Some(duration_ms),
-                result_count,
-                None,
-            ) {
-                warn!(error = %e, "Failed to update path check history");
+    if let Some(history) = state.history() {
+        match &result {
+            Ok(path_len) => {
+                let result_count = path_len.map(|l| l as i64).or(Some(0));
+                if let Err(e) = history.update_status(
+                    &query_id,
+                    "completed",
+                    Some(duration_ms),
+                    result_count,
+                    None,
+                ) {
+                    warn!(error = %e, "Failed to update path check history");
+                }
             }
-        }
-        Err(e) => {
-            let error_str = e.to_string();
-            if let Err(e2) = db.update_query_status(
-                &query_id,
-                "failed",
-                Some(duration_ms),
-                None,
-                Some(&error_str),
-            ) {
-                warn!(error = %e2, "Failed to update path check history");
+            Err(e) => {
+                let error_str = e.to_string();
+                if let Err(e2) = history.update_status(
+                    &query_id,
+                    "failed",
+                    Some(duration_ms),
+                    None,
+                    Some(&error_str),
+                ) {
+                    warn!(error = %e2, "Failed to update path check history");
+                }
             }
         }
     }
@@ -1023,19 +1037,21 @@ pub async fn graph_path(
     );
 
     // Add to history with "running" status
-    if let Err(e) = db.add_query_history(NewQueryHistoryEntry {
-        id: &query_id,
-        name: &query_name,
-        query: &query_text,
-        timestamp: started_at_unix,
-        result_count: None,
-        status: "running",
-        started_at: started_at_unix,
-        duration_ms: None,
-        error: None,
-        background: false,
-    }) {
-        warn!(error = %e, "Failed to add path query to history");
+    if let Some(history) = state.history() {
+        if let Err(e) = history.add(NewQueryHistoryEntry {
+            id: &query_id,
+            name: &query_name,
+            query: &query_text,
+            timestamp: started_at_unix,
+            result_count: None,
+            status: "running",
+            started_at: started_at_unix,
+            duration_ms: None,
+            error: None,
+            background: false,
+        }) {
+            warn!(error = %e, "Failed to add path query to history");
+        }
     }
 
     state.start_sync_query();
@@ -1120,33 +1136,35 @@ pub async fn graph_path(
 
     let duration_ms = started_at.elapsed().as_millis() as u64;
 
-    match &result {
-        Ok(response) => {
-            let result_count = if response.found {
-                Some(response.path.len() as i64)
-            } else {
-                Some(0)
-            };
-            if let Err(e) = db.update_query_status(
-                &query_id,
-                "completed",
-                Some(duration_ms),
-                result_count,
-                None,
-            ) {
-                warn!(error = %e, "Failed to update path query history");
+    if let Some(history) = state.history() {
+        match &result {
+            Ok(response) => {
+                let result_count = if response.found {
+                    Some(response.path.len() as i64)
+                } else {
+                    Some(0)
+                };
+                if let Err(e) = history.update_status(
+                    &query_id,
+                    "completed",
+                    Some(duration_ms),
+                    result_count,
+                    None,
+                ) {
+                    warn!(error = %e, "Failed to update path query history");
+                }
             }
-        }
-        Err(e) => {
-            let error_str = e.to_string();
-            if let Err(e2) = db.update_query_status(
-                &query_id,
-                "failed",
-                Some(duration_ms),
-                None,
-                Some(&error_str),
-            ) {
-                warn!(error = %e2, "Failed to update path query history");
+            Err(e) => {
+                let error_str = e.to_string();
+                if let Err(e2) = history.update_status(
+                    &query_id,
+                    "failed",
+                    Some(duration_ms),
+                    None,
+                    Some(&error_str),
+                ) {
+                    warn!(error = %e2, "Failed to update path query history");
+                }
             }
         }
     }
@@ -1464,20 +1482,22 @@ pub async fn graph_query(
     state.emit_query_progress(&initial_progress);
 
     // Add query to history with "running" status
-    let timestamp = started_at_unix;
-    if let Err(e) = db.add_query_history(NewQueryHistoryEntry {
-        id: &query_id,
-        name: &body.query, // Use query text as name
-        query: &body.query,
-        timestamp,
-        result_count: None,
-        status: "running",
-        started_at: started_at_unix,
-        duration_ms: None,
-        error: None,
-        background: body.background,
-    }) {
-        warn!(error = %e, "Failed to add query to history");
+    let history = state.history();
+    if let Some(ref h) = history {
+        if let Err(e) = h.add(NewQueryHistoryEntry {
+            id: &query_id,
+            name: &body.query, // Use query text as name
+            query: &body.query,
+            timestamp: started_at_unix,
+            result_count: None,
+            status: "running",
+            started_at: started_at_unix,
+            duration_ms: None,
+            error: None,
+            background: body.background,
+        }) {
+            warn!(error = %e, "Failed to add query to history");
+        }
     }
 
     // Spawn the query execution
@@ -1494,10 +1514,12 @@ pub async fn graph_query(
                               duration_ms: Option<u64>,
                               result_count: Option<i64>,
                               error: Option<&str>| {
-            if let Err(e) =
-                db.update_query_status(&query_id_clone, status, duration_ms, result_count, error)
-            {
-                warn!(error = %e, "Failed to update query history status");
+            if let Some(ref h) = history {
+                if let Err(e) =
+                    h.update_status(&query_id_clone, status, duration_ms, result_count, error)
+                {
+                    warn!(error = %e, "Failed to update query history status");
+                }
             }
         };
 
@@ -1720,9 +1742,8 @@ pub async fn query_abort(
     let duration_ms = query.started_at.elapsed().as_millis() as u64;
 
     // Update query history with aborted status
-    if let Some(db) = state.db() {
-        if let Err(e) = db.update_query_status(&query_id, "aborted", Some(duration_ms), None, None)
-        {
+    if let Some(history) = state.history() {
+        if let Err(e) = history.update_status(&query_id, "aborted", Some(duration_ms), None, None) {
             warn!(error = %e, "Failed to update query history status on abort");
         }
     }
@@ -1791,13 +1812,13 @@ pub async fn get_query_history(
     State(state): State<AppState>,
     Query(params): Query<HistoryParams>,
 ) -> Result<Json<QueryHistoryResponse>, ApiError> {
-    let db = state.require_db()?;
+    let history_service = state.require_history()?;
     let page = params.page.max(1);
     let per_page = params.per_page.clamp(1, 100);
     let offset = (page - 1) * per_page;
 
     let (history, total): (Vec<_>, usize) =
-        run_db(db, move |db| db.get_query_history(per_page, offset)).await?;
+        run_history(history_service, move |h| h.get(per_page, offset)).await?;
 
     let entries: Vec<QueryHistoryEntry> = history
         .into_iter()
@@ -1844,7 +1865,7 @@ pub async fn add_query_history(
     State(state): State<AppState>,
     Json(body): Json<AddHistoryRequest>,
 ) -> Result<Json<QueryHistoryEntry>, ApiError> {
-    let db = state.require_db()?;
+    let history_service = state.require_history()?;
     let id = uuid::Uuid::new_v4().to_string();
     let started_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1867,8 +1888,8 @@ pub async fn add_query_history(
     let error = body.error.clone();
     let background = body.background;
     let status_str_owned = status_str.to_string();
-    run_db(db, move |db| {
-        db.add_query_history(NewQueryHistoryEntry {
+    run_history(history_service, move |h| {
+        h.add(NewQueryHistoryEntry {
             id: &id_clone,
             name: &name,
             query: &query,
@@ -1904,9 +1925,9 @@ pub async fn delete_query_history(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let db = state.require_db()?;
+    let history_service = state.require_history()?;
     let id_clone = id.clone();
-    run_db(db, move |db| db.delete_query_history(&id_clone)).await?;
+    run_history(history_service, move |h| h.delete(&id_clone)).await?;
     info!(id = %id, "Query deleted from history");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1914,8 +1935,8 @@ pub async fn delete_query_history(
 /// Clear all query history.
 #[instrument(skip(state))]
 pub async fn clear_query_history(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
-    let db = state.require_db()?;
-    run_db(db, |db| db.clear_query_history()).await?;
+    let history_service = state.require_history()?;
+    run_history(history_service, |h| h.clear()).await?;
     info!("Query history cleared");
     Ok(StatusCode::NO_CONTENT)
 }

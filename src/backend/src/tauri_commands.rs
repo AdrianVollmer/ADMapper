@@ -299,6 +299,7 @@ pub fn graph_query(
     use crate::db::NewQueryHistoryEntry;
 
     let db = state.db().ok_or("Not connected to database")?;
+    let history = state.history();
     info!(query = %query, "Starting async query (IPC)");
 
     let query_id = uuid::Uuid::new_v4().to_string();
@@ -325,19 +326,21 @@ pub fn graph_query(
     state.emit_query_progress(&initial_progress);
 
     // Add query to history with "running" status
-    if let Err(e) = db.add_query_history(NewQueryHistoryEntry {
-        id: &query_id,
-        name: &query,
-        query: &query,
-        timestamp: started_at_unix,
-        result_count: None,
-        status: "running",
-        started_at: started_at_unix,
-        duration_ms: None,
-        error: None,
-        background,
-    }) {
-        debug!(error = %e, "Failed to add query to history");
+    if let Some(ref h) = history {
+        if let Err(e) = h.add(NewQueryHistoryEntry {
+            id: &query_id,
+            name: &query,
+            query: &query,
+            timestamp: started_at_unix,
+            result_count: None,
+            status: "running",
+            started_at: started_at_unix,
+            duration_ms: None,
+            error: None,
+            background,
+        }) {
+            debug!(error = %e, "Failed to add query to history");
+        }
     }
 
     // Clone what we need for the background thread
@@ -353,14 +356,12 @@ pub fn graph_query(
                               duration_ms: Option<u64>,
                               result_count: Option<i64>,
                               error: Option<&str>| {
-            if let Err(e) = db_clone.update_query_status(
-                &query_id_clone,
-                status,
-                duration_ms,
-                result_count,
-                error,
-            ) {
-                debug!(error = %e, "Failed to update query history status");
+            if let Some(ref h) = history {
+                if let Err(e) =
+                    h.update_status(&query_id_clone, status, duration_ms, result_count, error)
+                {
+                    debug!(error = %e, "Failed to update query history status");
+                }
             }
         };
 
@@ -428,24 +429,24 @@ pub fn get_query_history(
     page: Option<usize>,
     per_page: Option<usize>,
 ) -> Result<core::QueryHistoryResponse, String> {
-    let db = state.db().ok_or("Not connected to database")?;
-    core::get_query_history(db.as_ref(), page.unwrap_or(1), per_page.unwrap_or(20))
+    let history = state.history().ok_or("Not connected to database")?;
+    core::get_query_history(history.as_ref(), page.unwrap_or(1), per_page.unwrap_or(20))
 }
 
 /// Delete query history entry.
 #[tauri::command]
 pub fn delete_query_history(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let db = state.db().ok_or("Not connected to database")?;
+    let history = state.history().ok_or("Not connected to database")?;
     info!(id = %id, "Deleting query history (IPC)");
-    core::delete_query_history(db.as_ref(), &id)
+    core::delete_query_history(history.as_ref(), &id)
 }
 
 /// Clear query history.
 #[tauri::command]
 pub fn clear_query_history(state: State<'_, AppState>) -> Result<(), String> {
-    let db = state.db().ok_or("Not connected to database")?;
+    let history = state.history().ok_or("Not connected to database")?;
     info!("Clearing query history (IPC)");
-    core::clear_query_history(db.as_ref())
+    core::clear_query_history(history.as_ref())
 }
 
 // ============================================================================

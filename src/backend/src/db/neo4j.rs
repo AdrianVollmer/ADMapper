@@ -11,8 +11,8 @@ use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbNode, DetailedStats, NewQueryHistoryEntry, QueryHistoryRow, ReachabilityInsight,
-    Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
+    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// Neo4j database backend.
@@ -971,114 +971,5 @@ impl DatabaseBackend for Neo4jDatabase {
         })?;
 
         Ok(json!({ "results": result }))
-    }
-
-    fn add_query_history(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
-        let q = query(
-            "CREATE (h:QueryHistory {id: $id, name: $name, query: $query, timestamp: $ts, result_count: $cnt, status: $status, started_at: $started_at, duration_ms: $duration_ms, error: $error, background: $background})"
-        )
-        .param("id", entry.id.to_string())
-        .param("name", entry.name.to_string())
-        .param("query", entry.query.to_string())
-        .param("ts", entry.timestamp)
-        .param("cnt", entry.result_count.unwrap_or(0))
-        .param("status", entry.status.to_string())
-        .param("started_at", entry.started_at)
-        .param("duration_ms", entry.duration_ms.map(|d| d as i64).unwrap_or(0))
-        .param("error", entry.error.unwrap_or("").to_string())
-        .param("background", entry.background);
-
-        self.run_query(q)
-    }
-
-    fn update_query_status(
-        &self,
-        id: &str,
-        status: &str,
-        duration_ms: Option<u64>,
-        result_count: Option<i64>,
-        error: Option<&str>,
-    ) -> Result<()> {
-        let q = query(
-            "MATCH (h:QueryHistory {id: $id}) \
-             SET h.status = $status, h.duration_ms = $duration_ms, h.result_count = $result_count, h.error = $error"
-        )
-        .param("id", id.to_string())
-        .param("status", status.to_string())
-        .param("duration_ms", duration_ms.map(|d| d as i64).unwrap_or(0))
-        .param("result_count", result_count.unwrap_or(0))
-        .param("error", error.unwrap_or("").to_string());
-
-        self.run_query(q)
-    }
-
-    fn get_query_history(
-        &self,
-        limit: usize,
-        offset: usize,
-    ) -> Result<(Vec<QueryHistoryRow>, usize)> {
-        // Get total count
-        let count_rows =
-            self.execute_query(query("MATCH (h:QueryHistory) RETURN count(h) AS count"))?;
-        let total = count_rows
-            .first()
-            .and_then(|r| r.get::<i64>("count").ok())
-            .unwrap_or(0) as usize;
-
-        // Get paginated results
-        let q = query(
-            "MATCH (h:QueryHistory) \
-             RETURN h.id AS id, h.name AS name, h.query AS query, h.timestamp AS ts, h.result_count AS cnt, \
-                    h.status AS status, h.started_at AS started_at, h.duration_ms AS duration_ms, h.error AS error, \
-                    h.background AS background \
-             ORDER BY h.timestamp DESC \
-             SKIP $offset LIMIT $limit"
-        )
-        .param("offset", offset as i64)
-        .param("limit", limit as i64);
-
-        let rows = self.execute_query(q)?;
-
-        let history: Vec<QueryHistoryRow> = rows
-            .iter()
-            .filter_map(|r| {
-                let id = r.get::<String>("id").ok()?;
-                let name = r.get::<String>("name").ok()?;
-                let query = r.get::<String>("query").ok()?;
-                let timestamp = r.get::<i64>("ts").ok()?;
-                let result_count = r.get::<i64>("cnt").ok();
-                let status = r
-                    .get::<String>("status")
-                    .ok()
-                    .unwrap_or_else(|| "completed".to_string());
-                let started_at = r.get::<i64>("started_at").ok().unwrap_or(timestamp);
-                let duration_ms = r.get::<i64>("duration_ms").ok().map(|d| d as u64);
-                let error = r.get::<String>("error").ok().filter(|e| !e.is_empty());
-                let background = r.get::<bool>("background").ok().unwrap_or(false);
-                Some(QueryHistoryRow {
-                    id,
-                    name,
-                    query,
-                    timestamp,
-                    result_count,
-                    status,
-                    started_at,
-                    duration_ms,
-                    error,
-                    background,
-                })
-            })
-            .collect();
-
-        Ok((history, total))
-    }
-
-    fn delete_query_history(&self, id: &str) -> Result<()> {
-        let q = query("MATCH (h:QueryHistory {id: $id}) DELETE h").param("id", id.to_string());
-        self.run_query(q)
-    }
-
-    fn clear_query_history(&self) -> Result<()> {
-        self.run_query(query("MATCH (h:QueryHistory) DELETE h"))
     }
 }
