@@ -1,17 +1,17 @@
-# M8: Shortest Path Queries
+# M8: Shortest Path Queries (openCypher 9)
 #
-# Tests for SHORTEST k path finding with quantifiers (+, *).
+# Tests for shortestPath() and allShortestPaths() functions.
 
 [[test]]
 name = "shortest_path_basic"
-description = "Find shortest path between two nodes"
+description = "Find shortest path between two nodes using shortestPath()"
 [test.setup]
 cypher = [
     # Create a simple linear path: A -> B
     "CREATE (a:Station {name: 'A'})-[:LINK]->(b:Station {name: 'B'})",
 ]
 [test.query]
-cypher = "MATCH p = SHORTEST 1 (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result"
+cypher = "MATCH p = shortestPath((src:Station {name: 'A'})-[:LINK*]->(dst:Station {name: 'B'})) RETURN length(p) AS result"
 [test.expected]
 row_count = 1
 columns = ["result"]
@@ -25,7 +25,7 @@ cypher = [
     "CREATE (a:Station {name: 'A'})-[:LINK]->(b:Station {name: 'B'})-[:LINK]->(c:Station {name: 'C'})",
 ]
 [test.query]
-cypher = "MATCH p = SHORTEST 1 (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'C' RETURN length(p) AS result"
+cypher = "MATCH p = shortestPath((src:Station {name: 'A'})-[:LINK*]->(dst:Station {name: 'C'})) RETURN length(p) AS result"
 [test.expected]
 row_count = 1
 columns = ["result"]
@@ -40,20 +40,20 @@ cypher = [
     # No edges between them
 ]
 [test.query]
-cypher = "MATCH p = SHORTEST 1 (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result"
+cypher = "MATCH p = shortestPath((src:Station {name: 'A'})-[:LINK*]->(dst:Station {name: 'B'})) RETURN length(p) AS result"
 [test.expected]
 row_count = 0
 columns = ["result"]
 
 [[test]]
-name = "quantifier_one_or_more"
-description = "Quantifier + matches one or more"
+name = "variable_length_one_or_more"
+description = "Variable length *1.. matches one or more (openCypher 9 syntax)"
 [test.setup]
 cypher = [
     "CREATE (a:Station {name: 'A'})-[:LINK]->(b:Station {name: 'B'})",
 ]
 [test.query]
-cypher = "MATCH p = (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result"
+cypher = "MATCH p = (src:Station)-[:LINK*1..]->(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result"
 [test.expected]
 row_count = 1
 columns = ["result"]
@@ -68,7 +68,7 @@ cypher = [
     "CREATE (a:Node {name: 'A'})-[:EDGE]->(b:Node {name: 'B'})-[:EDGE]->(c:Node {name: 'C'})-[:EDGE]->(d:Node {name: 'D'})-[:EDGE]->(a)",
 ]
 [test.query]
-cypher = "MATCH p = SHORTEST 1 (src:Node)-[:EDGE]-+(dst:Node) WHERE src.name = 'A' AND dst.name = 'C' RETURN length(p) AS len"
+cypher = "MATCH p = shortestPath((src:Node {name: 'A'})-[:EDGE*]->(dst:Node {name: 'C'})) RETURN length(p) AS len"
 [test.expected]
 row_count = 1
 columns = ["len"]

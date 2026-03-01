@@ -128,14 +128,23 @@ pub struct OrderByItem {
     pub descending: bool,
 }
 
+/// Shortest path mode for openCypher 9 shortestPath() and allShortestPaths().
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ShortestPathMode {
+    /// shortestPath() - returns single shortest path
+    Single,
+    /// allShortestPaths() - returns all paths of shortest length
+    All,
+}
+
 /// A graph pattern (nodes and relationships).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pattern {
     pub elements: Vec<PatternElement>,
     /// Path variable name for `p = (a)-[*]->(b)` syntax.
     pub path_variable: Option<String>,
-    /// SHORTEST k modifier: find k shortest paths.
-    pub shortest_k: Option<u32>,
+    /// Shortest path mode when using shortestPath() or allShortestPaths().
+    pub shortest_path: Option<ShortestPathMode>,
 }
 
 /// An element in a pattern.
@@ -155,15 +164,6 @@ pub struct NodePattern {
     pub properties: Option<Expression>,
 }
 
-/// Quantifier for relationship patterns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RelQuantifier {
-    /// One or more (+)
-    OneOrMore,
-    /// Zero or more (*)
-    ZeroOrMore,
-}
-
 /// A relationship pattern like -[r:TYPE]->
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelationshipPattern {
@@ -172,8 +172,6 @@ pub struct RelationshipPattern {
     pub properties: Option<Expression>,
     pub direction: Direction,
     pub length: Option<LengthSpec>,
-    /// Quantifier suffix (+ or *) for shortest path patterns.
-    pub quantifier: Option<RelQuantifier>,
 }
 
 /// Relationship direction.
@@ -236,6 +234,10 @@ pub enum Expression {
     },
     /// Parameter: $param
     Parameter(String),
+    /// shortestPath((a)-[*]->(b)) - returns single shortest path
+    ShortestPath(Box<Pattern>),
+    /// allShortestPaths((a)-[*]->(b)) - returns all paths of shortest length
+    AllShortestPaths(Box<Pattern>),
 }
 
 /// A literal value.
@@ -445,11 +447,11 @@ fn build_merge_statement(pair: Pair<Rule>) -> Result<Statement> {
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::PatternPart => {
-                let (path_variable, shortest_k, elements) = build_pattern_part(inner)?;
+                let (path_variable, elements, shortest_path) = build_pattern_part(inner)?;
                 pattern = Some(Pattern {
                     elements,
                     path_variable,
-                    shortest_k,
+                    shortest_path,
                 });
             }
             Rule::MergeAction => {
@@ -766,16 +768,16 @@ fn build_skip_or_limit(pair: Pair<Rule>) -> Result<u64> {
 fn build_pattern(pair: Pair<Rule>) -> Result<Pattern> {
     let mut elements = Vec::new();
     let mut path_variable = None;
-    let mut shortest_k = None;
+    let mut shortest_path = None;
 
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::PatternPart {
-            let (path_var, short_k, part_elements) = build_pattern_part(inner)?;
+            let (path_var, part_elements, sp_mode) = build_pattern_part(inner)?;
             if path_var.is_some() {
                 path_variable = path_var;
             }
-            if short_k.is_some() {
-                shortest_k = short_k;
+            if sp_mode.is_some() {
+                shortest_path = sp_mode;
             }
             elements.extend(part_elements);
         }
@@ -784,30 +786,30 @@ fn build_pattern(pair: Pair<Rule>) -> Result<Pattern> {
     Ok(Pattern {
         elements,
         path_variable,
-        shortest_k,
+        shortest_path,
     })
 }
 
 /// Build pattern elements from a PatternPart.
-/// Returns (path_variable, shortest_k, elements).
+/// Returns (path_variable, elements, shortest_path_mode).
 fn build_pattern_part(
     pair: Pair<Rule>,
-) -> Result<(Option<String>, Option<u32>, Vec<PatternElement>)> {
+) -> Result<(
+    Option<String>,
+    Vec<PatternElement>,
+    Option<ShortestPathMode>,
+)> {
     let mut path_variable = None;
-    let mut shortest_k = None;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::AnonymousPatternPart => {
-                let elements = build_anonymous_pattern_part(inner)?;
-                return Ok((path_variable, shortest_k, elements));
+                let (elements, shortest_path) = build_anonymous_pattern_part(inner)?;
+                return Ok((path_variable, elements, shortest_path));
             }
             Rule::Variable => {
                 // Named pattern (p = ...)
                 path_variable = Some(extract_variable(inner)?);
-            }
-            Rule::ShortestPathModifier => {
-                shortest_k = Some(build_shortest_path_modifier(inner)?);
             }
             _ => {}
         }
@@ -817,27 +819,52 @@ fn build_pattern_part(
     ))
 }
 
-/// Build the SHORTEST k modifier. Defaults to k=1 if not specified.
-fn build_shortest_path_modifier(pair: Pair<Rule>) -> Result<u32> {
-    for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::IntegerLiteral {
-            let n = parse_integer_literal(inner)?;
-            return Ok(n as u32);
-        }
-    }
-    // Default to 1 if no k specified (e.g., "SHORTEST (a)-[]->(b)")
-    Ok(1)
-}
-
 /// Build pattern elements from an AnonymousPatternPart.
-fn build_anonymous_pattern_part(pair: Pair<Rule>) -> Result<Vec<PatternElement>> {
+/// Returns (elements, shortest_path_mode).
+fn build_anonymous_pattern_part(
+    pair: Pair<Rule>,
+) -> Result<(Vec<PatternElement>, Option<ShortestPathMode>)> {
     for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::PatternElement {
-            return build_pattern_element(inner);
+        match inner.as_rule() {
+            Rule::PatternElement => {
+                return Ok((build_pattern_element(inner)?, None));
+            }
+            Rule::ShortestPathPattern => {
+                // Extract the inner pattern from shortestPath() or allShortestPaths()
+                let (elements, is_all) = build_shortest_path_pattern_elements(inner)?;
+                let mode = if is_all {
+                    ShortestPathMode::All
+                } else {
+                    ShortestPathMode::Single
+                };
+                return Ok((elements, Some(mode)));
+            }
+            _ => {}
         }
     }
     Err(Error::Parse(
-        "AnonymousPatternPart requires PatternElement".into(),
+        "AnonymousPatternPart requires PatternElement or ShortestPathPattern".into(),
+    ))
+}
+
+/// Extract pattern elements from a ShortestPathPattern.
+/// Returns (elements, is_all_shortest_paths).
+fn build_shortest_path_pattern_elements(pair: Pair<Rule>) -> Result<(Vec<PatternElement>, bool)> {
+    let mut is_all = false;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::SHORTESTPATH => is_all = false,
+            Rule::ALLSHORTESTPATHS => is_all = true,
+            Rule::PatternElement => {
+                let elements = build_pattern_element(inner)?;
+                return Ok((elements, is_all));
+            }
+            _ => {}
+        }
+    }
+    Err(Error::Parse(
+        "ShortestPathPattern requires PatternElement".into(),
     ))
 }
 
@@ -947,7 +974,6 @@ fn build_relationship_pattern(pair: Pair<Rule>) -> Result<RelationshipPattern> {
     let mut length = None;
     let mut has_left_arrow = false;
     let mut has_right_arrow = false;
-    let mut quantifier = None;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
@@ -959,14 +985,6 @@ fn build_relationship_pattern(pair: Pair<Rule>) -> Result<RelationshipPattern> {
                 types = detail.1;
                 length = detail.2;
                 properties = detail.3;
-            }
-            Rule::QuantifierSuffix => {
-                let q = inner.as_str();
-                quantifier = Some(if q == "+" {
-                    RelQuantifier::OneOrMore
-                } else {
-                    RelQuantifier::ZeroOrMore
-                });
             }
             Rule::Dash => {}
             _ => {}
@@ -986,7 +1004,6 @@ fn build_relationship_pattern(pair: Pair<Rule>) -> Result<RelationshipPattern> {
         properties,
         direction,
         length,
-        quantifier,
     })
 }
 
@@ -1577,10 +1594,44 @@ fn build_atom(pair: Pair<Rule>) -> Result<Expression> {
                     "Pattern comprehension not yet supported".into(),
                 ));
             }
+            Rule::ShortestPathPattern => {
+                return build_shortest_path_pattern(inner);
+            }
             _ => {}
         }
     }
     Err(Error::Parse("Unknown atom type".into()))
+}
+
+/// Build a shortestPath() or allShortestPaths() expression.
+fn build_shortest_path_pattern(pair: Pair<Rule>) -> Result<Expression> {
+    let mut is_all = false;
+    let mut pattern_element = None;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::SHORTESTPATH => is_all = false,
+            Rule::ALLSHORTESTPATHS => is_all = true,
+            Rule::PatternElement => {
+                let elements = build_pattern_element(inner)?;
+                pattern_element = Some(Pattern {
+                    elements,
+                    path_variable: None,
+                    shortest_path: None, // Not used for expression-based shortest paths
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let pattern =
+        pattern_element.ok_or_else(|| Error::Parse("shortestPath requires a pattern".into()))?;
+
+    if is_all {
+        Ok(Expression::AllShortestPaths(Box::new(pattern)))
+    } else {
+        Ok(Expression::ShortestPath(Box::new(pattern)))
+    }
 }
 
 /// Build a literal value.
@@ -2492,19 +2543,19 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_shortest_path() {
-        let stmt = parse("MATCH p = SHORTEST 1 (a:Station)-[:LINK]-+(b:Station) RETURN length(p)")
-            .unwrap();
+    fn test_parse_shortest_path_function() {
+        // openCypher 9 shortestPath() syntax
+        let stmt =
+            parse("MATCH (a:Person), (b:Person) RETURN shortestPath((a)-[:KNOWS*]->(b))").unwrap();
         match stmt {
             Statement::Match(m) => {
-                assert_eq!(m.pattern.shortest_k, Some(1));
-                assert!(m.pattern.path_variable.is_some());
-                assert_eq!(m.pattern.path_variable.as_deref(), Some("p"));
-                match &m.pattern.elements[1] {
-                    PatternElement::Relationship(rel) => {
-                        assert_eq!(rel.quantifier, Some(RelQuantifier::OneOrMore));
+                let ret = m.return_clause.as_ref().expect("Expected RETURN clause");
+                assert_eq!(ret.items.len(), 1);
+                match &ret.items[0].expression {
+                    Expression::ShortestPath(pattern) => {
+                        assert_eq!(pattern.elements.len(), 3); // node-rel-node
                     }
-                    _ => panic!("Expected relationship pattern"),
+                    _ => panic!("Expected ShortestPath expression"),
                 }
             }
             _ => panic!("Expected MATCH statement"),
@@ -2512,50 +2563,35 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_shortest_path_k() {
-        let stmt = parse("MATCH p = SHORTEST 5 (a)-[:KNOWS]-+(b) RETURN p").unwrap();
+    fn test_parse_all_shortest_paths_function() {
+        // openCypher 9 allShortestPaths() syntax
+        let stmt = parse("MATCH (a), (b) RETURN allShortestPaths((a)-[:KNOWS*1..5]->(b))").unwrap();
         match stmt {
             Statement::Match(m) => {
-                assert_eq!(m.pattern.shortest_k, Some(5));
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
-    }
-
-    #[test]
-    fn test_parse_shortest_path_no_k() {
-        // SHORTEST without k defaults to 1 (compatible with Neo4j/FalkorDB)
-        let stmt = parse("MATCH p = SHORTEST (a)-[:KNOWS]-+(b) RETURN p").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                assert_eq!(m.pattern.shortest_k, Some(1));
-                assert_eq!(m.pattern.path_variable.as_deref(), Some("p"));
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
-    }
-
-    #[test]
-    fn test_parse_quantifier_plus() {
-        let stmt = parse("MATCH (a)-[:LINK]-+(b) RETURN a, b").unwrap();
-        match stmt {
-            Statement::Match(m) => match &m.pattern.elements[1] {
-                PatternElement::Relationship(rel) => {
-                    assert_eq!(rel.quantifier, Some(RelQuantifier::OneOrMore));
+                let ret = m.return_clause.as_ref().expect("Expected RETURN clause");
+                assert_eq!(ret.items.len(), 1);
+                match &ret.items[0].expression {
+                    Expression::AllShortestPaths(pattern) => {
+                        assert_eq!(pattern.elements.len(), 3);
+                    }
+                    _ => panic!("Expected AllShortestPaths expression"),
                 }
-                _ => panic!("Expected relationship pattern"),
-            },
+            }
             _ => panic!("Expected MATCH statement"),
         }
     }
 
     #[test]
-    fn test_parse_quantifier_star() {
-        let stmt = parse("MATCH (a)-[:LINK]-*(b) RETURN a, b").unwrap();
+    fn test_parse_variable_length_one_or_more() {
+        // Variable length with range (openCypher 9 syntax using *1..)
+        let stmt = parse("MATCH (a)-[:LINK*1..]->(b) RETURN a, b").unwrap();
         match stmt {
             Statement::Match(m) => match &m.pattern.elements[1] {
                 PatternElement::Relationship(rel) => {
-                    assert_eq!(rel.quantifier, Some(RelQuantifier::ZeroOrMore));
+                    assert!(rel.length.is_some());
+                    let len = rel.length.as_ref().unwrap();
+                    assert_eq!(len.min, Some(1));
+                    assert_eq!(len.max, None);
                 }
                 _ => panic!("Expected relationship pattern"),
             },

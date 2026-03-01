@@ -1,4 +1,4 @@
-//! Profiling harness for SHORTEST path queries.
+//! Profiling harness for shortestPath() queries using openCypher 9 syntax.
 //!
 //! Generates flamegraph SVGs using the pprof crate (no perf required).
 //!
@@ -92,7 +92,7 @@ fn main() {
 fn print_help() {
     eprintln!(
         r#"
-Profile SHORTEST path queries and generate flamegraph SVG.
+Profile shortestPath() queries and generate flamegraph SVG.
 
 USAGE:
     cargo run --release --example profile_shortest -- [OPTIONS]
@@ -150,8 +150,7 @@ fn profile_grid(n: usize, iterations: usize, warmup: usize, output: &str) {
 
     let last_id = n * n - 1;
     let query = format!(
-        "MATCH p = SHORTEST 1 (src:Node)-[:EDGE]-+(dst:Node) \
-         WHERE src.id = 0 AND dst.id = {} \
+        "MATCH p = shortestPath((src:Node {{id: 0}})-[:EDGE*]->(dst:Node {{id: {}}})) \
          RETURN length(p)",
         last_id
     );
@@ -177,8 +176,7 @@ fn profile_chain(n: usize, iterations: usize, warmup: usize, output: &str) {
         .expect("Failed to create graph");
 
     let query = format!(
-        "MATCH p = SHORTEST 1 (src:Node)-[:NEXT]-+(dst:Node) \
-         WHERE src.id = 0 AND dst.id = {} \
+        "MATCH p = shortestPath((src:Node {{id: 0}})-[:NEXT*]->(dst:Node {{id: {}}})) \
          RETURN length(p)",
         n - 1
     );
@@ -215,8 +213,7 @@ fn profile_tree(depth: usize, iterations: usize, warmup: usize, output: &str) {
         .expect("Failed to create graph");
 
     let query = format!(
-        "MATCH p = SHORTEST 1 (src:Node)-[:CHILD]-+(dst:Node) \
-         WHERE src.id = 0 AND dst.id = {} \
+        "MATCH p = shortestPath((src:Node {{id: 0}})-[:CHILD*]->(dst:Node {{id: {}}})) \
          RETURN length(p)",
         num_nodes - 1
     );

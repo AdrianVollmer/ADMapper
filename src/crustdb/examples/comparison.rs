@@ -382,36 +382,19 @@ fn parse_neo4j_row_count(output: &str) -> Option<usize> {
 }
 
 /// Translate CrustDB-style queries to FalkorDB-compatible Cypher.
-/// FalkorDB uses different syntax for some features.
+/// CrustDB now uses openCypher 9 syntax (shortestPath, allShortestPaths),
+/// which should be compatible with FalkorDB.
 pub fn translate_for_falkordb(query: &str) -> String {
-    // FalkorDB doesn't support SHORTEST syntax, use shortestPath function
-    let mut q = query.to_string();
-
-    // Replace SHORTEST 1 (a)-[*]->(b) with shortestPath((a)-[*]->(b))
-    // This is a simple heuristic translation
-    if q.contains("SHORTEST") {
-        // Not directly translatable, return a simpler query
-        q = q
-            .replace("SHORTEST 1 ", "")
-            .replace("SHORTEST 10 ", "")
-            .replace("-[*]->", "-[*1..10]->");
-    }
-
-    q
+    // CrustDB now uses standard openCypher 9 syntax
+    // No translation needed for shortestPath/allShortestPaths
+    query.to_string()
 }
 
 /// Translate CrustDB-style queries to Neo4j-compatible Cypher.
+/// CrustDB now uses openCypher 9 syntax (shortestPath, allShortestPaths),
+/// which should be compatible with Neo4j.
 pub fn translate_for_neo4j(query: &str) -> String {
-    let mut q = query.to_string();
-
-    // Neo4j uses shortestPath() function, not SHORTEST keyword
-    if q.contains("SHORTEST") {
-        // This is a simple heuristic; real translation would need proper parsing
-        q = q
-            .replace("SHORTEST 1 ", "")
-            .replace("SHORTEST 10 ", "")
-            .replace("-[*]->", "-[*1..10]->");
-    }
-
-    q
+    // CrustDB now uses standard openCypher 9 syntax
+    // No translation needed for shortestPath/allShortestPaths
+    query.to_string()
 }

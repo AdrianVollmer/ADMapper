@@ -738,22 +738,22 @@ fn test_m8_shortest_path_basic() {
     db.execute("CREATE (a:Station {name: 'A'})-[:LINK]->(b:Station {name: 'B'})")
         .unwrap();
 
-    // Find shortest path
+    // Find shortest path using openCypher 9 shortestPath() function
     let result = db
-        .execute("MATCH p = SHORTEST 1 (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result")
+        .execute("MATCH p = shortestPath((src:Station {name: 'A'})-[:LINK*]->(dst:Station {name: 'B'})) RETURN length(p) AS result")
         .unwrap();
     assert_eq!(result.rows.len(), 1);
 }
 
 #[test]
-fn test_m8_quantifier_plus() {
+fn test_m8_variable_length_one_or_more() {
     let db = Database::in_memory().unwrap();
     db.execute("CREATE (a:Station {name: 'A'})-[:LINK]->(b:Station {name: 'B'})")
         .unwrap();
 
-    // Quantifier + means one or more hops
+    // Variable length *1.. means one or more hops (openCypher 9 syntax)
     let result = db
-        .execute("MATCH p = (src:Station)-[:LINK]-+(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result")
+        .execute("MATCH p = (src:Station)-[:LINK*1..]->(dst:Station) WHERE src.name = 'A' AND dst.name = 'B' RETURN length(p) AS result")
         .unwrap();
     assert_eq!(result.rows.len(), 1);
 }

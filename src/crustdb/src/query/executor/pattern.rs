@@ -3,8 +3,7 @@
 use crate::error::{Error, Result};
 use crate::graph::{Node, PropertyValue, Relationship};
 use crate::query::parser::{
-    Direction, Expression, Literal, NodePattern, Pattern, PatternElement, RelQuantifier,
-    RelationshipPattern,
+    Direction, Expression, Literal, NodePattern, Pattern, PatternElement, RelationshipPattern,
 };
 use crate::storage::SqliteStorage;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -111,22 +110,21 @@ pub fn is_multi_hop_pattern(pattern: &Pattern) -> bool {
     true
 }
 
-/// Check if pattern is a shortest path pattern (has shortest_k or quantifier).
+/// Check if pattern is a shortest path pattern.
+///
+/// Note: In openCypher 9, shortest paths are expressed using shortestPath() and
+/// allShortestPaths() functions, which are parsed as Expression variants. This
+/// function checks if a pattern has variable-length relationships that would be
+/// suitable for shortest path queries.
 pub fn is_shortest_path_pattern(pattern: &Pattern) -> bool {
-    // Check if SHORTEST k is specified
-    if pattern.shortest_k.is_some() {
-        return true;
-    }
-
-    // Check if any relationship has a quantifier (+, *)
+    // A pattern is suitable for shortest path if it has a variable-length relationship
     for elem in &pattern.elements {
         if let PatternElement::Relationship(rel) = elem {
-            if rel.quantifier.is_some() {
+            if rel.length.is_some() {
                 return true;
             }
         }
     }
-
     false
 }
 
@@ -158,10 +156,14 @@ pub fn get_path_endpoint_vars(pattern: &Pattern) -> (String, String) {
 /// The `constraints` parameter enables predicate pushdown: when the WHERE clause
 /// specifies specific source/target node IDs (e.g., `src.id = 0 AND dst.id = 24`),
 /// we can filter nodes BEFORE BFS starts, enabling proper early termination.
+///
+/// The `all_paths` parameter controls whether to return just the single shortest path
+/// (shortestPath) or all paths of the shortest length (allShortestPaths).
 pub fn execute_shortest_path_pattern(
     pattern: &Pattern,
     storage: &SqliteStorage,
     constraints: &PathConstraints,
+    all_paths: bool,
 ) -> Result<Vec<Binding>> {
     // Extract pattern components (must be node-rel-node for now)
     if pattern.elements.len() != 3 {
@@ -185,21 +187,14 @@ pub fn execute_shortest_path_pattern(
     let target_var = target_pattern.variable.as_deref().unwrap_or("_tgt");
     let path_var = pattern.path_variable.as_deref();
 
-    // Determine min/max hops based on quantifier
-    let (min_hops, max_hops) = match &rel_pattern.quantifier {
-        Some(RelQuantifier::OneOrMore) => (1usize, DEFAULT_MAX_PATH_DEPTH),
-        Some(RelQuantifier::ZeroOrMore) => (0usize, DEFAULT_MAX_PATH_DEPTH),
-        None => {
-            // Check if there's a length spec
-            if let Some(ref len) = rel_pattern.length {
-                (
-                    len.min.unwrap_or(1) as usize,
-                    len.max.unwrap_or(DEFAULT_MAX_PATH_DEPTH as u32) as usize,
-                )
-            } else {
-                (1, DEFAULT_MAX_PATH_DEPTH) // Default: one or more
-            }
-        }
+    // Determine min/max hops from variable-length spec
+    let (min_hops, max_hops) = if let Some(ref len) = rel_pattern.length {
+        (
+            len.min.unwrap_or(1) as usize,
+            len.max.unwrap_or(DEFAULT_MAX_PATH_DEPTH as u32) as usize,
+        )
+    } else {
+        (1, DEFAULT_MAX_PATH_DEPTH) // Default: one or more
     };
 
     // BFS state
@@ -257,11 +252,12 @@ pub fn execute_shortest_path_pattern(
     let target_map: HashMap<i64, Node> = target_nodes.into_iter().map(|n| (n.id, n)).collect();
 
     let mut all_results: Vec<PathResult> = Vec::new();
-    let k = pattern.shortest_k.unwrap_or(1) as usize;
+    // shortestPath returns 1 path, allShortestPaths returns all paths of shortest length
+    let k = if all_paths { usize::MAX } else { 1 };
 
-    // Optimization: for SHORTEST 1 with specific target, use simple BFS with visited set
+    // Optimization: for shortestPath with specific target, use simple BFS with visited set
     // This is O(V+E) instead of exponential in the number of paths
-    let use_fast_bfs = k == 1 && target_ids.len() == 1;
+    let use_fast_bfs = !all_paths && target_ids.len() == 1;
 
     // BFS from each source node to find shortest paths
     for source_node in source_nodes {

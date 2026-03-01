@@ -1,4 +1,4 @@
-//! Benchmark for SHORTEST path queries.
+//! Benchmark for shortestPath() queries using openCypher 9 syntax.
 //!
 //! Run with: cargo run --release --example bench_shortest
 
@@ -6,8 +6,8 @@ use crustdb::Database;
 use std::time::Instant;
 
 fn main() {
-    println!("SHORTEST Path Benchmark");
-    println!("========================\n");
+    println!("shortestPath() Benchmark");
+    println!("=========================\n");
 
     // Test different graph sizes
     let sizes = [10, 25, 50, 100, 250, 500, 1000];
@@ -84,12 +84,11 @@ fn bench_linear_chain(n: usize) -> (f64, f64) {
 
     let setup_ms = setup_start.elapsed().as_secs_f64() * 1000.0;
 
-    // Query: find shortest path from first to last
+    // Query: find shortest path from first to last using openCypher 9 shortestPath()
     let query_start = Instant::now();
     let result = db
         .execute(&format!(
-            "MATCH p = SHORTEST 1 (src:Node)-[:NEXT]-+(dst:Node) \
-         WHERE src.id = 0 AND dst.id = {} \
+            "MATCH p = shortestPath((src:Node {{id: 0}})-[:NEXT*]->(dst:Node {{id: {}}})) \
          RETURN length(p)",
             n - 1
         ))
@@ -146,13 +145,12 @@ fn bench_grid(n: usize) -> (f64, f64) {
 
     let setup_ms = setup_start.elapsed().as_secs_f64() * 1000.0;
 
-    // Query: find shortest path from top-left to bottom-right
+    // Query: find shortest path from top-left to bottom-right using openCypher 9 shortestPath()
     let query_start = Instant::now();
     let last_id = n * n - 1;
     let result = db
         .execute(&format!(
-            "MATCH p = SHORTEST 1 (src:Node)-[:EDGE]-+(dst:Node) \
-         WHERE src.id = 0 AND dst.id = {} \
+            "MATCH p = shortestPath((src:Node {{id: 0}})-[:EDGE*]->(dst:Node {{id: {}}})) \
          RETURN length(p)",
             last_id
         ))
@@ -198,13 +196,12 @@ fn bench_binary_tree(depth: usize) -> (f64, f64) {
 
     let setup_ms = setup_start.elapsed().as_secs_f64() * 1000.0;
 
-    // Query: find shortest path from root to a leaf in the last level
+    // Query: find shortest path from root to a leaf using openCypher 9 shortestPath()
     let query_start = Instant::now();
     let leaf_id = num_nodes - 1; // Last node (a leaf)
     let result = db
         .execute(&format!(
-            "MATCH p = SHORTEST 1 (src:Node)-[:CHILD]-+(dst:Node) \
-         WHERE src.id = 0 AND dst.id = {} \
+            "MATCH p = shortestPath((src:Node {{id: 0}})-[:CHILD*]->(dst:Node {{id: {}}})) \
          RETURN length(p)",
             leaf_id
         ))

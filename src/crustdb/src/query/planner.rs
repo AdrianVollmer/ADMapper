@@ -486,9 +486,10 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         return Ok(PlanOperator::Empty);
     }
 
-    // Check for SHORTEST path pattern
-    if pattern.shortest_k.is_some() {
-        return plan_shortest_path_pattern(pattern);
+    // Check if this is a shortest path pattern (shortestPath() or allShortestPaths())
+    if let Some(mode) = pattern.shortest_path {
+        let all_paths = mode == crate::query::parser::ShortestPathMode::All;
+        return plan_shortest_path_pattern(pattern, all_paths);
     }
 
     // Start with first node
@@ -609,12 +610,13 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
     Ok(plan)
 }
 
-/// Plan a SHORTEST path pattern.
-fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
-    // SHORTEST requires exactly node-rel-node
+/// Plan a shortest path pattern (used by shortestPath() expression).
+/// This is now called when evaluating shortestPath expressions, not from pattern matching.
+pub fn plan_shortest_path_pattern(pattern: &Pattern, all_paths: bool) -> Result<PlanOperator> {
+    // shortestPath requires exactly node-rel-node
     if pattern.elements.len() != 3 {
         return Err(Error::Cypher(
-            "SHORTEST requires (a)-[r]->(b) pattern".into(),
+            "shortestPath requires (a)-[*]->(b) pattern".into(),
         ));
     }
 
@@ -644,11 +646,11 @@ fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
     let source_label_groups: Vec<Vec<String>> = source_node.labels.clone();
     let target_labels: Vec<String> = target_node.labels.iter().flatten().cloned().collect();
 
-    // Determine hop bounds
+    // Determine hop bounds from variable-length spec (e.g., [*1..5])
     let (min_hops, max_hops) = if let Some(ref length) = rel.length {
         (length.min.unwrap_or(1), length.max.unwrap_or(100))
     } else {
-        // Default or quantifier (+ or *): variable length up to 100 hops
+        // Default: variable length up to 100 hops
         (1, 100)
     };
 
@@ -684,6 +686,9 @@ fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         .as_ref()
         .and_then(extract_simple_property_filter);
 
+    // k=1 for shortestPath(), k=MAX for allShortestPaths() (all paths of shortest length)
+    let k = if all_paths { u32::MAX } else { 1 };
+
     plan = PlanOperator::ShortestPath {
         source: Box::new(plan),
         source_variable: source_var,
@@ -694,7 +699,7 @@ fn plan_shortest_path_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         direction: rel.direction.into(),
         min_hops,
         max_hops,
-        k: pattern.shortest_k.unwrap_or(1),
+        k,
         target_property_filter: target_property_filter.clone(),
     };
 

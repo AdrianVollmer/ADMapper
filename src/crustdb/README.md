@@ -300,7 +300,7 @@ MATCH with LIMIT (first 10 of N nodes):
 
 ### Shortest Path Queries
 
-Benchmark SHORTEST path queries across different graph structures:
+Benchmark `shortestPath()` queries across different graph structures:
 
 ```bash
 cargo run --release --example bench_shortest

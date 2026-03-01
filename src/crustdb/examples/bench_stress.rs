@@ -424,9 +424,9 @@ fn build_crustdb_query(query_type: QueryType, scale: usize) -> String {
             "MATCH (n) WHERE n.value > 500 RETURN COUNT(n)".to_string()
         }
         QueryType::DeepShortestPath => {
-            // K2: Deep shortest path
+            // K2: Deep shortest path using openCypher 9 shortestPath()
             format!(
-                "MATCH p = SHORTEST 1 (s:Node {{id: 0}})-[:NEXT|:EDGE|:CONNECTED|:LINKED|:CHILD|:SHORTCUT]-+(t:Node {{id: {}}}) RETURN length(p)",
+                "MATCH p = shortestPath((s:Node {{id: 0}})-[:NEXT|:EDGE|:CONNECTED|:LINKED|:CHILD|:SHORTCUT*]->(t:Node {{id: {}}})) RETURN length(p)",
                 target_id
             )
         }
@@ -436,9 +436,9 @@ fn build_crustdb_query(query_type: QueryType, scale: usize) -> String {
             "MATCH (s:Node {id: 0})-[*1..50]->(t) RETURN t LIMIT 1000".to_string()
         }
         QueryType::MultiPathBfs => {
-            // K4: Multi-path BFS (k > 1)
+            // K4: All shortest paths using openCypher 9 allShortestPaths()
             format!(
-                "MATCH p = SHORTEST 10 (s:Node {{id: 0}})-[*1..20]->(t:Node {{id: {}}}) RETURN p",
+                "MATCH p = allShortestPaths((s:Node {{id: 0}})-[*1..20]->(t:Node {{id: {}}})) RETURN p",
                 target_id / 2
             )
         }
@@ -740,9 +740,9 @@ QUERIES:
 
     Killer (stress tests):
         K1_full_scan_filter - Full scan with property filter (no index)
-        K2_deep_shortest    - Deep shortest path to last node
+        K2_deep_shortest    - Deep shortest path to last node (shortestPath)
         K3_unbounded_var    - Variable-length up to 50 hops
-        K4_multi_path_bfs   - SHORTEST 10 paths
+        K4_multi_path_bfs   - All shortest paths (allShortestPaths)
         K5_high_fanout      - Count all neighbors of hub node
 
 EXAMPLES:

@@ -29,8 +29,8 @@ CrustDB implements a subset of [openCypher 9](https://s3.amazonaws.com/artifacts
 | Undirected relationships | `(a)-[r]-(b)` |
 | Multiple labels | `(n:Label1:Label2)` |
 | Variable-length paths | `(a)-[:TYPE*1..3]->(b)` |
-| Kleene plus | `(a)-[:TYPE]-+(b)` |
-| Shortest path | `SHORTEST k (a)-[:TYPE]-+(b)` |
+| Shortest path | `shortestPath((a)-[:TYPE*]->(b))` |
+| All shortest paths | `allShortestPaths((a)-[:TYPE*]->(b))` |
 
 ### Operators
 

@@ -158,14 +158,10 @@ Pattern = {
 }
 
 PatternPart = {
-    (Variable ~ SP? ~ "=" ~ SP?)? ~ ShortestPathModifier? ~ AnonymousPatternPart
+    (Variable ~ SP? ~ "=" ~ SP?)? ~ AnonymousPatternPart
 }
 
-ShortestPathModifier = {
-    SHORTEST ~ (SP ~ IntegerLiteral)? ~ SP?
-}
-
-AnonymousPatternPart = { PatternElement }
+AnonymousPatternPart = { ShortestPathPattern | PatternElement }
 
 PatternElement = {
     (NodePattern ~ (SP? ~ PatternElementChain)*)
@@ -181,10 +177,10 @@ PatternElementChain = {
 }
 
 RelationshipPattern = {
-    (LeftArrowHead ~ SP? ~ Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ SP? ~ RightArrowHead ~ QuantifierSuffix?)
-    | (LeftArrowHead ~ SP? ~ Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ QuantifierSuffix?)
-    | (Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ SP? ~ RightArrowHead ~ QuantifierSuffix?)
-    | (Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ QuantifierSuffix?)
+    (LeftArrowHead ~ SP? ~ Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ SP? ~ RightArrowHead)
+    | (LeftArrowHead ~ SP? ~ Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash)
+    | (Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash ~ SP? ~ RightArrowHead)
+    | (Dash ~ SP? ~ RelationshipDetail? ~ SP? ~ Dash)
 }
 
 RelationshipDetail = {
@@ -210,11 +206,6 @@ NodeLabel = {
 
 RangeLiteral = {
     "*" ~ SP? ~ (IntegerLiteral ~ SP?)? ~ (DOT_DOT ~ SP? ~ (IntegerLiteral ~ SP?)?)?
-}
-
-// QuantifierSuffix for -[:TYPE]-+ (one or more) patterns
-QuantifierSuffix = {
-    "+" | "*"
 }
 
 LabelName = { SchemaName }
@@ -300,11 +291,18 @@ Atom = {
     | (ANY_ ~ SP? ~ "(" ~ SP? ~ FilterExpression ~ SP? ~ ")")
     | (NONE ~ SP? ~ "(" ~ SP? ~ FilterExpression ~ SP? ~ ")")
     | (SINGLE ~ SP? ~ "(" ~ SP? ~ FilterExpression ~ SP? ~ ")")
+    | ShortestPathPattern
     | RelationshipsPattern
     | ParenthesizedExpression
     | FunctionInvocation
     | ExistentialSubquery
     | Variable
+}
+
+// openCypher 9 shortest path functions
+ShortestPathPattern = {
+    (SHORTESTPATH ~ SP? ~ "(" ~ SP? ~ PatternElement ~ SP? ~ ")")
+    | (ALLSHORTESTPATHS ~ SP? ~ "(" ~ SP? ~ PatternElement ~ SP? ~ ")")
 }
 
 Literal = {
@@ -560,7 +558,8 @@ ReservedWord = {
     | REMOVE
     | RETURN
     | SET
-    | SHORTEST
+    | SHORTESTPATH
+    | ALLSHORTESTPATHS
     | SKIP
     | WHERE
     | WITH
@@ -726,7 +725,8 @@ SCALAR = @{ ^"SCALAR" }
 OF = @{ ^"OF" }
 ADD = @{ ^"ADD" }
 DROP_ = @{ ^"DROP" }
-SHORTEST = @{ ^"SHORTEST" }
+SHORTESTPATH = @{ ^"shortestPath" }
+ALLSHORTESTPATHS = @{ ^"allShortestPaths" }
 
 // CASE = @{ ^"CASE" }
 // ELSE = @{ ^"ELSE" }
