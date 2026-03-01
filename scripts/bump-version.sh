@@ -32,6 +32,18 @@ if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
 	exit 1
 fi
 
+# Get script directory for consistent paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Run lint and format checks before making any changes
+echo "Running lint and format checks..."
+if ! "$SCRIPT_DIR/check.sh"; then
+	echo "Error: Lint/format checks failed. Fix issues before bumping version."
+	exit 1
+fi
+echo ""
+
 # Get current version from src/backend/Cargo.toml
 CURRENT_VERSION=$(grep '^version = ' src/backend/Cargo.toml | head -n1 | sed 's/version = "\(.*\)"/\1/')
 
