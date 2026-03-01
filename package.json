@@ -1,6 +1,6 @@
 {
   "name": "admapper",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "BloodHound frontend for visualizing Active Directory permissions as graphs",
   "type": "module",
   "scripts": {
