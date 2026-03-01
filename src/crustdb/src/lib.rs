@@ -420,7 +420,7 @@ impl Database {
     /// along with those edges. Uses direct SQL with the object_id index
     /// for optimal performance O(degree) instead of O(N) for full scans.
     ///
-    /// Returns (Vec<Node>, Vec<Edge>) where nodes include both the target node
+    /// Returns `(Vec<Node>, Vec<Edge>)` where nodes include both the target node
     /// and all source nodes of incoming edges.
     pub fn get_incoming_connections_by_object_id(
         &self,
@@ -436,7 +436,7 @@ impl Database {
     /// along with those edges. Uses direct SQL with the object_id index
     /// for optimal performance O(degree) instead of O(N) for full scans.
     ///
-    /// Returns (Vec<Node>, Vec<Edge>) where nodes include both the source node
+    /// Returns `(Vec<Node>, Vec<Edge>)` where nodes include both the source node
     /// and all target nodes of outgoing edges.
     pub fn get_outgoing_connections_by_object_id(
         &self,
