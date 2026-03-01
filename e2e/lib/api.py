@@ -75,7 +75,10 @@ class APIClient:
             try:
                 error_body = e.read().decode("utf-8")
                 parsed = json.loads(error_body) if error_body else {}
-            except (json.JSONDecodeError, Exception):
+            except json.JSONDecodeError:
+                # Backend returns plain text errors, not JSON
+                parsed = {"error": error_body if error_body else str(e)}
+            except Exception:
                 parsed = {"error": str(e)}
             return APIResponse(
                 status_code=e.code,

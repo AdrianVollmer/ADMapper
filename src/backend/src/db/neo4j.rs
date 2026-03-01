@@ -921,6 +921,7 @@ impl DatabaseBackend for Neo4jDatabase {
                 let mut obj = Map::new();
 
                 // Try common column names that might be returned
+                // Note: neo4rs doesn't expose column names, so we try common patterns
                 let try_columns = [
                     "n",
                     "m",
@@ -935,6 +936,11 @@ impl DatabaseBackend for Neo4jDatabase {
                     "nodes",
                     "relationships",
                     "path",
+                    "src",
+                    "tgt",
+                    "hops",
+                    "node_ids",
+                    "rel_types",
                 ];
 
                 for col in try_columns {

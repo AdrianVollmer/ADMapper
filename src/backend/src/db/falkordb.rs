@@ -957,8 +957,11 @@ impl DatabaseBackend for FalkorDbDatabase {
         let from_escaped = from.replace('\'', "\\'");
         let to_escaped = to.replace('\'', "\\'");
 
+        // FalkorDB requires endpoints to be resolved before shortestPath call
+        // and uses WITH clause syntax per docs: WITH shortestPath(...) as p
         let cypher = format!(
-            "MATCH p = shortestPath((a {{objectid: '{}'}})-[*..20]->(b {{objectid: '{}'}})) \
+            "MATCH (a {{objectid: '{}'}}), (b {{objectid: '{}'}}) \
+             WITH shortestPath((a)-[*..20]->(b)) AS p \
              RETURN nodes(p) AS nodes, relationships(p) AS rels",
             from_escaped, to_escaped
         );
