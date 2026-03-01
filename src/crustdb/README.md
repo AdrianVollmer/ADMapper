@@ -2,11 +2,14 @@
 
 An embedded graph database with SQLite backend and Cypher support, written in Rust.
 
+CrustDB implements a subset of [openCypher 9](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf),
+the vendor-neutral graph query language specification.
+
 ## Features
 
 - **Embedded**: No separate server process, links directly into your application
 - **SQLite Backend**: Battle-tested storage with ACID transactions
-- **Cypher Support**: Industry-standard graph query language
+- **openCypher 9**: Vendor-neutral graph query language
 - **Property Graph Model**: Nodes and relationships with labels, types, and arbitrary properties
 
 ## SQLite Schema

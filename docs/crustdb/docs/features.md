@@ -1,6 +1,6 @@
 # Feature Support
 
-CrustDB implements a subset of the Cypher query language. This page lists supported and unsupported features. For Cypher syntax details, refer to the [openCypher specification](https://opencypher.org/resources/).
+CrustDB implements a subset of [openCypher 9](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf), the vendor-neutral graph query language specification. This page lists supported and unsupported features.
 
 ## Implemented Features
 
