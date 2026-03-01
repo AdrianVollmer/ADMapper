@@ -482,6 +482,33 @@ for (src, tgt, edge_type) in edges {
 
 ---
 
+### `Database::get_node`
+
+Get a node by its ID.
+
+```rust
+pub fn get_node(&self, node_id: i64) -> Result<Option<Node>>
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `node_id` | `i64` | The node ID |
+
+**Returns:** `Result<Option<Node>>` - The node if found, with its labels and properties.
+
+**Example:**
+
+```rust
+if let Some(node) = db.get_node(42)? {
+    println!("Labels: {:?}", node.labels);
+    println!("Properties: {:?}", node.properties);
+}
+```
+
+---
+
 ### `Database::get_edge`
 
 Get an edge by its ID.

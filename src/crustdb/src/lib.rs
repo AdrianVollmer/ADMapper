@@ -610,6 +610,12 @@ impl Database {
         Ok(result)
     }
 
+    /// Get a node by its ID.
+    pub fn get_node(&self, node_id: i64) -> Result<Option<Node>> {
+        let storage = self.get_read_storage();
+        storage.get_node(node_id)
+    }
+
     /// Get an edge by its ID.
     ///
     /// Useful for resolving edge IDs returned by algorithms like edge betweenness.
