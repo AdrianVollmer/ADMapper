@@ -117,9 +117,9 @@ class APIClient:
         """Get all node types."""
         return self.get("/api/graph/node-types")
 
-    def edge_types(self) -> APIResponse:
-        """Get all edge types."""
-        return self.get("/api/graph/edge-types")
+    def relationship_types(self) -> APIResponse:
+        """Get all relationship types."""
+        return self.get("/api/graph/relationship-types")
 
     def node_counts(self, node_id: str) -> APIResponse:
         """Get connection counts for a node."""

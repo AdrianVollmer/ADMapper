@@ -188,19 +188,19 @@ class TestRunner:
 
         results.append(self._run_test("Graph has nodes after import", check_nodes))
 
-        # Check graph has edges
-        def check_edges():
+        # Check graph has relationships
+        def check_relationships():
             response = self.api.stats()
             proof = self._to_proof(response.body)
             if not response.ok:
                 return False, f"Stats request failed: {response.body}", proof
-            edges = response.body.get("edges", 0)
-            if edges <= 0:
-                return False, "No edges in graph after import", proof
-            self.logger.info(f"Edges imported: {edges}")
+            relationships = response.body.get("relationships", 0)
+            if relationships <= 0:
+                return False, "No relationships in graph after import", proof
+            self.logger.info(f"Relationships imported: {relationships}")
             return True, "", proof
 
-        results.append(self._run_test("Graph has edges after import", check_edges))
+        results.append(self._run_test("Graph has relationships after import", check_relationships))
 
         return results
 
@@ -220,9 +220,9 @@ class TestRunner:
             if not response.ok:
                 return False, f"Stats request failed: {response.body}", proof
             nodes = self._body_get(response.body, "nodes", 0)
-            edges = self._body_get(response.body, "edges", 0)
-            if nodes <= 0 or edges <= 0:
-                return False, f"Invalid stats: nodes={nodes}, edges={edges}", proof
+            relationships = self._body_get(response.body, "relationships", 0)
+            if nodes <= 0 or relationships <= 0:
+                return False, f"Invalid stats: nodes={nodes}, relationships={relationships}", proof
             return True, "", proof
 
         results.append(self._run_test("Basic stats endpoint works", check_basic_stats))
@@ -260,18 +260,18 @@ class TestRunner:
 
             results.append(self._run_test("Total nodes is plausible", check_total_nodes))
 
-            # Note: Edge count from source files won't match actual imports
-            # because some edges reference non-existent nodes. We just verify
-            # edges exist rather than checking exact count.
-            def check_has_edges():
+            # Note: Relationship count from source files won't match actual imports
+            # because some relationships reference non-existent nodes. We just verify
+            # relationships exist rather than checking exact count.
+            def check_has_relationships():
                 actual = detailed.get("total_edges", 0)
-                proof = f"actual edges: {actual}"
+                proof = f"actual relationships: {actual}"
                 if actual <= 0:
-                    return False, "No edges in database", proof
-                self.logger.info(f"Total edges: {actual}")
+                    return False, "No relationships in database", proof
+                self.logger.info(f"Total relationships: {actual}")
                 return True, "", proof
 
-            results.append(self._run_test("Graph has edges", check_has_edges))
+            results.append(self._run_test("Graph has relationships", check_has_relationships))
 
             # Check individual type counts
             # Note: domains use >= because trusts can create orphaned domain references
@@ -315,19 +315,19 @@ class TestRunner:
 
         results.append(self._run_test("Node types endpoint works", check_node_types))
 
-        # Edge types endpoint
-        def check_edge_types():
-            response = self.api.edge_types()
+        # Relationship types endpoint
+        def check_relationship_types():
+            response = self.api.relationship_types()
             proof = self._to_proof(response.body)
             if not response.ok:
-                return False, f"Edge types failed: {response.body}", proof
+                return False, f"Relationship types failed: {response.body}", proof
             types = response.body
             if not isinstance(types, list) or len(types) == 0:
-                return False, "No edge types returned", proof
-            self.logger.info(f"Edge types: {', '.join(types[:5])}")
+                return False, "No relationship types returned", proof
+            self.logger.info(f"Relationship types: {', '.join(types[:5])}")
             return True, "", proof
 
-        results.append(self._run_test("Edge types endpoint works", check_edge_types))
+        results.append(self._run_test("Relationship types endpoint works", check_relationship_types))
 
         return results
 
@@ -749,7 +749,8 @@ class TestRunner:
         results.append(self._run_test("Perf: Complex WHERE with OR", check_complex_where_or))
 
         # Test 8: Shortest path (user 0 to user 10 via KNOWS chain)
-        # Uses SHORTEST syntax which is only supported by CrustDB
+        # Uses openCypher 9 SHORTEST keyword syntax - CrustDB only.
+        # Neo4j/FalkorDB use different shortestPath() function syntax.
         if self.backend == "crustdb":
             def check_shortest_path():
                 start = time.time()
@@ -799,7 +800,7 @@ class TestRunner:
 
             results.append(self._run_test("Perf: Shortest path (19 hops)", check_longer_shortest_path))
         else:
-            self.logger.info("Skipping SHORTEST path tests (not supported by this backend)")
+            self.logger.info("Skipping SHORTEST Cypher syntax tests (uses openCypher 9 syntax, CrustDB only)")
 
         # Test 10: Combined pattern - path traversal with property filter
         def check_combined_pattern():
@@ -902,8 +903,8 @@ class TestRunner:
             if not isinstance(body, dict):
                 return False, f"Expected dict, got {type(body)}", proof
             nodes = body.get("nodes", [])
-            edges = body.get("edges", [])
-            self.logger.info(f"Incoming connections: {elapsed_ms:.0f}ms, {len(nodes)} nodes, {len(edges)} edges")
+            relationships = body.get("relationships", [])
+            self.logger.info(f"Incoming connections: {elapsed_ms:.0f}ms, {len(nodes)} nodes, {len(relationships)} relationships")
             return True, "", proof
 
         results.append(self._run_test("Perf: Incoming connections API (<3s)", check_incoming_connections))
@@ -923,8 +924,8 @@ class TestRunner:
             if not isinstance(body, dict):
                 return False, f"Expected dict, got {type(body)}", proof
             nodes = body.get("nodes", [])
-            edges = body.get("edges", [])
-            self.logger.info(f"Outgoing connections: {elapsed_ms:.0f}ms, {len(nodes)} nodes, {len(edges)} edges")
+            relationships = body.get("relationships", [])
+            self.logger.info(f"Outgoing connections: {elapsed_ms:.0f}ms, {len(nodes)} nodes, {len(relationships)} relationships")
             return True, "", proof
 
         results.append(self._run_test("Perf: Outgoing connections API (<3s)", check_outgoing_connections))
@@ -1185,12 +1186,6 @@ class TestRunner:
     def test_shortest_path(self) -> list[TestResult]:
         """Test shortest path API."""
         results = []
-
-        # Skip for non-CrustDB backends (shortest path API uses CrustDB-specific queries)
-        if self.backend != "crustdb":
-            self.logger.info("Skipping shortest path test (not supported by this backend)")
-            return results
-
         max_time_ms = 5000
 
         # Find two nodes to test path between
@@ -1246,8 +1241,18 @@ class TestRunner:
             body = response.body
             if not isinstance(body, dict):
                 return False, f"Expected dict, got {type(body)}", proof
-            paths = body.get("paths", [])
-            self.logger.info(f"Shortest path: {elapsed_ms:.0f}ms, found {len(paths)} path(s)")
+            # Check response structure
+            if "found" not in body:
+                return False, "Missing 'found' field in response", proof
+            if "path" not in body:
+                return False, "Missing 'path' field in response", proof
+            path = body.get("path", [])
+            found = body.get("found", False)
+            if not found:
+                return False, "No path found between nodes", proof
+            if len(path) < 2:
+                return False, f"Path too short: expected at least 2 nodes, got {len(path)}", proof
+            self.logger.info(f"Shortest path: {elapsed_ms:.0f}ms, {len(path)} steps")
             return True, "", proof
 
         results.append(self._run_test("Shortest path API works", check_shortest_path))
