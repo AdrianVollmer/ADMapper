@@ -203,7 +203,7 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
         id: "paths-to-da",
         name: "All Paths to Domain Admins",
         description: "Find all users with paths to Domain Admins (SID -512)",
-        query: `MATCH p = (u:User)-[:Edge*1..5]->(da:Group) WHERE da.object_id ENDS WITH '-512' RETURN p, length(p) as hops ORDER BY hops`,
+        query: `MATCH p = (u:User)-[:Relationship*1..5]->(da:Group) WHERE da.object_id ENDS WITH '-512' RETURN p, length(p) as hops ORDER BY hops`,
       },
       {
         id: "shortest-paths-da",

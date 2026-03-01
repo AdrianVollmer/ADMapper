@@ -282,9 +282,9 @@ function createModal(): void {
             <div class="settings-slider-group">
               <label class="settings-checkbox">
                 <input type="checkbox" name="fixedNodeSizes" id="fixed-node-sizes-checkbox" checked>
-                <span class="settings-checkbox-label">Fixed node and edge sizes</span>
+                <span class="settings-checkbox-label">Fixed node and relationship sizes</span>
               </label>
-              <p class="settings-slider-help">When enabled, nodes and edges stay the same visual size regardless of zoom level</p>
+              <p class="settings-slider-help">When enabled, nodes and relationships stay the same visual size regardless of zoom level</p>
             </div>
           </div>
         </div>

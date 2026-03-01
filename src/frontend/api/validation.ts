@@ -56,8 +56,8 @@ export function isGraphEdge(value: unknown): value is GraphEdge {
 /** Validate a GraphData structure */
 export function isGraphData(value: unknown): value is GraphData {
   if (!isObject(value)) return false;
-  if (!isArray(value.nodes) || !isArray(value.edges)) return false;
-  return value.nodes.every(isGraphNode) && value.edges.every(isGraphEdge);
+  if (!isArray(value.nodes) || !isArray(value.relationships)) return false;
+  return value.nodes.every(isGraphNode) && value.relationships.every(isGraphEdge);
 }
 
 // ============================================================================

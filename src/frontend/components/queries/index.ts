@@ -296,14 +296,16 @@ async function runQuery(queryId: string): Promise<void> {
           type: n.type as RawADGraph["nodes"][0]["type"],
           properties: n.properties,
         })),
-        edges: result.graph.edges.map((e) => ({
+        relationships: result.graph.relationships.map((e) => ({
           source: e.source,
           target: e.target,
-          type: e.type as RawADGraph["edges"][0]["type"],
+          type: e.type as RawADGraph["relationships"][0]["type"],
         })),
       };
       loadGraphData(rawGraph);
-      showSuccess(`"${query.name}" returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
+      showSuccess(
+        `"${query.name}" returned ${result.graph.nodes.length} nodes and ${result.graph.relationships.length} relationships`
+      );
     } else if (result.resultCount && result.resultCount > 0) {
       showSuccess(`"${query.name}" returned ${result.resultCount} rows`);
     } else {

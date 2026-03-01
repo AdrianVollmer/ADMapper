@@ -19,7 +19,7 @@ export interface GraphNode {
   properties?: Record<string, unknown>;
 }
 
-/** Edge in the graph from API */
+/** Relationship in the graph from API */
 export interface GraphEdge {
   source: string;
   target: string;
@@ -30,7 +30,7 @@ export interface GraphEdge {
 /** Full graph data from /api/graph/all */
 export interface GraphData {
   nodes: GraphNode[];
-  edges: GraphEdge[];
+  relationships: GraphEdge[];
 }
 
 // ============================================================================
@@ -55,7 +55,7 @@ export interface SearchResult {
 /** Step in a path from /api/graph/path */
 export interface PathStep {
   node: GraphNode;
-  edge_type?: string;
+  rel_type?: string;
 }
 
 /** Path finding response from /api/graph/path */
@@ -218,7 +218,7 @@ export interface Settings {
   theme: Theme;
   defaultGraphLayout: GraphLayout;
   forceLayout?: ForceLayoutSettings;
-  /** If true, nodes and edges stay same visual size regardless of zoom level */
+  /** If true, nodes and relationships stay same visual size regardless of zoom level */
   fixedNodeSizes?: boolean;
 }
 

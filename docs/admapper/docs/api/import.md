@@ -52,9 +52,9 @@ data: {"stage": "parsing", "progress": 25, "message": "Parsing users..."}
 
 data: {"stage": "importing", "progress": 50, "message": "Importing nodes..."}
 
-data: {"stage": "importing", "progress": 75, "message": "Importing edges..."}
+data: {"stage": "importing", "progress": 75, "message": "Importing relationships..."}
 
-data: {"complete": true, "stats": {"nodes": 1500, "edges": 8200}}
+data: {"complete": true, "stats": {"nodes": 1500, "relationships": 8200}}
 ```
 
 Error event:

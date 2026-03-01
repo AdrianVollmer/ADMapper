@@ -77,7 +77,7 @@ impl CrustDatabase {
     /// Initialize the schema by creating indexes and base structures.
     fn init_schema(&self) -> Result<()> {
         debug!("Initializing CrustDB schema");
-        // CrustDB auto-creates nodes/edges on first use
+        // CrustDB auto-creates nodes/relationships on first use
 
         // Create property indexes for commonly queried fields
         // These significantly speed up node lookups by object_id and name
@@ -115,8 +115,8 @@ impl CrustDatabase {
     /// in a single transaction with prepared statements.
     ///
     /// If a node with the same object_id already exists (e.g., an orphan placeholder
-    /// created during edge insertion), its properties are **merged** rather than
-    /// replaced. This enables streaming edge import.
+    /// created during relationship insertion), its properties are **merged** rather than
+    /// replaced. This enables streaming relationship import.
     pub fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
         if nodes.is_empty() {
             return Ok(0);
@@ -239,12 +239,12 @@ impl CrustDatabase {
         }
     }
 
-    /// Insert a batch of edges using efficient batch insert.
+    /// Insert a batch of relationships using efficient batch insert.
     ///
     /// This builds an index of object_id -> node_id for efficient lookups,
     /// then uses CrustDB's native batch insert.
-    pub fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
-        if edges.is_empty() {
+    pub fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        if relationships.is_empty() {
             return Ok(0);
         }
 
@@ -253,39 +253,40 @@ impl CrustDatabase {
             Ok(index) => index,
             Err(e) => {
                 debug!("Failed to build property index, falling back: {}", e);
-                return self.insert_edges_fallback(edges);
+                return self.insert_edges_fallback(relationships);
             }
         };
 
-        // Convert edges to the format expected by CrustDB batch insert
-        let mut batch: Vec<(i64, i64, String, serde_json::Value)> = Vec::with_capacity(edges.len());
+        // Convert relationships to the format expected by CrustDB batch insert
+        let mut batch: Vec<(i64, i64, String, serde_json::Value)> =
+            Vec::with_capacity(relationships.len());
         let mut skipped = 0;
 
         // Collect unique placeholder nodes to create (deduplicated)
         let mut placeholder_set: std::collections::HashSet<(String, String)> =
             std::collections::HashSet::new();
 
-        for edge in edges {
-            let source_id = node_index.get(&edge.source);
-            let target_id = node_index.get(&edge.target);
+        for relationship in relationships {
+            let source_id = node_index.get(&relationship.source);
+            let target_id = node_index.get(&relationship.target);
 
             // Create placeholder for missing source
             if source_id.is_none() {
-                let node_type = edge
+                let node_type = relationship
                     .source_type
                     .as_deref()
                     .map(normalize_node_type)
                     .unwrap_or_else(|| "Base".to_string());
-                placeholder_set.insert((edge.source.clone(), node_type));
+                placeholder_set.insert((relationship.source.clone(), node_type));
             }
             // Create placeholder for missing target
             if target_id.is_none() {
-                let node_type = edge
+                let node_type = relationship
                     .target_type
                     .as_deref()
                     .map(normalize_node_type)
                     .unwrap_or_else(|| "Base".to_string());
-                placeholder_set.insert((edge.target.clone(), node_type));
+                placeholder_set.insert((relationship.target.clone(), node_type));
             }
         }
 
@@ -325,21 +326,21 @@ impl CrustDatabase {
             node_index
         };
 
-        for edge in edges {
-            let source_id = node_index.get(&edge.source);
-            let target_id = node_index.get(&edge.target);
+        for relationship in relationships {
+            let source_id = node_index.get(&relationship.source);
+            let target_id = node_index.get(&relationship.target);
 
             match (source_id, target_id) {
                 (Some(&src), Some(&tgt)) => {
                     let props = serde_json::json!({
-                        "properties": serde_json::to_string(&edge.properties).unwrap_or_default()
+                        "properties": serde_json::to_string(&relationship.properties).unwrap_or_default()
                     });
-                    batch.push((src, tgt, edge.edge_type.clone(), props));
+                    batch.push((src, tgt, relationship.rel_type.clone(), props));
                 }
                 _ => {
                     debug!(
-                        "Skipping edge {} -> {}: source or target not found",
-                        edge.source, edge.target
+                        "Skipping relationship {} -> {}: source or target not found",
+                        relationship.source, relationship.target
                     );
                     skipped += 1;
                 }
@@ -347,36 +348,40 @@ impl CrustDatabase {
         }
 
         if batch.is_empty() {
-            debug!("No valid edges to insert (skipped {})", skipped);
+            debug!("No valid relationships to insert (skipped {})", skipped);
             return Ok(0);
         }
 
         match self.db.insert_edges_batch(&batch) {
             Ok(ids) => {
-                debug!("Batch inserted {} edges (skipped {})", ids.len(), skipped);
+                debug!(
+                    "Batch inserted {} relationships (skipped {})",
+                    ids.len(),
+                    skipped
+                );
                 Ok(ids.len())
             }
             Err(e) => {
-                debug!("Batch edge insert failed, falling back: {}", e);
-                self.insert_edges_fallback(edges)
+                debug!("Batch relationship insert failed, falling back: {}", e);
+                self.insert_edges_fallback(relationships)
             }
         }
     }
 
-    /// Fallback method for individual edge inserts (used if batch fails).
-    fn insert_edges_fallback(&self, edges: &[DbEdge]) -> Result<usize> {
+    /// Fallback method for individual relationship inserts (used if batch fails).
+    fn insert_edges_fallback(&self, relationships: &[DbEdge]) -> Result<usize> {
         let mut count = 0;
-        for edge in edges {
-            let props_str = serde_json::to_string(&edge.properties)?;
-            let source = edge.source.replace('\'', "''");
-            let target = edge.target.replace('\'', "''");
-            let edge_type = edge.edge_type.replace('\'', "''");
+        for relationship in relationships {
+            let props_str = serde_json::to_string(&relationship.properties)?;
+            let source = relationship.source.replace('\'', "''");
+            let target = relationship.target.replace('\'', "''");
+            let rel_type = relationship.rel_type.replace('\'', "''");
             let props_escaped = props_str.replace('\'', "''");
 
             let query = format!(
                 "MATCH (a {{object_id: '{}'}}), (b {{object_id: '{}'}}) \
                  CREATE (a)-[:{}  {{properties: '{}'}}]->(b)",
-                source, target, edge_type, props_escaped
+                source, target, rel_type, props_escaped
             );
 
             if self.execute(&query).is_ok() {
@@ -392,13 +397,13 @@ impl CrustDatabase {
         Ok(())
     }
 
-    /// Insert a single edge.
-    pub fn insert_edge(&self, edge: DbEdge) -> Result<()> {
-        self.insert_edges(&[edge])?;
+    /// Insert a single relationship.
+    pub fn insert_edge(&self, relationship: DbEdge) -> Result<()> {
+        self.insert_edges(&[relationship])?;
         Ok(())
     }
 
-    /// Get node and edge counts.
+    /// Get node and relationship counts.
     ///
     /// Uses efficient SQL via CrustDB's stats() method instead of Cypher queries.
     pub fn get_stats(&self) -> Result<(usize, usize)> {
@@ -556,29 +561,29 @@ impl CrustDatabase {
         JsonValue::Object(map)
     }
 
-    /// Get all edges.
+    /// Get all relationships.
     pub fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
         let result = self
             .execute("MATCH (a)-[r]->(b) RETURN a.object_id, b.object_id, type(r), r.properties")?;
 
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
         for row in &result.rows {
             let source = self.get_string_value(&row.values, "a.object_id");
             let target = self.get_string_value(&row.values, "b.object_id");
-            let edge_type = self.get_string_value(&row.values, "type(r)");
+            let rel_type = self.get_string_value(&row.values, "type(r)");
             let props_str = self.get_string_value(&row.values, "r.properties");
 
             let properties = serde_json::from_str(&props_str).unwrap_or(JsonValue::Null);
-            edges.push(DbEdge {
+            relationships.push(DbEdge {
                 source,
                 target,
-                edge_type,
+                rel_type,
                 properties,
                 ..Default::default()
             });
         }
 
-        Ok(edges)
+        Ok(relationships)
     }
 
     /// Helper to extract string value from result row.
@@ -601,7 +606,7 @@ impl CrustDatabase {
             .unwrap_or_default()
     }
 
-    /// Get all distinct edge types.
+    /// Get all distinct relationship types.
     pub fn get_edge_types(&self) -> Result<Vec<String>> {
         let result = self.execute("MATCH ()-[r]->() RETURN DISTINCT type(r)")?;
 
@@ -705,15 +710,15 @@ impl CrustDatabase {
             return Ok(Some(vec![(from.to_string(), None)]));
         }
 
-        // Use BFS over edges
-        let edges = self.get_all_edges()?;
+        // Use BFS over relationships
+        let relationships = self.get_all_edges()?;
 
         let mut adj: std::collections::HashMap<String, Vec<(String, String)>> =
             std::collections::HashMap::new();
-        for edge in &edges {
-            adj.entry(edge.source.clone())
+        for relationship in &relationships {
+            adj.entry(relationship.source.clone())
                 .or_default()
-                .push((edge.target.clone(), edge.edge_type.clone()));
+                .push((relationship.target.clone(), relationship.rel_type.clone()));
         }
 
         let mut visited = std::collections::HashSet::new();
@@ -728,8 +733,8 @@ impl CrustDatabase {
             if current == to {
                 let mut path = vec![(to.to_string(), None)];
                 let mut node = to.to_string();
-                while let Some((prev, edge_type)) = parent.get(&node) {
-                    path.push((prev.clone(), Some(edge_type.clone())));
+                while let Some((prev, rel_type)) = parent.get(&node) {
+                    path.push((prev.clone(), Some(rel_type.clone())));
                     node = prev.clone();
                 }
                 path.reverse();
@@ -737,10 +742,10 @@ impl CrustDatabase {
             }
 
             if let Some(neighbors) = adj.get(&current) {
-                for (neighbor, edge_type) in neighbors {
+                for (neighbor, rel_type) in neighbors {
                     if !visited.contains(neighbor) {
                         visited.insert(neighbor.clone());
-                        parent.insert(neighbor.clone(), (current.clone(), edge_type.clone()));
+                        parent.insert(neighbor.clone(), (current.clone(), rel_type.clone()));
                         queue.push_back(neighbor.clone());
                     }
                 }
@@ -758,7 +763,7 @@ impl CrustDatabase {
         debug!(exclude = ?exclude_edge_types, "Finding paths to Domain Admins");
 
         let nodes = self.get_all_nodes()?;
-        let edges = self.get_all_edges()?;
+        let relationships = self.get_all_edges()?;
 
         // Find DA groups (SID ends with -512)
         let da_groups: Vec<&str> = nodes
@@ -771,17 +776,17 @@ impl CrustDatabase {
             return Ok(Vec::new());
         }
 
-        // Build adjacency list, filtering excluded edge types
+        // Build adjacency list, filtering excluded relationship types
         let exclude_set: std::collections::HashSet<&str> =
             exclude_edge_types.iter().map(|s| s.as_str()).collect();
 
         let mut adj: std::collections::HashMap<String, Vec<(String, String)>> =
             std::collections::HashMap::new();
-        for edge in &edges {
-            if !exclude_set.contains(edge.edge_type.as_str()) {
-                adj.entry(edge.source.clone())
+        for relationship in &relationships {
+            if !exclude_set.contains(relationship.rel_type.as_str()) {
+                adj.entry(relationship.source.clone())
                     .or_default()
-                    .push((edge.target.clone(), edge.edge_type.clone()));
+                    .push((relationship.target.clone(), relationship.rel_type.clone()));
             }
         }
 
@@ -862,7 +867,7 @@ impl CrustDatabase {
         Ok(nodes)
     }
 
-    /// Get edges between nodes.
+    /// Get relationships between nodes.
     pub fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>> {
         if node_ids.is_empty() {
             return Ok(Vec::new());
@@ -883,24 +888,24 @@ impl CrustDatabase {
 
         let result = self.execute(&query)?;
 
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
         for row in &result.rows {
             let source = self.get_string_value(&row.values, "a.object_id");
             let target = self.get_string_value(&row.values, "b.object_id");
-            let edge_type = self.get_string_value(&row.values, "type(r)");
+            let rel_type = self.get_string_value(&row.values, "type(r)");
             let props_str = self.get_string_value(&row.values, "r.properties");
 
             let properties = serde_json::from_str(&props_str).unwrap_or(JsonValue::Null);
-            edges.push(DbEdge {
+            relationships.push(DbEdge {
                 source,
                 target,
-                edge_type,
+                rel_type,
                 properties,
                 ..Default::default()
             });
         }
 
-        Ok(edges)
+        Ok(relationships)
     }
 
     /// Get node connections in a direction.
@@ -977,7 +982,7 @@ impl CrustDatabase {
                 .map_err(|e| DbError::Database(e.to_string()))?
         };
 
-        // Build map from internal node ID to object_id for edge conversion
+        // Build map from internal node ID to object_id for relationship conversion
         let mut internal_to_object_id: std::collections::HashMap<i64, String> =
             std::collections::HashMap::new();
 
@@ -1028,8 +1033,8 @@ impl CrustDatabase {
             })
             .collect();
 
-        // Convert crustdb::Edge to DbEdge using the ID map
-        let edges: Vec<DbEdge> = crust_edges
+        // Convert crustdb::Relationship to DbEdge using the ID map
+        let relationships: Vec<DbEdge> = crust_edges
             .into_iter()
             .filter_map(|e| {
                 // Map internal IDs to object_ids
@@ -1039,14 +1044,14 @@ impl CrustDatabase {
                 Some(DbEdge {
                     source: source_obj_id.clone(),
                     target: target_obj_id.clone(),
-                    edge_type: e.edge_type,
+                    rel_type: e.rel_type,
                     properties: Self::properties_to_json(&e.properties),
                     ..Default::default()
                 })
             })
             .collect();
 
-        Ok((nodes, edges))
+        Ok((nodes, relationships))
     }
 
     /// Execute a Cypher query and extract node connections from the result.
@@ -1057,19 +1062,19 @@ impl CrustDatabase {
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
         let result = self.execute(query)?;
 
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
         let mut nodes_map: std::collections::HashMap<String, DbNode> =
             std::collections::HashMap::new();
 
         for row in &result.rows {
             let source = self.get_string_value(&row.values, "a.object_id");
             let target = self.get_string_value(&row.values, "b.object_id");
-            let edge_type = self.get_string_value(&row.values, "type(r)");
+            let rel_type = self.get_string_value(&row.values, "type(r)");
 
-            edges.push(DbEdge {
+            relationships.push(DbEdge {
                 source: source.clone(),
                 target: target.clone(),
-                edge_type,
+                rel_type,
                 properties: JsonValue::Null,
                 ..Default::default()
             });
@@ -1134,7 +1139,7 @@ impl CrustDatabase {
         }
 
         let nodes: Vec<DbNode> = nodes_map.into_values().collect();
-        Ok((nodes, edges))
+        Ok((nodes, relationships))
     }
 
     /// Convert CrustDB properties to JSON.
@@ -1148,7 +1153,7 @@ impl CrustDatabase {
         JsonValue::Object(map)
     }
 
-    /// Get all edges for a node (both incoming and outgoing) with edge types.
+    /// Get all relationships for a node (both incoming and outgoing) with relationship types.
     /// Used for efficient counting by the backend layer.
     /// Uses direct SQL for efficiency instead of Cypher queries.
     pub fn get_node_edges(&self, node_id: &str) -> Result<Vec<DbEdge>> {
@@ -1157,18 +1162,18 @@ impl CrustDatabase {
             .get_node_edges_by_object_id(node_id)
             .map_err(|e| DbError::Database(e.to_string()))?;
 
-        let edges = raw_edges
+        let relationships = raw_edges
             .into_iter()
-            .map(|(source, target, edge_type)| DbEdge {
+            .map(|(source, target, rel_type)| DbEdge {
                 source,
                 target,
-                edge_type,
+                rel_type,
                 properties: JsonValue::Null,
                 ..Default::default()
             })
             .collect();
 
-        Ok(edges)
+        Ok(relationships)
     }
 
     /// Find membership in a group with matching SID suffix using graph traversal.
@@ -1262,11 +1267,11 @@ impl CrustDatabase {
                     "properties": props
                 })
             }
-            crustdb::ResultValue::Edge {
+            crustdb::ResultValue::Relationship {
                 id,
                 source,
                 target,
-                edge_type,
+                rel_type,
                 properties,
             } => {
                 let props: serde_json::Map<String, JsonValue> = properties
@@ -1274,19 +1279,22 @@ impl CrustDatabase {
                     .map(|(k, pv)| (k.clone(), Self::property_value_to_json(pv)))
                     .collect();
                 serde_json::json!({
-                    "_type": "edge",
+                    "_type": "relationship",
                     "id": id,
                     "source": source,
                     "target": target,
-                    "edge_type": edge_type,
+                    "rel_type": rel_type,
                     "properties": props
                 })
             }
-            crustdb::ResultValue::Path { nodes, edges } => {
+            crustdb::ResultValue::Path {
+                nodes,
+                relationships,
+            } => {
                 serde_json::json!({
                     "_type": "path",
                     "nodes": nodes,
-                    "edges": edges
+                    "relationships": relationships
                 })
             }
         }
@@ -1320,7 +1328,7 @@ impl CrustDatabase {
         debug!("Computing security insights");
 
         let nodes = self.get_all_nodes()?;
-        let edges = self.get_all_edges()?;
+        let relationships = self.get_all_edges()?;
 
         let total_users = nodes.iter().filter(|n| n.label == "User").count();
 
@@ -1334,12 +1342,12 @@ impl CrustDatabase {
         // Build MemberOf adjacency
         let mut memberof_adj: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
-        for edge in &edges {
-            if edge.edge_type == "MemberOf" {
+        for relationship in &relationships {
+            if relationship.rel_type == "MemberOf" {
                 memberof_adj
-                    .entry(edge.source.clone())
+                    .entry(relationship.source.clone())
                     .or_default()
-                    .push(edge.target.clone());
+                    .push(relationship.target.clone());
             }
         }
 
@@ -1354,11 +1362,11 @@ impl CrustDatabase {
         // Build full adjacency for effective DA paths
         let mut full_adj: std::collections::HashMap<String, Vec<(String, String)>> =
             std::collections::HashMap::new();
-        for edge in &edges {
+        for relationship in &relationships {
             full_adj
-                .entry(edge.source.clone())
+                .entry(relationship.source.clone())
                 .or_default()
-                .push((edge.target.clone(), edge.edge_type.clone()));
+                .push((relationship.target.clone(), relationship.rel_type.clone()));
         }
 
         // Find effective DAs (any path to DA group)
@@ -1417,16 +1425,19 @@ impl CrustDatabase {
         false
     }
 
-    /// Get choke points using edge betweenness centrality.
+    /// Get choke points using relationship betweenness centrality.
     ///
-    /// Uses Brandes' algorithm to compute which edges have the most shortest
-    /// paths passing through them. These are critical "choke point" edges.
+    /// Uses Brandes' algorithm to compute which relationships have the most shortest
+    /// paths passing through them. These are critical "choke point" relationships.
     pub fn get_choke_points(&self, top_k: usize) -> Result<ChokePointsResponse> {
         use super::types::ChokePoint;
 
-        debug!(top_k = top_k, "Computing choke points via edge betweenness");
+        debug!(
+            top_k = top_k,
+            "Computing choke points via relationship betweenness"
+        );
 
-        // Run the edge betweenness centrality algorithm
+        // Run the relationship betweenness centrality algorithm
         // Use directed=true since AD permissions are directional
         let result = self
             .db
@@ -1436,16 +1447,16 @@ impl CrustDatabase {
         let total_edges = result.edges_count;
         let total_nodes = result.nodes_processed;
 
-        // Get top k edges by betweenness
+        // Get top k relationships by betweenness
         let top_edges = result.top_k(top_k);
 
-        // Resolve edge IDs to full edge/node info
+        // Resolve relationship IDs to full relationship/node info
         let mut choke_points = Vec::with_capacity(top_edges.len());
-        for (edge_id, betweenness) in top_edges {
-            // Get the edge
-            let edge = match self
+        for (rel_id, betweenness) in top_edges {
+            // Get the relationship
+            let relationship = match self
                 .db
-                .get_edge(edge_id)
+                .get_edge(rel_id)
                 .map_err(|e| DbError::Database(e.to_string()))?
             {
                 Some(e) => e,
@@ -1453,8 +1464,8 @@ impl CrustDatabase {
             };
 
             // Get source and target node info
-            let source_info = self.get_node_info_by_internal_id(edge.source)?;
-            let target_info = self.get_node_info_by_internal_id(edge.target)?;
+            let source_info = self.get_node_info_by_internal_id(relationship.source)?;
+            let target_info = self.get_node_info_by_internal_id(relationship.target)?;
 
             if let (
                 Some((source_id, source_name, source_label)),
@@ -1468,7 +1479,7 @@ impl CrustDatabase {
                     target_id,
                     target_name,
                     target_label,
-                    edge_type: edge.edge_type,
+                    rel_type: relationship.rel_type,
                     betweenness,
                 });
             }
@@ -1644,16 +1655,16 @@ impl DatabaseBackend for CrustDatabase {
         CrustDatabase::insert_node(self, node)
     }
 
-    fn insert_edge(&self, edge: DbEdge) -> Result<()> {
-        CrustDatabase::insert_edge(self, edge)
+    fn insert_edge(&self, relationship: DbEdge) -> Result<()> {
+        CrustDatabase::insert_edge(self, relationship)
     }
 
     fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
         CrustDatabase::insert_nodes(self, nodes)
     }
 
-    fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
-        CrustDatabase::insert_edges(self, edges)
+    fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        CrustDatabase::insert_edges(self, relationships)
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {
@@ -1713,8 +1724,8 @@ impl DatabaseBackend for CrustDatabase {
     }
 
     fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
-        // Get all edges for this node efficiently
-        let edges = CrustDatabase::get_node_edges(self, node_id)?;
+        // Get all relationships for this node efficiently
+        let relationships = CrustDatabase::get_node_edges(self, node_id)?;
 
         let admin_types: std::collections::HashSet<&str> = [
             "AdminTo",
@@ -1730,28 +1741,28 @@ impl DatabaseBackend for CrustDatabase {
         .into_iter()
         .collect();
 
-        // Count unique nodes, not edges
-        // e.g., if node A has 3 edges from node B, count as 1 incoming node
+        // Count unique nodes, not relationships
+        // e.g., if node A has 3 relationships from node B, count as 1 incoming node
         let mut incoming_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut outgoing_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut admin_to_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut member_of_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut member_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
 
-        for edge in &edges {
-            if edge.target == node_id {
-                incoming_nodes.insert(&edge.source);
-                if edge.edge_type == "MemberOf" {
-                    member_nodes.insert(&edge.source);
+        for relationship in &relationships {
+            if relationship.target == node_id {
+                incoming_nodes.insert(&relationship.source);
+                if relationship.rel_type == "MemberOf" {
+                    member_nodes.insert(&relationship.source);
                 }
             }
-            if edge.source == node_id {
-                outgoing_nodes.insert(&edge.target);
-                if edge.edge_type == "MemberOf" {
-                    member_of_nodes.insert(&edge.target);
+            if relationship.source == node_id {
+                outgoing_nodes.insert(&relationship.target);
+                if relationship.rel_type == "MemberOf" {
+                    member_of_nodes.insert(&relationship.target);
                 }
-                if admin_types.contains(edge.edge_type.as_str()) {
-                    admin_to_nodes.insert(&edge.target);
+                if admin_types.contains(relationship.rel_type.as_str()) {
+                    admin_to_nodes.insert(&relationship.target);
                 }
             }
         }

@@ -1,4 +1,4 @@
-//! Graph data structures: nodes, edges, and properties.
+//! Graph data structures: nodes, relationships, and properties.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -101,34 +101,34 @@ impl Node {
     }
 }
 
-/// An edge (relationship) in the graph.
+/// An relationship (relationship) in the graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Edge {
-    /// Unique edge identifier.
+pub struct Relationship {
+    /// Unique relationship identifier.
     pub id: i64,
     /// Source node ID.
     pub source: i64,
     /// Target node ID.
     pub target: i64,
-    /// Edge type (e.g., "KNOWS", "WORKS_AT").
-    pub edge_type: String,
-    /// Edge properties.
+    /// Relationship type (e.g., "KNOWS", "WORKS_AT").
+    pub rel_type: String,
+    /// Relationship properties.
     pub properties: HashMap<String, PropertyValue>,
 }
 
-impl Edge {
-    /// Create a new edge.
-    pub fn new(id: i64, source: i64, target: i64, edge_type: impl Into<String>) -> Self {
+impl Relationship {
+    /// Create a new relationship.
+    pub fn new(id: i64, source: i64, target: i64, rel_type: impl Into<String>) -> Self {
         Self {
             id,
             source,
             target,
-            edge_type: edge_type.into(),
+            rel_type: rel_type.into(),
             properties: HashMap::new(),
         }
     }
 
-    /// Add a property to the edge.
+    /// Add a property to the relationship.
     pub fn with_property(
         mut self,
         key: impl Into<String>,

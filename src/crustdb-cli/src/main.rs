@@ -123,27 +123,30 @@ fn result_value_to_json(val: &ResultValue) -> serde_json::Value {
                 "properties": properties_to_json(properties)
             })
         }
-        ResultValue::Edge {
+        ResultValue::Relationship {
             id,
             source,
             target,
-            edge_type,
+            rel_type,
             properties,
         } => {
             serde_json::json!({
-                "_type": "edge",
+                "_type": "relationship",
                 "_id": id,
                 "_source": source,
                 "_target": target,
-                "_edge_type": edge_type,
+                "_edge_type": rel_type,
                 "properties": properties_to_json(properties)
             })
         }
-        ResultValue::Path { nodes, edges } => {
+        ResultValue::Path {
+            nodes,
+            relationships,
+        } => {
             serde_json::json!({
                 "_type": "path",
                 "nodes": nodes,
-                "edges": edges
+                "relationships": relationships
             })
         }
     }
@@ -332,17 +335,24 @@ fn format_value(val: &ResultValue) -> String {
             let props_str = format_properties(properties);
             format!("(#{}{} {})", id, labels_str, props_str)
         }
-        ResultValue::Edge {
+        ResultValue::Relationship {
             id,
-            edge_type,
+            rel_type,
             properties,
             ..
         } => {
             let props_str = format_properties(properties);
-            format!("[#{}:{} {}]", id, edge_type, props_str)
+            format!("[#{}:{} {}]", id, rel_type, props_str)
         }
-        ResultValue::Path { nodes, edges } => {
-            format!("<path: {} nodes, {} edges>", nodes.len(), edges.len())
+        ResultValue::Path {
+            nodes,
+            relationships,
+        } => {
+            format!(
+                "<path: {} nodes, {} relationships>",
+                nodes.len(),
+                relationships.len()
+            )
         }
     }
 }

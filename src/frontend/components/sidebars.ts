@@ -357,7 +357,7 @@ export function handleSidebarClicks(e: MouseEvent): boolean {
   if (button && !button.classList.contains("overflow-trigger")) {
     const action = button.getAttribute("data-action");
     const nodeId = button.getAttribute("data-node-id");
-    const edgeId = button.getAttribute("data-edge-id");
+    const edgeId = button.getAttribute("data-relationship-id");
 
     if (action && nodeId) {
       // Close overflow menu if clicking an overflow item
@@ -370,10 +370,10 @@ export function handleSidebarClicks(e: MouseEvent): boolean {
     }
 
     if (action && edgeId) {
-      // Handle edge actions
+      // Handle relationship actions
       const sourceId = button.getAttribute("data-source-id") || "";
       const targetId = button.getAttribute("data-target-id") || "";
-      const edgeType = button.getAttribute("data-edge-type") || "";
+      const edgeType = button.getAttribute("data-relationship-type") || "";
       handleEdgeAction(action, edgeId, sourceId, targetId, edgeType);
       return true;
     }
@@ -450,7 +450,7 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
   }
 }
 
-/** Handle edge panel actions */
+/** Handle relationship panel actions */
 async function handleEdgeAction(
   action: string,
   edgeId: string,
@@ -462,9 +462,9 @@ async function handleEdgeAction(
   const graph = renderer?.sigma.getGraph();
 
   switch (action) {
-    case "delete-edge": {
-      const confirmed = await showConfirm(`Delete edge "${edgeType}" from "${sourceId}" to "${targetId}"?`, {
-        title: "Delete Edge",
+    case "delete-relationship": {
+      const confirmed = await showConfirm(`Delete relationship "${edgeType}" from "${sourceId}" to "${targetId}"?`, {
+        title: "Delete Relationship",
         confirmText: "Delete",
         danger: true,
       });
@@ -472,7 +472,7 @@ async function handleEdgeAction(
         try {
           // Delete from backend
           await api.delete(
-            `/api/graph/edges/${encodeURIComponent(sourceId)}/${encodeURIComponent(targetId)}/${encodeURIComponent(edgeType)}`
+            `/api/graph/relationships/${encodeURIComponent(sourceId)}/${encodeURIComponent(targetId)}/${encodeURIComponent(edgeType)}`
           );
           // Remove from graph view
           if (graph?.hasEdge(edgeId)) {
@@ -481,15 +481,15 @@ async function handleEdgeAction(
           // Clear detail panel
           updateDetailPanel(null, null);
         } catch (err) {
-          console.error("Failed to delete edge:", err);
-          showError("Failed to delete edge");
+          console.error("Failed to delete relationship:", err);
+          showError("Failed to delete relationship");
         }
       }
       break;
     }
 
     default:
-      console.log(`Unknown edge action: ${action}`);
+      console.log(`Unknown relationship action: ${action}`);
   }
 }
 
@@ -527,7 +527,7 @@ async function loadConnections(nodeId: string, direction: string): Promise<void>
   try {
     const response = await api.get<{
       nodes: Array<{ id: string; name: string; type: string; properties?: Record<string, unknown> }>;
-      edges: Array<{ source: string; target: string; type: string }>;
+      relationships: Array<{ source: string; target: string; type: string }>;
     }>(`/api/graph/node/${encodeURIComponent(nodeId)}/connections/${direction}`);
 
     if (!response.nodes || response.nodes.length === 0) {
@@ -543,7 +543,7 @@ async function loadConnections(nodeId: string, direction: string): Promise<void>
         type: n.type as ADNodeType,
         properties: n.properties,
       })),
-      edges: response.edges.map((e) => ({
+      relationships: response.relationships.map((e) => ({
         source: e.source,
         target: e.target,
         type: e.type as import("../graph/types").ADEdgeType,
@@ -940,7 +940,7 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   }
 }
 
-/** Update the detail sidebar with edge information */
+/** Update the detail sidebar with relationship information */
 export function updateDetailPanelForEdge(
   edgeId: string,
   attrs: ADEdgeAttributes,
@@ -975,7 +975,7 @@ export function updateDetailPanelForEdge(
     </div>
   `;
 
-  // Add any additional edge attributes (excluding internal sigma attributes)
+  // Add any additional relationship attributes (excluding internal sigma attributes)
   const excludeKeys = new Set(["label", "edgeType", "color", "size", "highlighted", "type", "curvature"]);
   for (const [key, value] of Object.entries(attrs)) {
     if (!excludeKeys.has(key) && value !== undefined && value !== null) {
@@ -994,21 +994,21 @@ export function updateDetailPanelForEdge(
   content.innerHTML = `
     <div class="detail-header">
       <div class="detail-header-top">
-        <span class="detail-node-type edge-badge" style="background-color: ${edgeColor}">
-          Edge
+        <span class="detail-node-type relationship-badge" style="background-color: ${edgeColor}">
+          Relationship
         </span>
       </div>
       <h2 class="detail-node-name">${escapeHtml(edgeType)}</h2>
       <div class="detail-actions">
         <button
           class="detail-action-btn danger"
-          data-action="delete-edge"
-          data-edge-id="${escapeHtml(edgeId)}"
+          data-action="delete-relationship"
+          data-relationship-id="${escapeHtml(edgeId)}"
           data-source-id="${escapeHtml(sourceId)}"
           data-target-id="${escapeHtml(targetId)}"
-          data-edge-type="${escapeHtml(edgeType)}"
-          title="Delete Edge"
-          aria-label="Delete Edge"
+          data-relationship-type="${escapeHtml(edgeType)}"
+          title="Delete Relationship"
+          aria-label="Delete Relationship"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/>
@@ -1134,7 +1134,7 @@ async function showPathToHighValue(nodeId: string): Promise<void> {
           type: n.type as ADNodeType,
           properties: n.properties,
         })),
-        edges: result.graph.edges.map((e) => ({
+        relationships: result.graph.relationships.map((e) => ({
           source: e.source,
           target: e.target,
           type: e.type as ADEdgeType,

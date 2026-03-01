@@ -24,7 +24,7 @@ export const NODE_COLORS: Record<ADNodeType, string> = {
   Unknown: "#adb5bd", // Light gray - unknown types
 };
 
-/** Color palette for edge types (grouped by category) */
+/** Color palette for relationship types (grouped by category) */
 export const EDGE_COLORS: Record<ADEdgeType, string> = {
   // Membership/structure (neutral)
   MemberOf: "#6c757d",
@@ -91,26 +91,26 @@ export const NODE_SIZES: Record<ADNodeType, number> = {
   Unknown: 6,
 };
 
-/** Default edge size (controls arrow head size) */
+/** Default relationship size (controls arrow head size) */
 export const DEFAULT_EDGE_SIZE = 5;
 
-/** Default edge color (uniform for all edge types) */
+/** Default relationship color (uniform for all relationship types) */
 export const DEFAULT_EDGE_COLOR = "#6c757d";
 
-/** Highlighted edge size multiplier */
+/** Highlighted relationship size multiplier */
 export const HIGHLIGHT_SIZE_MULTIPLIER = 2;
 
 /** Colors for highlighted/selected states */
 export const HIGHLIGHT_COLORS = {
   node: "#fff700",
-  edge: "#fff700",
+  relationship: "#fff700",
   neighbor: "#ffffff",
 };
 
 /** Colors for dimmed/faded states */
 export const DIM_COLORS = {
   node: "#2a2a2a",
-  edge: "#1a1a1a",
+  relationship: "#1a1a1a",
 };
 
 /** Background color for the graph canvas */
@@ -132,9 +132,9 @@ export function getNodeColor(type: ADNodeType, highlighted?: boolean, dimmed?: b
   return NODE_COLORS[type];
 }
 
-/** Get edge color, considering highlight state */
+/** Get relationship color, considering highlight state */
 export function getEdgeColor(type: ADEdgeType, highlighted?: boolean, dimmed?: boolean): string {
-  if (highlighted) return HIGHLIGHT_COLORS.edge;
-  if (dimmed) return DIM_COLORS.edge;
+  if (highlighted) return HIGHLIGHT_COLORS.relationship;
+  if (dimmed) return DIM_COLORS.relationship;
   return EDGE_COLORS[type];
 }

@@ -66,7 +66,7 @@ pub struct BloodHoundImporter {
     progress_tx: broadcast::Sender<ImportProgress>,
     /// Track which object IDs we've seen to avoid duplicate nodes
     seen_nodes: HashSet<String>,
-    /// Buffer edges across all files, flush at end when all nodes exist
+    /// Buffer relationships across all files, flush at end when all nodes exist
     edge_buffer: Vec<DbEdge>,
     /// Buffer domain nodes from trust relationships (for orphaned domains)
     trust_domain_buffer: Vec<DbNode>,
@@ -148,7 +148,7 @@ impl BloodHoundImporter {
                     info!(
                         file = %file_name,
                         nodes = progress.nodes_imported,
-                        edges = progress.edges_imported,
+                        relationships = progress.edges_imported,
                         "File processed"
                     );
                     progress.files_processed += 1;
@@ -161,10 +161,10 @@ impl BloodHoundImporter {
             }
         }
 
-        // Flush all buffered edges now that all nodes from all files exist
+        // Flush all buffered relationships now that all nodes from all files exist
         info!(
             edge_count = self.edge_buffer.len(),
-            "Flushing all buffered edges"
+            "Flushing all buffered relationships"
         );
         self.flush_edge_buffer(&mut progress)?;
 
@@ -188,7 +188,7 @@ impl BloodHoundImporter {
 
         self.import_json_str(&contents, &mut progress)?;
 
-        // Flush buffered edges for single-file import
+        // Flush buffered relationships for single-file import
         self.flush_edge_buffer(&mut progress)?;
 
         progress.files_processed = 1;
@@ -230,7 +230,7 @@ impl BloodHoundImporter {
                     info!(
                         file = %filename,
                         nodes = progress.nodes_imported,
-                        edges = progress.edges_imported,
+                        relationships = progress.edges_imported,
                         "File processed"
                     );
                     progress.files_processed += 1;
@@ -243,10 +243,10 @@ impl BloodHoundImporter {
             }
         }
 
-        // Flush all buffered edges now that all nodes from all files exist
+        // Flush all buffered relationships now that all nodes from all files exist
         info!(
             edge_count = self.edge_buffer.len(),
-            "Flushing all buffered edges"
+            "Flushing all buffered relationships"
         );
         self.flush_edge_buffer(&mut progress)?;
 
@@ -323,12 +323,12 @@ impl BloodHoundImporter {
                 }
             }
 
-            // Extract edges - buffer them for later (after all nodes from all files exist)
-            let edges = self.extract_edges(&data_type, &entity);
-            self.edge_buffer.extend(edges);
+            // Extract relationships - buffer them for later (after all nodes from all files exist)
+            let relationships = self.extract_edges(&data_type, &entity);
+            self.edge_buffer.extend(relationships);
         }
 
-        // Flush remaining nodes (edges are flushed at the end of import_zip)
+        // Flush remaining nodes (relationships are flushed at the end of import_zip)
         self.flush_nodes(&mut node_batch, progress)?;
 
         Ok(())
@@ -474,7 +474,7 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Extract edges from a BloodHound entity.
+    /// Extract relationships from a BloodHound entity.
     fn extract_edges(&mut self, data_type: &str, entity: &JsonValue) -> Vec<DbEdge> {
         let object_id = match entity.get("ObjectIdentifier").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
@@ -484,25 +484,25 @@ impl BloodHoundImporter {
         // Normalize type name for consistency
         let node_type = self.normalize_type(data_type);
 
-        let mut edges = Vec::new();
-        self.extract_member_edges(entity, &object_id, &node_type, &mut edges);
-        self.extract_session_edges(entity, &object_id, &node_type, &mut edges);
-        self.extract_local_group_edges(entity, &object_id, &node_type, &mut edges);
-        self.extract_ace_edges(entity, &object_id, &node_type, &mut edges);
-        self.extract_containment_edges(entity, &object_id, &node_type, &mut edges);
-        self.extract_delegation_edges(entity, &object_id, &node_type, &mut edges);
-        self.extract_gpo_link_edges(entity, &object_id, &node_type, &mut edges);
-        self.extract_trust_edges(entity, &object_id, &mut edges);
-        edges
+        let mut relationships = Vec::new();
+        self.extract_member_edges(entity, &object_id, &node_type, &mut relationships);
+        self.extract_session_edges(entity, &object_id, &node_type, &mut relationships);
+        self.extract_local_group_edges(entity, &object_id, &node_type, &mut relationships);
+        self.extract_ace_edges(entity, &object_id, &node_type, &mut relationships);
+        self.extract_containment_edges(entity, &object_id, &node_type, &mut relationships);
+        self.extract_delegation_edges(entity, &object_id, &node_type, &mut relationships);
+        self.extract_gpo_link_edges(entity, &object_id, &node_type, &mut relationships);
+        self.extract_trust_edges(entity, &object_id, &mut relationships);
+        relationships
     }
 
-    /// Extract MemberOf edges from group membership.
+    /// Extract MemberOf relationships from group membership.
     fn extract_member_edges(
         &self,
         entity: &JsonValue,
         object_id: &str,
         target_type: &str,
-        edges: &mut Vec<DbEdge>,
+        relationships: &mut Vec<DbEdge>,
     ) {
         let Some(members) = entity.get("Members").and_then(|v| v.as_array()) else {
             return;
@@ -510,10 +510,10 @@ impl BloodHoundImporter {
         for member in members {
             if let Some(member_id) = member.get("ObjectIdentifier").and_then(|v| v.as_str()) {
                 let member_type = member.get("ObjectType").and_then(|v| v.as_str());
-                edges.push(DbEdge {
+                relationships.push(DbEdge {
                     source: member_id.to_string(),
                     target: object_id.to_string(),
-                    edge_type: "MemberOf".to_string(),
+                    rel_type: "MemberOf".to_string(),
                     properties: JsonValue::Null,
                     source_type: member_type.map(String::from),
                     target_type: Some(target_type.to_string()),
@@ -522,13 +522,13 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Extract HasSession edges from computer sessions.
+    /// Extract HasSession relationships from computer sessions.
     fn extract_session_edges(
         &self,
         entity: &JsonValue,
         object_id: &str,
         target_type: &str,
-        edges: &mut Vec<DbEdge>,
+        relationships: &mut Vec<DbEdge>,
     ) {
         for session_field in ["Sessions", "PrivilegedSessions", "RegistrySessions"] {
             let Some(sessions) = entity
@@ -540,10 +540,10 @@ impl BloodHoundImporter {
             };
             for session in sessions {
                 if let Some(user_sid) = session.get("UserSID").and_then(|v| v.as_str()) {
-                    edges.push(DbEdge {
+                    relationships.push(DbEdge {
                         source: user_sid.to_string(),
                         target: object_id.to_string(),
-                        edge_type: "HasSession".to_string(),
+                        rel_type: "HasSession".to_string(),
                         properties: JsonValue::Null,
                         source_type: Some("User".to_string()),
                         target_type: Some(target_type.to_string()),
@@ -553,20 +553,20 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Extract local group membership edges (AdminTo, CanRDP, etc.).
+    /// Extract local group membership relationships (AdminTo, CanRDP, etc.).
     fn extract_local_group_edges(
         &self,
         entity: &JsonValue,
         object_id: &str,
         target_type: &str,
-        edges: &mut Vec<DbEdge>,
+        relationships: &mut Vec<DbEdge>,
     ) {
         let Some(local_groups) = entity.get("LocalGroups").and_then(|v| v.as_array()) else {
             return;
         };
         for group in local_groups {
             let group_name = group.get("Name").and_then(|v| v.as_str()).unwrap_or("");
-            let edge_type = self.local_group_to_edge_type(group_name);
+            let rel_type = self.local_group_to_edge_type(group_name);
 
             let Some(results) = group.get("Results").and_then(|v| v.as_array()) else {
                 continue;
@@ -574,10 +574,10 @@ impl BloodHoundImporter {
             for member in results {
                 if let Some(member_id) = member.get("ObjectIdentifier").and_then(|v| v.as_str()) {
                     let member_type = member.get("ObjectType").and_then(|v| v.as_str());
-                    edges.push(DbEdge {
+                    relationships.push(DbEdge {
                         source: member_id.to_string(),
                         target: object_id.to_string(),
-                        edge_type: edge_type.to_string(),
+                        rel_type: rel_type.to_string(),
                         properties: JsonValue::Null,
                         source_type: member_type.map(String::from),
                         target_type: Some(target_type.to_string()),
@@ -587,13 +587,13 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Extract ACE permission edges.
+    /// Extract ACE permission relationships.
     fn extract_ace_edges(
         &self,
         entity: &JsonValue,
         object_id: &str,
         target_type: &str,
-        edges: &mut Vec<DbEdge>,
+        relationships: &mut Vec<DbEdge>,
     ) {
         let Some(aces) = entity.get("Aces").and_then(|v| v.as_array()) else {
             return;
@@ -605,17 +605,17 @@ impl BloodHoundImporter {
             ) else {
                 continue;
             };
-            let edge_type = self.ace_to_edge_type(right_name);
+            let rel_type = self.ace_to_edge_type(right_name);
             let is_inherited = ace
                 .get("IsInherited")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let principal_type = ace.get("PrincipalType").and_then(|v| v.as_str());
 
-            edges.push(DbEdge {
+            relationships.push(DbEdge {
                 source: principal_sid.to_string(),
                 target: object_id.to_string(),
-                edge_type: edge_type.to_string(),
+                rel_type: rel_type.to_string(),
                 properties: serde_json::json!({"inherited": is_inherited}),
                 source_type: principal_type.map(String::from),
                 target_type: Some(target_type.to_string()),
@@ -623,25 +623,25 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Extract containment edges.
+    /// Extract containment relationships.
     fn extract_containment_edges(
         &self,
         entity: &JsonValue,
         object_id: &str,
         target_type: &str,
-        edges: &mut Vec<DbEdge>,
+        relationships: &mut Vec<DbEdge>,
     ) {
-        // ContainedBy -> Contains edge (reversed direction)
+        // ContainedBy -> Contains relationship (reversed direction)
         if let Some(contained_by) = entity.get("ContainedBy") {
             if let Some(container_id) = contained_by
                 .get("ObjectIdentifier")
                 .and_then(|v| v.as_str())
             {
                 let container_type = contained_by.get("ObjectType").and_then(|v| v.as_str());
-                edges.push(DbEdge {
+                relationships.push(DbEdge {
                     source: container_id.to_string(),
                     target: object_id.to_string(),
-                    edge_type: "Contains".to_string(),
+                    rel_type: "Contains".to_string(),
                     properties: JsonValue::Null,
                     source_type: container_type.map(String::from),
                     target_type: Some(target_type.to_string()),
@@ -650,23 +650,23 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Extract delegation edges (AllowedToDelegate, AllowedToAct).
+    /// Extract delegation relationships (AllowedToDelegate, AllowedToAct).
     fn extract_delegation_edges(
         &self,
         entity: &JsonValue,
         object_id: &str,
         source_type: &str,
-        edges: &mut Vec<DbEdge>,
+        relationships: &mut Vec<DbEdge>,
     ) {
         // AllowedToDelegate
         if let Some(delegates) = entity.get("AllowedToDelegate").and_then(|v| v.as_array()) {
             for delegate in delegates {
                 if let Some(target_id) = delegate.get("ObjectIdentifier").and_then(|v| v.as_str()) {
                     let target_type = delegate.get("ObjectType").and_then(|v| v.as_str());
-                    edges.push(DbEdge {
+                    relationships.push(DbEdge {
                         source: object_id.to_string(),
                         target: target_id.to_string(),
-                        edge_type: "AllowedToDelegate".to_string(),
+                        rel_type: "AllowedToDelegate".to_string(),
                         properties: JsonValue::Null,
                         source_type: Some(source_type.to_string()),
                         target_type: target_type.map(String::from),
@@ -680,10 +680,10 @@ impl BloodHoundImporter {
             for actor in actors {
                 if let Some(actor_id) = actor.get("ObjectIdentifier").and_then(|v| v.as_str()) {
                     let actor_type = actor.get("ObjectType").and_then(|v| v.as_str());
-                    edges.push(DbEdge {
+                    relationships.push(DbEdge {
                         source: actor_id.to_string(),
                         target: object_id.to_string(),
-                        edge_type: "AllowedToAct".to_string(),
+                        rel_type: "AllowedToAct".to_string(),
                         properties: JsonValue::Null,
                         source_type: actor_type.map(String::from),
                         target_type: Some(source_type.to_string()),
@@ -693,23 +693,23 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Extract GPO link edges.
+    /// Extract GPO link relationships.
     fn extract_gpo_link_edges(
         &self,
         entity: &JsonValue,
         object_id: &str,
         source_type: &str,
-        edges: &mut Vec<DbEdge>,
+        relationships: &mut Vec<DbEdge>,
     ) {
         let Some(links) = entity.get("Links").and_then(|v| v.as_array()) else {
             return;
         };
         for link in links {
             if let Some(gpo_id) = link.get("GUID").and_then(|v| v.as_str()) {
-                edges.push(DbEdge {
+                relationships.push(DbEdge {
                     source: object_id.to_string(),
                     target: gpo_id.to_string(),
-                    edge_type: "GPLink".to_string(),
+                    rel_type: "GPLink".to_string(),
                     properties: JsonValue::Null,
                     source_type: Some(source_type.to_string()),
                     target_type: Some("GPO".to_string()),
@@ -718,12 +718,12 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Extract domain trust edges and collect target domain nodes.
+    /// Extract domain trust relationships and collect target domain nodes.
     fn extract_trust_edges(
         &mut self,
         entity: &JsonValue,
         object_id: &str,
-        edges: &mut Vec<DbEdge>,
+        relationships: &mut Vec<DbEdge>,
     ) {
         let Some(trusts) = entity.get("Trusts").and_then(|v| v.as_array()) else {
             return;
@@ -765,10 +765,10 @@ impl BloodHoundImporter {
 
             // Bidirectional or outbound trust
             if trust_direction == 2 || trust_direction == 3 {
-                edges.push(DbEdge {
+                relationships.push(DbEdge {
                     source: target_sid.to_string(),
                     target: object_id.to_string(),
-                    edge_type: "TrustedBy".to_string(),
+                    rel_type: "TrustedBy".to_string(),
                     properties: serde_json::json!({"direction": trust_direction}),
                     source_type: Some("Domain".to_string()),
                     target_type: Some("Domain".to_string()),
@@ -776,10 +776,10 @@ impl BloodHoundImporter {
             }
             // Bidirectional or inbound trust
             if trust_direction == 1 || trust_direction == 3 {
-                edges.push(DbEdge {
+                relationships.push(DbEdge {
                     source: object_id.to_string(),
                     target: target_sid.to_string(),
-                    edge_type: "TrustedBy".to_string(),
+                    rel_type: "TrustedBy".to_string(),
                     properties: serde_json::json!({"direction": trust_direction}),
                     source_type: Some("Domain".to_string()),
                     target_type: Some("Domain".to_string()),
@@ -788,7 +788,7 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Map local group name to edge type.
+    /// Map local group name to relationship type.
     fn local_group_to_edge_type(&self, group_name: &str) -> &'static str {
         match group_name.to_uppercase().as_str() {
             s if s.contains("ADMINISTRATORS") => "AdminTo",
@@ -819,7 +819,7 @@ impl BloodHoundImporter {
         .to_string()
     }
 
-    /// Map ACE right name to edge type.
+    /// Map ACE right name to relationship type.
     fn ace_to_edge_type(&self, right_name: &str) -> &'static str {
         match right_name {
             "GenericAll" => "GenericAll",
@@ -872,7 +872,7 @@ impl BloodHoundImporter {
     }
 
     /// Flush buffered domain nodes from trust relationships.
-    /// Called before flushing edges to ensure target domains exist.
+    /// Called before flushing relationships to ensure target domains exist.
     fn flush_trust_domains(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
         if self.trust_domain_buffer.is_empty() {
             return Ok(());
@@ -909,7 +909,7 @@ impl BloodHoundImporter {
         Ok(())
     }
 
-    /// Flush all buffered edges in batches.
+    /// Flush all buffered relationships in batches.
     /// Called at the end of import after all nodes from all files are inserted.
     fn flush_edge_buffer(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
         // First flush any domain nodes from trust relationships
@@ -920,21 +920,24 @@ impl BloodHoundImporter {
         }
 
         let total_edges = self.edge_buffer.len();
-        info!(total_edges, "Flushing edge buffer");
+        info!(total_edges, "Flushing relationship buffer");
 
         // Process in batches
         for chunk in self.edge_buffer.chunks(BATCH_SIZE) {
             let batch_size = chunk.len();
             let count = self.db.insert_edges(chunk).map_err(|e| {
-                error!(error = %e, batch_size, "Failed to insert edges");
-                format!("Failed to insert edges: {e}")
+                error!(error = %e, batch_size, "Failed to insert relationships");
+                format!("Failed to insert relationships: {e}")
             })?;
 
             progress.edges_imported += count;
             self.send_progress(progress);
         }
 
-        debug!(total = progress.edges_imported, "All edges inserted");
+        debug!(
+            total = progress.edges_imported,
+            "All relationships inserted"
+        );
         self.edge_buffer.clear();
         Ok(())
     }
@@ -1163,7 +1166,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Edge Extraction Tests
+    // Relationship Extraction Tests
     // ========================================================================
 
     #[test]
@@ -1178,16 +1181,16 @@ mod tests {
             ]
         });
 
-        let edges = importer.extract_edges("groups", &entity);
+        let relationships = importer.extract_edges("groups", &entity);
 
-        assert_eq!(edges.len(), 2);
+        assert_eq!(relationships.len(), 2);
         // Members point TO the group (MemberOf)
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-USER1"
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-USER1"
             && e.target == "S-1-5-21-GROUP1"
-            && e.edge_type == "MemberOf"));
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-USER2"
+            && e.rel_type == "MemberOf"));
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-USER2"
             && e.target == "S-1-5-21-GROUP1"
-            && e.edge_type == "MemberOf"));
+            && e.rel_type == "MemberOf"));
     }
 
     #[test]
@@ -1208,14 +1211,14 @@ mod tests {
             }
         });
 
-        let edges = importer.extract_edges("computers", &entity);
+        let relationships = importer.extract_edges("computers", &entity);
 
-        assert_eq!(edges.len(), 2);
-        assert!(edges
+        assert_eq!(relationships.len(), 2);
+        assert!(relationships
             .iter()
-            .all(|e| e.edge_type == "HasSession" && e.target == "S-1-5-21-COMP1"));
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-USER1"));
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-ADMIN1"));
+            .all(|e| e.rel_type == "HasSession" && e.target == "S-1-5-21-COMP1"));
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-USER1"));
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-ADMIN1"));
     }
 
     #[test]
@@ -1238,19 +1241,22 @@ mod tests {
             ]
         });
 
-        let edges = importer.extract_edges("users", &entity);
+        let relationships = importer.extract_edges("users", &entity);
 
-        assert_eq!(edges.len(), 2);
+        assert_eq!(relationships.len(), 2);
 
-        let generic_all = edges
+        let generic_all = relationships
             .iter()
             .find(|e| e.source == "S-1-5-21-ATTACKER")
             .unwrap();
-        assert_eq!(generic_all.edge_type, "GenericAll");
+        assert_eq!(generic_all.rel_type, "GenericAll");
         assert_eq!(generic_all.properties["inherited"], false);
 
-        let write_dacl = edges.iter().find(|e| e.source == "S-1-5-21-USER1").unwrap();
-        assert_eq!(write_dacl.edge_type, "WriteDacl");
+        let write_dacl = relationships
+            .iter()
+            .find(|e| e.source == "S-1-5-21-USER1")
+            .unwrap();
+        assert_eq!(write_dacl.rel_type, "WriteDacl");
         assert_eq!(write_dacl.properties["inherited"], true);
     }
 
@@ -1268,14 +1274,14 @@ mod tests {
             ]
         });
 
-        let edges = importer.extract_edges("domains", &entity);
+        let relationships = importer.extract_edges("domains", &entity);
 
-        // Bidirectional trust creates 2 edges
-        assert_eq!(edges.len(), 2);
-        assert!(edges
+        // Bidirectional trust creates 2 relationships
+        assert_eq!(relationships.len(), 2);
+        assert!(relationships
             .iter()
             .any(|e| e.source == "S-1-5-21-DOMAIN2" && e.target == "S-1-5-21-DOMAIN1"));
-        assert!(edges
+        assert!(relationships
             .iter()
             .any(|e| e.source == "S-1-5-21-DOMAIN1" && e.target == "S-1-5-21-DOMAIN2"));
     }
@@ -1303,28 +1309,28 @@ mod tests {
             ]
         });
 
-        let edges = importer.extract_edges("domains", &entity);
+        let relationships = importer.extract_edges("domains", &entity);
 
-        // Bidirectional creates 2 edges, Outbound creates 1, Inbound creates 1 = 4 total
-        assert_eq!(edges.len(), 4);
+        // Bidirectional creates 2 relationships, Outbound creates 1, Inbound creates 1 = 4 total
+        assert_eq!(relationships.len(), 4);
 
         // Bidirectional with DOMAIN2
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-DOMAIN2"
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN2"
             && e.target == "S-1-5-21-DOMAIN1"
-            && e.edge_type == "TrustedBy"));
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
+            && e.rel_type == "TrustedBy"));
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
             && e.target == "S-1-5-21-DOMAIN2"
-            && e.edge_type == "TrustedBy"));
+            && e.rel_type == "TrustedBy"));
 
         // Outbound to DOMAIN3 (we trust them)
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-DOMAIN3"
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN3"
             && e.target == "S-1-5-21-DOMAIN1"
-            && e.edge_type == "TrustedBy"));
+            && e.rel_type == "TrustedBy"));
 
         // Inbound from DOMAIN4 (they trust us)
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
             && e.target == "S-1-5-21-DOMAIN4"
-            && e.edge_type == "TrustedBy"));
+            && e.rel_type == "TrustedBy"));
     }
 
     #[test]
@@ -1339,12 +1345,12 @@ mod tests {
             }
         });
 
-        let edges = importer.extract_edges("users", &entity);
+        let relationships = importer.extract_edges("users", &entity);
 
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].source, "S-1-5-21-OU1");
-        assert_eq!(edges[0].target, "S-1-5-21-USER1");
-        assert_eq!(edges[0].edge_type, "Contains");
+        assert_eq!(relationships.len(), 1);
+        assert_eq!(relationships[0].source, "S-1-5-21-OU1");
+        assert_eq!(relationships[0].target, "S-1-5-21-USER1");
+        assert_eq!(relationships[0].rel_type, "Contains");
     }
 
     #[test]
@@ -1361,15 +1367,15 @@ mod tests {
             ]
         });
 
-        let edges = importer.extract_edges("users", &entity);
+        let relationships = importer.extract_edges("users", &entity);
 
-        assert_eq!(edges.len(), 2);
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-USER1"
+        assert_eq!(relationships.len(), 2);
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-USER1"
             && e.target == "S-1-5-21-SERVICE1"
-            && e.edge_type == "AllowedToDelegate"));
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-ACTOR1"
+            && e.rel_type == "AllowedToDelegate"));
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-ACTOR1"
             && e.target == "S-1-5-21-USER1"
-            && e.edge_type == "AllowedToAct"));
+            && e.rel_type == "AllowedToAct"));
     }
 
     #[test]
@@ -1394,15 +1400,15 @@ mod tests {
             ]
         });
 
-        let edges = importer.extract_edges("computers", &entity);
+        let relationships = importer.extract_edges("computers", &entity);
 
-        assert_eq!(edges.len(), 2);
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-ADMIN1"
+        assert_eq!(relationships.len(), 2);
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-ADMIN1"
             && e.target == "S-1-5-21-COMP1"
-            && e.edge_type == "AdminTo"));
-        assert!(edges.iter().any(|e| e.source == "S-1-5-21-USER1"
+            && e.rel_type == "AdminTo"));
+        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-USER1"
             && e.target == "S-1-5-21-COMP1"
-            && e.edge_type == "CanRDP"));
+            && e.rel_type == "CanRDP"));
     }
 
     // ========================================================================
@@ -1461,9 +1467,9 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(progress.nodes_imported, 1);
-        assert_eq!(progress.edges_imported, 2); // 2 MemberOf edges
+        assert_eq!(progress.edges_imported, 2); // 2 MemberOf relationships
 
-        // Verify edges are in database
+        // Verify relationships are in database
         let (_, edge_count) = importer.db.get_stats().unwrap();
         assert_eq!(edge_count, 2);
     }

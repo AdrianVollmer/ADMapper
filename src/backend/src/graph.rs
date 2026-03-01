@@ -33,7 +33,7 @@ impl From<DbNode> for GraphNode {
     }
 }
 
-/// Graph edge response format.
+/// Graph relationship response format.
 ///
 /// This is a subset of `DbEdge` used for API responses, excluding
 /// internal fields like `properties`, `source_type`, and `target_type`.
@@ -42,15 +42,15 @@ pub struct GraphEdge {
     pub source: String,
     pub target: String,
     #[serde(rename = "type")]
-    pub edge_type: String,
+    pub rel_type: String,
 }
 
 impl From<DbEdge> for GraphEdge {
-    fn from(edge: DbEdge) -> Self {
+    fn from(relationship: DbEdge) -> Self {
         GraphEdge {
-            source: edge.source,
-            target: edge.target,
-            edge_type: edge.edge_type,
+            source: relationship.source,
+            target: relationship.target,
+            rel_type: relationship.rel_type,
         }
     }
 }
@@ -62,11 +62,11 @@ impl From<DbEdge> for GraphEdge {
 #[derive(Debug, Clone, Serialize)]
 pub struct FullGraph {
     pub nodes: Vec<GraphNode>,
-    pub edges: Vec<GraphEdge>,
+    pub relationships: Vec<GraphEdge>,
 }
 
 impl FullGraph {
-    /// Build a subgraph containing only the specified nodes and edges between them.
+    /// Build a subgraph containing only the specified nodes and relationships between them.
     pub fn from_node_ids(
         db: &Arc<dyn DatabaseBackend>,
         node_ids: &[String],
@@ -74,16 +74,16 @@ impl FullGraph {
         if node_ids.is_empty() {
             return Ok(FullGraph {
                 nodes: Vec::new(),
-                edges: Vec::new(),
+                relationships: Vec::new(),
             });
         }
 
         let nodes = db.get_nodes_by_ids(node_ids)?;
-        let edges = db.get_edges_between(node_ids)?;
+        let relationships = db.get_edges_between(node_ids)?;
 
         Ok(FullGraph {
             nodes: nodes.into_iter().map(GraphNode::from).collect(),
-            edges: edges.into_iter().map(GraphEdge::from).collect(),
+            relationships: relationships.into_iter().map(GraphEdge::from).collect(),
         })
     }
 }
@@ -94,9 +94,9 @@ impl FullGraph {
 
 /// Extract a graph from query results.
 ///
-/// This function looks for node and edge objects in the query results and
+/// This function looks for node and relationship objects in the query results and
 /// extracts them into a graph structure. It handles:
-/// - Direct node/edge objects (with `_type: "node"` or `_type: "edge"`)
+/// - Direct node/relationship objects (with `_type: "node"` or `_type: "relationship"`)
 /// - Object IDs in properties (looks up nodes from the database)
 pub fn extract_graph_from_results(
     results: &JsonValue,
@@ -110,11 +110,11 @@ pub fn extract_graph_from_results(
     let mut nodes: Vec<GraphNode> = Vec::new();
     let mut raw_edges: Vec<JsonValue> = Vec::new();
     let mut node_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // Map internal database IDs to object_ids for edge resolution
+    // Map internal database IDs to object_ids for relationship resolution
     let mut id_to_object_id: std::collections::HashMap<i64, String> =
         std::collections::HashMap::new();
 
-    // Scan all values in all rows for node/edge objects
+    // Scan all values in all rows for node/relationship objects
     for row in rows {
         let values: Vec<&JsonValue> = if let Some(arr) = row.as_array() {
             arr.iter().collect()
@@ -128,7 +128,7 @@ pub fn extract_graph_from_results(
             // Check if this is a node object
             if value.get("_type").and_then(|t| t.as_str()) == Some("node") {
                 if let Some(node) = extract_node_from_json(value) {
-                    // Build ID mapping for edge resolution
+                    // Build ID mapping for relationship resolution
                     if let Some(internal_id) = value.get("id").and_then(|v| v.as_i64()) {
                         id_to_object_id.insert(internal_id, node.id.clone());
                     }
@@ -137,17 +137,17 @@ pub fn extract_graph_from_results(
                     }
                 }
             }
-            // Check if this is an edge object - store for later processing
-            else if value.get("_type").and_then(|t| t.as_str()) == Some("edge") {
+            // Check if this is an relationship object - store for later processing
+            else if value.get("_type").and_then(|t| t.as_str()) == Some("relationship") {
                 raw_edges.push(value.clone());
             }
-            // Check if this is a path object - extract nodes and edges from it
+            // Check if this is a path object - extract nodes and relationships from it
             else if value.get("_type").and_then(|t| t.as_str()) == Some("path") {
                 // Extract nodes from path
                 if let Some(path_nodes) = value.get("nodes").and_then(|n| n.as_array()) {
                     for path_node in path_nodes {
                         if let Some(node) = extract_node_from_json(path_node) {
-                            // Build ID mapping for edge resolution
+                            // Build ID mapping for relationship resolution
                             if let Some(internal_id) = path_node.get("id").and_then(|v| v.as_i64())
                             {
                                 id_to_object_id.insert(internal_id, node.id.clone());
@@ -158,8 +158,8 @@ pub fn extract_graph_from_results(
                         }
                     }
                 }
-                // Extract edges from path
-                if let Some(path_edges) = value.get("edges").and_then(|e| e.as_array()) {
+                // Extract relationships from path
+                if let Some(path_edges) = value.get("relationships").and_then(|e| e.as_array()) {
                     for path_edge in path_edges {
                         raw_edges.push(path_edge.clone());
                     }
@@ -174,19 +174,19 @@ pub fn extract_graph_from_results(
         }
     }
 
-    // Process edges, mapping internal IDs to object_ids and deduplicating
-    // Multiple paths can share the same edge, so we need to deduplicate
-    let edges: Vec<GraphEdge> = raw_edges
+    // Process relationships, mapping internal IDs to object_ids and deduplicating
+    // Multiple paths can share the same relationship, so we need to deduplicate
+    let relationships: Vec<GraphEdge> = raw_edges
         .iter()
         .filter_map(|value| extract_edge_from_json(value, &id_to_object_id))
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
 
-    // If we found direct node/edge objects, use those
-    if !nodes.is_empty() || !edges.is_empty() {
-        // If we have edges but missing some nodes, fetch them
-        let edge_node_ids: std::collections::HashSet<String> = edges
+    // If we found direct node/relationship objects, use those
+    if !nodes.is_empty() || !relationships.is_empty() {
+        // If we have relationships but missing some nodes, fetch them
+        let edge_node_ids: std::collections::HashSet<String> = relationships
             .iter()
             .flat_map(|e| vec![e.source.clone(), e.target.clone()])
             .collect();
@@ -202,7 +202,10 @@ pub fn extract_graph_from_results(
             }
         }
 
-        return Ok(Some(FullGraph { nodes, edges }));
+        return Ok(Some(FullGraph {
+            nodes,
+            relationships,
+        }));
     }
 
     // Fall back to looking up nodes by collected IDs
@@ -273,7 +276,7 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
     })
 }
 
-/// Extract a GraphEdge from a JSON edge object.
+/// Extract a GraphEdge from a JSON relationship object.
 ///
 /// Uses the id_map to convert internal database IDs to object_ids.
 fn extract_edge_from_json(
@@ -295,8 +298,8 @@ fn extract_edge_from_json(
         })
     })?;
 
-    let edge_type = value
-        .get("edge_type")
+    let rel_type = value
+        .get("rel_type")
         .and_then(|v| v.as_str())
         .map(String::from)
         .unwrap_or_else(|| "RELATED".to_string());
@@ -304,6 +307,6 @@ fn extract_edge_from_json(
     Some(GraphEdge {
         source,
         target,
-        edge_type,
+        rel_type,
     })
 }

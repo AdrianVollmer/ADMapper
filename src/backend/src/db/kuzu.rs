@@ -99,7 +99,7 @@ impl KuzuDatabase {
             }
         }
 
-        // Create REL TABLE GROUP for edges between all node types
+        // Create REL TABLE GROUP for relationships between all node types
         // This allows any node type to connect to any other
         let mut from_to_pairs = Vec::new();
         for from_type in Self::NODE_TYPES {
@@ -109,17 +109,17 @@ impl KuzuDatabase {
         }
 
         let create_edges = format!(
-            r#"CREATE REL TABLE GROUP IF NOT EXISTS Edge(
+            r#"CREATE REL TABLE GROUP IF NOT EXISTS Relationship(
                 {},
-                edge_type STRING,
+                rel_type STRING,
                 properties STRING
             )"#,
             from_to_pairs.join(", ")
         );
 
         match conn.query(&create_edges) {
-            Ok(_) => debug!("Created Edge relationship table group"),
-            Err(e) => trace!("Edge table might already exist: {}", e),
+            Ok(_) => debug!("Created Relationship relationship table group"),
+            Err(e) => trace!("Relationship table might already exist: {}", e),
         }
 
         // Create QueryHistory table for storing query history
@@ -170,8 +170,8 @@ impl KuzuDatabase {
         info!("Clearing all data from KuzuDB");
         let conn = self.conn()?;
 
-        // Delete all edges first (due to foreign key constraints)
-        conn.query("MATCH ()-[e:Edge]->() DELETE e")?;
+        // Delete all relationships first (due to foreign key constraints)
+        conn.query("MATCH ()-[e:Relationship]->() DELETE e")?;
 
         // Delete nodes from all tables
         for node_type in Self::NODE_TYPES {
@@ -306,10 +306,10 @@ impl KuzuDatabase {
         None
     }
 
-    /// Insert a batch of edges.
+    /// Insert a batch of relationships.
     /// Note: This requires source and target nodes to already exist.
-    pub fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
-        if edges.is_empty() {
+    pub fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        if relationships.is_empty() {
             return Ok(0);
         }
 
@@ -319,47 +319,50 @@ impl KuzuDatabase {
         let mut node_type_cache: std::collections::HashMap<String, &'static str> =
             std::collections::HashMap::new();
 
-        for edge in edges {
-            let props_str = serde_json::to_string(&edge.properties)?;
-            let source = edge.source.replace('\'', "''");
-            let target = edge.target.replace('\'', "''");
-            let edge_type = edge.edge_type.replace('\'', "''");
+        for relationship in relationships {
+            let props_str = serde_json::to_string(&relationship.properties)?;
+            let source = relationship.source.replace('\'', "''");
+            let target = relationship.target.replace('\'', "''");
+            let rel_type = relationship.rel_type.replace('\'', "''");
             let props_escaped = props_str.replace('\'', "''");
 
             // Look up source node type (with caching)
-            let src_type = if let Some(t) = node_type_cache.get(&edge.source) {
+            let src_type = if let Some(t) = node_type_cache.get(&relationship.source) {
                 *t
-            } else if let Some(t) = self.find_node_type(&conn, &edge.source) {
-                node_type_cache.insert(edge.source.clone(), t);
+            } else if let Some(t) = self.find_node_type(&conn, &relationship.source) {
+                node_type_cache.insert(relationship.source.clone(), t);
                 t
             } else {
-                debug!("Source node not found: {}", edge.source);
+                debug!("Source node not found: {}", relationship.source);
                 continue;
             };
 
             // Look up target node type (with caching)
-            let tgt_type = if let Some(t) = node_type_cache.get(&edge.target) {
+            let tgt_type = if let Some(t) = node_type_cache.get(&relationship.target) {
                 *t
-            } else if let Some(t) = self.find_node_type(&conn, &edge.target) {
-                node_type_cache.insert(edge.target.clone(), t);
+            } else if let Some(t) = self.find_node_type(&conn, &relationship.target) {
+                node_type_cache.insert(relationship.target.clone(), t);
                 t
             } else {
-                debug!("Target node not found: {}", edge.target);
+                debug!("Target node not found: {}", relationship.target);
                 continue;
             };
 
             let query = format!(
                 "MATCH (a:{} {{object_id: '{}'}}), (b:{} {{object_id: '{}'}}) \
-                 CREATE (a)-[:Edge {{edge_type: '{}', properties: '{}'}}]->(b)",
-                src_type, source, tgt_type, target, edge_type, props_escaped
+                 CREATE (a)-[:Relationship {{rel_type: '{}', properties: '{}'}}]->(b)",
+                src_type, source, tgt_type, target, rel_type, props_escaped
             );
 
             if let Err(e) = conn.query(&query) {
-                debug!("Failed to create edge {} -> {}: {}", source, target, e);
+                debug!(
+                    "Failed to create relationship {} -> {}: {}",
+                    source, target, e
+                );
             }
         }
 
-        Ok(edges.len())
+        Ok(relationships.len())
     }
 
     /// Insert a single node.
@@ -368,13 +371,13 @@ impl KuzuDatabase {
         Ok(())
     }
 
-    /// Insert a single edge.
-    pub fn insert_edge(&self, edge: DbEdge) -> Result<()> {
-        self.insert_edges(&[edge])?;
+    /// Insert a single relationship.
+    pub fn insert_edge(&self, relationship: DbEdge) -> Result<()> {
+        self.insert_edges(&[relationship])?;
         Ok(())
     }
 
-    /// Get node and edge counts.
+    /// Get node and relationship counts.
     pub fn get_stats(&self) -> Result<(usize, usize)> {
         let conn = self.conn()?;
 
@@ -387,7 +390,7 @@ impl KuzuDatabase {
             }
         }
 
-        let edge_result = conn.query("MATCH ()-[e:Edge]->() RETURN count(e)")?;
+        let edge_result = conn.query("MATCH ()-[e:Relationship]->() RETURN count(e)")?;
         let edge_count = self.extract_count(&edge_result);
 
         Ok((node_count, edge_count))
@@ -469,16 +472,16 @@ impl KuzuDatabase {
         Ok(nodes)
     }
 
-    /// Get all edges.
+    /// Get all relationships.
     pub fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
         let conn = self.conn()?;
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
 
-        // Query edges between each pair of node types
+        // Query relationships between each pair of node types
         for src_type in Self::NODE_TYPES {
             for tgt_type in Self::NODE_TYPES {
                 let query = format!(
-                    "MATCH (a:{})-[e:Edge]->(b:{}) RETURN a.object_id, b.object_id, e.edge_type, e.properties",
+                    "MATCH (a:{})-[e:Relationship]->(b:{}) RETURN a.object_id, b.object_id, e.rel_type, e.properties",
                     src_type, tgt_type
                 );
                 if let Ok(result) = conn.query(&query) {
@@ -488,10 +491,10 @@ impl KuzuDatabase {
                         if parts.len() >= 4 {
                             let properties =
                                 serde_json::from_str(parts[3]).unwrap_or(JsonValue::Null);
-                            edges.push(DbEdge {
+                            relationships.push(DbEdge {
                                 source: parts[0].to_string(),
                                 target: parts[1].to_string(),
-                                edge_type: parts[2].to_string(),
+                                rel_type: parts[2].to_string(),
                                 properties,
                                 ..Default::default()
                             });
@@ -501,20 +504,20 @@ impl KuzuDatabase {
             }
         }
 
-        Ok(edges)
+        Ok(relationships)
     }
 
-    /// Get all distinct edge types.
+    /// Get all distinct relationship types.
     pub fn get_edge_types(&self) -> Result<Vec<String>> {
         let conn = self.conn()?;
-        let result = conn.query("MATCH ()-[e:Edge]->() RETURN DISTINCT e.edge_type")?;
+        let result = conn.query("MATCH ()-[e:Relationship]->() RETURN DISTINCT e.rel_type")?;
 
         let mut types = Vec::new();
         let result_str = result.to_string();
         for line in result_str.lines().skip(1) {
-            let edge_type = line.trim();
-            if !edge_type.is_empty() {
-                types.push(edge_type.to_string());
+            let rel_type = line.trim();
+            if !rel_type.is_empty() {
+                types.push(rel_type.to_string());
             }
         }
 
@@ -646,7 +649,7 @@ impl KuzuDatabase {
 
             // Use Cypher shortest path with typed nodes
             let query = format!(
-                "MATCH p = (a:{} {{object_id: '{}'}})-[e:Edge* SHORTEST 1..20]->(b:{} {{object_id: '{}'}}) \
+                "MATCH p = (a:{} {{object_id: '{}'}})-[e:Relationship* SHORTEST 1..20]->(b:{} {{object_id: '{}'}}) \
                  RETURN nodes(p), relationships(p)",
                 from_type, from_escaped, to_type, to_escaped
             );
@@ -684,15 +687,15 @@ impl KuzuDatabase {
         from: &str,
         to: &str,
     ) -> Result<Option<Vec<(String, Option<String>)>>> {
-        let edges = self.get_all_edges()?;
+        let relationships = self.get_all_edges()?;
 
         // Build adjacency list
         let mut adj: std::collections::HashMap<String, Vec<(String, String)>> =
             std::collections::HashMap::new();
-        for edge in &edges {
-            adj.entry(edge.source.clone())
+        for relationship in &relationships {
+            adj.entry(relationship.source.clone())
                 .or_default()
-                .push((edge.target.clone(), edge.edge_type.clone()));
+                .push((relationship.target.clone(), relationship.rel_type.clone()));
         }
 
         // BFS
@@ -709,8 +712,8 @@ impl KuzuDatabase {
                 // Reconstruct path
                 let mut path = vec![(to.to_string(), None)];
                 let mut node = to.to_string();
-                while let Some((prev, edge_type)) = parent.get(&node) {
-                    path.push((prev.clone(), Some(edge_type.clone())));
+                while let Some((prev, rel_type)) = parent.get(&node) {
+                    path.push((prev.clone(), Some(rel_type.clone())));
                     node = prev.clone();
                 }
                 path.reverse();
@@ -718,10 +721,10 @@ impl KuzuDatabase {
             }
 
             if let Some(neighbors) = adj.get(&current) {
-                for (neighbor, edge_type) in neighbors {
+                for (neighbor, rel_type) in neighbors {
                     if !visited.contains(neighbor) {
                         visited.insert(neighbor.clone());
-                        parent.insert(neighbor.clone(), (current.clone(), edge_type.clone()));
+                        parent.insert(neighbor.clone(), (current.clone(), rel_type.clone()));
                         queue.push_back(neighbor.clone());
                     }
                 }
@@ -741,13 +744,13 @@ impl KuzuDatabase {
 
         let conn = self.conn()?;
 
-        // Build WHERE clause to exclude certain edge types
+        // Build WHERE clause to exclude certain relationship types
         let exclude_clause = if exclude_edge_types.is_empty() {
             String::new()
         } else {
             let conditions: Vec<String> = exclude_edge_types
                 .iter()
-                .map(|t| format!("e.edge_type <> '{}'", t.replace('\'', "''")))
+                .map(|t| format!("e.rel_type <> '{}'", t.replace('\'', "''")))
                 .collect();
             format!(
                 "AND ALL(e IN relationships(p) WHERE {})",
@@ -758,7 +761,7 @@ impl KuzuDatabase {
         // Find all users with paths to DA groups (SID ending in -512)
         // DA groups are in the Group table
         let query = format!(
-            "MATCH p = (u:User)-[:Edge*1..10]->(da:Group) \
+            "MATCH p = (u:User)-[:Relationship*1..10]->(da:Group) \
              WHERE da.object_id ENDS WITH '-512' {} \
              RETURN u.object_id, u.label, length(p) as hops \
              ORDER BY hops, u.label",
@@ -834,7 +837,7 @@ impl KuzuDatabase {
         Ok(nodes)
     }
 
-    /// Get edges between a set of nodes.
+    /// Get relationships between a set of nodes.
     pub fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>> {
         if node_ids.is_empty() {
             return Ok(Vec::new());
@@ -847,15 +850,15 @@ impl KuzuDatabase {
             .collect();
         let id_set = id_list.join(", ");
 
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
 
-        // Query edges between each pair of node types
+        // Query relationships between each pair of node types
         for src_type in Self::NODE_TYPES {
             for tgt_type in Self::NODE_TYPES {
                 let query = format!(
-                    "MATCH (a:{})-[e:Edge]->(b:{}) \
+                    "MATCH (a:{})-[e:Relationship]->(b:{}) \
                      WHERE a.object_id IN [{}] AND b.object_id IN [{}] \
-                     RETURN a.object_id, b.object_id, e.edge_type, e.properties",
+                     RETURN a.object_id, b.object_id, e.rel_type, e.properties",
                     src_type, tgt_type, id_set, id_set
                 );
 
@@ -866,10 +869,10 @@ impl KuzuDatabase {
                         if parts.len() >= 4 {
                             let properties =
                                 serde_json::from_str(parts[3]).unwrap_or(JsonValue::Null);
-                            edges.push(DbEdge {
+                            relationships.push(DbEdge {
                                 source: parts[0].to_string(),
                                 target: parts[1].to_string(),
-                                edge_type: parts[2].to_string(),
+                                rel_type: parts[2].to_string(),
                                 properties,
                                 ..Default::default()
                             });
@@ -879,7 +882,7 @@ impl KuzuDatabase {
             }
         }
 
-        Ok(edges)
+        Ok(relationships)
     }
 
     /// Get connections for a node in the specified direction.
@@ -892,7 +895,7 @@ impl KuzuDatabase {
 
         let all_edges = self.get_all_edges()?;
 
-        // Admin permission edge types
+        // Admin permission relationship types
         const ADMIN_EDGE_TYPES: &[&str] = &[
             "AdminTo",
             "GenericAll",
@@ -905,27 +908,28 @@ impl KuzuDatabase {
             "AddMember",
         ];
 
-        // Filter edges based on direction
+        // Filter relationships based on direction
         let filtered_edges: Vec<DbEdge> = all_edges
             .into_iter()
-            .filter(|edge| match direction {
-                "incoming" => edge.target == node_id,
-                "outgoing" => edge.source == node_id,
+            .filter(|relationship| match direction {
+                "incoming" => relationship.target == node_id,
+                "outgoing" => relationship.source == node_id,
                 "admin" => {
-                    edge.source == node_id && ADMIN_EDGE_TYPES.contains(&edge.edge_type.as_str())
+                    relationship.source == node_id
+                        && ADMIN_EDGE_TYPES.contains(&relationship.rel_type.as_str())
                 }
-                "memberof" => edge.source == node_id && edge.edge_type == "MemberOf",
-                "members" => edge.target == node_id && edge.edge_type == "MemberOf",
-                _ => edge.source == node_id || edge.target == node_id,
+                "memberof" => relationship.source == node_id && relationship.rel_type == "MemberOf",
+                "members" => relationship.target == node_id && relationship.rel_type == "MemberOf",
+                _ => relationship.source == node_id || relationship.target == node_id,
             })
             .collect();
 
         // Collect all node IDs involved (including the original node)
         let mut node_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         node_ids.insert(node_id.to_string());
-        for edge in &filtered_edges {
-            node_ids.insert(edge.source.clone());
-            node_ids.insert(edge.target.clone());
+        for relationship in &filtered_edges {
+            node_ids.insert(relationship.source.clone());
+            node_ids.insert(relationship.target.clone());
         }
 
         // Fetch all involved nodes
@@ -935,7 +939,7 @@ impl KuzuDatabase {
         Ok((nodes, filtered_edges))
     }
 
-    /// Get edge counts for a node efficiently using targeted queries.
+    /// Get relationship counts for a node efficiently using targeted queries.
     pub fn get_node_edge_counts(
         &self,
         node_id: &str,
@@ -979,38 +983,38 @@ impl KuzuDatabase {
             None => return Ok((0, 0, 0, 0, 0)), // Node not found
         };
 
-        // Count unique incoming NODES (not edges - a node with multiple edges to us counts as 1)
+        // Count unique incoming NODES (not relationships - a node with multiple relationships to us counts as 1)
         let incoming_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})<-[:Edge]-(other) RETURN count(DISTINCT other)",
+            "MATCH (n:{} {{object_id: '{}'}})<-[:Relationship]-(other) RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let incoming = self.extract_count(&conn.query(&incoming_query)?);
 
         // Count unique outgoing NODES
         let outgoing_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[:Edge]->(other) RETURN count(DISTINCT other)",
+            "MATCH (n:{} {{object_id: '{}'}})-[:Relationship]->(other) RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let outgoing = self.extract_count(&conn.query(&outgoing_query)?);
 
-        // Count unique admin_to NODES (outgoing admin edges)
+        // Count unique admin_to NODES (outgoing admin relationships)
         let admin_types = "'AdminTo','GenericAll','GenericWrite','Owns','WriteDacl','WriteOwner','AllExtendedRights','ForceChangePassword','AddMember'";
         let admin_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge]->(other) WHERE e.edge_type IN [{}] RETURN count(DISTINCT other)",
+            "MATCH (n:{} {{object_id: '{}'}})-[e:Relationship]->(other) WHERE e.rel_type IN [{}] RETURN count(DISTINCT other)",
             node_type, id_escaped, admin_types
         );
         let admin_to = self.extract_count(&conn.query(&admin_query)?);
 
-        // Count unique member_of NODES (outgoing MemberOf edges)
+        // Count unique member_of NODES (outgoing MemberOf relationships)
         let memberof_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge]->(other) WHERE e.edge_type = 'MemberOf' RETURN count(DISTINCT other)",
+            "MATCH (n:{} {{object_id: '{}'}})-[e:Relationship]->(other) WHERE e.rel_type = 'MemberOf' RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let member_of = self.extract_count(&conn.query(&memberof_query)?);
 
-        // Count unique member NODES (incoming MemberOf edges)
+        // Count unique member NODES (incoming MemberOf relationships)
         let members_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})<-[e:Edge]-(other) WHERE e.edge_type = 'MemberOf' RETURN count(DISTINCT other)",
+            "MATCH (n:{} {{object_id: '{}'}})<-[e:Relationship]-(other) WHERE e.rel_type = 'MemberOf' RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let members = self.extract_count(&conn.query(&members_query)?);
@@ -1058,10 +1062,10 @@ impl KuzuDatabase {
         };
 
         // Use variable-length path to find transitive membership
-        // KuzuDB uses Edge with edge_type property for relationships
+        // KuzuDB uses Relationship with rel_type property for relationships
         let query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[e:Edge* 1..20]->(g:Group) \
-             WHERE ALL(rel IN e WHERE rel.edge_type = 'MemberOf') \
+            "MATCH (n:{} {{object_id: '{}'}})-[e:Relationship* 1..20]->(g:Group) \
+             WHERE ALL(rel IN e WHERE rel.rel_type = 'MemberOf') \
              AND g.object_id ENDS WITH '{}' \
              RETURN g.object_id LIMIT 1",
             source_type, id_escaped, suffix_escaped
@@ -1127,11 +1131,11 @@ impl KuzuDatabase {
         let total_users = self.extract_count(&user_result);
 
         // Find "real" DAs - users who are members of DA groups
-        // Using typed tables: User -> Group path with MemberOf edges
+        // Using typed tables: User -> Group path with MemberOf relationships
         let real_da_query = format!(
-            "MATCH p = (u:User)-[:Edge*1..10]->(da:Group) \
+            "MATCH p = (u:User)-[:Relationship*1..10]->(da:Group) \
              WHERE da.object_id ENDS WITH '{}' \
-             AND ALL(e IN relationships(p) WHERE e.edge_type = 'MemberOf') \
+             AND ALL(e IN relationships(p) WHERE e.rel_type = 'MemberOf') \
              RETURN DISTINCT u.object_id, u.label",
             DOMAIN_ADMIN_SID_SUFFIX
         );
@@ -1140,7 +1144,7 @@ impl KuzuDatabase {
 
         // Find "effective" DAs - users with any path to DA group
         let effective_da_query = format!(
-            "MATCH p = (u:User)-[:Edge*1..10]->(da:Group) \
+            "MATCH p = (u:User)-[:Relationship*1..10]->(da:Group) \
              WHERE da.object_id ENDS WITH '{}' \
              RETURN DISTINCT u.object_id, u.label, min(length(p)) as hops",
             DOMAIN_ADMIN_SID_SUFFIX
@@ -1156,7 +1160,7 @@ impl KuzuDatabase {
                 // Suffix match - these are domain-relative SIDs (Groups)
                 let query = format!(
                     "MATCH (p:Group) WHERE p.object_id ENDS WITH '{}' \
-                     OPTIONAL MATCH (p)-[:Edge*1..5]->(target) \
+                     OPTIONAL MATCH (p)-[:Relationship*1..5]->(target) \
                      RETURN p.object_id, count(DISTINCT target)",
                     id_pattern
                 );
@@ -1181,7 +1185,7 @@ impl KuzuDatabase {
                 // Exact SID match - well-known SIDs (Groups)
                 let query = format!(
                     "MATCH (p:Group {{object_id: '{}'}}) \
-                     OPTIONAL MATCH (p)-[:Edge*1..5]->(target) \
+                     OPTIONAL MATCH (p)-[:Relationship*1..5]->(target) \
                      RETURN p.object_id, count(DISTINCT target)",
                     id_pattern
                 );
@@ -1412,16 +1416,16 @@ impl DatabaseBackend for KuzuDatabase {
         KuzuDatabase::insert_node(self, node)
     }
 
-    fn insert_edge(&self, edge: DbEdge) -> Result<()> {
-        KuzuDatabase::insert_edge(self, edge)
+    fn insert_edge(&self, relationship: DbEdge) -> Result<()> {
+        KuzuDatabase::insert_edge(self, relationship)
     }
 
     fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
         KuzuDatabase::insert_nodes(self, nodes)
     }
 
-    fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
-        KuzuDatabase::insert_edges(self, edges)
+    fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        KuzuDatabase::insert_edges(self, relationships)
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {

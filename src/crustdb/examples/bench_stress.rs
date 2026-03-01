@@ -186,7 +186,7 @@ fn main() {
             let graph = generate(*topology, scale);
             let gen_time = gen_start.elapsed();
             println!(
-                "    Generated: {} nodes, {} edges in {:.2}ms",
+                "    Generated: {} nodes, {} relationships in {:.2}ms",
                 graph.node_count(),
                 graph.edge_count(),
                 gen_time.as_secs_f64() * 1000.0
@@ -320,21 +320,22 @@ fn load_crustdb(db: &Database, graph: &GeneratedGraph) -> Result<(), String> {
         .insert_nodes_batch(&graph.nodes)
         .map_err(|e| e.to_string())?;
 
-    // Convert edges to use database IDs
-    let edges: Vec<_> = graph
-        .edges
+    // Convert relationships to use database IDs
+    let relationships: Vec<_> = graph
+        .relationships
         .iter()
-        .map(|(src_idx, tgt_idx, edge_type, props)| {
+        .map(|(src_idx, tgt_idx, rel_type, props)| {
             (
                 node_ids[*src_idx],
                 node_ids[*tgt_idx],
-                edge_type.clone(),
+                rel_type.clone(),
                 props.clone(),
             )
         })
         .collect();
 
-    db.insert_edges_batch(&edges).map_err(|e| e.to_string())?;
+    db.insert_edges_batch(&relationships)
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -584,7 +585,7 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 
 fn print_results_summary(results: &BenchmarkResults) {
     println!(
-        "    {} results ({} nodes, {} edges):",
+        "    {} results ({} nodes, {} relationships):",
         results.database, results.total_nodes, results.total_edges
     );
     println!(
@@ -725,7 +726,7 @@ OPTIONS:
     -h, --help              Show this help message
 
 TOPOLOGIES:
-    dense_cluster   Near-clique (10% edge density) - tests BFS explosion
+    dense_cluster   Near-clique (10% relationship density) - tests BFS explosion
     long_chain      Linear path with shortcuts - tests deep traversals
     wide_fanout     Tree with branching=100 - tests high-degree node expansion
     power_law       Barabási-Albert scale-free - tests skewed degree distribution

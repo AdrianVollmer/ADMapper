@@ -33,7 +33,7 @@ struct Domain {
 pub struct Generator {
     rng: StdRng,
     nodes: Vec<DbNode>,
-    edges: Vec<DbEdge>,
+    relationships: Vec<DbEdge>,
     domains: Vec<Domain>,
     next_user_id: u32,
     next_computer_id: u32,
@@ -46,7 +46,7 @@ impl Generator {
         Self {
             rng: StdRng::seed_from_u64(SEED),
             nodes: Vec::new(),
-            edges: Vec::new(),
+            relationships: Vec::new(),
             domains: Vec::new(),
             next_user_id: 1000,
             next_computer_id: 1000,
@@ -64,7 +64,7 @@ impl Generator {
             GenerateSize::Large => gen.generate_large(),
         }
 
-        (gen.nodes, gen.edges)
+        (gen.nodes, gen.relationships)
     }
 
     /// Small dataset: single domain, basic structure.
@@ -312,10 +312,10 @@ impl Generator {
 
             // Domain Admins is member of Administrators
             if rid == 512 {
-                self.edges.push(DbEdge {
+                self.relationships.push(DbEdge {
                     source: group_sid.clone(),
                     target: format!("{}-544", domain_sid),
-                    edge_type: "MemberOf".to_string(),
+                    rel_type: "MemberOf".to_string(),
                     properties: json!({}),
                     ..Default::default()
                 });
@@ -323,10 +323,10 @@ impl Generator {
 
             // Add AdminTo for Domain Admins on Domain Controllers
             if rid == 512 {
-                self.edges.push(DbEdge {
+                self.relationships.push(DbEdge {
                     source: group_sid,
                     target: domain_sid.to_string(),
-                    edge_type: "GenericAll".to_string(),
+                    rel_type: "GenericAll".to_string(),
                     properties: json!({}),
                     ..Default::default()
                 });
@@ -401,19 +401,19 @@ impl Generator {
         self.nodes.push(dc);
 
         // DC is member of Domain Controllers
-        self.edges.push(DbEdge {
+        self.relationships.push(DbEdge {
             source: computer_sid.clone(),
             target: format!("{}-516", domain_sid),
-            edge_type: "MemberOf".to_string(),
+            rel_type: "MemberOf".to_string(),
             properties: json!({}),
             ..Default::default()
         });
 
         // Domain Admins have GenericAll on DC
-        self.edges.push(DbEdge {
+        self.relationships.push(DbEdge {
             source: format!("{}-512", domain_sid),
             target: computer_sid,
-            edge_type: "GenericAll".to_string(),
+            rel_type: "GenericAll".to_string(),
             properties: json!({}),
             ..Default::default()
         });
@@ -449,10 +449,10 @@ impl Generator {
         self.nodes.push(server);
 
         // Server is member of Domain Computers
-        self.edges.push(DbEdge {
+        self.relationships.push(DbEdge {
             source: computer_sid.clone(),
             target: format!("{}-515", domain_sid),
-            edge_type: "MemberOf".to_string(),
+            rel_type: "MemberOf".to_string(),
             properties: json!({}),
             ..Default::default()
         });
@@ -470,10 +470,10 @@ impl Generator {
             .map(|n| n.id.clone());
 
         if let Some(sa_id) = server_admins {
-            self.edges.push(DbEdge {
+            self.relationships.push(DbEdge {
                 source: sa_id,
                 target: computer_sid,
-                edge_type: "AdminTo".to_string(),
+                rel_type: "AdminTo".to_string(),
                 properties: json!({}),
                 ..Default::default()
             });
@@ -506,10 +506,10 @@ impl Generator {
         self.nodes.push(wks);
 
         // Workstation is member of Domain Computers
-        self.edges.push(DbEdge {
+        self.relationships.push(DbEdge {
             source: computer_sid.clone(),
             target: format!("{}-515", domain_sid),
-            edge_type: "MemberOf".to_string(),
+            rel_type: "MemberOf".to_string(),
             properties: json!({}),
             ..Default::default()
         });
@@ -526,10 +526,10 @@ impl Generator {
             .map(|n| n.id.clone());
 
         if let Some(wa_id) = wks_admins {
-            self.edges.push(DbEdge {
+            self.relationships.push(DbEdge {
                 source: wa_id,
                 target: computer_sid,
-                edge_type: "AdminTo".to_string(),
+                rel_type: "AdminTo".to_string(),
                 properties: json!({}),
                 ..Default::default()
             });
@@ -662,10 +662,10 @@ impl Generator {
             self.nodes.push(user);
 
             // All users are members of Domain Users
-            self.edges.push(DbEdge {
+            self.relationships.push(DbEdge {
                 source: user_sid.clone(),
                 target: format!("{}-513", domain_sid),
-                edge_type: "MemberOf".to_string(),
+                rel_type: "MemberOf".to_string(),
                 properties: json!({}),
                 ..Default::default()
             });
@@ -673,10 +673,10 @@ impl Generator {
             // Assign to groups based on role
             if i < admin_count {
                 // Domain Admin
-                self.edges.push(DbEdge {
+                self.relationships.push(DbEdge {
                     source: user_sid.clone(),
                     target: format!("{}-512", domain_sid),
-                    edge_type: "MemberOf".to_string(),
+                    rel_type: "MemberOf".to_string(),
                     properties: json!({}),
                     ..Default::default()
                 });
@@ -701,10 +701,10 @@ impl Generator {
                     .map(|n| n.id.clone());
 
                 if let Some(g_id) = it_group {
-                    self.edges.push(DbEdge {
+                    self.relationships.push(DbEdge {
                         source: user_sid.clone(),
                         target: g_id,
-                        edge_type: "MemberOf".to_string(),
+                        rel_type: "MemberOf".to_string(),
                         properties: json!({}),
                         ..Default::default()
                     });
@@ -723,10 +723,10 @@ impl Generator {
                     .map(|n| n.id.clone());
 
                 if let Some(g_id) = dept_group {
-                    self.edges.push(DbEdge {
+                    self.relationships.push(DbEdge {
                         source: user_sid.clone(),
                         target: g_id,
-                        edge_type: "MemberOf".to_string(),
+                        rel_type: "MemberOf".to_string(),
                         properties: json!({}),
                         ..Default::default()
                     });
@@ -754,10 +754,10 @@ impl Generator {
                 if !workstations.is_empty() {
                     let wks = workstations[self.rng.gen_range(0..workstations.len())].clone();
                     // HasSession: Computer -> User (computer has session of user)
-                    self.edges.push(DbEdge {
+                    self.relationships.push(DbEdge {
                         source: wks,
                         target: user_sid,
-                        edge_type: "HasSession".to_string(),
+                        rel_type: "HasSession".to_string(),
                         properties: json!({}),
                         ..Default::default()
                     });
@@ -807,10 +807,10 @@ impl Generator {
             self.nodes.push(ou);
 
             // Domain Contains OU
-            self.edges.push(DbEdge {
+            self.relationships.push(DbEdge {
                 source: domain_sid.to_string(),
                 target: ou_id,
-                edge_type: "Contains".to_string(),
+                rel_type: "Contains".to_string(),
                 properties: json!({}),
                 ..Default::default()
             });
@@ -858,10 +858,10 @@ impl Generator {
             self.nodes.push(gpo);
 
             // GPLink to domain
-            self.edges.push(DbEdge {
+            self.relationships.push(DbEdge {
                 source: gpo_id,
                 target: domain_sid.to_string(),
-                edge_type: "GPLink".to_string(),
+                rel_type: "GPLink".to_string(),
                 properties: json!({}),
                 ..Default::default()
             });
@@ -887,10 +887,10 @@ impl Generator {
             // Child domains trust root
             for (child_sid, is_root) in &forest_domains {
                 if !is_root {
-                    self.edges.push(DbEdge {
+                    self.relationships.push(DbEdge {
                         source: child_sid.clone(),
                         target: root.clone(),
-                        edge_type: "TrustedBy".to_string(),
+                        rel_type: "TrustedBy".to_string(),
                         properties: json!({
                             "trusttype": "ParentChild",
                             "transitive": true,
@@ -918,10 +918,10 @@ impl Generator {
 
         if let (Some(pr), Some(fr)) = (primary_root, foreign_root) {
             // Bidirectional external trust
-            self.edges.push(DbEdge {
+            self.relationships.push(DbEdge {
                 source: fr.clone(),
                 target: pr.clone(),
-                edge_type: "TrustedBy".to_string(),
+                rel_type: "TrustedBy".to_string(),
                 properties: json!({
                     "trusttype": "External",
                     "transitive": false,
@@ -929,10 +929,10 @@ impl Generator {
                 ..Default::default()
             });
 
-            self.edges.push(DbEdge {
+            self.relationships.push(DbEdge {
                 source: pr,
                 target: fr,
-                edge_type: "TrustedBy".to_string(),
+                rel_type: "TrustedBy".to_string(),
                 properties: json!({
                     "trusttype": "External",
                     "transitive": false,
@@ -952,7 +952,7 @@ impl Generator {
                 n.label == "User"
                     && n.id.starts_with(domain_sid)
                     && !self
-                        .edges
+                        .relationships
                         .iter()
                         .any(|e| e.source == n.id && e.target == format!("{}-512", domain_sid))
             })
@@ -1022,17 +1022,17 @@ impl Generator {
 
             let vuln_type = vulnerability_types[self.rng.gen_range(0..vulnerability_types.len())];
 
-            // Check we don't already have this edge
+            // Check we don't already have this relationship
             let exists = self
-                .edges
+                .relationships
                 .iter()
-                .any(|e| e.source == source && e.target == target && e.edge_type == vuln_type);
+                .any(|e| e.source == source && e.target == target && e.rel_type == vuln_type);
 
             if !exists {
-                self.edges.push(DbEdge {
+                self.relationships.push(DbEdge {
                     source,
                     target,
-                    edge_type: vuln_type.to_string(),
+                    rel_type: vuln_type.to_string(),
                     properties: json!({
                         "isacl": true,
                         "isinherited": self.rng.gen_bool(0.3),
@@ -1062,17 +1062,17 @@ impl Generator {
         // Add some DCSync rights to a non-DA user (dangerous misconfiguration)
         if !regular_users.is_empty() && self.rng.gen_bool(0.3) {
             let attacker = regular_users[self.rng.gen_range(0..regular_users.len())].clone();
-            self.edges.push(DbEdge {
+            self.relationships.push(DbEdge {
                 source: attacker.clone(),
                 target: domain_sid.to_string(),
-                edge_type: "GetChanges".to_string(),
+                rel_type: "GetChanges".to_string(),
                 properties: json!({}),
                 ..Default::default()
             });
-            self.edges.push(DbEdge {
+            self.relationships.push(DbEdge {
                 source: attacker,
                 target: domain_sid.to_string(),
-                edge_type: "GetChangesAll".to_string(),
+                rel_type: "GetChangesAll".to_string(),
                 properties: json!({}),
                 ..Default::default()
             });

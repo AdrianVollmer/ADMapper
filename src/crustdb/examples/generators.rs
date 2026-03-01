@@ -15,7 +15,7 @@ pub struct GeneratedGraph {
     pub nodes: Vec<(Vec<String>, serde_json::Value)>,
     /// Edges as (source_idx, target_idx, type, properties).
     /// Indices refer to position in nodes vector.
-    pub edges: Vec<(usize, usize, String, serde_json::Value)>,
+    pub relationships: Vec<(usize, usize, String, serde_json::Value)>,
 }
 
 impl GeneratedGraph {
@@ -24,7 +24,7 @@ impl GeneratedGraph {
     }
 
     pub fn edge_count(&self) -> usize {
-        self.edges.len()
+        self.relationships.len()
     }
 }
 
@@ -33,7 +33,7 @@ impl GeneratedGraph {
 pub enum Topology {
     /// Near-clique: every node connected to ~10% of others randomly.
     DenseCluster,
-    /// Linear chain with optional shortcut edges.
+    /// Linear chain with optional shortcut relationships.
     LongChain,
     /// Tree with high branching factor.
     WideFanOut,
@@ -114,19 +114,22 @@ pub fn generate_dense_cluster(n: usize, density: Option<f64>) -> GeneratedGraph 
         })
         .collect();
 
-    let mut edges = Vec::new();
+    let mut relationships = Vec::new();
     for i in 0..n {
         for j in 0..n {
             if i != j && rng.next_f64() < density {
-                edges.push((i, j, "CONNECTED".to_string(), serde_json::json!({})));
+                relationships.push((i, j, "CONNECTED".to_string(), serde_json::json!({})));
             }
         }
     }
 
-    GeneratedGraph { nodes, edges }
+    GeneratedGraph {
+        nodes,
+        relationships,
+    }
 }
 
-/// Generate a long chain graph with optional shortcut edges.
+/// Generate a long chain graph with optional shortcut relationships.
 ///
 /// Creates a linear path A→B→C→...→N, plus random shortcuts.
 pub fn generate_long_chain(n: usize, shortcuts: usize) -> GeneratedGraph {
@@ -144,23 +147,26 @@ pub fn generate_long_chain(n: usize, shortcuts: usize) -> GeneratedGraph {
         })
         .collect();
 
-    // Chain edges
-    let mut edges: Vec<_> = (0..n - 1)
+    // Chain relationships
+    let mut relationships: Vec<_> = (0..n - 1)
         .map(|i| (i, i + 1, "NEXT".to_string(), serde_json::json!({})))
         .collect();
 
-    // Add random shortcut edges
+    // Add random shortcut relationships
     let mut shortcut_set: HashSet<(usize, usize)> = HashSet::new();
     while shortcut_set.len() < shortcuts && shortcut_set.len() < n * (n - 1) / 2 {
         let from = rng.next_usize(n);
         let to = rng.next_usize(n);
         if from != to && !shortcut_set.contains(&(from, to)) {
             shortcut_set.insert((from, to));
-            edges.push((from, to, "SHORTCUT".to_string(), serde_json::json!({})));
+            relationships.push((from, to, "SHORTCUT".to_string(), serde_json::json!({})));
         }
     }
 
-    GeneratedGraph { nodes, edges }
+    GeneratedGraph {
+        nodes,
+        relationships,
+    }
 }
 
 /// Generate a wide fan-out tree.
@@ -170,7 +176,7 @@ pub fn generate_long_chain(n: usize, shortcuts: usize) -> GeneratedGraph {
 pub fn generate_wide_fanout(branching: usize, depth: usize) -> GeneratedGraph {
     let mut rng = SimpleRng::new(42);
     let mut nodes = Vec::new();
-    let mut edges = Vec::new();
+    let mut relationships = Vec::new();
 
     // BFS to build the tree
     let mut current_level = vec![0usize]; // Start with root
@@ -196,7 +202,7 @@ pub fn generate_wide_fanout(branching: usize, depth: usize) -> GeneratedGraph {
                         "depth": d + 1
                     }),
                 ));
-                edges.push((
+                relationships.push((
                     parent_idx,
                     child_idx,
                     "CHILD".to_string(),
@@ -208,14 +214,17 @@ pub fn generate_wide_fanout(branching: usize, depth: usize) -> GeneratedGraph {
         current_level = next_level;
     }
 
-    GeneratedGraph { nodes, edges }
+    GeneratedGraph {
+        nodes,
+        relationships,
+    }
 }
 
 /// Generate a power-law (Barabási-Albert) graph.
 ///
 /// Uses preferential attachment: new nodes connect to existing nodes
 /// with probability proportional to their degree.
-/// `m` is the number of edges each new node creates.
+/// `m` is the number of relationships each new node creates.
 pub fn generate_power_law(n: usize, m: usize) -> GeneratedGraph {
     let mut rng = SimpleRng::new(42);
 
@@ -233,11 +242,11 @@ pub fn generate_power_law(n: usize, m: usize) -> GeneratedGraph {
         })
         .collect();
 
-    // Initial complete graph edges
-    let mut edges: Vec<(usize, usize, String, serde_json::Value)> = Vec::new();
+    // Initial complete graph relationships
+    let mut relationships: Vec<(usize, usize, String, serde_json::Value)> = Vec::new();
     for i in 0..initial_nodes {
         for j in (i + 1)..initial_nodes {
-            edges.push((i, j, "LINKED".to_string(), serde_json::json!({})));
+            relationships.push((i, j, "LINKED".to_string(), serde_json::json!({})));
         }
     }
 
@@ -277,7 +286,7 @@ pub fn generate_power_law(n: usize, m: usize) -> GeneratedGraph {
 
             if !connected.contains(&target) {
                 connected.insert(target);
-                edges.push((new_idx, target, "LINKED".to_string(), serde_json::json!({})));
+                relationships.push((new_idx, target, "LINKED".to_string(), serde_json::json!({})));
                 degrees[new_idx] += 1;
                 degrees[target] += 1;
                 total_degree += 2;
@@ -285,7 +294,10 @@ pub fn generate_power_law(n: usize, m: usize) -> GeneratedGraph {
         }
     }
 
-    GeneratedGraph { nodes, edges }
+    GeneratedGraph {
+        nodes,
+        relationships,
+    }
 }
 
 /// Generate a graph of the specified topology and scale.
@@ -327,7 +339,7 @@ mod tests {
     fn test_dense_cluster() {
         let graph = generate_dense_cluster(100, Some(0.1));
         assert_eq!(graph.node_count(), 100);
-        // With 10% density, expect ~100*99*0.1 = 990 edges (but random)
+        // With 10% density, expect ~100*99*0.1 = 990 relationships (but random)
         assert!(graph.edge_count() > 500 && graph.edge_count() < 1500);
     }
 
@@ -343,7 +355,7 @@ mod tests {
         let graph = generate_wide_fanout(10, 2);
         // 1 root + 10 children + 100 grandchildren = 111 nodes
         assert_eq!(graph.node_count(), 111);
-        // Each non-leaf has 10 children = 11 * 10 = 110 edges
+        // Each non-leaf has 10 children = 11 * 10 = 110 relationships
         assert_eq!(graph.edge_count(), 110);
     }
 
@@ -351,9 +363,9 @@ mod tests {
     fn test_power_law() {
         let graph = generate_power_law(100, 3);
         assert_eq!(graph.node_count(), 100);
-        // Initial complete graph of 4 nodes = 6 edges
-        // Then 96 nodes each adding ~3 edges = ~288 edges
-        // Total ~294 edges (may vary due to collision avoidance)
+        // Initial complete graph of 4 nodes = 6 relationships
+        // Then 96 nodes each adding ~3 relationships = ~288 relationships
+        // Total ~294 relationships (may vary due to collision avoidance)
         assert!(graph.edge_count() > 250 && graph.edge_count() < 350);
     }
 }

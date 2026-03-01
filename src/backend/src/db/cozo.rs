@@ -58,13 +58,13 @@ impl GraphDatabase {
             }
         "#;
 
-        // Create edges relation
-        // Composite key of source, target, edge_type
+        // Create relationships relation
+        // Composite key of source, target, rel_type
         let create_edges = r#"
-            :create edges {
+            :create relationships {
                 source: String,
                 target: String,
-                edge_type: String
+                rel_type: String
                 =>
                 properties: String
             }
@@ -99,7 +99,7 @@ impl GraphDatabase {
             .db
             .run_script(create_edges, Default::default(), ScriptMutability::Mutable)
         {
-            Ok(_) => debug!("Created edges relation"),
+            Ok(_) => debug!("Created relationships relation"),
             Err(_) => trace!("Edges relation already exists"),
         }
         match self.db.run_script(
@@ -137,14 +137,14 @@ impl GraphDatabase {
     /// Clear all data from the database.
     pub fn clear(&self) -> Result<()> {
         info!("Clearing all data from database");
-        // Delete all nodes and edges
+        // Delete all nodes and relationships
         self.db.run_script(
             "?[object_id] := *nodes{object_id} :delete nodes {object_id}",
             Default::default(),
             ScriptMutability::Mutable,
         )?;
         self.db.run_script(
-            "?[source, target, edge_type] := *edges{source, target, edge_type} :delete edges {source, target, edge_type}",
+            "?[source, target, rel_type] := *relationships{source, target, rel_type} :delete relationships {source, target, rel_type}",
             Default::default(),
             ScriptMutability::Mutable,
         )?;
@@ -152,10 +152,10 @@ impl GraphDatabase {
         Ok(())
     }
 
-    /// Get all distinct edge types in the database.
+    /// Get all distinct relationship types in the database.
     pub fn get_edge_types(&self) -> Result<Vec<String>> {
         let result = self.db.run_script(
-            "?[edge_type] := *edges{edge_type}",
+            "?[rel_type] := *relationships{rel_type}",
             Default::default(),
             ScriptMutability::Immutable,
         )?;
@@ -200,9 +200,9 @@ impl GraphDatabase {
         Ok(())
     }
 
-    /// Insert a single edge.
-    pub fn insert_edge(&self, edge: DbEdge) -> Result<()> {
-        self.insert_edges(&[edge])?;
+    /// Insert a single relationship.
+    pub fn insert_edge(&self, relationship: DbEdge) -> Result<()> {
+        self.insert_edges(&[relationship])?;
         Ok(())
     }
 
@@ -242,19 +242,19 @@ impl GraphDatabase {
         Ok(nodes.len())
     }
 
-    /// Insert a batch of edges.
-    pub fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
-        if edges.is_empty() {
+    /// Insert a batch of relationships.
+    pub fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        if relationships.is_empty() {
             return Ok(0);
         }
 
-        let mut rows = Vec::with_capacity(edges.len());
-        for edge in edges {
-            let props_str = serde_json::to_string(&edge.properties)?;
+        let mut rows = Vec::with_capacity(relationships.len());
+        for relationship in relationships {
+            let props_str = serde_json::to_string(&relationship.properties)?;
             rows.push(vec![
-                DataValue::Str(edge.source.clone().into()),
-                DataValue::Str(edge.target.clone().into()),
-                DataValue::Str(edge.edge_type.clone().into()),
+                DataValue::Str(relationship.source.clone().into()),
+                DataValue::Str(relationship.target.clone().into()),
+                DataValue::Str(relationship.rel_type.clone().into()),
                 DataValue::Str(props_str.into()),
             ]);
         }
@@ -263,7 +263,7 @@ impl GraphDatabase {
             headers: vec![
                 "source".to_string(),
                 "target".to_string(),
-                "edge_type".to_string(),
+                "rel_type".to_string(),
                 "properties".to_string(),
             ],
             rows,
@@ -271,13 +271,13 @@ impl GraphDatabase {
         };
 
         let mut relations = BTreeMap::new();
-        relations.insert("edges".to_string(), params);
+        relations.insert("relationships".to_string(), params);
         self.db.import_relations(relations)?;
 
-        Ok(edges.len())
+        Ok(relationships.len())
     }
 
-    /// Get node and edge counts.
+    /// Get node and relationship counts.
     pub fn get_stats(&self) -> Result<(usize, usize)> {
         let node_result = self.db.run_script(
             "?[count(object_id)] := *nodes{object_id}",
@@ -292,7 +292,7 @@ impl GraphDatabase {
             .unwrap_or(0) as usize;
 
         let edge_result = self.db.run_script(
-            "?[count(source)] := *edges{source}",
+            "?[count(source)] := *relationships{source}",
             Default::default(),
             ScriptMutability::Immutable,
         )?;
@@ -350,7 +350,7 @@ impl GraphDatabase {
         debug!("Computing security insights");
 
         let nodes = self.get_all_nodes()?;
-        let edges = self.get_all_edges()?;
+        let relationships = self.get_all_edges()?;
 
         // Count total users
         let total_users = nodes.iter().filter(|n| n.label == "User").count();
@@ -362,15 +362,15 @@ impl GraphDatabase {
             .collect();
 
         // Find "real" DAs - users who are direct or transitive members of DA
-        // Build adjacency for MemberOf edges only
+        // Build adjacency for MemberOf relationships only
         let mut member_of_adj: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
-        for edge in &edges {
-            if edge.edge_type == "MemberOf" {
+        for relationship in &relationships {
+            if relationship.rel_type == "MemberOf" {
                 member_of_adj
-                    .entry(edge.source.clone())
+                    .entry(relationship.source.clone())
                     .or_default()
-                    .push(edge.target.clone());
+                    .push(relationship.target.clone());
             }
         }
 
@@ -413,14 +413,14 @@ impl GraphDatabase {
             .map(|(id, _node_type, label, hops)| (id, label, hops))
             .collect();
 
-        // Build forward adjacency for reachability (all edge types)
+        // Build forward adjacency for reachability (all relationship types)
         let mut forward_adj: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
-        for edge in &edges {
+        for relationship in &relationships {
             forward_adj
-                .entry(edge.source.clone())
+                .entry(relationship.source.clone())
                 .or_default()
-                .push(edge.target.clone());
+                .push(relationship.target.clone());
         }
 
         // Compute reachability from well-known principals
@@ -518,10 +518,10 @@ impl GraphDatabase {
         })
     }
 
-    /// Get all edges (for graph rendering).
+    /// Get all relationships (for graph rendering).
     pub fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
         self.query_rows(
-            "?[source, target, edge_type, properties] := *edges{source, target, edge_type, properties}",
+            "?[source, target, rel_type, properties] := *relationships{source, target, rel_type, properties}",
             Self::parse_edge_row,
         )
     }
@@ -530,14 +530,14 @@ impl GraphDatabase {
     fn parse_edge_row(row: &JsonValue) -> Option<DbEdge> {
         let source = row.get(0).and_then(|v| v.as_str())?;
         let target = row.get(1).and_then(|v| v.as_str())?;
-        let edge_type = row.get(2).and_then(|v| v.as_str())?;
+        let rel_type = row.get(2).and_then(|v| v.as_str())?;
         let props_str = row.get(3).and_then(|v| v.as_str())?;
         let properties = serde_json::from_str(props_str).unwrap_or(JsonValue::Null);
 
         Some(DbEdge {
             source: source.to_string(),
             target: target.to_string(),
-            edge_type: edge_type.to_string(),
+            rel_type: rel_type.to_string(),
             properties,
             ..Default::default()
         })
@@ -606,7 +606,7 @@ impl GraphDatabase {
     }
 
     /// Find shortest path between two nodes using BFS.
-    /// Returns the path as a list of (node_id, edge_type) pairs.
+    /// Returns the path as a list of (node_id, rel_type) pairs.
     #[allow(clippy::type_complexity)]
     pub fn shortest_path(
         &self,
@@ -615,16 +615,16 @@ impl GraphDatabase {
     ) -> Result<Option<Vec<(String, Option<String>)>>> {
         debug!(from = %from, to = %to, "Finding shortest path");
 
-        // Get all edges for BFS
-        let edges = self.get_all_edges()?;
+        // Get all relationships for BFS
+        let relationships = self.get_all_edges()?;
 
         // Build adjacency list
         let mut adj: std::collections::HashMap<String, Vec<(String, String)>> =
             std::collections::HashMap::new();
-        for edge in &edges {
-            adj.entry(edge.source.clone())
+        for relationship in &relationships {
+            adj.entry(relationship.source.clone())
                 .or_default()
-                .push((edge.target.clone(), edge.edge_type.clone()));
+                .push((relationship.target.clone(), relationship.rel_type.clone()));
         }
 
         // BFS
@@ -641,8 +641,8 @@ impl GraphDatabase {
                 // Reconstruct path
                 let mut path = vec![(to.to_string(), None)];
                 let mut node = to.to_string();
-                while let Some((prev, edge_type)) = parent.get(&node) {
-                    path.push((prev.clone(), Some(edge_type.clone())));
+                while let Some((prev, rel_type)) = parent.get(&node) {
+                    path.push((prev.clone(), Some(rel_type.clone())));
                     node = prev.clone();
                 }
                 path.reverse();
@@ -651,10 +651,10 @@ impl GraphDatabase {
             }
 
             if let Some(neighbors) = adj.get(&current) {
-                for (neighbor, edge_type) in neighbors {
+                for (neighbor, rel_type) in neighbors {
                     if !visited.contains(neighbor) {
                         visited.insert(neighbor.clone());
-                        parent.insert(neighbor.clone(), (current.clone(), edge_type.clone()));
+                        parent.insert(neighbor.clone(), (current.clone(), rel_type.clone()));
                         queue.push_back(neighbor.clone());
                     }
                 }
@@ -675,7 +675,7 @@ impl GraphDatabase {
         debug!(exclude = ?exclude_edge_types, "Finding paths to Domain Admins");
 
         let nodes = self.get_all_nodes()?;
-        let edges = self.get_all_edges()?;
+        let relationships = self.get_all_edges()?;
 
         // Find all Domain Admins groups (SID ending in -512)
         let da_nodes: Vec<&DbNode> = nodes.iter().filter(|n| n.id.ends_with("-512")).collect();
@@ -695,12 +695,12 @@ impl GraphDatabase {
         let mut reverse_adj: std::collections::HashMap<String, Vec<(String, String)>> =
             std::collections::HashMap::new();
 
-        for edge in &edges {
-            if !exclude_set.contains(edge.edge_type.as_str()) {
+        for relationship in &relationships {
+            if !exclude_set.contains(relationship.rel_type.as_str()) {
                 reverse_adj
-                    .entry(edge.target.clone())
+                    .entry(relationship.target.clone())
                     .or_default()
-                    .push((edge.source.clone(), edge.edge_type.clone()));
+                    .push((relationship.source.clone(), relationship.rel_type.clone()));
             }
         }
 
@@ -768,7 +768,7 @@ impl GraphDatabase {
             .collect())
     }
 
-    /// Get edges between a set of nodes.
+    /// Get relationships between a set of nodes.
     pub fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>> {
         if node_ids.is_empty() {
             return Ok(Vec::new());
@@ -779,8 +779,9 @@ impl GraphDatabase {
 
         Ok(all_edges
             .into_iter()
-            .filter(|edge| {
-                id_set.contains(edge.source.as_str()) && id_set.contains(edge.target.as_str())
+            .filter(|relationship| {
+                id_set.contains(relationship.source.as_str())
+                    && id_set.contains(relationship.target.as_str())
             })
             .collect())
     }
@@ -795,7 +796,7 @@ impl GraphDatabase {
 
         let all_edges = self.get_all_edges()?;
 
-        // Admin permission edge types
+        // Admin permission relationship types
         const ADMIN_EDGE_TYPES: &[&str] = &[
             "AdminTo",
             "GenericAll",
@@ -808,27 +809,28 @@ impl GraphDatabase {
             "AddMember",
         ];
 
-        // Filter edges based on direction
+        // Filter relationships based on direction
         let filtered_edges: Vec<DbEdge> = all_edges
             .into_iter()
-            .filter(|edge| match direction {
-                "incoming" => edge.target == node_id,
-                "outgoing" => edge.source == node_id,
+            .filter(|relationship| match direction {
+                "incoming" => relationship.target == node_id,
+                "outgoing" => relationship.source == node_id,
                 "admin" => {
-                    edge.source == node_id && ADMIN_EDGE_TYPES.contains(&edge.edge_type.as_str())
+                    relationship.source == node_id
+                        && ADMIN_EDGE_TYPES.contains(&relationship.rel_type.as_str())
                 }
-                "memberof" => edge.source == node_id && edge.edge_type == "MemberOf",
-                "members" => edge.target == node_id && edge.edge_type == "MemberOf",
-                _ => edge.source == node_id || edge.target == node_id,
+                "memberof" => relationship.source == node_id && relationship.rel_type == "MemberOf",
+                "members" => relationship.target == node_id && relationship.rel_type == "MemberOf",
+                _ => relationship.source == node_id || relationship.target == node_id,
             })
             .collect();
 
         // Collect all node IDs involved (including the original node)
         let mut node_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         node_ids.insert(node_id.to_string());
-        for edge in &filtered_edges {
-            node_ids.insert(edge.source.clone());
-            node_ids.insert(edge.target.clone());
+        for relationship in &filtered_edges {
+            node_ids.insert(relationship.source.clone());
+            node_ids.insert(relationship.target.clone());
         }
 
         // Fetch all involved nodes
@@ -838,15 +840,15 @@ impl GraphDatabase {
         Ok((nodes, filtered_edges))
     }
 
-    /// Get edge counts for a node efficiently using targeted queries.
-    /// Counts unique connected NODES, not edges (a node with multiple edges counts as 1).
+    /// Get relationship counts for a node efficiently using targeted queries.
+    /// Counts unique connected NODES, not relationships (a node with multiple relationships counts as 1).
     pub fn get_node_edge_counts(
         &self,
         node_id: &str,
     ) -> Result<(usize, usize, usize, usize, usize)> {
-        // Count unique incoming NODES (not edges - a node with multiple edges to us counts as 1)
+        // Count unique incoming NODES (not relationships - a node with multiple relationships to us counts as 1)
         let incoming_query = format!(
-            "?[count_unique(source)] := *edges{{source, target, edge_type}}, target = '{}'",
+            "?[count_unique(source)] := *relationships{{source, target, rel_type}}, target = '{}'",
             node_id.replace('\'', "''")
         );
         let incoming_result = self.db.run_script(
@@ -862,7 +864,7 @@ impl GraphDatabase {
 
         // Count unique outgoing NODES
         let outgoing_query = format!(
-            "?[count_unique(target)] := *edges{{source, target, edge_type}}, source = '{}'",
+            "?[count_unique(target)] := *relationships{{source, target, rel_type}}, source = '{}'",
             node_id.replace('\'', "''")
         );
         let outgoing_result = self.db.run_script(
@@ -876,10 +878,10 @@ impl GraphDatabase {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
 
-        // Count unique admin_to NODES (outgoing admin edges)
+        // Count unique admin_to NODES (outgoing admin relationships)
         let admin_query = format!(
-            "?[count_unique(target)] := *edges{{source, target, edge_type}}, source = '{}', \
-             edge_type in ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']",
+            "?[count_unique(target)] := *relationships{{source, target, rel_type}}, source = '{}', \
+             rel_type in ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']",
             node_id.replace('\'', "''")
         );
         let admin_result = self.db.run_script(
@@ -893,9 +895,9 @@ impl GraphDatabase {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
 
-        // Count unique member_of NODES (outgoing MemberOf edges)
+        // Count unique member_of NODES (outgoing MemberOf relationships)
         let memberof_query = format!(
-            "?[count_unique(target)] := *edges{{source, target, edge_type}}, source = '{}', edge_type = 'MemberOf'",
+            "?[count_unique(target)] := *relationships{{source, target, rel_type}}, source = '{}', rel_type = 'MemberOf'",
             node_id.replace('\'', "''")
         );
         let memberof_result = self.db.run_script(
@@ -909,9 +911,9 @@ impl GraphDatabase {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
 
-        // Count unique member NODES (incoming MemberOf edges)
+        // Count unique member NODES (incoming MemberOf relationships)
         let members_query = format!(
-            "?[count_unique(source)] := *edges{{source, target, edge_type}}, target = '{}', edge_type = 'MemberOf'",
+            "?[count_unique(source)] := *relationships{{source, target, rel_type}}, target = '{}', rel_type = 'MemberOf'",
             node_id.replace('\'', "''")
         );
         let members_result = self.db.run_script(
@@ -940,8 +942,8 @@ impl GraphDatabase {
         // Use recursive Datalog query to find transitive MemberOf membership
         // reachable[target] := direct MemberOf from source, or transitive through intermediate
         let query = format!(
-            "reachable[target] := *edges{{source: '{}', target, edge_type}}, edge_type = 'MemberOf'
-             reachable[target] := reachable[intermediate], *edges{{source: intermediate, target, edge_type}}, edge_type = 'MemberOf'
+            "reachable[target] := *relationships{{source: '{}', target, rel_type}}, rel_type = 'MemberOf'
+             reachable[target] := reachable[intermediate], *relationships{{source: intermediate, target, rel_type}}, rel_type = 'MemberOf'
              ?[target] := reachable[target], ends_with(target, '{}')
              :limit 1",
             id_escaped, suffix_escaped
@@ -963,7 +965,7 @@ impl GraphDatabase {
         Ok(None)
     }
 
-    /// Run a custom CozoDB query and extract nodes/edges from results.
+    /// Run a custom CozoDB query and extract nodes/relationships from results.
     /// The query should return rows with columns that can be matched to node IDs.
     pub fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
         debug!(query = %query, "Running custom query");
@@ -1216,16 +1218,16 @@ impl DatabaseBackend for GraphDatabase {
         GraphDatabase::insert_node(self, node)
     }
 
-    fn insert_edge(&self, edge: DbEdge) -> Result<()> {
-        GraphDatabase::insert_edge(self, edge)
+    fn insert_edge(&self, relationship: DbEdge) -> Result<()> {
+        GraphDatabase::insert_edge(self, relationship)
     }
 
     fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
         GraphDatabase::insert_nodes(self, nodes)
     }
 
-    fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
-        GraphDatabase::insert_edges(self, edges)
+    fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        GraphDatabase::insert_edges(self, relationships)
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {
@@ -1346,9 +1348,9 @@ mod tests {
     #[test]
     fn test_in_memory_db() {
         let db = GraphDatabase::in_memory().unwrap();
-        let (nodes, edges) = db.get_stats().unwrap();
+        let (nodes, relationships) = db.get_stats().unwrap();
         assert_eq!(nodes, 0);
-        assert_eq!(edges, 0);
+        assert_eq!(relationships, 0);
     }
 
     #[test]
@@ -1381,15 +1383,15 @@ mod tests {
     fn test_insert_edges() {
         let db = GraphDatabase::in_memory().unwrap();
 
-        let edges = vec![DbEdge {
+        let relationships = vec![DbEdge {
             source: "user-1".to_string(),
             target: "group-1".to_string(),
-            edge_type: "MemberOf".to_string(),
+            rel_type: "MemberOf".to_string(),
             properties: serde_json::json!({}),
             ..Default::default()
         }];
 
-        let count = db.insert_edges(&edges).unwrap();
+        let count = db.insert_edges(&relationships).unwrap();
         assert_eq!(count, 1);
 
         let (_, edge_count) = db.get_stats().unwrap();
@@ -1452,37 +1454,37 @@ mod tests {
         ];
         db.insert_nodes(&nodes).unwrap();
 
-        let edges = vec![
+        let relationships = vec![
             DbEdge {
                 source: "S-1-5-21-USER1".to_string(),
                 target: "S-1-5-21-GROUP1".to_string(),
-                edge_type: "MemberOf".to_string(),
+                rel_type: "MemberOf".to_string(),
                 properties: serde_json::json!({}),
                 ..Default::default()
             },
             DbEdge {
                 source: "S-1-5-21-USER2".to_string(),
                 target: "S-1-5-21-GROUP2".to_string(),
-                edge_type: "MemberOf".to_string(),
+                rel_type: "MemberOf".to_string(),
                 properties: serde_json::json!({}),
                 ..Default::default()
             },
             DbEdge {
                 source: "S-1-5-21-GROUP2".to_string(),
                 target: "S-1-5-21-GROUP1".to_string(),
-                edge_type: "MemberOf".to_string(),
+                rel_type: "MemberOf".to_string(),
                 properties: serde_json::json!({}),
                 ..Default::default()
             },
             DbEdge {
                 source: "S-1-5-21-GROUP1".to_string(),
                 target: "S-1-5-21-COMP1".to_string(),
-                edge_type: "AdminTo".to_string(),
+                rel_type: "AdminTo".to_string(),
                 properties: serde_json::json!({}),
                 ..Default::default()
             },
         ];
-        db.insert_edges(&edges).unwrap();
+        db.insert_edges(&relationships).unwrap();
 
         db
     }
@@ -1603,7 +1605,7 @@ mod tests {
     fn test_shortest_path_direct() {
         let db = setup_test_db();
 
-        // Direct edge: USER1 -> GROUP1
+        // Direct relationship: USER1 -> GROUP1
         let path = db
             .shortest_path("S-1-5-21-USER1", "S-1-5-21-GROUP1")
             .unwrap();
@@ -1639,7 +1641,7 @@ mod tests {
     fn test_shortest_path_no_path() {
         let db = setup_test_db();
 
-        // No path from COMP1 to USER1 (edges are directional)
+        // No path from COMP1 to USER1 (relationships are directional)
         let path = db
             .shortest_path("S-1-5-21-COMP1", "S-1-5-21-USER1")
             .unwrap();
@@ -1858,7 +1860,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Node/Edge Retrieval Tests
+    // Node/Relationship Retrieval Tests
     // ========================================================================
 
     #[test]
@@ -1902,44 +1904,44 @@ mod tests {
     fn test_get_edges_between_subset() {
         let db = setup_test_db();
 
-        // Get edges between USER1, GROUP1, GROUP2
+        // Get relationships between USER1, GROUP1, GROUP2
         let ids = vec![
             "S-1-5-21-USER1".to_string(),
             "S-1-5-21-GROUP1".to_string(),
             "S-1-5-21-GROUP2".to_string(),
         ];
-        let edges = db.get_edges_between(&ids).unwrap();
+        let relationships = db.get_edges_between(&ids).unwrap();
 
         // Should include USER1->GROUP1 and GROUP2->GROUP1
         // Should NOT include USER2->GROUP2 (USER2 not in subset)
         // Should NOT include GROUP1->COMP1 (COMP1 not in subset)
-        assert_eq!(edges.len(), 2);
+        assert_eq!(relationships.len(), 2);
 
-        let edge_types: Vec<(&str, &str)> = edges
+        let rel_types: Vec<(&str, &str)> = relationships
             .iter()
             .map(|e| (e.source.as_str(), e.target.as_str()))
             .collect();
-        assert!(edge_types.contains(&("S-1-5-21-USER1", "S-1-5-21-GROUP1")));
-        assert!(edge_types.contains(&("S-1-5-21-GROUP2", "S-1-5-21-GROUP1")));
+        assert!(rel_types.contains(&("S-1-5-21-USER1", "S-1-5-21-GROUP1")));
+        assert!(rel_types.contains(&("S-1-5-21-GROUP2", "S-1-5-21-GROUP1")));
     }
 
     #[test]
     fn test_get_edges_between_no_edges() {
         let db = setup_test_db();
 
-        // These two nodes have no direct edges between them
+        // These two nodes have no direct relationships between them
         let ids = vec!["S-1-5-21-USER1".to_string(), "S-1-5-21-USER2".to_string()];
-        let edges = db.get_edges_between(&ids).unwrap();
+        let relationships = db.get_edges_between(&ids).unwrap();
 
-        assert!(edges.is_empty());
+        assert!(relationships.is_empty());
     }
 
     #[test]
     fn test_get_edges_between_empty() {
         let db = setup_test_db();
 
-        let edges = db.get_edges_between(&[]).unwrap();
-        assert!(edges.is_empty());
+        let relationships = db.get_edges_between(&[]).unwrap();
+        assert!(relationships.is_empty());
     }
 
     // ========================================================================

@@ -29,7 +29,7 @@ pub struct ImportProgress {
     pub total_files: usize,
     /// Number of nodes imported
     pub nodes_imported: usize,
-    /// Number of edges imported
+    /// Number of relationships imported
     pub edges_imported: usize,
     /// Error message if status is Failed
     pub error: Option<String>,

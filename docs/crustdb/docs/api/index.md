@@ -8,7 +8,7 @@ CrustDB provides a Rust API for embedded graph database operations. The `Databas
 |---------|-------------|
 | [Database Lifecycle](database.md#database-lifecycle) | Opening databases, clearing data, getting statistics |
 | [Query Execution](database.md#query-execution) | Running Cypher queries |
-| [Batch Operations](database.md#batch-operations) | Bulk insert and upsert of nodes and edges |
+| [Batch Operations](database.md#batch-operations) | Bulk insert and upsert of nodes and relationships |
 | [Graph Traversal](database.md#graph-traversal) | Direct lookups and neighbor retrieval |
 | [Indexes](database.md#indexes) | Property index management |
 | [Caching](database.md#caching) | Query result caching |
@@ -51,14 +51,14 @@ A value in a query result cell.
 pub enum ResultValue {
     Property(PropertyValue),
     Node { id: i64, labels: Vec<String>, properties: HashMap<String, PropertyValue> },
-    Edge { id: i64, source: i64, target: i64, edge_type: String, properties: HashMap<String, PropertyValue> },
-    Path { nodes: Vec<PathNode>, edges: Vec<PathEdge> },
+    Relationship { id: i64, source: i64, target: i64, rel_type: String, properties: HashMap<String, PropertyValue> },
+    Path { nodes: Vec<PathNode>, relationships: Vec<PathEdge> },
 }
 ```
 
 ### PropertyValue
 
-A property value stored on a node or edge.
+A property value stored on a node or relationship.
 
 ```rust
 pub enum PropertyValue {
@@ -114,7 +114,7 @@ pub struct CacheStats {
 
 ### EdgeBetweenness
 
-Result of edge betweenness centrality computation.
+Result of relationship betweenness centrality computation.
 
 ```rust
 pub struct EdgeBetweenness {
@@ -149,14 +149,14 @@ pub enum Error {
 |--------|-------------|
 | `crustdb` | Main crate, exports `Database` and core types |
 | `crustdb::query` | Query parsing, planning, and execution |
-| `crustdb::graph` | Node, Edge, and PropertyValue types |
+| `crustdb::graph` | Node, Relationship, and PropertyValue types |
 | `crustdb::error` | Error types |
 
 ## Re-exports
 
 ```rust
 pub use error::{Error, Result};
-pub use graph::{Edge, Node, PropertyValue};
+pub use graph::{Relationship, Node, PropertyValue};
 pub use query::executor::algorithms::EdgeBetweenness;
 pub use query::{QueryResult, QueryStats, ResultValue, Row};
 pub use storage::CacheStats;

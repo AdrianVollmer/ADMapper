@@ -75,8 +75,8 @@ pub fn evaluate_expression_with_bindings(
         Expression::Variable(name) => {
             if let Some(node) = binding.get_node(name) {
                 Ok(PropertyValue::Map(node.properties.clone()))
-            } else if let Some(edge) = binding.get_edge(name) {
-                Ok(PropertyValue::Map(edge.properties.clone()))
+            } else if let Some(relationship) = binding.get_edge(name) {
+                Ok(PropertyValue::Map(relationship.properties.clone()))
             } else {
                 Err(Error::Cypher(format!("Unknown variable: {}", name)))
             }
@@ -87,8 +87,8 @@ pub fn evaluate_expression_with_bindings(
                 if let Some(node) = binding.get_node(base_name) {
                     return Ok(node.get(property).cloned().unwrap_or(PropertyValue::Null));
                 }
-                if let Some(edge) = binding.get_edge(base_name) {
-                    return Ok(edge
+                if let Some(relationship) = binding.get_edge(base_name) {
+                    return Ok(relationship
                         .properties
                         .get(property)
                         .cloned()
@@ -296,8 +296,8 @@ pub fn evaluate_function_call_with_bindings(
                 return Err(Error::Cypher("type() requires 1 argument".into()));
             }
             if let Expression::Variable(var_name) = &args[0] {
-                if let Some(edge) = binding.get_edge(var_name) {
-                    return Ok(PropertyValue::String(edge.edge_type.clone()));
+                if let Some(relationship) = binding.get_edge(var_name) {
+                    return Ok(PropertyValue::String(relationship.rel_type.clone()));
                 }
             }
             Ok(PropertyValue::Null)
@@ -310,8 +310,8 @@ pub fn evaluate_function_call_with_bindings(
                 if let Some(node) = binding.get_node(var_name) {
                     return Ok(PropertyValue::Integer(node.id));
                 }
-                if let Some(edge) = binding.get_edge(var_name) {
-                    return Ok(PropertyValue::Integer(edge.id));
+                if let Some(relationship) = binding.get_edge(var_name) {
+                    return Ok(PropertyValue::Integer(relationship.id));
                 }
             }
             Ok(PropertyValue::Null)

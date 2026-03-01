@@ -62,13 +62,13 @@ pub struct PathNode {
     pub properties: HashMap<String, PropertyValue>,
 }
 
-/// An edge in a path result.
+/// An relationship in a path result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathEdge {
     pub id: i64,
     pub source: i64,
     pub target: i64,
-    pub edge_type: String,
+    pub rel_type: String,
     pub properties: HashMap<String, PropertyValue>,
 }
 
@@ -84,18 +84,18 @@ pub enum ResultValue {
         labels: Vec<String>,
         properties: HashMap<String, PropertyValue>,
     },
-    /// An edge.
-    Edge {
+    /// An relationship.
+    Relationship {
         id: i64,
         source: i64,
         target: i64,
-        edge_type: String,
+        rel_type: String,
         properties: HashMap<String, PropertyValue>,
     },
-    /// A path (sequence of nodes and edges) with full data.
+    /// A path (sequence of nodes and relationships) with full data.
     Path {
         nodes: Vec<PathNode>,
-        edges: Vec<PathEdge>,
+        relationships: Vec<PathEdge>,
     },
 }
 
@@ -106,9 +106,9 @@ pub struct QueryStats {
     pub nodes_created: usize,
     /// Number of nodes deleted.
     pub nodes_deleted: usize,
-    /// Number of edges created.
+    /// Number of relationships created.
     pub relationships_created: usize,
-    /// Number of edges deleted.
+    /// Number of relationships deleted.
     pub relationships_deleted: usize,
     /// Number of properties set.
     pub properties_set: usize,

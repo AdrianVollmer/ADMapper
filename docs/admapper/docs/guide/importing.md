@@ -71,7 +71,7 @@ curl http://localhost:9191/api/import/progress/abc123
 - Duplicate imports update existing nodes rather than creating duplicates
 - Properties are merged on re-import
 
-### Edge Handling
+### Relationship Handling
 
 - Edges are created between nodes based on relationships in the data
 - Missing target nodes create placeholder entries

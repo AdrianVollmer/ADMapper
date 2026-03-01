@@ -218,7 +218,7 @@ pub struct PathParams {
 pub struct PathStep {
     pub node: DbNode,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub edge_type: Option<String>,
+    pub rel_type: Option<String>,
 }
 
 /// Path response with full graph for rendering.
@@ -232,7 +232,7 @@ pub struct PathResponse {
 /// Query parameters for paths to Domain Admins.
 #[derive(Debug, Deserialize)]
 pub struct PathsToDaParams {
-    /// Comma-separated list of edge types to exclude
+    /// Comma-separated list of relationship types to exclude
     #[serde(default)]
     pub exclude: String,
 }
@@ -255,7 +255,7 @@ pub struct PathsToDaResponse {
 }
 
 // ============================================================================
-// Node/Edge Mutation Types
+// Node/Relationship Mutation Types
 // ============================================================================
 
 /// Request body for adding a node.
@@ -268,12 +268,12 @@ pub struct AddNodeRequest {
     pub properties: JsonValue,
 }
 
-/// Request body for adding an edge.
+/// Request body for adding an relationship.
 #[derive(Deserialize)]
 pub struct AddEdgeRequest {
     pub source: String,
     pub target: String,
-    pub edge_type: String,
+    pub rel_type: String,
     #[serde(default)]
     pub properties: JsonValue,
 }
@@ -401,7 +401,7 @@ pub struct GenerateRequest {
 #[derive(Debug, Serialize)]
 pub struct GenerateResponse {
     pub nodes: usize,
-    pub edges: usize,
+    pub relationships: usize,
 }
 
 // ============================================================================

@@ -1,5 +1,5 @@
 /**
- * TaperedEdgeProgram: Antialiased tapered (cone-shaped) edges.
+ * TaperedEdgeProgram: Antialiased tapered (cone-shaped) relationships.
  *
  * Based on @sigma/edge-curve's approach: render a quad, pass viewport coords
  * to fragment shader, compute distance in pixel space, apply smoothstep AA.
@@ -133,13 +133,13 @@ void main() {
   v_target = viewportTarget;
 
   // Compute offset for this vertex
-  // a_direction: -1 or +1 for the two sides of the edge
+  // a_direction: -1 or +1 for the two sides of the relationship
   // The offset needs to account for the tapered shape
   float offsetAmount = (curveThickness + epsilon) * a_direction;
 
   vec2 viewportOffsetPosition = viewportPosition + unitNormal * offsetAmount;
 
-  // Also extend along the edge direction for padding at the ends
+  // Also extend along the relationship direction for padding at the ends
   if (a_current > 0.5) {
     // Source vertex - extend backward
     viewportOffsetPosition -= unitDir * epsilon;
@@ -194,14 +194,14 @@ float sdTaperedLine(vec2 p, vec2 a, vec2 b, float thickness) {
 
   // Clamp t and compute distance based on region
   if (t < 0.0) {
-    // Before source - use distance to source edge
+    // Before source - use distance to source relationship
     float halfWidth = thickness * 0.5;
     return length(vec2(along, abs(perp) - halfWidth));
   } else if (t > 1.0) {
     // After target - use distance to target point
     return length(p - b);
   } else {
-    // Along the edge - width tapers from full at source to 0 at target
+    // Along the relationship - width tapers from full at source to 0 at target
     float halfWidthAtT = thickness * 0.5 * (1.0 - t);
     return abs(perp) - halfWidthAtT;
   }
@@ -229,8 +229,8 @@ void main(void) {
 const UNIFORMS = ["u_matrix", "u_sizeRatio", "u_pixelRatio", "u_dimensions", "u_minEdgeThickness", "u_feather"];
 
 /**
- * Tapered edge program with antialiasing.
- * Renders cone-shaped edges that are wider at source and narrower at target.
+ * Tapered relationship program with antialiasing.
+ * Renders cone-shaped relationships that are wider at source and narrower at target.
  */
 export class TaperedEdgeProgram extends EdgeProgram<(typeof UNIFORMS)[number], EdgeDisplayData> {
   getDefinition() {

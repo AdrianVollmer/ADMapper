@@ -196,11 +196,11 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
 
   // Check for large graphs and ask for confirmation
   const nodeCount = data.nodes.length;
-  const edgeCount = data.edges.length;
+  const edgeCount = data.relationships.length;
 
   if (nodeCount > LARGE_GRAPH_NODE_THRESHOLD || edgeCount > LARGE_GRAPH_EDGE_THRESHOLD) {
     const confirmed = await showConfirm(
-      `This graph is very large (${nodeCount.toLocaleString()} nodes, ${edgeCount.toLocaleString()} edges) ` +
+      `This graph is very large (${nodeCount.toLocaleString()} nodes, ${edgeCount.toLocaleString()} relationships) ` +
         `and may cause performance issues or browser slowdown. Do you want to render it anyway?`,
       { title: "Large Graph Warning", confirmText: "Render Anyway" }
     );
@@ -208,7 +208,7 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
       // Update stats to show what was skipped
       const statsEl = document.getElementById("graph-stats");
       if (statsEl) {
-        statsEl.textContent = `Skipped: ${nodeCount.toLocaleString()} nodes, ${edgeCount.toLocaleString()} edges`;
+        statsEl.textContent = `Skipped: ${nodeCount.toLocaleString()} nodes, ${edgeCount.toLocaleString()} relationships`;
       }
       return;
     }
@@ -227,7 +227,7 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
   clearCollapseState();
 
   // Load and layout the graph
-  // Use lattice layout for graphs with no edges (e.g., stale objects) to avoid label collision
+  // Use lattice layout for graphs with no relationships (e.g., stale objects) to avoid label collision
   const graph = loadGraph(data);
   const layoutToUse = edgeCount === 0 ? "lattice" : currentLayout;
   await applyLayoutAsync(graph, layoutToUse);
@@ -266,7 +266,7 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
   const stats = getGraphStats(graph);
   const statsEl = document.getElementById("graph-stats");
   if (statsEl) {
-    statsEl.textContent = `${stats.nodeCount} nodes, ${stats.edgeCount} edges`;
+    statsEl.textContent = `${stats.nodeCount} nodes, ${stats.edgeCount} relationships`;
   }
 }
 
@@ -331,10 +331,10 @@ export function toggleLabelVisibility(): string {
   return modeName;
 }
 
-/** Generate a demo graph for testing - curated to show multi-edge support */
+/** Generate a demo graph for testing - curated to show multi-relationship support */
 function generateDemoGraph(_nodeCount: number): RawADGraph {
   const nodes: RawADGraph["nodes"] = [];
-  const edges: RawADGraph["edges"] = [];
+  const relationships: RawADGraph["relationships"] = [];
 
   // Domain
   nodes.push({
@@ -370,45 +370,45 @@ function generateDemoGraph(_nodeCount: number): RawADGraph {
   nodes.push({ id: "comp-ws01", name: "WS01", type: "Computer" });
   nodes.push({ id: "comp-ws02", name: "WS02", type: "Computer" });
 
-  // Structure edges
-  edges.push({ source: "ou-it", target: "domain", type: "Contains" });
-  edges.push({ source: "ou-hr", target: "domain", type: "Contains" });
+  // Structure relationships
+  relationships.push({ source: "ou-it", target: "domain", type: "Contains" });
+  relationships.push({ source: "ou-hr", target: "domain", type: "Contains" });
 
   // Group memberships
-  edges.push({ source: "user-alice", target: "grp-admins", type: "MemberOf" });
-  edges.push({ source: "user-alice", target: "grp-it", type: "MemberOf" });
-  edges.push({ source: "user-bob", target: "grp-it", type: "MemberOf" });
-  edges.push({ source: "user-bob", target: "grp-rdp", type: "MemberOf" });
-  edges.push({ source: "user-carol", target: "grp-hr", type: "MemberOf" });
-  edges.push({ source: "user-dave", target: "grp-hr", type: "MemberOf" });
-  edges.push({ source: "user-eve", target: "grp-rdp", type: "MemberOf" });
-  edges.push({ source: "grp-it", target: "grp-rdp", type: "MemberOf" });
+  relationships.push({ source: "user-alice", target: "grp-admins", type: "MemberOf" });
+  relationships.push({ source: "user-alice", target: "grp-it", type: "MemberOf" });
+  relationships.push({ source: "user-bob", target: "grp-it", type: "MemberOf" });
+  relationships.push({ source: "user-bob", target: "grp-rdp", type: "MemberOf" });
+  relationships.push({ source: "user-carol", target: "grp-hr", type: "MemberOf" });
+  relationships.push({ source: "user-dave", target: "grp-hr", type: "MemberOf" });
+  relationships.push({ source: "user-eve", target: "grp-rdp", type: "MemberOf" });
+  relationships.push({ source: "grp-it", target: "grp-rdp", type: "MemberOf" });
 
   // Sessions
-  edges.push({ source: "user-alice", target: "comp-dc01", type: "HasSession" });
-  edges.push({ source: "user-bob", target: "comp-srv01", type: "HasSession" });
-  edges.push({ source: "user-carol", target: "comp-ws01", type: "HasSession" });
-  edges.push({ source: "user-dave", target: "comp-ws02", type: "HasSession" });
+  relationships.push({ source: "user-alice", target: "comp-dc01", type: "HasSession" });
+  relationships.push({ source: "user-bob", target: "comp-srv01", type: "HasSession" });
+  relationships.push({ source: "user-carol", target: "comp-ws01", type: "HasSession" });
+  relationships.push({ source: "user-dave", target: "comp-ws02", type: "HasSession" });
 
   // MULTI-EDGES: Multiple different relationships between same nodes
   // alice has multiple permissions on DC01
-  edges.push({ source: "user-alice", target: "comp-dc01", type: "AdminTo" });
-  edges.push({ source: "user-alice", target: "comp-dc01", type: "CanRDP" });
+  relationships.push({ source: "user-alice", target: "comp-dc01", type: "AdminTo" });
+  relationships.push({ source: "user-alice", target: "comp-dc01", type: "CanRDP" });
 
   // bob has multiple permissions on SRV01
-  edges.push({ source: "user-bob", target: "comp-srv01", type: "AdminTo" });
-  edges.push({ source: "user-bob", target: "comp-srv01", type: "CanRDP" });
-  edges.push({ source: "user-bob", target: "comp-srv01", type: "GenericAll" });
+  relationships.push({ source: "user-bob", target: "comp-srv01", type: "AdminTo" });
+  relationships.push({ source: "user-bob", target: "comp-srv01", type: "CanRDP" });
+  relationships.push({ source: "user-bob", target: "comp-srv01", type: "GenericAll" });
 
   // grp-admins has multiple permissions on domain
-  edges.push({ source: "grp-admins", target: "domain", type: "GenericAll" });
-  edges.push({ source: "grp-admins", target: "domain", type: "WriteDacl" });
-  edges.push({ source: "grp-admins", target: "domain", type: "DCSync" });
+  relationships.push({ source: "grp-admins", target: "domain", type: "GenericAll" });
+  relationships.push({ source: "grp-admins", target: "domain", type: "WriteDacl" });
+  relationships.push({ source: "grp-admins", target: "domain", type: "DCSync" });
 
   // RDP access
-  edges.push({ source: "grp-rdp", target: "comp-ws01", type: "CanRDP" });
-  edges.push({ source: "grp-rdp", target: "comp-ws02", type: "CanRDP" });
-  edges.push({ source: "grp-rdp", target: "comp-srv01", type: "CanRDP" });
+  relationships.push({ source: "grp-rdp", target: "comp-ws01", type: "CanRDP" });
+  relationships.push({ source: "grp-rdp", target: "comp-ws02", type: "CanRDP" });
+  relationships.push({ source: "grp-rdp", target: "comp-srv01", type: "CanRDP" });
 
-  return { nodes, edges };
+  return { nodes, relationships };
 }

@@ -262,7 +262,7 @@ pub async fn import_bloodhound(
                     info!(
                         filename = %filename,
                         nodes = progress.nodes_imported,
-                        edges = progress.edges_imported,
+                        relationships = progress.edges_imported,
                         "ZIP imported successfully"
                     );
                     *job_for_task.final_state.write() = Some(progress.clone());
@@ -291,7 +291,7 @@ pub async fn import_bloodhound(
                     Ok(progress) => {
                         info!(
                             nodes = progress.nodes_imported,
-                            edges = progress.edges_imported,
+                            relationships = progress.edges_imported,
                             "JSON files imported successfully"
                         );
                         *job_for_task.final_state.write() = Some(progress.clone());
@@ -369,12 +369,12 @@ pub async fn graph_stats(State(state): State<AppState>) -> Result<Json<JsonValue
 
     debug!(
         nodes = node_count,
-        edges = edge_count,
+        relationships = edge_count,
         "Graph stats retrieved"
     );
     Ok(Json(json!({
         "nodes": node_count,
-        "edges": edge_count
+        "relationships": edge_count
     })))
 }
 
@@ -388,7 +388,7 @@ pub async fn graph_detailed_stats(
 
     debug!(
         nodes = stats.total_nodes,
-        edges = stats.total_edges,
+        relationships = stats.total_edges,
         users = stats.users,
         computers = stats.computers,
         "Detailed stats retrieved"
@@ -410,7 +410,7 @@ pub async fn graph_clear(State(state): State<AppState>) -> Result<StatusCode, Ap
 pub async fn graph_clear_disabled(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
     let db = state.require_db()?;
     run_db(db, |db| {
-        // Execute Cypher query to delete disabled nodes and their edges
+        // Execute Cypher query to delete disabled nodes and their relationships
         db.run_custom_query("MATCH (n {enabled: false}) DETACH DELETE n")
     })
     .await?;
@@ -441,40 +441,40 @@ pub async fn generate_data(
 
     // Generate data
     let size = body.size;
-    let (nodes, edges) =
+    let (nodes, relationships) =
         tokio::task::spawn_blocking(move || crate::generate::Generator::generate(size))
             .await
             .map_err(|e| ApiError::Internal(format!("Task join error: {e}")))?;
 
     let node_count = nodes.len();
-    let edge_count = edges.len();
+    let edge_count = relationships.len();
 
     info!(
         nodes = node_count,
-        edges = edge_count,
+        relationships = edge_count,
         "Generated sample data, inserting..."
     );
 
     // Insert nodes
     run_db(db.clone(), move |db| db.insert_nodes(&nodes)).await?;
 
-    // Insert edges
-    run_db(db, move |db| db.insert_edges(&edges)).await?;
+    // Insert relationships
+    run_db(db, move |db| db.insert_edges(&relationships)).await?;
 
     info!(
         nodes = node_count,
-        edges = edge_count,
+        relationships = edge_count,
         "Sample data generation complete"
     );
 
     Ok(Json(GenerateResponse {
         nodes: node_count,
-        edges: edge_count,
+        relationships: edge_count,
     }))
 }
 
 // ============================================================================
-// Graph Node/Edge Endpoints
+// Graph Node/Relationship Endpoints
 // ============================================================================
 
 /// Get all graph nodes.
@@ -484,27 +484,27 @@ pub async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<DbNod
     Ok(Json(nodes))
 }
 
-/// Get all graph edges.
+/// Get all graph relationships.
 pub async fn graph_edges(State(state): State<AppState>) -> Result<Json<Vec<GraphEdge>>, ApiError> {
     let db = state.require_db()?;
-    let edges: Vec<DbEdge> = run_db(db, |db| db.get_all_edges()).await?;
-    let result: Vec<GraphEdge> = edges.into_iter().map(GraphEdge::from).collect();
+    let relationships: Vec<DbEdge> = run_db(db, |db| db.get_all_edges()).await?;
+    let result: Vec<GraphEdge> = relationships.into_iter().map(GraphEdge::from).collect();
     Ok(Json(result))
 }
 
-/// Get full graph (nodes and edges).
+/// Get full graph (nodes and relationships).
 pub async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>, ApiError> {
     let db = state.require_db()?;
-    let (nodes, edges): (Vec<DbNode>, Vec<DbEdge>) = run_db(db, |db| {
+    let (nodes, relationships): (Vec<DbNode>, Vec<DbEdge>) = run_db(db, |db| {
         let nodes = db.get_all_nodes()?;
-        let edges = db.get_all_edges()?;
-        Ok((nodes, edges))
+        let relationships = db.get_all_edges()?;
+        Ok((nodes, relationships))
     })
     .await?;
 
     let result = FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
-        edges: edges.into_iter().map(GraphEdge::from).collect(),
+        relationships: relationships.into_iter().map(GraphEdge::from).collect(),
     };
 
     Ok(Json(result))
@@ -584,7 +584,7 @@ pub async fn node_counts(
 }
 
 /// Get connections for a node in a specific direction.
-/// Returns the full graph (nodes and edges) for rendering.
+/// Returns the full graph (nodes and relationships) for rendering.
 #[instrument(skip(state))]
 pub async fn node_connections(
     State(state): State<AppState>,
@@ -595,14 +595,14 @@ pub async fn node_connections(
 
     let node_id_clone = node_id.clone();
     let direction_clone = direction.clone();
-    let (nodes, edges): (Vec<DbNode>, Vec<DbEdge>) = run_db(db, move |db| {
+    let (nodes, relationships): (Vec<DbNode>, Vec<DbEdge>) = run_db(db, move |db| {
         db.get_node_connections(&node_id_clone, &direction_clone)
     })
     .await?;
 
     Ok(Json(FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
-        edges: edges.into_iter().map(GraphEdge::from).collect(),
+        relationships: relationships.into_iter().map(GraphEdge::from).collect(),
     }))
 }
 
@@ -1054,7 +1054,7 @@ pub async fn graph_path(
                     path: Vec::new(),
                     graph: FullGraph {
                         nodes: Vec::new(),
-                        edges: Vec::new(),
+                        relationships: Vec::new(),
                     },
                 })
             }
@@ -1074,7 +1074,7 @@ pub async fn graph_path(
                 // Build path steps
                 let path_steps: Vec<PathStep> = path
                     .iter()
-                    .map(|(id, edge_type)| {
+                    .map(|(id, rel_type)| {
                         let node = node_map.get(id).cloned().unwrap_or_else(|| DbNode {
                             id: id.clone(),
                             name: id.clone(),
@@ -1083,20 +1083,20 @@ pub async fn graph_path(
                         });
                         PathStep {
                             node,
-                            edge_type: edge_type.clone(),
+                            rel_type: rel_type.clone(),
                         }
                     })
                     .collect();
 
-                // Get edges between path nodes
-                let edges = db.get_edges_between(&node_ids)?;
+                // Get relationships between path nodes
+                let relationships = db.get_edges_between(&node_ids)?;
 
                 let graph = FullGraph {
                     nodes: path_steps
                         .iter()
                         .map(|s| GraphNode::from(s.node.clone()))
                         .collect(),
-                    edges: edges.into_iter().map(GraphEdge::from).collect(),
+                    relationships: relationships.into_iter().map(GraphEdge::from).collect(),
                 };
 
                 debug!(
@@ -1160,7 +1160,7 @@ pub async fn paths_to_domain_admins(
     State(state): State<AppState>,
     Query(params): Query<PathsToDaParams>,
 ) -> Result<Json<PathsToDaResponse>, ApiError> {
-    // Parse excluded edge types
+    // Parse excluded relationship types
     let exclude_types: Vec<String> = if params.exclude.is_empty() {
         Vec::new()
     } else {
@@ -1215,14 +1215,14 @@ pub async fn graph_insights(
     Ok(Json(insights))
 }
 
-/// Get all distinct edge types in the database.
+/// Get all distinct relationship types in the database.
 #[instrument(skip(state))]
 pub async fn graph_edge_types(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<String>>, ApiError> {
     let db = state.require_db()?;
     let types: Vec<String> = run_db(db, |db| db.get_edge_types()).await?;
-    debug!(count = types.len(), "Edge types retrieved");
+    debug!(count = types.len(), "Relationship types retrieved");
     Ok(Json(types))
 }
 
@@ -1237,10 +1237,10 @@ pub async fn graph_node_types(
     Ok(Json(types))
 }
 
-/// Get choke points in the graph using edge betweenness centrality.
+/// Get choke points in the graph using relationship betweenness centrality.
 ///
-/// Returns the top edges through which the most shortest paths pass.
-/// These are critical "choke point" edges whose removal would disrupt many attack paths.
+/// Returns the top relationships through which the most shortest paths pass.
+/// These are critical "choke point" relationships whose removal would disrupt many attack paths.
 ///
 /// Results are cached at the database level and automatically invalidated when data changes.
 #[instrument(skip(state))]
@@ -1260,7 +1260,7 @@ pub async fn graph_choke_points(
 }
 
 // ============================================================================
-// Node/Edge Mutation Endpoints
+// Node/Relationship Mutation Endpoints
 // ============================================================================
 
 /// Add a new node to the graph.
@@ -1303,7 +1303,7 @@ pub async fn add_node(
     }))
 }
 
-/// Add a new edge to the graph.
+/// Add a new relationship to the graph.
 #[instrument(skip(state, body))]
 pub async fn add_edge(
     State(state): State<AppState>,
@@ -1320,14 +1320,16 @@ pub async fn add_edge(
             "Target node ID is required".to_string(),
         ));
     }
-    if body.edge_type.is_empty() {
-        return Err(ApiError::BadRequest("Edge type is required".to_string()));
+    if body.rel_type.is_empty() {
+        return Err(ApiError::BadRequest(
+            "Relationship type is required".to_string(),
+        ));
     }
 
-    let edge = DbEdge {
+    let relationship = DbEdge {
         source: body.source.clone(),
         target: body.target.clone(),
-        edge_type: body.edge_type.clone(),
+        rel_type: body.rel_type.clone(),
         properties: if body.properties.is_null() {
             serde_json::json!({})
         } else {
@@ -1337,18 +1339,18 @@ pub async fn add_edge(
     };
 
     let db = state.require_db()?;
-    run_db(db, move |db| db.insert_edge(edge)).await?;
+    run_db(db, move |db| db.insert_edge(relationship)).await?;
     info!(
         source = %body.source,
         target = %body.target,
-        edge_type = %body.edge_type,
-        "Edge added"
+        rel_type = %body.rel_type,
+        "Relationship added"
     );
 
     Ok(Json(GraphEdge {
         source: body.source,
         target: body.target,
-        edge_type: body.edge_type,
+        rel_type: body.rel_type,
     }))
 }
 
@@ -1362,7 +1364,7 @@ pub async fn delete_node(
     // Escape single quotes in the ID to prevent injection
     let escaped_id = id.replace('\'', "\\'");
     run_db(db, move |db| {
-        // Use DETACH DELETE to also remove connected edges
+        // Use DETACH DELETE to also remove connected relationships
         let query = format!(
             "MATCH (n) WHERE n.objectid = '{}' OR n.name = '{}' DETACH DELETE n",
             escaped_id, escaped_id
@@ -1374,18 +1376,18 @@ pub async fn delete_node(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Delete an edge from the graph.
+/// Delete an relationship from the graph.
 #[instrument(skip(state))]
 pub async fn delete_edge(
     State(state): State<AppState>,
-    Path((source, target, edge_type)): Path<(String, String, String)>,
+    Path((source, target, rel_type)): Path<(String, String, String)>,
 ) -> Result<StatusCode, ApiError> {
     let db = state.require_db()?;
     // Escape single quotes to prevent injection
     let escaped_source = source.replace('\'', "\\'");
     let escaped_target = target.replace('\'', "\\'");
-    // Edge type should be alphanumeric (relationship name)
-    let safe_edge_type = edge_type
+    // Relationship type should be alphanumeric (relationship name)
+    let safe_edge_type = rel_type
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '_')
         .collect::<String>();
@@ -1397,7 +1399,7 @@ pub async fn delete_edge(
         db.run_custom_query(&query)
     })
     .await?;
-    info!(source = %source, target = %target, edge_type = %edge_type, "Edge deleted");
+    info!(source = %source, target = %target, rel_type = %rel_type, "Relationship deleted");
     Ok(StatusCode::NO_CONTENT)
 }
 

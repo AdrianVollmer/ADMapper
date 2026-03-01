@@ -115,8 +115,8 @@ pub fn run_desktop(database_url: Option<&str>) {
         match state.connect(url) {
             Ok(db_type) => {
                 if let Some(db) = state.db() {
-                    let (nodes, edges) = db.get_stats().unwrap_or((0, 0));
-                    info!(database = %db_type.name(), nodes = nodes, edges = edges, "Database connected");
+                    let (nodes, relationships) = db.get_stats().unwrap_or((0, 0));
+                    info!(database = %db_type.name(), nodes = nodes, relationships = relationships, "Database connected");
                 }
             }
             Err(e) => {
@@ -245,7 +245,7 @@ pub fn create_api_router(state: AppState) -> Router {
             post(handlers::graph_clear_disabled),
         )
         .route("/api/graph/nodes", get(handlers::graph_nodes))
-        .route("/api/graph/edges", get(handlers::graph_edges))
+        .route("/api/graph/relationships", get(handlers::graph_edges))
         .route("/api/graph/all", get(handlers::graph_all))
         .route("/api/graph/search", get(handlers::graph_search))
         .route("/api/graph/node/:id", get(handlers::node_get))
@@ -261,13 +261,16 @@ pub fn create_api_router(state: AppState) -> Router {
             "/api/graph/paths-to-da",
             get(handlers::paths_to_domain_admins),
         )
-        .route("/api/graph/edge-types", get(handlers::graph_edge_types))
+        .route(
+            "/api/graph/relationship-types",
+            get(handlers::graph_edge_types),
+        )
         .route("/api/graph/node-types", get(handlers::graph_node_types))
         .route("/api/graph/node", post(handlers::add_node))
-        .route("/api/graph/edge", post(handlers::add_edge))
+        .route("/api/graph/relationship", post(handlers::add_edge))
         .route("/api/graph/nodes/:id", delete(handlers::delete_node))
         .route(
-            "/api/graph/edges/:source/:target/:edge_type",
+            "/api/graph/relationships/:source/:target/:rel_type",
             delete(handlers::delete_edge),
         )
         .route("/api/graph/insights", get(handlers::graph_insights))
@@ -325,8 +328,8 @@ pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
         match state.connect(url) {
             Ok(db_type) => {
                 let db = state.db().unwrap();
-                let (nodes, edges) = db.get_stats().unwrap_or((0, 0));
-                info!(database = %db_type.name(), nodes = nodes, edges = edges, "Database connected");
+                let (nodes, relationships) = db.get_stats().unwrap_or((0, 0));
+                info!(database = %db_type.name(), nodes = nodes, relationships = relationships, "Database connected");
             }
             Err(e) => {
                 error!(error = %e, "Failed to connect to database");
@@ -341,8 +344,12 @@ pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
         match state.connect(&url) {
             Ok(_) => {
                 let db = state.db().unwrap();
-                let (nodes, edges) = db.get_stats().unwrap_or((0, 0));
-                info!(nodes = nodes, edges = edges, "Database loaded");
+                let (nodes, relationships) = db.get_stats().unwrap_or((0, 0));
+                info!(
+                    nodes = nodes,
+                    relationships = relationships,
+                    "Database loaded"
+                );
             }
             Err(e) => {
                 error!(error = %e, "Failed to open database");

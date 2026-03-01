@@ -57,7 +57,7 @@ pub struct Settings {
     /// Force layout settings
     #[serde(default)]
     pub force_layout: ForceLayoutSettings,
-    /// Whether nodes and edges stay same visual size regardless of zoom level
+    /// Whether nodes and relationships stay same visual size regardless of zoom level
     #[serde(default = "default_fixed_node_sizes")]
     pub fixed_node_sizes: bool,
 }

@@ -82,7 +82,7 @@ const COMMAND_MAPPING: Record<string, string> = {
   "POST /api/graph/clear-disabled": "graph_clear_disabled",
   // Graph data
   "GET /api/graph/nodes": "graph_nodes",
-  "GET /api/graph/edges": "graph_edges",
+  "GET /api/graph/relationships": "graph_edges",
   "GET /api/graph/all": "graph_all",
   "GET /api/graph/search": "graph_search",
   // Node operations
@@ -96,12 +96,12 @@ const COMMAND_MAPPING: Record<string, string> = {
   "GET /api/graph/paths-to-da": "paths_to_domain_admins",
   // Insights
   "GET /api/graph/insights": "graph_insights",
-  "GET /api/graph/edge-types": "graph_edge_types",
+  "GET /api/graph/relationship-types": "graph_edge_types",
   "GET /api/graph/node-types": "graph_node_types",
   "GET /api/graph/choke-points": "graph_choke_points",
   // Mutations
   "POST /api/graph/node": "add_node",
-  "POST /api/graph/edge": "add_edge",
+  "POST /api/graph/relationship": "add_edge",
   // Query
   "POST /api/graph/query": "graph_query",
   // Query history

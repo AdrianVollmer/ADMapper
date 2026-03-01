@@ -243,22 +243,25 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
             obj.insert("properties".to_string(), JsonValue::Object(props));
             JsonValue::Object(obj)
         }
-        falkordb::FalkorValue::Edge(edge) => {
+        falkordb::FalkorValue::Relationship(relationship) => {
             let mut obj = Map::new();
-            obj.insert("id".to_string(), JsonValue::Number(edge.entity_id.into()));
+            obj.insert(
+                "id".to_string(),
+                JsonValue::Number(relationship.entity_id.into()),
+            );
             obj.insert(
                 "type".to_string(),
-                JsonValue::String(edge.relationship_type),
+                JsonValue::String(relationship.relationship_type),
             );
             obj.insert(
                 "source".to_string(),
-                JsonValue::Number(edge.src_node_id.into()),
+                JsonValue::Number(relationship.src_node_id.into()),
             );
             obj.insert(
                 "target".to_string(),
-                JsonValue::Number(edge.dst_node_id.into()),
+                JsonValue::Number(relationship.dst_node_id.into()),
             );
-            let props: Map<String, JsonValue> = edge
+            let props: Map<String, JsonValue> = relationship
                 .properties
                 .into_iter()
                 .map(|(k, v)| (k, falkor_value_to_json(v)))
@@ -272,12 +275,12 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
                 .into_iter()
                 .map(|n| falkor_value_to_json(falkordb::FalkorValue::Node(n)))
                 .collect();
-            let edges: Vec<JsonValue> = path
+            let relationships: Vec<JsonValue> = path
                 .relationships
                 .into_iter()
-                .map(|e| falkor_value_to_json(falkordb::FalkorValue::Edge(e)))
+                .map(|e| falkor_value_to_json(falkordb::FalkorValue::Relationship(e)))
                 .collect();
-            json!({ "nodes": nodes, "edges": edges })
+            json!({ "nodes": nodes, "relationships": relationships })
         }
         falkordb::FalkorValue::Point(point) => {
             json!({ "latitude": point.latitude, "longitude": point.longitude })
@@ -344,8 +347,8 @@ impl DatabaseBackend for FalkorDbDatabase {
         Ok(())
     }
 
-    fn insert_edge(&self, edge: DbEdge) -> Result<()> {
-        self.insert_edges(&[edge])?;
+    fn insert_edge(&self, relationship: DbEdge) -> Result<()> {
+        self.insert_edges(&[relationship])?;
         Ok(())
     }
 
@@ -394,26 +397,26 @@ impl DatabaseBackend for FalkorDbDatabase {
         Ok(nodes.len())
     }
 
-    fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
-        if edges.is_empty() {
+    fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        if relationships.is_empty() {
             return Ok(0);
         }
 
-        // Group edges by type for efficient batching
+        // Group relationships by type for efficient batching
         let mut edges_by_type: std::collections::HashMap<String, Vec<&DbEdge>> =
             std::collections::HashMap::new();
-        for edge in edges {
+        for relationship in relationships {
             edges_by_type
-                .entry(edge.edge_type.clone())
+                .entry(relationship.rel_type.clone())
                 .or_default()
-                .push(edge);
+                .push(relationship);
         }
 
-        // Batch insert edges of each type using UNWIND
+        // Batch insert relationships of each type using UNWIND
         // Use MERGE for nodes to create placeholders if they don't exist
         const BATCH_SIZE: usize = 200;
         let mut inserted = 0;
-        for (edge_type, type_edges) in edges_by_type {
+        for (rel_type, type_edges) in edges_by_type {
             for chunk in type_edges.chunks(BATCH_SIZE) {
                 // Build the list literal for UNWIND
                 let items: Vec<String> = chunk
@@ -442,7 +445,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                     })
                     .collect();
 
-                // MERGE nodes (creates placeholders if not exist), then create edge
+                // MERGE nodes (creates placeholders if not exist), then create relationship
                 let cypher = format!(
                     "UNWIND [{}] AS row \
                      MERGE (a {{objectid: row.src}}) \
@@ -453,7 +456,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                      SET r.properties = row.props \
                      RETURN count(r) AS created",
                     items.join(", "),
-                    edge_type
+                    rel_type
                 );
 
                 match self.execute_query(&cypher) {
@@ -466,7 +469,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                         inserted += created;
                     }
                     Err(e) => {
-                        debug!("Failed to create {} edges batch: {}", edge_type, e);
+                        debug!("Failed to create {} relationships batch: {}", rel_type, e);
                     }
                 }
             }
@@ -633,7 +636,7 @@ impl DatabaseBackend for FalkorDbDatabase {
             "MATCH (a)-[r]->(b) RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel"
         )?;
 
-        let edges: Vec<DbEdge> = rows
+        let relationships: Vec<DbEdge> = rows
             .iter()
             .filter_map(|r| {
                 let src = r.first()?.as_str()?.to_string();
@@ -647,14 +650,14 @@ impl DatabaseBackend for FalkorDbDatabase {
                 Some(DbEdge {
                     source: src,
                     target: tgt,
-                    edge_type: typ,
+                    rel_type: typ,
                     properties: props,
                     ..Default::default()
                 })
             })
             .collect();
 
-        Ok(edges)
+        Ok(relationships)
     }
 
     fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>> {
@@ -701,7 +704,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         );
 
         let rows = self.execute_query(&cypher)?;
-        let edges: Vec<DbEdge> = rows
+        let relationships: Vec<DbEdge> = rows
             .iter()
             .filter_map(|r| {
                 let src = r.first()?.as_str()?.to_string();
@@ -715,14 +718,14 @@ impl DatabaseBackend for FalkorDbDatabase {
                 Some(DbEdge {
                     source: src,
                     target: tgt,
-                    edge_type: typ,
+                    rel_type: typ,
                     properties: props,
                     ..Default::default()
                 })
             })
             .collect();
 
-        Ok(edges)
+        Ok(relationships)
     }
 
     fn get_edge_types(&self) -> Result<Vec<String>> {
@@ -850,7 +853,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let mut node_ids: HashSet<String> = HashSet::new();
         node_ids.insert(node_id.to_string());
 
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
         for row in &rows {
             if row.len() >= 3 {
                 if let (Some(src_node), Some(tgt_node)) =
@@ -860,7 +863,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                     node_ids.insert(tgt_node.id.clone());
 
                     if let Some(rel) = row[1].as_object() {
-                        let edge_type = rel
+                        let rel_type = rel
                             .get("type")
                             .and_then(|v| v.as_str())
                             .unwrap_or("RELATED")
@@ -870,10 +873,10 @@ impl DatabaseBackend for FalkorDbDatabase {
                             .cloned()
                             .unwrap_or(JsonValue::Object(Map::new()));
 
-                        edges.push(DbEdge {
+                        relationships.push(DbEdge {
                             source: src_node.id,
                             target: tgt_node.id,
-                            edge_type,
+                            rel_type,
                             properties: props,
                             ..Default::default()
                         });
@@ -885,14 +888,14 @@ impl DatabaseBackend for FalkorDbDatabase {
         let node_id_vec: Vec<String> = node_ids.into_iter().collect();
         let nodes = self.get_nodes_by_ids(&node_id_vec)?;
 
-        Ok((nodes, edges))
+        Ok((nodes, relationships))
     }
 
     fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
         let id_escaped = node_id.replace('\'', "\\'");
 
         // Use a single query with multiple counts for efficiency
-        // Count unique NODES, not edges (a node with multiple edges to us counts as 1)
+        // Count unique NODES, not relationships (a node with multiple relationships to us counts as 1)
         let cypher = format!(
             "MATCH (n {{objectid: '{}'}})
              OPTIONAL MATCH (n)<-[]-(in_node)
@@ -981,7 +984,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                             .unwrap_or("")
                             .to_string();
 
-                        let edge_type = if i < rels.len() {
+                        let rel_type = if i < rels.len() {
                             rels[i]
                                 .as_object()
                                 .and_then(|o| o.get("type"))
@@ -991,10 +994,10 @@ impl DatabaseBackend for FalkorDbDatabase {
                             None
                         };
 
-                        path.push((node_id, edge_type));
+                        path.push((node_id, rel_type));
                     }
 
-                    // Last node has no outgoing edge
+                    // Last node has no outgoing relationship
                     if let Some(last) = path.last_mut() {
                         last.1 = None;
                     }

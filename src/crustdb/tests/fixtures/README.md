@@ -16,13 +16,13 @@ Each `.toml` file contains one or more test cases:
 name = "descriptive_test_name"
 description = "What this test verifies"
 
-# Optional: Graph setup (nodes and edges to create before running the query)
+# Optional: Graph setup (nodes and relationships to create before running the query)
 [test.setup]
 nodes = [
     { id = "a", labels = ["Person"], properties = { name = "Alice", age = 30 } },
     { id = "b", labels = ["Person"], properties = { name = "Bob" } },
 ]
-edges = [
+relationships = [
     { from = "a", to = "b", type = "KNOWS", properties = { since = 2020 } },
 ]
 

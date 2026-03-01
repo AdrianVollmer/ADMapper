@@ -1,7 +1,7 @@
 //! SQLite storage backend for the graph database.
 
 use crate::error::{Error, Result};
-use crate::graph::{Edge, Node, PropertyValue};
+use crate::graph::{Node, PropertyValue, Relationship};
 use crate::{DatabaseStats, NewQueryHistoryEntry, QueryHistoryRow};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
@@ -130,8 +130,8 @@ impl SqliteStorage {
                 name TEXT NOT NULL UNIQUE
             );
 
-            -- Normalized edge types
-            CREATE TABLE edge_types (
+            -- Normalized relationship types
+            CREATE TABLE rel_types (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE
             );
@@ -156,7 +156,7 @@ impl SqliteStorage {
             CREATE INDEX idx_node_label_map_node ON node_label_map(node_id);
 
             -- Edges table
-            CREATE TABLE edges (
+            CREATE TABLE relationships (
                 id INTEGER PRIMARY KEY,
                 source_id INTEGER NOT NULL,
                 target_id INTEGER NOT NULL,
@@ -164,13 +164,13 @@ impl SqliteStorage {
                 properties TEXT NOT NULL DEFAULT '{}',
                 FOREIGN KEY (source_id) REFERENCES nodes(id) ON DELETE CASCADE,
                 FOREIGN KEY (target_id) REFERENCES nodes(id) ON DELETE CASCADE,
-                FOREIGN KEY (type_id) REFERENCES edge_types(id) ON DELETE RESTRICT
+                FOREIGN KEY (type_id) REFERENCES rel_types(id) ON DELETE RESTRICT
             );
-            CREATE INDEX idx_edges_source ON edges(source_id);
-            CREATE INDEX idx_edges_target ON edges(target_id);
-            CREATE INDEX idx_edges_type ON edges(type_id);
-            CREATE INDEX idx_edges_source_type ON edges(source_id, type_id);
-            CREATE INDEX idx_edges_target_type ON edges(target_id, type_id);
+            CREATE INDEX idx_edges_source ON relationships(source_id);
+            CREATE INDEX idx_edges_target ON relationships(target_id);
+            CREATE INDEX idx_edges_type ON relationships(type_id);
+            CREATE INDEX idx_edges_source_type ON relationships(source_id, type_id);
+            CREATE INDEX idx_edges_target_type ON relationships(target_id, type_id);
 
             -- Query history table for storing executed queries
             CREATE TABLE query_history (
@@ -202,11 +202,11 @@ impl SqliteStorage {
                 BEGIN DELETE FROM query_cache; END;
             CREATE TRIGGER cache_invalidate_nodes_delete AFTER DELETE ON nodes
                 BEGIN DELETE FROM query_cache; END;
-            CREATE TRIGGER cache_invalidate_edges_insert AFTER INSERT ON edges
+            CREATE TRIGGER cache_invalidate_edges_insert AFTER INSERT ON relationships
                 BEGIN DELETE FROM query_cache; END;
-            CREATE TRIGGER cache_invalidate_edges_update AFTER UPDATE ON edges
+            CREATE TRIGGER cache_invalidate_edges_update AFTER UPDATE ON relationships
                 BEGIN DELETE FROM query_cache; END;
-            CREATE TRIGGER cache_invalidate_edges_delete AFTER DELETE ON edges
+            CREATE TRIGGER cache_invalidate_edges_delete AFTER DELETE ON relationships
                 BEGIN DELETE FROM query_cache; END;
             CREATE TRIGGER cache_invalidate_labels_insert AFTER INSERT ON node_label_map
                 BEGIN DELETE FROM query_cache; END;
@@ -282,11 +282,11 @@ impl SqliteStorage {
                 BEGIN DELETE FROM query_cache; END;
             CREATE TRIGGER IF NOT EXISTS cache_invalidate_nodes_delete AFTER DELETE ON nodes
                 BEGIN DELETE FROM query_cache; END;
-            CREATE TRIGGER IF NOT EXISTS cache_invalidate_edges_insert AFTER INSERT ON edges
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_edges_insert AFTER INSERT ON relationships
                 BEGIN DELETE FROM query_cache; END;
-            CREATE TRIGGER IF NOT EXISTS cache_invalidate_edges_update AFTER UPDATE ON edges
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_edges_update AFTER UPDATE ON relationships
                 BEGIN DELETE FROM query_cache; END;
-            CREATE TRIGGER IF NOT EXISTS cache_invalidate_edges_delete AFTER DELETE ON edges
+            CREATE TRIGGER IF NOT EXISTS cache_invalidate_edges_delete AFTER DELETE ON relationships
                 BEGIN DELETE FROM query_cache; END;
             CREATE TRIGGER IF NOT EXISTS cache_invalidate_labels_insert AFTER INSERT ON node_label_map
                 BEGIN DELETE FROM query_cache; END;
@@ -313,8 +313,8 @@ impl SqliteStorage {
             -- Convert nodes properties from JSON text to JSONB
             UPDATE nodes SET properties = jsonb(properties) WHERE properties IS NOT NULL;
 
-            -- Convert edges properties from JSON text to JSONB
-            UPDATE edges SET properties = jsonb(properties) WHERE properties IS NOT NULL;
+            -- Convert relationships properties from JSON text to JSONB
+            UPDATE relationships SET properties = jsonb(properties) WHERE properties IS NOT NULL;
 
             -- Update schema version
             UPDATE meta SET value = '4' WHERE key = 'schema_version';
@@ -412,14 +412,14 @@ impl SqliteStorage {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Get or create an edge type ID.
-    fn get_or_create_edge_type(&self, edge_type: &str) -> Result<i64> {
+    /// Get or create an relationship type ID.
+    fn get_or_create_edge_type(&self, rel_type: &str) -> Result<i64> {
         // Try to get existing
         if let Some(id) = self
             .conn
             .query_row(
-                "SELECT id FROM edge_types WHERE name = ?1",
-                params![edge_type],
+                "SELECT id FROM rel_types WHERE name = ?1",
+                params![rel_type],
                 |row| row.get(0),
             )
             .optional()?
@@ -429,8 +429,8 @@ impl SqliteStorage {
 
         // Create new
         self.conn.execute(
-            "INSERT INTO edge_types (name) VALUES (?1)",
-            params![edge_type],
+            "INSERT INTO rel_types (name) VALUES (?1)",
+            params![rel_type],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -460,18 +460,18 @@ impl SqliteStorage {
         Ok(node_id)
     }
 
-    /// Insert an edge into the database.
+    /// Insert an relationship into the database.
     pub fn insert_edge(
         &self,
         source_id: i64,
         target_id: i64,
-        edge_type: &str,
+        rel_type: &str,
         properties: &serde_json::Value,
     ) -> Result<i64> {
-        let type_id = self.get_or_create_edge_type(edge_type)?;
+        let type_id = self.get_or_create_edge_type(rel_type)?;
         let props_json = serde_json::to_string(properties)?;
         self.conn.execute(
-            "INSERT INTO edges (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, jsonb(?4))",
+            "INSERT INTO relationships (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, jsonb(?4))",
             params![source_id, target_id, type_id, props_json],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -693,30 +693,30 @@ impl SqliteStorage {
         Ok(node_id)
     }
 
-    /// Insert multiple edges in a single transaction.
+    /// Insert multiple relationships in a single transaction.
     ///
-    /// Each edge is specified as (source_id, target_id, edge_type, properties).
-    /// Returns a vector of the created edge IDs in the same order as the input.
+    /// Each relationship is specified as (source_id, target_id, rel_type, properties).
+    /// Returns a vector of the created relationship IDs in the same order as the input.
     pub fn insert_edges_batch(
         &mut self,
-        edges: &[(i64, i64, String, serde_json::Value)],
+        relationships: &[(i64, i64, String, serde_json::Value)],
     ) -> Result<Vec<i64>> {
-        if edges.is_empty() {
+        if relationships.is_empty() {
             return Ok(Vec::new());
         }
 
         let tx = self.conn.transaction()?;
-        let mut edge_ids = Vec::with_capacity(edges.len());
+        let mut edge_ids = Vec::with_capacity(relationships.len());
 
-        // Pre-collect all unique edge types and create them
+        // Pre-collect all unique relationship types and create them
         let mut type_cache: std::collections::HashMap<String, i64> =
             std::collections::HashMap::new();
-        for (_, _, edge_type, _) in edges {
-            if !type_cache.contains_key(edge_type) {
+        for (_, _, rel_type, _) in relationships {
+            if !type_cache.contains_key(rel_type) {
                 let type_id: Option<i64> = tx
                     .query_row(
-                        "SELECT id FROM edge_types WHERE name = ?1",
-                        params![edge_type],
+                        "SELECT id FROM rel_types WHERE name = ?1",
+                        params![rel_type],
                         |row| row.get(0),
                     )
                     .optional()?;
@@ -724,25 +724,25 @@ impl SqliteStorage {
                     Some(id) => id,
                     None => {
                         tx.execute(
-                            "INSERT INTO edge_types (name) VALUES (?1)",
-                            params![edge_type],
+                            "INSERT INTO rel_types (name) VALUES (?1)",
+                            params![rel_type],
                         )?;
                         tx.last_insert_rowid()
                     }
                 };
-                type_cache.insert(edge_type.clone(), type_id);
+                type_cache.insert(rel_type.clone(), type_id);
             }
         }
 
-        // Insert edges using prepared statement
+        // Insert relationships using prepared statement
         {
             let mut edge_stmt = tx.prepare(
-                "INSERT INTO edges (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, jsonb(?4))",
+                "INSERT INTO relationships (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, jsonb(?4))",
             )?;
 
-            for (source_id, target_id, edge_type, properties) in edges {
+            for (source_id, target_id, rel_type, properties) in relationships {
                 let props_json = serde_json::to_string(properties)?;
-                let type_id = type_cache.get(edge_type).copied().unwrap_or(0);
+                let type_id = type_cache.get(rel_type).copied().unwrap_or(0);
                 edge_stmt.execute(params![source_id, target_id, type_id, props_json])?;
                 edge_ids.push(tx.last_insert_rowid());
             }
@@ -936,15 +936,15 @@ impl SqliteStorage {
         }))
     }
 
-    /// Get an edge by ID.
-    pub fn get_edge(&self, id: i64) -> Result<Option<Edge>> {
+    /// Get an relationship by ID.
+    pub fn get_edge(&self, id: i64) -> Result<Option<Relationship>> {
         // Use json() to convert JSONB blob back to JSON text
-        let edge: Option<(i64, i64, i64, String, String)> = self
+        let relationship: Option<(i64, i64, i64, String, String)> = self
             .conn
             .query_row(
                 "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
-                 FROM edges e
-                 JOIN edge_types et ON e.type_id = et.id
+                 FROM relationships e
+                 JOIN rel_types et ON e.type_id = et.id
                  WHERE e.id = ?1",
                 params![id],
                 |row| {
@@ -959,23 +959,23 @@ impl SqliteStorage {
             )
             .optional()?;
 
-        let Some((id, source, target, edge_type, props_json)) = edge else {
+        let Some((id, source, target, rel_type, props_json)) = relationship else {
             return Ok(None);
         };
 
         let properties: std::collections::HashMap<String, PropertyValue> =
             serde_json::from_str(&props_json)?;
 
-        Ok(Some(Edge {
+        Ok(Some(Relationship {
             id,
             source,
             target,
-            edge_type,
+            rel_type,
             properties,
         }))
     }
 
-    /// Delete a node and its associated edges.
+    /// Delete a node and its associated relationships.
     pub fn delete_node(&self, id: i64) -> Result<bool> {
         let affected = self
             .conn
@@ -983,18 +983,18 @@ impl SqliteStorage {
         Ok(affected > 0)
     }
 
-    /// Delete an edge.
+    /// Delete an relationship.
     pub fn delete_edge(&self, id: i64) -> Result<bool> {
         let affected = self
             .conn
-            .execute("DELETE FROM edges WHERE id = ?1", params![id])?;
+            .execute("DELETE FROM relationships WHERE id = ?1", params![id])?;
         Ok(affected > 0)
     }
 
-    /// Check if a node has any connected edges.
+    /// Check if a node has any connected relationships.
     pub fn has_edges(&self, node_id: i64) -> Result<bool> {
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM edges WHERE source_id = ?1 OR target_id = ?1",
+            "SELECT COUNT(*) FROM relationships WHERE source_id = ?1 OR target_id = ?1",
             params![node_id],
             |row| row.get(0),
         )?;
@@ -1072,62 +1072,62 @@ impl SqliteStorage {
         self.find_nodes_by_label_limit(label, None)
     }
 
-    /// Find edges by type.
-    pub fn find_edges_by_type(&self, edge_type: &str) -> Result<Vec<Edge>> {
+    /// Find relationships by type.
+    pub fn find_edges_by_type(&self, rel_type: &str) -> Result<Vec<Relationship>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
-             FROM edges e
-             JOIN edge_types et ON e.type_id = et.id
+             FROM relationships e
+             JOIN rel_types et ON e.type_id = et.id
              WHERE et.name = ?1",
         )?;
 
-        self.collect_edges_from_stmt(&mut stmt, params![edge_type])
+        self.collect_edges_from_stmt(&mut stmt, params![rel_type])
     }
 
-    /// Scan all edges in the database.
-    pub fn scan_all_edges(&self) -> Result<Vec<Edge>> {
+    /// Scan all relationships in the database.
+    pub fn scan_all_edges(&self) -> Result<Vec<Relationship>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
-             FROM edges e
-             JOIN edge_types et ON e.type_id = et.id",
+             FROM relationships e
+             JOIN rel_types et ON e.type_id = et.id",
         )?;
 
         self.collect_edges_from_stmt(&mut stmt, [])
     }
 
-    /// Helper: collect edges from a prepared statement that returns
-    /// (id, source_id, target_id, edge_type, properties).
+    /// Helper: collect relationships from a prepared statement that returns
+    /// (id, source_id, target_id, rel_type, properties).
     fn collect_edges_from_stmt<P: rusqlite::Params>(
         &self,
         stmt: &mut rusqlite::Statement,
         params: P,
-    ) -> Result<Vec<Edge>> {
+    ) -> Result<Vec<Relationship>> {
         let rows = stmt.query_map(params, |row| {
             let id: i64 = row.get(0)?;
             let source: i64 = row.get(1)?;
             let target: i64 = row.get(2)?;
-            let edge_type: String = row.get(3)?;
+            let rel_type: String = row.get(3)?;
             let properties_json: String = row.get(4)?;
-            Ok((id, source, target, edge_type, properties_json))
+            Ok((id, source, target, rel_type, properties_json))
         })?;
 
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
         for row_result in rows {
-            let (id, source, target, edge_type, properties_json) = row_result?;
+            let (id, source, target, rel_type, properties_json) = row_result?;
 
             let properties: std::collections::HashMap<String, PropertyValue> =
                 serde_json::from_str(&properties_json)?;
 
-            edges.push(Edge {
+            relationships.push(Relationship {
                 id,
                 source,
                 target,
-                edge_type,
+                rel_type,
                 properties,
             });
         }
 
-        Ok(edges)
+        Ok(relationships)
     }
 
     /// Count all nodes.
@@ -1151,21 +1151,21 @@ impl SqliteStorage {
         Ok(count as u64)
     }
 
-    /// Count all edges.
+    /// Count all relationships.
     pub fn count_edges(&self) -> Result<u64> {
         let count: i64 = self
             .conn
-            .query_row("SELECT COUNT(*) FROM edges", [], |row| row.get(0))?;
+            .query_row("SELECT COUNT(*) FROM relationships", [], |row| row.get(0))?;
         Ok(count as u64)
     }
 
-    /// Count edges with a specific type.
-    pub fn count_edges_by_type(&self, edge_type: &str) -> Result<u64> {
+    /// Count relationships with a specific type.
+    pub fn count_edges_by_type(&self, rel_type: &str) -> Result<u64> {
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM edges e
-             JOIN edge_types et ON e.type_id = et.id
+            "SELECT COUNT(*) FROM relationships e
+             JOIN rel_types et ON e.type_id = et.id
              WHERE et.name = ?1",
-            params![edge_type],
+            params![rel_type],
             |row| row.get(0),
         )?;
         Ok(count as u64)
@@ -1269,55 +1269,55 @@ impl SqliteStorage {
         Ok(nodes)
     }
 
-    /// Find outgoing edges from a node.
-    pub fn find_outgoing_edges(&self, node_id: i64) -> Result<Vec<Edge>> {
+    /// Find outgoing relationships from a node.
+    pub fn find_outgoing_edges(&self, node_id: i64) -> Result<Vec<Relationship>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
-             FROM edges e
-             JOIN edge_types et ON e.type_id = et.id
+             FROM relationships e
+             JOIN rel_types et ON e.type_id = et.id
              WHERE e.source_id = ?1",
         )?;
 
         self.collect_edges_from_stmt(&mut stmt, params![node_id])
     }
 
-    /// Find incoming edges to a node.
-    pub fn find_incoming_edges(&self, node_id: i64) -> Result<Vec<Edge>> {
+    /// Find incoming relationships to a node.
+    pub fn find_incoming_edges(&self, node_id: i64) -> Result<Vec<Relationship>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
-             FROM edges e
-             JOIN edge_types et ON e.type_id = et.id
+             FROM relationships e
+             JOIN rel_types et ON e.type_id = et.id
              WHERE e.target_id = ?1",
         )?;
 
         self.collect_edges_from_stmt(&mut stmt, params![node_id])
     }
 
-    /// Count outgoing edges from a node.
+    /// Count outgoing relationships from a node.
     pub fn count_outgoing_edges(&self, node_id: i64) -> Result<usize> {
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM edges WHERE source_id = ?1",
+            "SELECT COUNT(*) FROM relationships WHERE source_id = ?1",
             params![node_id],
             |row| row.get(0),
         )?;
         Ok(count as usize)
     }
 
-    /// Count incoming edges to a node.
+    /// Count incoming relationships to a node.
     pub fn count_incoming_edges(&self, node_id: i64) -> Result<usize> {
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM edges WHERE target_id = ?1",
+            "SELECT COUNT(*) FROM relationships WHERE target_id = ?1",
             params![node_id],
             |row| row.get(0),
         )?;
         Ok(count as usize)
     }
 
-    /// Count incoming edges to a node by object_id.
+    /// Count incoming relationships to a node by object_id.
     /// Uses the dedicated object_id column for efficient indexed lookup.
     pub fn count_incoming_edges_by_object_id(&self, object_id: &str) -> Result<usize> {
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM edges e \
+            "SELECT COUNT(*) FROM relationships e \
              JOIN nodes n ON e.target_id = n.id \
              WHERE n.object_id = ?1",
             params![object_id],
@@ -1326,11 +1326,11 @@ impl SqliteStorage {
         Ok(count as usize)
     }
 
-    /// Count outgoing edges from a node by object_id.
+    /// Count outgoing relationships from a node by object_id.
     /// Uses the dedicated object_id column for efficient indexed lookup.
     pub fn count_outgoing_edges_by_object_id(&self, object_id: &str) -> Result<usize> {
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM edges e \
+            "SELECT COUNT(*) FROM relationships e \
              JOIN nodes n ON e.source_id = n.id \
              WHERE n.object_id = ?1",
             params![object_id],
@@ -1339,25 +1339,25 @@ impl SqliteStorage {
         Ok(count as usize)
     }
 
-    /// Get all edges for a node by object_id (both incoming and outgoing).
-    /// Returns (source_object_id, target_object_id, edge_type) tuples.
+    /// Get all relationships for a node by object_id (both incoming and outgoing).
+    /// Returns (source_object_id, target_object_id, rel_type) tuples.
     /// Uses the dedicated object_id column for efficient indexed lookup.
     pub fn get_node_edges_by_object_id(
         &self,
         object_id: &str,
     ) -> Result<Vec<(String, String, String)>> {
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
 
-        // Query for edges where node is source or target, using dedicated object_id column
+        // Query for relationships where node is source or target, using dedicated object_id column
         let mut stmt = self.conn.prepare_cached(
             "SELECT
                 src.object_id AS src_id,
                 tgt.object_id AS tgt_id,
-                et.name AS edge_type
-             FROM edges e
+                et.name AS rel_type
+             FROM relationships e
              JOIN nodes src ON e.source_id = src.id
              JOIN nodes tgt ON e.target_id = tgt.id
-             JOIN edge_types et ON e.type_id = et.id
+             JOIN rel_types et ON e.type_id = et.id
              WHERE src.object_id = ?1
                 OR tgt.object_id = ?1",
         )?;
@@ -1371,24 +1371,24 @@ impl SqliteStorage {
         })?;
 
         for row in rows {
-            edges.push(row?);
+            relationships.push(row?);
         }
 
-        Ok(edges)
+        Ok(relationships)
     }
 
     /// Get incoming connections to a node by object_id.
     ///
-    /// Returns all nodes that have edges pointing TO the specified node,
-    /// along with those edges. This uses direct SQL with the object_id index
+    /// Returns all nodes that have relationships pointing TO the specified node,
+    /// along with those relationships. This uses direct SQL with the object_id index
     /// for optimal performance, avoiding full node scans.
     ///
-    /// Returns (Vec<Node>, Vec<Edge>) where nodes are the source nodes of
-    /// incoming edges, and edges are the relationships.
+    /// Returns (Vec<Node>, Vec<Relationship>) where nodes are the source nodes of
+    /// incoming relationships, and relationships are the relationships.
     pub fn get_incoming_connections_by_object_id(
         &self,
         object_id: &str,
-    ) -> Result<(Vec<Node>, Vec<Edge>)> {
+    ) -> Result<(Vec<Node>, Vec<Relationship>)> {
         // First find the target node's internal ID using the dedicated object_id column
         let target_id: Option<i64> = self
             .conn
@@ -1403,19 +1403,19 @@ impl SqliteStorage {
             return Ok((Vec::new(), Vec::new()));
         };
 
-        // Get incoming edges and source nodes in a single query
+        // Get incoming relationships and source nodes in a single query
         let mut stmt = self.conn.prepare_cached(
             "SELECT
-                e.id AS edge_id,
+                e.id AS rel_id,
                 e.source_id,
                 e.target_id,
-                et.name AS edge_type,
+                et.name AS rel_type,
                 json(e.properties) AS edge_props,
                 src.id AS src_node_id,
                 json(src.properties) AS src_props,
                 GROUP_CONCAT(DISTINCT nl.name) AS src_labels
-             FROM edges e
-             JOIN edge_types et ON e.type_id = et.id
+             FROM relationships e
+             JOIN rel_types et ON e.type_id = et.id
              JOIN nodes src ON e.source_id = src.id
              LEFT JOIN node_label_map nlm ON src.id = nlm.node_id
              LEFT JOIN node_labels nl ON nlm.label_id = nl.id
@@ -1424,14 +1424,14 @@ impl SqliteStorage {
         )?;
 
         let mut nodes_map: std::collections::HashMap<i64, Node> = std::collections::HashMap::new();
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
 
         let rows = stmt.query_map(params![target_id], |row| {
             Ok((
-                row.get::<_, i64>(0)?,            // edge_id
+                row.get::<_, i64>(0)?,            // rel_id
                 row.get::<_, i64>(1)?,            // source_id
                 row.get::<_, i64>(2)?,            // target_id
-                row.get::<_, String>(3)?,         // edge_type
+                row.get::<_, String>(3)?,         // rel_type
                 row.get::<_, String>(4)?,         // edge_props
                 row.get::<_, i64>(5)?,            // src_node_id
                 row.get::<_, String>(6)?,         // src_props
@@ -1441,24 +1441,24 @@ impl SqliteStorage {
 
         for row_result in rows {
             let (
-                edge_id,
+                rel_id,
                 source_id,
                 target_id_row,
-                edge_type,
+                rel_type,
                 edge_props,
                 src_node_id,
                 src_props,
                 src_labels,
             ) = row_result?;
 
-            // Add edge
+            // Add relationship
             let edge_properties: std::collections::HashMap<String, PropertyValue> =
                 serde_json::from_str(&edge_props)?;
-            edges.push(Edge {
-                id: edge_id,
+            relationships.push(Relationship {
+                id: rel_id,
                 source: source_id,
                 target: target_id_row,
-                edge_type,
+                rel_type,
                 properties: edge_properties,
             });
 
@@ -1482,21 +1482,21 @@ impl SqliteStorage {
             nodes_map.insert(target_id, target_node);
         }
 
-        Ok((nodes_map.into_values().collect(), edges))
+        Ok((nodes_map.into_values().collect(), relationships))
     }
 
     /// Get outgoing connections from a node by object_id.
     ///
-    /// Returns all nodes that the specified node has edges pointing TO,
-    /// along with those edges. This uses direct SQL with the object_id index
+    /// Returns all nodes that the specified node has relationships pointing TO,
+    /// along with those relationships. This uses direct SQL with the object_id index
     /// for optimal performance.
     ///
-    /// Returns (Vec<Node>, Vec<Edge>) where nodes are the target nodes of
-    /// outgoing edges, and edges are the relationships.
+    /// Returns (Vec<Node>, Vec<Relationship>) where nodes are the target nodes of
+    /// outgoing relationships, and relationships are the relationships.
     pub fn get_outgoing_connections_by_object_id(
         &self,
         object_id: &str,
-    ) -> Result<(Vec<Node>, Vec<Edge>)> {
+    ) -> Result<(Vec<Node>, Vec<Relationship>)> {
         // First find the source node's internal ID using the dedicated object_id column
         let source_id: Option<i64> = self
             .conn
@@ -1511,19 +1511,19 @@ impl SqliteStorage {
             return Ok((Vec::new(), Vec::new()));
         };
 
-        // Get outgoing edges and target nodes in a single query
+        // Get outgoing relationships and target nodes in a single query
         let mut stmt = self.conn.prepare_cached(
             "SELECT
-                e.id AS edge_id,
+                e.id AS rel_id,
                 e.source_id,
                 e.target_id,
-                et.name AS edge_type,
+                et.name AS rel_type,
                 json(e.properties) AS edge_props,
                 tgt.id AS tgt_node_id,
                 json(tgt.properties) AS tgt_props,
                 GROUP_CONCAT(DISTINCT nl.name) AS tgt_labels
-             FROM edges e
-             JOIN edge_types et ON e.type_id = et.id
+             FROM relationships e
+             JOIN rel_types et ON e.type_id = et.id
              JOIN nodes tgt ON e.target_id = tgt.id
              LEFT JOIN node_label_map nlm ON tgt.id = nlm.node_id
              LEFT JOIN node_labels nl ON nlm.label_id = nl.id
@@ -1532,14 +1532,14 @@ impl SqliteStorage {
         )?;
 
         let mut nodes_map: std::collections::HashMap<i64, Node> = std::collections::HashMap::new();
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
 
         let rows = stmt.query_map(params![source_id], |row| {
             Ok((
-                row.get::<_, i64>(0)?,            // edge_id
+                row.get::<_, i64>(0)?,            // rel_id
                 row.get::<_, i64>(1)?,            // source_id
                 row.get::<_, i64>(2)?,            // target_id
-                row.get::<_, String>(3)?,         // edge_type
+                row.get::<_, String>(3)?,         // rel_type
                 row.get::<_, String>(4)?,         // edge_props
                 row.get::<_, i64>(5)?,            // tgt_node_id
                 row.get::<_, String>(6)?,         // tgt_props
@@ -1549,24 +1549,24 @@ impl SqliteStorage {
 
         for row_result in rows {
             let (
-                edge_id,
+                rel_id,
                 source_id_row,
                 target_id,
-                edge_type,
+                rel_type,
                 edge_props,
                 tgt_node_id,
                 tgt_props,
                 tgt_labels,
             ) = row_result?;
 
-            // Add edge
+            // Add relationship
             let edge_properties: std::collections::HashMap<String, PropertyValue> =
                 serde_json::from_str(&edge_props)?;
-            edges.push(Edge {
-                id: edge_id,
+            relationships.push(Relationship {
+                id: rel_id,
                 source: source_id_row,
                 target: target_id,
-                edge_type,
+                rel_type,
                 properties: edge_properties,
             });
 
@@ -1590,7 +1590,7 @@ impl SqliteStorage {
             nodes_map.insert(source_id, source_node);
         }
 
-        Ok((nodes_map.into_values().collect(), edges))
+        Ok((nodes_map.into_values().collect(), relationships))
     }
 
     /// Get database statistics.
@@ -1599,9 +1599,9 @@ impl SqliteStorage {
             .conn
             .query_row("SELECT COUNT(*) FROM nodes", [], |row| row.get(0))?;
 
-        let edge_count: usize = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM edges", [], |row| row.get(0))?;
+        let edge_count: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM relationships", [], |row| row.get(0))?;
 
         let label_count: usize =
             self.conn
@@ -1609,7 +1609,7 @@ impl SqliteStorage {
 
         let edge_type_count: usize =
             self.conn
-                .query_row("SELECT COUNT(*) FROM edge_types", [], |row| row.get(0))?;
+                .query_row("SELECT COUNT(*) FROM rel_types", [], |row| row.get(0))?;
 
         Ok(DatabaseStats {
             node_count,
@@ -1630,14 +1630,14 @@ impl SqliteStorage {
         Ok((page_count * page_size) as usize)
     }
 
-    /// Clear all data from the database (nodes, edges, labels, types).
+    /// Clear all data from the database (nodes, relationships, labels, types).
     /// This is much faster than deleting via Cypher queries.
     pub fn clear(&self) -> Result<()> {
         // Delete in order respecting foreign key relationships
         self.conn.execute("DELETE FROM node_label_map", [])?;
-        self.conn.execute("DELETE FROM edges", [])?;
+        self.conn.execute("DELETE FROM relationships", [])?;
         self.conn.execute("DELETE FROM nodes", [])?;
-        self.conn.execute("DELETE FROM edge_types", [])?;
+        self.conn.execute("DELETE FROM rel_types", [])?;
         self.conn.execute("DELETE FROM node_labels", [])?;
         Ok(())
     }
@@ -1668,11 +1668,11 @@ impl SqliteStorage {
         Ok(labels)
     }
 
-    /// Get all edge types.
+    /// Get all relationship types.
     pub fn get_all_edge_types(&self) -> Result<Vec<String>> {
         let mut stmt = self
             .conn
-            .prepare_cached("SELECT name FROM edge_types ORDER BY name")?;
+            .prepare_cached("SELECT name FROM rel_types ORDER BY name")?;
         let types: Vec<String> = stmt
             .query_map([], |row| row.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -2014,7 +2014,7 @@ mod tests {
             .insert_node(&["Person".to_string()], &serde_json::json!({"name": "Bob"}))
             .unwrap();
 
-        let edge_id = storage
+        let rel_id = storage
             .insert_edge(
                 alice_id,
                 bob_id,
@@ -2023,10 +2023,10 @@ mod tests {
             )
             .unwrap();
 
-        let edge = storage.get_edge(edge_id).unwrap().unwrap();
-        assert_eq!(edge.source, alice_id);
-        assert_eq!(edge.target, bob_id);
-        assert_eq!(edge.edge_type, "KNOWS");
+        let relationship = storage.get_edge(rel_id).unwrap().unwrap();
+        assert_eq!(relationship.source, alice_id);
+        assert_eq!(relationship.target, bob_id);
+        assert_eq!(relationship.rel_type, "KNOWS");
     }
 
     #[test]
@@ -2150,15 +2150,15 @@ mod tests {
             .insert_node(&["Person".to_string()], &serde_json::json!({}))
             .unwrap();
 
-        let edge_id = storage
+        let rel_id = storage
             .insert_edge(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
             .unwrap();
 
-        // Delete alice - should cascade delete the edge
+        // Delete alice - should cascade delete the relationship
         storage.delete_node(alice_id).unwrap();
 
         assert!(storage.get_node(alice_id).unwrap().is_none());
-        assert!(storage.get_edge(edge_id).unwrap().is_none());
+        assert!(storage.get_edge(rel_id).unwrap().is_none());
         assert!(storage.get_node(bob_id).unwrap().is_some());
     }
 

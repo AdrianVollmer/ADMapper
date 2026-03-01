@@ -1,13 +1,13 @@
 /**
- * Add Node/Edge Component
+ * Add Node/Relationship Component
  *
- * Modals for adding new nodes and edges to the graph.
+ * Modals for adding new nodes and relationships to the graph.
  */
 
 import { api } from "../api/client";
 import { escapeHtml } from "../utils/html";
 
-/** Available edge types */
+/** Available relationship types */
 const COMMON_EDGE_TYPES = [
   "MemberOf",
   "HasSession",
@@ -42,7 +42,7 @@ interface SearchResult {
   type: string;
 }
 
-/** Add Edge modal element */
+/** Add Relationship modal element */
 let addEdgeModal: HTMLElement | null = null;
 
 /** Add Node modal element */
@@ -51,12 +51,12 @@ let addNodeModal: HTMLElement | null = null;
 /** Debounce timer for search */
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Initialize the add node/edge modals */
+/** Initialize the add node/relationship modals */
 export function initAddNodeEdge(): void {
   // Modals are created on demand
 }
 
-/** Open the Add Edge modal */
+/** Open the Add Relationship modal */
 export function openAddEdge(): void {
   if (!addEdgeModal) {
     createAddEdgeModal();
@@ -64,7 +64,7 @@ export function openAddEdge(): void {
   addEdgeModal!.hidden = false;
   resetAddEdgeForm();
   // Focus first input
-  const sourceInput = document.getElementById("add-edge-source") as HTMLInputElement;
+  const sourceInput = document.getElementById("add-relationship-source") as HTMLInputElement;
   sourceInput?.focus();
 }
 
@@ -80,7 +80,7 @@ export function openAddNode(): void {
   idInput?.focus();
 }
 
-/** Close Add Edge modal */
+/** Close Add Relationship modal */
 function closeAddEdgeModal(): void {
   if (addEdgeModal) {
     addEdgeModal.hidden = true;
@@ -94,13 +94,13 @@ function closeAddNodeModal(): void {
   }
 }
 
-/** Create the Add Edge modal */
+/** Create the Add Relationship modal */
 function createAddEdgeModal(): void {
   addEdgeModal = document.createElement("div");
-  addEdgeModal.id = "add-edge-modal";
+  addEdgeModal.id = "add-relationship-modal";
   addEdgeModal.className = "modal-overlay";
 
-  // Build edge type options
+  // Build relationship type options
   const edgeTypeOptions = COMMON_EDGE_TYPES.map(
     (type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`
   ).join("");
@@ -108,7 +108,7 @@ function createAddEdgeModal(): void {
   addEdgeModal.innerHTML = `
     <div class="modal-content">
       <div class="modal-header">
-        <h2 class="modal-title">Add Edge</h2>
+        <h2 class="modal-title">Add Relationship</h2>
         <button class="modal-close" data-action="close" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12"/>
@@ -116,58 +116,58 @@ function createAddEdgeModal(): void {
         </button>
       </div>
       <div class="modal-body">
-        <form id="add-edge-form" class="add-form">
+        <form id="add-relationship-form" class="add-form">
           <div class="form-group">
-            <label for="add-edge-source" class="form-label">Source Node</label>
+            <label for="add-relationship-source" class="form-label">Source Node</label>
             <div class="search-input-wrapper">
               <input
                 type="text"
-                id="add-edge-source"
+                id="add-relationship-source"
                 class="form-input"
                 placeholder="Search for source node..."
                 autocomplete="off"
               />
-              <input type="hidden" id="add-edge-source-id" />
-              <div id="add-edge-source-results" class="search-results" hidden></div>
+              <input type="hidden" id="add-relationship-source-id" />
+              <div id="add-relationship-source-results" class="search-results" hidden></div>
             </div>
           </div>
 
           <div class="form-group">
-            <label for="add-edge-type" class="form-label">Edge Type</label>
-            <select id="add-edge-type" class="form-select">
-              <option value="">Select edge type...</option>
+            <label for="add-relationship-type" class="form-label">Relationship Type</label>
+            <select id="add-relationship-type" class="form-select">
+              <option value="">Select relationship type...</option>
               ${edgeTypeOptions}
             </select>
           </div>
 
           <div class="form-group">
-            <label for="add-edge-target" class="form-label">Target Node</label>
+            <label for="add-relationship-target" class="form-label">Target Node</label>
             <div class="search-input-wrapper">
               <input
                 type="text"
-                id="add-edge-target"
+                id="add-relationship-target"
                 class="form-input"
                 placeholder="Search for target node..."
                 autocomplete="off"
               />
-              <input type="hidden" id="add-edge-target-id" />
-              <div id="add-edge-target-results" class="search-results" hidden></div>
+              <input type="hidden" id="add-relationship-target-id" />
+              <div id="add-relationship-target-results" class="search-results" hidden></div>
             </div>
           </div>
 
-          <div id="add-edge-error" class="form-error" hidden></div>
+          <div id="add-relationship-error" class="form-error" hidden></div>
         </form>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-action="close">Cancel</button>
-        <button class="btn btn-primary" data-action="submit-edge">Add Edge</button>
+        <button class="btn btn-primary" data-action="submit-relationship">Add Relationship</button>
       </div>
     </div>
   `;
 
   addEdgeModal.addEventListener("click", handleAddEdgeClick);
-  setupSearchInput("add-edge-source", "add-edge-source-results", "add-edge-source-id");
-  setupSearchInput("add-edge-target", "add-edge-target-results", "add-edge-target-id");
+  setupSearchInput("add-relationship-source", "add-relationship-source-results", "add-relationship-source-id");
+  setupSearchInput("add-relationship-target", "add-relationship-target-results", "add-relationship-target-id");
 
   document.body.appendChild(addEdgeModal);
 
@@ -338,7 +338,7 @@ async function performSearch(
   }
 }
 
-/** Handle clicks in Add Edge modal */
+/** Handle clicks in Add Relationship modal */
 function handleAddEdgeClick(e: Event): void {
   const target = e.target as HTMLElement;
 
@@ -356,7 +356,7 @@ function handleAddEdgeClick(e: Event): void {
     case "close":
       closeAddEdgeModal();
       break;
-    case "submit-edge":
+    case "submit-relationship":
       submitAddEdge();
       break;
   }
@@ -386,12 +386,12 @@ function handleAddNodeClick(e: Event): void {
   }
 }
 
-/** Submit add edge form */
+/** Submit add relationship form */
 async function submitAddEdge(): Promise<void> {
-  const sourceId = (document.getElementById("add-edge-source-id") as HTMLInputElement).value;
-  const targetId = (document.getElementById("add-edge-target-id") as HTMLInputElement).value;
-  const edgeType = (document.getElementById("add-edge-type") as HTMLSelectElement).value;
-  const errorEl = document.getElementById("add-edge-error");
+  const sourceId = (document.getElementById("add-relationship-source-id") as HTMLInputElement).value;
+  const targetId = (document.getElementById("add-relationship-target-id") as HTMLInputElement).value;
+  const edgeType = (document.getElementById("add-relationship-type") as HTMLSelectElement).value;
+  const errorEl = document.getElementById("add-relationship-error");
 
   // Validate
   if (!sourceId) {
@@ -399,7 +399,7 @@ async function submitAddEdge(): Promise<void> {
     return;
   }
   if (!edgeType) {
-    showError(errorEl, "Please select an edge type");
+    showError(errorEl, "Please select an relationship type");
     return;
   }
   if (!targetId) {
@@ -408,10 +408,10 @@ async function submitAddEdge(): Promise<void> {
   }
 
   try {
-    await api.post("/api/graph/edge", {
+    await api.post("/api/graph/relationship", {
       source: sourceId,
       target: targetId,
-      edge_type: edgeType,
+      rel_type: edgeType,
     });
 
     closeAddEdgeModal();
@@ -419,7 +419,7 @@ async function submitAddEdge(): Promise<void> {
     // Refresh the graph
     window.location.reload();
   } catch (err) {
-    showError(errorEl, `Failed to add edge: ${err instanceof Error ? err.message : String(err)}`);
+    showError(errorEl, `Failed to add relationship: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -468,21 +468,21 @@ function showError(el: HTMLElement | null, message: string): void {
   }
 }
 
-/** Reset Add Edge form */
+/** Reset Add Relationship form */
 function resetAddEdgeForm(): void {
-  const form = document.getElementById("add-edge-form") as HTMLFormElement;
+  const form = document.getElementById("add-relationship-form") as HTMLFormElement;
   if (form) form.reset();
 
-  const sourceId = document.getElementById("add-edge-source-id") as HTMLInputElement;
-  const targetId = document.getElementById("add-edge-target-id") as HTMLInputElement;
+  const sourceId = document.getElementById("add-relationship-source-id") as HTMLInputElement;
+  const targetId = document.getElementById("add-relationship-target-id") as HTMLInputElement;
   if (sourceId) sourceId.value = "";
   if (targetId) targetId.value = "";
 
-  const error = document.getElementById("add-edge-error");
+  const error = document.getElementById("add-relationship-error");
   if (error) error.hidden = true;
 
-  const sourceResults = document.getElementById("add-edge-source-results");
-  const targetResults = document.getElementById("add-edge-target-results");
+  const sourceResults = document.getElementById("add-relationship-source-results");
+  const targetResults = document.getElementById("add-relationship-target-results");
   if (sourceResults) sourceResults.hidden = true;
   if (targetResults) targetResults.hidden = true;
 }

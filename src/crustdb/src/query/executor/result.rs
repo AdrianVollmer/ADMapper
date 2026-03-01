@@ -129,13 +129,13 @@ pub fn evaluate_return_item_with_bindings(
                     labels: node.labels.clone(),
                     properties: node.properties.clone(),
                 })
-            } else if let Some(edge) = binding.get_edge(name) {
-                Ok(ResultValue::Edge {
-                    id: edge.id,
-                    source: edge.source,
-                    target: edge.target,
-                    edge_type: edge.edge_type.clone(),
-                    properties: edge.properties.clone(),
+            } else if let Some(relationship) = binding.get_edge(name) {
+                Ok(ResultValue::Relationship {
+                    id: relationship.id,
+                    source: relationship.source,
+                    target: relationship.target,
+                    rel_type: relationship.rel_type.clone(),
+                    properties: relationship.properties.clone(),
                 })
             } else if let Some(path) = binding.get_path(name) {
                 Ok(ResultValue::Path {
@@ -148,14 +148,14 @@ pub fn evaluate_return_item_with_bindings(
                             properties: n.properties.clone(),
                         })
                         .collect(),
-                    edges: path
-                        .edges
+                    relationships: path
+                        .relationships
                         .iter()
                         .map(|e| PathEdge {
                             id: e.id,
                             source: e.source,
                             target: e.target,
-                            edge_type: e.edge_type.clone(),
+                            rel_type: e.rel_type.clone(),
                             properties: e.properties.clone(),
                         })
                         .collect(),
@@ -176,8 +176,8 @@ pub fn evaluate_return_item_with_bindings(
                     let value = node.get(property).cloned().unwrap_or(PropertyValue::Null);
                     return Ok(ResultValue::Property(value));
                 }
-                if let Some(edge) = binding.get_edge(base_name) {
-                    let value = edge
+                if let Some(relationship) = binding.get_edge(base_name) {
+                    let value = relationship
                         .properties
                         .get(property)
                         .cloned()
@@ -201,7 +201,7 @@ pub fn evaluate_return_item_with_bindings(
                     if let Expression::Variable(var_name) = &args[0] {
                         if let Some(path) = binding.get_path(var_name) {
                             return Ok(ResultValue::Property(PropertyValue::Integer(
-                                path.edges.len() as i64,
+                                path.relationships.len() as i64,
                             )));
                         }
                     }
@@ -240,7 +240,7 @@ pub fn evaluate_return_item_with_bindings(
                     if let Expression::Variable(var_name) = &args[0] {
                         if let Some(path) = binding.get_path(var_name) {
                             let list: Vec<PropertyValue> = path
-                                .edges
+                                .relationships
                                 .iter()
                                 .map(|e| PropertyValue::Integer(e.id))
                                 .collect();

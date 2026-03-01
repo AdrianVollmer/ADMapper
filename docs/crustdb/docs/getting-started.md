@@ -166,13 +166,13 @@ let nodes = vec![
 
 let node_ids = db.insert_nodes_batch(&nodes)?;
 
-// Batch insert edges
-let edges = vec![
+// Batch insert relationships
+let relationships = vec![
     (node_ids[0], node_ids[1], "KNOWS".to_string(), json!({"since": 2020})),
     (node_ids[0], node_ids[2], "WORKS_AT".to_string(), json!({})),
 ];
 
-let edge_ids = db.insert_edges_batch(&edges)?;
+let edge_ids = db.insert_edges_batch(&relationships)?;
 ```
 
 ## Property Indexes
@@ -200,7 +200,7 @@ let stats = db.stats()?;
 println!("Nodes: {}", stats.node_count);
 println!("Edges: {}", stats.edge_count);
 println!("Labels: {}", stats.label_count);
-println!("Edge types: {}", stats.edge_type_count);
+println!("Relationship types: {}", stats.edge_type_count);
 ```
 
 ## Error Handling
@@ -210,7 +210,7 @@ CrustDB operations return `Result<T, crustdb::Error>`. Common errors include:
 - `Error::Parse`: Invalid Cypher syntax
 - `Error::Execution`: Runtime query errors
 - `Error::Storage`: SQLite-level errors
-- `Error::NotFound`: Referenced node or edge does not exist
+- `Error::NotFound`: Referenced node or relationship does not exist
 
 ```rust
 match db.execute("INVALID QUERY") {

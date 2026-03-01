@@ -128,7 +128,7 @@ async fn test_graph_stats_empty() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["nodes"], 0);
-    assert_eq!(json["edges"], 0);
+    assert_eq!(json["relationships"], 0);
 }
 
 // ============================================================================
@@ -349,7 +349,7 @@ async fn test_graph_all_empty() {
 
     assert_eq!(status, StatusCode::OK);
     assert!(json["nodes"].as_array().unwrap().is_empty());
-    assert!(json["edges"].as_array().unwrap().is_empty());
+    assert!(json["relationships"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -368,7 +368,7 @@ async fn test_graph_nodes_empty() {
 async fn test_graph_edges_empty() {
     let app = create_test_app();
 
-    let (status, json) = get_json(&app, "/api/graph/edges").await;
+    let (status, json) = get_json(&app, "/api/graph/relationships").await;
 
     assert_eq!(status, StatusCode::OK);
     assert!(json.as_array().unwrap().is_empty());
@@ -408,13 +408,13 @@ fn test_nodes() -> Vec<DbNode> {
     ]
 }
 
-/// Helper to create test edges
+/// Helper to create test relationships
 fn test_edges() -> Vec<DbEdge> {
     vec![
         DbEdge {
             source: "user-admin".to_string(),
             target: "group-admins".to_string(),
-            edge_type: "MemberOf".to_string(),
+            rel_type: "MemberOf".to_string(),
             properties: json!({}),
             source_type: None,
             target_type: None,
@@ -422,7 +422,7 @@ fn test_edges() -> Vec<DbEdge> {
         DbEdge {
             source: "group-admins".to_string(),
             target: "computer-dc01".to_string(),
-            edge_type: "AdminTo".to_string(),
+            rel_type: "AdminTo".to_string(),
             properties: json!({}),
             source_type: None,
             target_type: None,
@@ -447,7 +447,7 @@ async fn test_graph_stats_with_data() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["nodes"], 4);
-    assert_eq!(json["edges"], 2);
+    assert_eq!(json["relationships"], 2);
 }
 
 #[tokio::test]
@@ -475,14 +475,17 @@ async fn test_graph_edges_with_data() {
     app.db().insert_nodes(&test_nodes()).unwrap();
     app.db().insert_edges(&test_edges()).unwrap();
 
-    let (status, json) = get_json(app.router(), "/api/graph/edges").await;
+    let (status, json) = get_json(app.router(), "/api/graph/relationships").await;
 
     assert_eq!(status, StatusCode::OK);
-    let edges = json.as_array().unwrap();
-    assert_eq!(edges.len(), 2);
+    let relationships = json.as_array().unwrap();
+    assert_eq!(relationships.len(), 2);
 
-    // Verify edge structure
-    let member_edge = edges.iter().find(|e| e["type"] == "MemberOf").unwrap();
+    // Verify relationship structure
+    let member_edge = relationships
+        .iter()
+        .find(|e| e["type"] == "MemberOf")
+        .unwrap();
     assert_eq!(member_edge["source"], "user-admin");
     assert_eq!(member_edge["target"], "group-admins");
 }
@@ -498,7 +501,7 @@ async fn test_graph_all_with_data() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["nodes"].as_array().unwrap().len(), 4);
-    assert_eq!(json["edges"].as_array().unwrap().len(), 2);
+    assert_eq!(json["relationships"].as_array().unwrap().len(), 2);
 }
 
 // Search tests use MATCH queries internally
@@ -576,18 +579,18 @@ async fn test_graph_path_finds_direct_path() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["found"], true);
 
-    // Path contains nodes with their outgoing edge types
+    // Path contains nodes with their outgoing relationship types
     // A direct path has 2 nodes: source -> target
     let path = json["path"].as_array().unwrap();
     assert_eq!(path.len(), 2);
 
-    // First step: source node with edge type to next
+    // First step: source node with relationship type to next
     assert_eq!(path[0]["node"]["id"], "user-admin");
-    assert_eq!(path[0]["edge_type"], "MemberOf");
+    assert_eq!(path[0]["rel_type"], "MemberOf");
 
-    // Last step: target node with no outgoing edge
+    // Last step: target node with no outgoing relationship
     assert_eq!(path[1]["node"]["id"], "group-admins");
-    assert!(path[1]["edge_type"].is_null());
+    assert!(path[1]["rel_type"].is_null());
 }
 
 #[tokio::test]
@@ -613,15 +616,15 @@ async fn test_graph_path_finds_multi_hop_path() {
 
     // First step: source node
     assert_eq!(path[0]["node"]["id"], "user-admin");
-    assert_eq!(path[0]["edge_type"], "MemberOf");
+    assert_eq!(path[0]["rel_type"], "MemberOf");
 
     // Second step: intermediate node
     assert_eq!(path[1]["node"]["id"], "group-admins");
-    assert_eq!(path[1]["edge_type"], "AdminTo");
+    assert_eq!(path[1]["rel_type"], "AdminTo");
 
     // Third step: target node
     assert_eq!(path[2]["node"]["id"], "computer-dc01");
-    assert!(path[2]["edge_type"].is_null());
+    assert!(path[2]["rel_type"].is_null());
 }
 
 #[tokio::test]
@@ -710,11 +713,17 @@ async fn test_debug_actual_db() {
         println!();
     }
 
-    // Get all edges
-    let edges = db.get_all_edges().unwrap();
-    println!("\n=== EDGES ({} total, showing first 20) ===", edges.len());
-    for edge in edges.iter().take(20) {
-        println!("  {} -> {} ({})", edge.source, edge.target, edge.edge_type);
+    // Get all relationships
+    let relationships = db.get_all_edges().unwrap();
+    println!(
+        "\n=== EDGES ({} total, showing first 20) ===",
+        relationships.len()
+    );
+    for relationship in relationships.iter().take(20) {
+        println!(
+            "  {} -> {} ({})",
+            relationship.source, relationship.target, relationship.rel_type
+        );
     }
 
     // Search for ADMINISTRATOR
@@ -748,21 +757,27 @@ async fn test_debug_actual_db() {
 
         println!("\n=== TESTING PATH FROM {} TO {} ===", from_id, to_id);
 
-        // Check if there's an edge
-        let edges_from_admin: Vec<_> = edges.iter().filter(|e| e.source == *from_id).collect();
+        // Check if there's an relationship
+        let edges_from_admin: Vec<_> = relationships
+            .iter()
+            .filter(|e| e.source == *from_id)
+            .collect();
         println!("  Edges FROM {}: {:?}", from_id, edges_from_admin.len());
         for e in &edges_from_admin {
-            println!("    -> {} ({})", e.target, e.edge_type);
+            println!("    -> {} ({})", e.target, e.rel_type);
         }
 
-        // Check edges TO domain admins
-        let edges_to_da: Vec<_> = edges.iter().filter(|e| e.target == *to_id).collect();
+        // Check relationships TO domain admins
+        let edges_to_da: Vec<_> = relationships
+            .iter()
+            .filter(|e| e.target == *to_id)
+            .collect();
         println!("  Edges TO {}: {:?}", to_id, edges_to_da.len());
         for e in edges_to_da.iter().take(10) {
             // Also resolve the source to see who it is
             let source_node = nodes.iter().find(|n| n.id == e.source);
             let source_label = source_node.map(|n| n.label.as_str()).unwrap_or("UNKNOWN");
-            println!("    {} ({}) -> ({})", e.source, source_label, e.edge_type);
+            println!("    {} ({}) -> ({})", e.source, source_label, e.rel_type);
         }
 
         // Check if there's a user with the expected SID pattern (-500 for Administrator)
@@ -773,13 +788,16 @@ async fn test_debug_actual_db() {
                     "    Found: ID={}, Name={}, Label={}",
                     node.id, node.name, node.label
                 );
-                // Check edges from this node
-                let edges_from: Vec<_> = edges.iter().filter(|e| e.source == node.id).collect();
+                // Check relationships from this node
+                let edges_from: Vec<_> = relationships
+                    .iter()
+                    .filter(|e| e.source == node.id)
+                    .collect();
                 println!("    Edges from this node: {}", edges_from.len());
                 for e in edges_from.iter().take(5) {
                     let target_node = nodes.iter().find(|n| n.id == e.target);
                     let target_name = target_node.map(|n| n.name.as_str()).unwrap_or("UNKNOWN");
-                    println!("      -> {} ({}) [{}]", e.target, target_name, e.edge_type);
+                    println!("      -> {} ({}) [{}]", e.target, target_name, e.rel_type);
                 }
             }
         }
@@ -789,8 +807,8 @@ async fn test_debug_actual_db() {
         match path {
             Some(p) => {
                 println!("  PATH FOUND! {} hops", p.len());
-                for (node_id, edge_type) in &p {
-                    println!("    {} (edge: {:?})", node_id, edge_type);
+                for (node_id, rel_type) in &p {
+                    println!("    {} (relationship: {:?})", node_id, rel_type);
                 }
             }
             None => {
@@ -823,28 +841,34 @@ async fn test_graph_path_bloodhound_style() {
     ];
 
     // ADMINISTRATOR is MemberOf DOMAIN ADMINS
-    let edges = vec![DbEdge {
+    let relationships = vec![DbEdge {
         source: "S-1-5-21-2697957641-2271029196-387917394-500".to_string(),
         target: "S-1-5-21-2697957641-2271029196-387917394-512".to_string(),
-        edge_type: "MemberOf".to_string(),
+        rel_type: "MemberOf".to_string(),
         properties: json!({}),
         source_type: None,
         target_type: None,
     }];
 
     app.db().insert_nodes(&nodes).unwrap();
-    app.db().insert_edges(&edges).unwrap();
+    app.db().insert_edges(&relationships).unwrap();
 
     // Verify data was inserted correctly
     let all_nodes = app.db().get_all_nodes().unwrap();
     let all_edges = app.db().get_all_edges().unwrap();
     assert_eq!(all_nodes.len(), 2, "Should have 2 nodes");
-    assert_eq!(all_edges.len(), 1, "Should have 1 edge");
+    assert_eq!(all_edges.len(), 1, "Should have 1 relationship");
 
-    // Verify edge direction
-    let edge = &all_edges[0];
-    assert_eq!(edge.source, "S-1-5-21-2697957641-2271029196-387917394-500");
-    assert_eq!(edge.target, "S-1-5-21-2697957641-2271029196-387917394-512");
+    // Verify relationship direction
+    let relationship = &all_edges[0];
+    assert_eq!(
+        relationship.source,
+        "S-1-5-21-2697957641-2271029196-387917394-500"
+    );
+    assert_eq!(
+        relationship.target,
+        "S-1-5-21-2697957641-2271029196-387917394-512"
+    );
 
     // Verify identifier resolution works
     let resolved_from = app

@@ -11,7 +11,7 @@ declare const self: Worker;
 
 export interface LayoutWorkerInput {
   nodes: Array<{ id: string }>;
-  edges: Array<{ source: string; target: string }>;
+  relationships: Array<{ source: string; target: string }>;
   settings: {
     layerSpacing: number;
     nodeSpacing: number;
@@ -24,7 +24,7 @@ export interface LayoutWorkerOutput {
 }
 
 self.onmessage = (event: MessageEvent<LayoutWorkerInput>) => {
-  const { nodes, edges, settings } = event.data;
+  const { nodes, relationships, settings } = event.data;
 
   // Create a dagre graph
   const g = new dagre.graphlib.Graph();
@@ -38,7 +38,7 @@ self.onmessage = (event: MessageEvent<LayoutWorkerInput>) => {
     marginy: 0,
   });
 
-  // Default edge label (required by dagre)
+  // Default relationship label (required by dagre)
   g.setDefaultEdgeLabel(() => ({}));
 
   // Add nodes to dagre graph
@@ -46,9 +46,9 @@ self.onmessage = (event: MessageEvent<LayoutWorkerInput>) => {
     g.setNode(node.id, { width: 40, height: 40 });
   }
 
-  // Add edges to dagre graph
-  for (const edge of edges) {
-    g.setEdge(edge.source, edge.target);
+  // Add relationships to dagre graph
+  for (const relationship of relationships) {
+    g.setEdge(relationship.source, relationship.target);
   }
 
   // Run dagre layout

@@ -371,7 +371,7 @@ function loadSingleNode(nodeId: string, label: string, nodeType: string, propert
         properties,
       },
     ],
-    edges: [],
+    relationships: [],
   };
 
   // Load the graph
@@ -429,7 +429,7 @@ async function findPath(): Promise<void> {
           type: n.type as ADNodeType,
           properties: n.properties,
         })),
-        edges: data.graph.edges.map((e) => ({
+        relationships: data.graph.relationships.map((e) => ({
           source: e.source,
           target: e.target,
           type: e.type as ADEdgeType,

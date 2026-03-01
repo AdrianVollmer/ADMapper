@@ -23,7 +23,7 @@ export async function exportPNG(): Promise<void> {
     // Force a synchronous render to ensure canvas content is fresh
     sigma.refresh();
 
-    // Get all canvas layers (Sigma uses multiple: edges, nodes, labels, hovers, etc.)
+    // Get all canvas layers (Sigma uses multiple: relationships, nodes, labels, hovers, etc.)
     const canvases = container.querySelectorAll("canvas");
 
     if (canvases.length === 0) {
@@ -98,8 +98,8 @@ export async function exportSVG(): Promise<void> {
   <rect width="100%" height="100%" fill="${bgColor}"/>
 `;
 
-    // Draw edges first (so they appear behind nodes)
-    svg += '  <g class="edges">\n';
+    // Draw relationships first (so they appear behind nodes)
+    svg += '  <g class="relationships">\n';
     graph.forEachEdge((_edge: string, attrs: { color?: string; size?: number }, source: string, target: string) => {
       // Use getNodeDisplayData to get viewport coordinates (already transformed by camera)
       const sourceDisplay = sigma.getNodeDisplayData(source);
@@ -151,7 +151,7 @@ export async function exportJSON(): Promise<void> {
   try {
     const graph = renderer.sigma.getGraph();
 
-    // Export nodes and edges
+    // Export nodes and relationships
     const nodes: Array<{
       id: string;
       label: string;
@@ -161,7 +161,7 @@ export async function exportJSON(): Promise<void> {
       properties: Record<string, unknown>;
     }> = [];
 
-    const edges: Array<{
+    const relationships: Array<{
       source: string;
       target: string;
       type: string;
@@ -184,7 +184,7 @@ export async function exportJSON(): Promise<void> {
     );
 
     graph.forEachEdge((_edge: string, attrs: { edgeType?: string }, source: string, target: string) => {
-      edges.push({
+      relationships.push({
         source,
         target,
         type: attrs.edgeType || "Unknown",
@@ -194,9 +194,9 @@ export async function exportJSON(): Promise<void> {
     const data = {
       exportedAt: new Date().toISOString(),
       nodeCount: nodes.length,
-      edgeCount: edges.length,
+      edgeCount: relationships.length,
       nodes,
-      edges,
+      relationships,
     };
 
     const json = JSON.stringify(data, null, 2);

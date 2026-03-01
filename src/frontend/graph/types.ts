@@ -21,7 +21,7 @@ export type ADNodeType =
   | "NTAuthStore"
   | "Unknown";
 
-/** Common AD edge/relationship types */
+/** Common AD relationship/relationship types */
 export type ADEdgeType =
   | "MemberOf"
   | "HasSession"
@@ -78,21 +78,21 @@ export interface ADNodeAttributes {
   highlighted?: boolean;
 }
 
-/** Edge data stored in graphology */
+/** Relationship data stored in graphology */
 export interface ADEdgeAttributes {
   /** Display label */
   label?: string;
   /** Relationship type (named edgeType to avoid Sigma's reserved 'type' attribute) */
   edgeType: ADEdgeType;
-  /** Edge color */
+  /** Relationship color */
   color?: string;
-  /** Edge size/weight */
+  /** Relationship size/weight */
   size?: number;
-  /** Whether this edge is currently highlighted */
+  /** Whether this relationship is currently highlighted */
   highlighted?: boolean;
-  /** Sigma edge type: "tapered" for straight cone-shaped, "curvedArrow" for curved */
+  /** Sigma relationship type: "tapered" for straight cone-shaped, "curvedArrow" for curved */
   type?: "tapered" | "curvedArrow";
-  /** Curvature for curved edges (0 = straight, positive = curve one way, negative = other) */
+  /** Curvature for curved relationships (0 = straight, positive = curve one way, negative = other) */
   curvature?: number;
 }
 
@@ -108,7 +108,7 @@ export interface RawADNode {
   y?: number;
 }
 
-/** Raw edge data as received from server */
+/** Raw relationship data as received from server */
 export interface RawADEdge {
   source: string;
   target: string;
@@ -119,5 +119,5 @@ export interface RawADEdge {
 /** Graph data as received from server */
 export interface RawADGraph {
   nodes: RawADNode[];
-  edges: RawADEdge[];
+  relationships: RawADEdge[];
 }

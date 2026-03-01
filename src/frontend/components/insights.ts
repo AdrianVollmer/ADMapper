@@ -47,7 +47,7 @@ interface ChokePointData {
   target_id: string;
   target_name: string;
   target_label: string;
-  edge_type: string;
+  rel_type: string;
   betweenness: number;
 }
 
@@ -265,7 +265,7 @@ function renderReachabilityTab(): string {
     <div class="insights-container">
       <div class="insight-section">
         <h3 class="insight-section-title">Reachability from Well-Known Principals</h3>
-        <p class="insight-desc">Objects reachable via non-MemberOf edges (control paths, permissions, etc.):</p>
+        <p class="insight-desc">Objects reachable via non-MemberOf relationships (control paths, permissions, etc.):</p>
         <div class="insight-stats">
           ${rowsHtml}
         </div>
@@ -363,7 +363,7 @@ function renderChokePointsTab(): string {
         <div class="choke-point-details">
           <div class="choke-point-path">
             <span class="choke-point-node">${escapeHtml(cp.source_name)}</span>
-            <span class="choke-point-edge">&rarr; ${escapeHtml(cp.edge_type)} &rarr;</span>
+            <span class="choke-point-relationship">&rarr; ${escapeHtml(cp.rel_type)} &rarr;</span>
             <span class="choke-point-node">${escapeHtml(cp.target_name)}</span>
           </div>
           <div class="choke-point-meta">
@@ -384,12 +384,12 @@ function renderChokePointsTab(): string {
         <h3 class="insight-section-title">Choke Points</h3>
         <p class="insight-desc">
           Edges with the highest betweenness centrality - removing these would disrupt the most attack paths.
-          Analyzed ${total_nodes.toLocaleString()} nodes and ${total_edges.toLocaleString()} edges.
+          Analyzed ${total_nodes.toLocaleString()} nodes and ${total_edges.toLocaleString()} relationships.
         </p>
         <div class="choke-points-list">
           ${rowsHtml}
         </div>
-        <p class="text-xs text-gray-500 mt-3">Click on a row to view the edge in the graph. Higher scores indicate more paths pass through this edge.</p>
+        <p class="text-xs text-gray-500 mt-3">Click on a row to view the relationship in the graph. Higher scores indicate more paths pass through this relationship.</p>
       </div>
     </div>
   `;
@@ -448,7 +448,7 @@ async function loadReachability(): Promise<void> {
     // Run all reachability queries in parallel
     const queries = principals.map(async (p) => {
       try {
-        // Use NONE() to exclude MemberOf edges from the path
+        // Use NONE() to exclude MemberOf relationships from the path
         const query = `
           MATCH (g:Group)-[r*1..5]->(target)
           WHERE g.object_id ENDS WITH '${p.sid}'
@@ -576,8 +576,8 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
       const index = parseInt(extraData ?? "0", 10);
       const cp = chokePointsState.data?.choke_points[index];
       if (!cp) return;
-      // Query for the edge and its connected nodes
-      query = `MATCH p=(a)-[r]->(b) WHERE a.object_id = '${cp.source_id}' AND b.object_id = '${cp.target_id}' AND type(r) = '${cp.edge_type}' RETURN p`;
+      // Query for the relationship and its connected nodes
+      query = `MATCH p=(a)-[r]->(b) WHERE a.object_id = '${cp.source_id}' AND b.object_id = '${cp.target_id}' AND type(r) = '${cp.rel_type}' RETURN p`;
       break;
     }
     default:
@@ -593,7 +593,7 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
     } else {
       // For single-node queries like stale objects, build a simple graph
       // The backend should have extracted the nodes from the query result
-      const emptyGraph: RawADGraph = { nodes: [], edges: [] };
+      const emptyGraph: RawADGraph = { nodes: [], relationships: [] };
       loadGraphData(emptyGraph);
     }
   } catch (err) {

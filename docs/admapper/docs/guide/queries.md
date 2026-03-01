@@ -116,7 +116,7 @@ RETURN n.name, d.name
 
 Results appear in a table below the editor:
 
-- Click a row to select the corresponding node/edge in the graph
+- Click a row to select the corresponding node/relationship in the graph
 - Export results as CSV
 
 ## Query History

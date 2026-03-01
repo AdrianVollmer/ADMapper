@@ -38,7 +38,7 @@ export function initImport(): void {
   progressFiles = document.getElementById("import-progress-files");
   currentFileEl = document.getElementById("import-current-file");
   nodesCountEl = document.getElementById("import-nodes-count");
-  edgesCountEl = document.getElementById("import-edges-count");
+  edgesCountEl = document.getElementById("import-relationships-count");
   errorEl = document.getElementById("import-error");
   doneBtn = document.getElementById("import-done-btn");
   cancelBtn = document.getElementById("import-cancel-btn");
@@ -306,9 +306,9 @@ function cleanup(): void {
 
 /** Query to find all members of Domain Admin groups (SID ends with -512) */
 const DOMAIN_ADMINS_QUERY = `
-MATCH (m)-[e:Edge]->(g:Group)
+MATCH (m)-[e:Relationship]->(g:Group)
 WHERE g.object_id ENDS WITH '-512'
-AND e.edge_type = 'MemberOf'
+AND e.rel_type = 'MemberOf'
 RETURN m, e, g
 `;
 
@@ -326,7 +326,7 @@ async function loadDomainAdmins(): Promise<void> {
           type: mapNodeType(n.type),
           properties: n.properties,
         })),
-        edges: result.graph.edges.map((e) => ({
+        relationships: result.graph.relationships.map((e) => ({
           source: e.source,
           target: e.target,
           type: mapEdgeType(e.type),
@@ -336,7 +336,7 @@ async function loadDomainAdmins(): Promise<void> {
       loadGraphData(graph);
     } else {
       // No Domain Admins found - show empty graph
-      loadGraphData({ nodes: [], edges: [] });
+      loadGraphData({ nodes: [], relationships: [] });
     }
   } catch (err) {
     console.error("Failed to load Domain Admins:", err);
@@ -363,7 +363,7 @@ function mapNodeType(type: string): ADNodeType {
   return known.includes(type as ADNodeType) ? (type as ADNodeType) : "Unknown";
 }
 
-/** Map API edge type to ADEdgeType */
+/** Map API relationship type to ADEdgeType */
 function mapEdgeType(type: string): ADEdgeType {
   const known: ADEdgeType[] = [
     "MemberOf",

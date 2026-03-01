@@ -25,7 +25,7 @@ struct TestCase {
     expected: Expected,
 }
 
-/// Setup data (nodes and edges to create before the test).
+/// Setup data (nodes and relationships to create before the test).
 #[derive(Debug, Deserialize, Default)]
 struct Setup {
     /// Raw Cypher queries to run for setup (preferred for complex setups)
@@ -34,7 +34,7 @@ struct Setup {
     #[serde(default)]
     nodes: Vec<SetupNode>,
     #[serde(default)]
-    edges: Vec<SetupEdge>,
+    relationships: Vec<SetupEdge>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,7 +55,7 @@ struct SetupEdge {
     to: String,
     #[serde(rename = "type")]
     #[allow(dead_code)]
-    edge_type: String,
+    rel_type: String,
     #[allow(dead_code)]
     properties: Option<toml::Value>,
 }
@@ -125,13 +125,13 @@ fn run_test_case(test: &TestCase) {
                 .unwrap_or_else(|e| panic!("Setup failed for test '{}': {}", test.name, e));
         }
 
-        // Note: Edge setup via `edges` array is not supported yet.
+        // Note: Relationship setup via `relationships` array is not supported yet.
         // Use the `cypher` array for tests that need relationships, e.g.:
         //   [test.setup]
         //   cypher = ["CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})"]
-        if !setup.edges.is_empty() {
+        if !setup.relationships.is_empty() {
             eprintln!(
-                "Warning: test '{}' uses edges array which is not fully supported. Use setup.cypher instead.",
+                "Warning: test '{}' uses relationships array which is not fully supported. Use setup.cypher instead.",
                 test.name
             );
         }
@@ -553,7 +553,7 @@ fn test_m5_single_hop_with_where() {
 }
 
 /// Test the flipped traversal optimization: when the target has a filter but the source doesn't,
-/// the executor should start from the target and traverse edges in reverse for efficiency.
+/// the executor should start from the target and traverse relationships in reverse for efficiency.
 #[test]
 fn test_m5_single_hop_flipped_optimization() {
     let db = Database::in_memory().unwrap();
@@ -575,19 +575,19 @@ fn test_m5_single_hop_flipped_optimization() {
     .unwrap();
 
     // Query with unfiltered source, filtered target - should trigger flipped optimization
-    // This pattern: (a)-[r]->(b {id: 'T1'}) should flip to start from 'T1' and find incoming edges
+    // This pattern: (a)-[r]->(b {id: 'T1'}) should flip to start from 'T1' and find incoming relationships
     let result = db
         .execute("MATCH (a)-[:KNOWS]->(b {id: 'T1'}) RETURN a.name")
         .unwrap();
 
-    // Should find Alice and Bob (both KNOWS edges to T1), not Charlie (FOLLOWS) or David (to T2)
+    // Should find Alice and Bob (both KNOWS relationships to T1), not Charlie (FOLLOWS) or David (to T2)
     assert_eq!(result.rows.len(), 2);
 
     // Test with incoming direction and flipped optimization
     let result = db
         .execute("MATCH (a)<-[:KNOWS]-(b {id: 'T1'}) RETURN b.name")
         .unwrap();
-    // T1 has no outgoing KNOWS edges, so should be empty
+    // T1 has no outgoing KNOWS relationships, so should be empty
     assert_eq!(result.rows.len(), 0);
 
     // Test bidirectional with flipped optimization

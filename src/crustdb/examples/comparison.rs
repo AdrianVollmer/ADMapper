@@ -152,8 +152,8 @@ pub fn load_falkordb(graph: &GeneratedGraph, graph_name: &str) -> Result<(), Str
         run_falkordb_query(graph_name, &query)?;
     }
 
-    // Batch insert edges
-    for chunk in graph.edges.chunks(batch_size) {
+    // Batch insert relationships
+    for chunk in graph.relationships.chunks(batch_size) {
         let mut edges_json: Vec<serde_json::Value> = Vec::with_capacity(chunk.len());
         for (src, tgt, _, _) in chunk {
             let src_id = graph.nodes[*src]
@@ -287,8 +287,8 @@ pub fn load_neo4j(graph: &GeneratedGraph) -> Result<(), String> {
     // Create index for faster lookups
     let _ = run_neo4j_query("CREATE INDEX IF NOT EXISTS FOR (n:Node) ON (n.id)");
 
-    // Batch insert edges
-    for chunk in graph.edges.chunks(batch_size) {
+    // Batch insert relationships
+    for chunk in graph.relationships.chunks(batch_size) {
         let mut edges_json: Vec<serde_json::Value> = Vec::with_capacity(chunk.len());
         for (src, tgt, _, _) in chunk {
             let src_id = graph.nodes[*src]

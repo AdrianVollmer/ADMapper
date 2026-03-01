@@ -15,7 +15,7 @@ export type ADGraphType = Graph<ADNodeAttributes, ADEdgeAttributes>;
 export function createGraph(): ADGraphType {
   return new Graph<ADNodeAttributes, ADEdgeAttributes>({
     type: "directed",
-    multi: true, // Allow multiple edges between same nodes (e.g., MemberOf + GenericAll)
+    multi: true, // Allow multiple relationships between same nodes (e.g., MemberOf + GenericAll)
     allowSelfLoops: true,
   });
 }
@@ -40,14 +40,14 @@ function rawNodeToAttributes(node: RawADNode): ADNodeAttributes {
   return attrs;
 }
 
-/** Convert a raw edge to graphology attributes */
-function rawEdgeToAttributes(edge: RawADEdge): ADEdgeAttributes {
+/** Convert a raw relationship to graphology attributes */
+function rawEdgeToAttributes(relationship: RawADEdge): ADEdgeAttributes {
   const attrs: ADEdgeAttributes = {
-    edgeType: edge.type,
-    label: edge.label ?? edge.type, // Use edge type as label if not provided
+    edgeType: relationship.type,
+    label: relationship.label ?? relationship.type, // Use relationship type as label if not provided
     color: DEFAULT_EDGE_COLOR,
     size: DEFAULT_EDGE_SIZE,
-    type: "tapered", // Use tapered for antialiased cone-shaped edges
+    type: "tapered", // Use tapered for antialiased cone-shaped relationships
   };
   return attrs;
 }
@@ -61,11 +61,11 @@ export function addNode(graph: ADGraphType, node: RawADNode): void {
   }
 }
 
-/** Add an edge to the graph */
-export function addEdge(graph: ADGraphType, edge: RawADEdge): void {
-  const edgeKey = `${edge.source}-${edge.type}-${edge.target}`;
+/** Add an relationship to the graph */
+export function addEdge(graph: ADGraphType, relationship: RawADEdge): void {
+  const edgeKey = `${relationship.source}-${relationship.type}-${relationship.target}`;
   if (!graph.hasEdge(edgeKey)) {
-    graph.addEdgeWithKey(edgeKey, edge.source, edge.target, rawEdgeToAttributes(edge));
+    graph.addEdgeWithKey(edgeKey, relationship.source, relationship.target, rawEdgeToAttributes(relationship));
   }
 }
 
@@ -77,22 +77,22 @@ export function loadGraph(data: RawADGraph): ADGraphType {
     addNode(graph, node);
   }
 
-  for (const edge of data.edges) {
-    // Only add edge if both endpoints exist
-    if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
-      addEdge(graph, edge);
+  for (const relationship of data.relationships) {
+    // Only add relationship if both endpoints exist
+    if (graph.hasNode(relationship.source) && graph.hasNode(relationship.target)) {
+      addEdge(graph, relationship);
     }
   }
 
-  // Assign curvature to parallel edges (multiple edges between same node pair)
+  // Assign curvature to parallel relationships (multiple relationships between same node pair)
   assignEdgeCurvatures(graph);
 
   return graph;
 }
 
-/** Assign curvature values to edges to spread out parallel edges */
+/** Assign curvature values to relationships to spread out parallel relationships */
 function assignEdgeCurvatures(graph: ADGraphType): void {
-  // Group edges by their node pair (ignoring direction for grouping)
+  // Group relationships by their node pair (ignoring direction for grouping)
   const edgeGroups = new Map<string, Array<{ key: string; source: string; target: string }>>();
 
   graph.forEachEdge((edgeKey, _attrs, source, target) => {
@@ -103,31 +103,31 @@ function assignEdgeCurvatures(graph: ADGraphType): void {
     edgeGroups.set(pairKey, group);
   });
 
-  // Assign curvature to edges in groups with multiple edges
-  for (const [pairKey, edges] of edgeGroups.entries()) {
-    if (edges.length === 1) {
-      // Single edge: tapered edge with antialiasing
-      const edge = edges[0]!;
-      graph.setEdgeAttribute(edge.key, "type", "tapered");
-      graph.setEdgeAttribute(edge.key, "curvature", 0);
+  // Assign curvature to relationships in groups with multiple relationships
+  for (const [pairKey, relationships] of edgeGroups.entries()) {
+    if (relationships.length === 1) {
+      // Single relationship: tapered relationship with antialiasing
+      const relationship = relationships[0]!;
+      graph.setEdgeAttribute(relationship.key, "type", "tapered");
+      graph.setEdgeAttribute(relationship.key, "curvature", 0);
     } else {
-      // Multiple edges: separate by direction and spread with curvature
+      // Multiple relationships: separate by direction and spread with curvature
       const [canonicalSource] = pairKey.split("|");
 
-      // Separate edges by direction
-      const forward = edges.filter((e) => e.source === canonicalSource);
-      const backward = edges.filter((e) => e.source !== canonicalSource);
+      // Separate relationships by direction
+      const forward = relationships.filter((e) => e.source === canonicalSource);
+      const backward = relationships.filter((e) => e.source !== canonicalSource);
 
       // Assign curvatures: both directions get POSITIVE curvature
-      // Since backward edges go the opposite direction, positive curvature
-      // on them will visually curve to the opposite side of forward edges
-      const assignCurvatures = (edgeList: typeof edges) => {
+      // Since backward relationships go the opposite direction, positive curvature
+      // on them will visually curve to the opposite side of forward relationships
+      const assignCurvatures = (edgeList: typeof relationships) => {
         let i = 0;
-        for (const edge of edgeList) {
+        for (const relationship of edgeList) {
           const curvature = 0.2 + i * 0.15;
-          graph.setEdgeAttribute(edge.key, "type", "curvedArrow");
-          graph.setEdgeAttribute(edge.key, "curvature", curvature);
-          graph.setEdgeAttribute(edge.key, "size", 3);
+          graph.setEdgeAttribute(relationship.key, "type", "curvedArrow");
+          graph.setEdgeAttribute(relationship.key, "curvature", curvature);
+          graph.setEdgeAttribute(relationship.key, "size", 3);
           i++;
         }
       };
@@ -196,7 +196,7 @@ export function getGraphStats(graph: ADGraphType): {
   };
 }
 
-/** Clear all nodes and edges from the graph */
+/** Clear all nodes and relationships from the graph */
 export function clearGraph(graph: ADGraphType): void {
   graph.clear();
 }
@@ -204,7 +204,7 @@ export function clearGraph(graph: ADGraphType): void {
 /** Export graph to JSON (for debugging/persistence) */
 export function exportGraph(graph: ADGraphType): RawADGraph {
   const nodes: RawADNode[] = [];
-  const edges: RawADEdge[] = [];
+  const relationships: RawADEdge[] = [];
 
   graph.forEachNode((id, attrs) => {
     const node: RawADNode = {
@@ -221,16 +221,16 @@ export function exportGraph(graph: ADGraphType): RawADGraph {
   });
 
   graph.forEachEdge((_, attrs, source, target) => {
-    const edge: RawADEdge = {
+    const relationship: RawADEdge = {
       source,
       target,
       type: attrs.edgeType,
     };
     if (attrs.label) {
-      edge.label = attrs.label;
+      relationship.label = attrs.label;
     }
-    edges.push(edge);
+    relationships.push(relationship);
   });
 
-  return { nodes, edges };
+  return { nodes, relationships };
 }

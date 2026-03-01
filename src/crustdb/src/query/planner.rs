@@ -36,7 +36,7 @@ pub enum PlanOperator {
         /// Format: (property_name, value) - uses property index if available.
         property_filter: Option<(String, serde_json::Value)>,
     },
-    /// Scan all edges with optional type filter.
+    /// Scan all relationships with optional type filter.
     #[allow(dead_code)]
     EdgeScan {
         variable: String,
@@ -123,13 +123,13 @@ pub enum PlanOperator {
         source: Box<PlanOperator>,
         count: u64,
     },
-    /// Create nodes/edges.
+    /// Create nodes/relationships.
     Create {
         source: Option<Box<PlanOperator>>,
         nodes: Vec<CreateNode>,
-        edges: Vec<CreateEdge>,
+        relationships: Vec<CreateEdge>,
     },
-    /// Delete nodes/edges.
+    /// Delete nodes/relationships.
     Delete {
         source: Box<PlanOperator>,
         variables: Vec<String>,
@@ -297,13 +297,13 @@ pub struct CreateNode {
     pub properties: Vec<(String, PlanExpr)>,
 }
 
-/// Edge creation specification.
+/// Relationship creation specification.
 #[derive(Debug, Clone)]
 pub struct CreateEdge {
     pub variable: Option<String>,
     pub source: String,
     pub target: String,
-    pub edge_type: String,
+    pub rel_type: String,
     pub properties: Vec<(String, PlanExpr)>,
 }
 
@@ -352,7 +352,7 @@ pub fn plan(statement: &Statement) -> Result<QueryPlan> {
 /// Plan a CREATE statement.
 fn plan_create(create: &super::parser::CreateClause) -> Result<PlanOperator> {
     let mut nodes = Vec::new();
-    let mut edges = Vec::new();
+    let mut relationships = Vec::new();
     let mut auto_var_counter = 0;
     let mut declared_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -371,18 +371,18 @@ fn plan_create(create: &super::parser::CreateClause) -> Result<PlanOperator> {
 
                 // If there's a pending relationship, complete it now
                 if let Some((rp, source_var)) = pending_rel.take() {
-                    let edge_type = rp.types.first().cloned().unwrap_or_default();
+                    let rel_type = rp.types.first().cloned().unwrap_or_default();
                     let properties = plan_properties(&rp.properties)?;
                     let (source, target) = match rp.direction {
                         super::parser::Direction::Outgoing => (source_var, var.clone()),
                         super::parser::Direction::Incoming => (var.clone(), source_var),
                         super::parser::Direction::Both => (source_var, var.clone()), // Default to outgoing
                     };
-                    edges.push(CreateEdge {
+                    relationships.push(CreateEdge {
                         variable: rp.variable.clone(),
                         source,
                         target,
-                        edge_type,
+                        rel_type,
                         properties,
                     });
                 }
@@ -419,7 +419,7 @@ fn plan_create(create: &super::parser::CreateClause) -> Result<PlanOperator> {
     Ok(PlanOperator::Create {
         source: None,
         nodes,
-        edges,
+        relationships,
     })
 }
 
@@ -1375,11 +1375,11 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
         PlanOperator::Create {
             source,
             nodes,
-            edges,
+            relationships,
         } => PlanOperator::Create {
             source: source.map(|s| Box::new(optimize_operator(*s))),
             nodes,
-            edges,
+            relationships,
         },
 
         // Leaf operators - no optimization needed

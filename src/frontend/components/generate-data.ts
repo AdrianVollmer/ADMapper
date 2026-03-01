@@ -96,7 +96,7 @@ function createModal(): void {
 }
 
 /** Show database not empty message */
-function showDatabaseNotEmpty(nodes: number, edges: number): void {
+function showDatabaseNotEmpty(nodes: number, relationships: number): void {
   if (!modalEl) {
     createModal();
   }
@@ -113,7 +113,7 @@ function showDatabaseNotEmpty(nodes: number, edges: number): void {
       <h3 class="text-lg font-semibold mb-2">Database Not Empty</h3>
       <p class="text-gray-400 mb-4">
         The database already contains <strong>${nodes.toLocaleString()}</strong> nodes
-        and <strong>${edges.toLocaleString()}</strong> edges.
+        and <strong>${relationships.toLocaleString()}</strong> relationships.
       </p>
       <p class="text-gray-400">
         Sample data generation is only available for empty databases.
@@ -184,7 +184,7 @@ function showProgress(): void {
 }
 
 /** Show completion */
-function showComplete(nodes: number, edges: number): void {
+function showComplete(nodes: number, relationships: number): void {
   const body = document.getElementById("generate-data-body");
   const footer = document.getElementById("generate-data-footer");
   if (!body || !footer) return;
@@ -198,7 +198,7 @@ function showComplete(nodes: number, edges: number): void {
       <h3 class="text-lg font-semibold mb-2">Generation Complete</h3>
       <p class="text-gray-400">
         Created <strong>${nodes.toLocaleString()}</strong> nodes
-        and <strong>${edges.toLocaleString()}</strong> edges.
+        and <strong>${relationships.toLocaleString()}</strong> relationships.
       </p>
     </div>
   `;
@@ -277,8 +277,8 @@ async function startGeneration(): Promise<void> {
   showProgress();
 
   try {
-    const result = await api.post<{ nodes: number; edges: number }>("/api/graph/generate", { size });
-    showComplete(result.nodes, result.edges);
+    const result = await api.post<{ nodes: number; relationships: number }>("/api/graph/generate", { size });
+    showComplete(result.nodes, result.relationships);
   } catch (err) {
     showError(err instanceof Error ? err.message : String(err));
   }

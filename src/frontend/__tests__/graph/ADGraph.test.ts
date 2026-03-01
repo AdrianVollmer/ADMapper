@@ -25,7 +25,7 @@ describe("createGraph", () => {
   it("creates an empty directed multi-graph", () => {
     const graph = createGraph();
     expect(graph.order).toBe(0); // No nodes
-    expect(graph.size).toBe(0); // No edges
+    expect(graph.size).toBe(0); // No relationships
     expect(graph.type).toBe("directed");
     expect(graph.multi).toBe(true);
   });
@@ -44,7 +44,7 @@ describe("createGraph", () => {
 
 describe("loadGraph", () => {
   it("loads empty graph", () => {
-    const data: RawADGraph = { nodes: [], edges: [] };
+    const data: RawADGraph = { nodes: [], relationships: [] };
     const graph = loadGraph(data);
     expect(graph.order).toBe(0);
     expect(graph.size).toBe(0);
@@ -56,7 +56,7 @@ describe("loadGraph", () => {
         { id: "user1", name: "jsmith@corp.local", type: "User" },
         { id: "group1", name: "Domain Admins", type: "Group" },
       ],
-      edges: [],
+      relationships: [],
     };
 
     const graph = loadGraph(data);
@@ -69,13 +69,13 @@ describe("loadGraph", () => {
     expect(typeof userAttrs.y).toBe("number");
   });
 
-  it("loads edges between existing nodes", () => {
+  it("loads relationships between existing nodes", () => {
     const data: RawADGraph = {
       nodes: [
         { id: "user1", name: "jsmith", type: "User" },
         { id: "group1", name: "Admins", type: "Group" },
       ],
-      edges: [{ source: "user1", target: "group1", type: "MemberOf" }],
+      relationships: [{ source: "user1", target: "group1", type: "MemberOf" }],
     };
 
     const graph = loadGraph(data);
@@ -83,20 +83,20 @@ describe("loadGraph", () => {
     expect(graph.hasEdge("user1", "group1")).toBe(true);
   });
 
-  it("ignores edges with missing source node", () => {
+  it("ignores relationships with missing source node", () => {
     const data: RawADGraph = {
       nodes: [{ id: "group1", name: "Admins", type: "Group" }],
-      edges: [{ source: "missing", target: "group1", type: "MemberOf" }],
+      relationships: [{ source: "missing", target: "group1", type: "MemberOf" }],
     };
 
     const graph = loadGraph(data);
     expect(graph.size).toBe(0);
   });
 
-  it("ignores edges with missing target node", () => {
+  it("ignores relationships with missing target node", () => {
     const data: RawADGraph = {
       nodes: [{ id: "user1", name: "jsmith", type: "User" }],
-      edges: [{ source: "user1", target: "missing", type: "MemberOf" }],
+      relationships: [{ source: "user1", target: "missing", type: "MemberOf" }],
     };
 
     const graph = loadGraph(data);
@@ -106,7 +106,7 @@ describe("loadGraph", () => {
   it("handles unknown node types", () => {
     const data: RawADGraph = {
       nodes: [{ id: "x", name: "Unknown Thing", type: "SomethingNew" as unknown as ADNodeType }],
-      edges: [],
+      relationships: [],
     };
 
     const graph = loadGraph(data);
@@ -124,7 +124,7 @@ describe("loadGraph", () => {
           properties: { enabled: true, admincount: 1 },
         },
       ],
-      edges: [],
+      relationships: [],
     };
 
     const graph = loadGraph(data);
@@ -134,55 +134,55 @@ describe("loadGraph", () => {
 });
 
 // ============================================================================
-// Edge Curvature (tested through loadGraph)
+// Relationship Curvature (tested through loadGraph)
 // ============================================================================
 
-describe("edge curvatures", () => {
-  it("assigns no curvature to single edges", () => {
+describe("relationship curvatures", () => {
+  it("assigns no curvature to single relationships", () => {
     const data: RawADGraph = {
       nodes: [
         { id: "a", name: "A", type: "User" },
         { id: "b", name: "B", type: "Group" },
       ],
-      edges: [{ source: "a", target: "b", type: "MemberOf" }],
+      relationships: [{ source: "a", target: "b", type: "MemberOf" }],
     };
 
     const graph = loadGraph(data);
-    const edge = graph.edges()[0];
-    expect(graph.getEdgeAttribute(edge, "curvature")).toBe(0);
-    expect(graph.getEdgeAttribute(edge, "type")).toBe("tapered");
+    const relationship = graph.edges()[0];
+    expect(graph.getEdgeAttribute(relationship, "curvature")).toBe(0);
+    expect(graph.getEdgeAttribute(relationship, "type")).toBe("tapered");
   });
 
-  it("assigns same curvatures to bidirectional edges (visually opposite)", () => {
+  it("assigns same curvatures to bidirectional relationships (visually opposite)", () => {
     const data: RawADGraph = {
       nodes: [
         { id: "a", name: "A", type: "User" },
         { id: "b", name: "B", type: "Group" },
       ],
-      edges: [
+      relationships: [
         { source: "a", target: "b", type: "MemberOf" },
         { source: "b", target: "a", type: "AdminTo" },
       ],
     };
 
     const graph = loadGraph(data);
-    const edges = graph.edges();
-    expect(edges).toHaveLength(2);
+    const relationships = graph.edges();
+    expect(relationships).toHaveLength(2);
 
-    const curvatures = edges.map((e) => graph.getEdgeAttribute(e, "curvature"));
-    // Both edges get the same positive curvature (0.2)
+    const curvatures = relationships.map((e) => graph.getEdgeAttribute(e, "curvature"));
+    // Both relationships get the same positive curvature (0.2)
     // Since they go opposite directions, same curvature = visually opposite arcs
     expect(curvatures[0]).toBe(0.2);
     expect(curvatures[1]).toBe(0.2);
   });
 
-  it("distributes curvatures evenly for multiple parallel edges", () => {
+  it("distributes curvatures evenly for multiple parallel relationships", () => {
     const data: RawADGraph = {
       nodes: [
         { id: "a", name: "A", type: "User" },
         { id: "b", name: "B", type: "Group" },
       ],
-      edges: [
+      relationships: [
         { source: "a", target: "b", type: "MemberOf" },
         { source: "a", target: "b", type: "GenericAll" },
         { source: "a", target: "b", type: "WriteDacl" },
@@ -190,14 +190,14 @@ describe("edge curvatures", () => {
     };
 
     const graph = loadGraph(data);
-    const edges = graph.edges();
-    expect(edges).toHaveLength(3);
+    const relationships = graph.edges();
+    expect(relationships).toHaveLength(3);
 
-    const curvatures = edges.map((e) => graph.getEdgeAttribute(e, "curvature"));
+    const curvatures = relationships.map((e) => graph.getEdgeAttribute(e, "curvature"));
     // All should be different
     expect(new Set(curvatures).size).toBe(3);
     // All should use curvedArrow type
-    for (const e of edges) {
+    for (const e of relationships) {
       expect(graph.getEdgeAttribute(e, "type")).toBe("curvedArrow");
     }
   });
@@ -205,14 +205,14 @@ describe("edge curvatures", () => {
   it("handles self-loops", () => {
     const data: RawADGraph = {
       nodes: [{ id: "a", name: "A", type: "User" }],
-      edges: [{ source: "a", target: "a", type: "GenericAll" }],
+      relationships: [{ source: "a", target: "a", type: "GenericAll" }],
     };
 
     const graph = loadGraph(data);
     expect(graph.size).toBe(1);
     // Self-loop should still get curvature assigned
-    const edge = graph.edges()[0];
-    expect(graph.getEdgeAttribute(edge, "curvature")).toBeDefined();
+    const relationship = graph.edges()[0];
+    expect(graph.getEdgeAttribute(relationship, "curvature")).toBeDefined();
   });
 });
 
@@ -233,7 +233,7 @@ describe("getNodesByType", () => {
         { id: "u2", name: "User 2", type: "User" },
         { id: "g1", name: "Group 1", type: "Group" },
       ],
-      edges: [],
+      relationships: [],
     };
 
     const graph = loadGraph(data);
@@ -246,7 +246,7 @@ describe("getNodesByType", () => {
   it("returns empty array when no nodes match", () => {
     const data: RawADGraph = {
       nodes: [{ id: "g1", name: "Group 1", type: "Group" }],
-      edges: [],
+      relationships: [],
     };
 
     const graph = loadGraph(data);
@@ -267,7 +267,7 @@ describe("getNeighbors", () => {
   it("returns empty array for isolated node", () => {
     const data: RawADGraph = {
       nodes: [{ id: "a", name: "A", type: "User" }],
-      edges: [],
+      relationships: [],
     };
 
     const graph = loadGraph(data);
@@ -281,7 +281,7 @@ describe("getNeighbors", () => {
         { id: "b", name: "B", type: "Group" },
         { id: "c", name: "C", type: "Computer" },
       ],
-      edges: [
+      relationships: [
         { source: "a", target: "b", type: "MemberOf" },
         { source: "c", target: "a", type: "HasSession" },
       ],
@@ -303,7 +303,7 @@ describe("getReachableNodes", () => {
   it("returns only start node when isolated", () => {
     const data: RawADGraph = {
       nodes: [{ id: "a", name: "A", type: "User" }],
-      edges: [],
+      relationships: [],
     };
 
     const graph = loadGraph(data);
@@ -312,7 +312,7 @@ describe("getReachableNodes", () => {
     expect(reachable.has("a")).toBe(true);
   });
 
-  it("finds all reachable nodes via outgoing edges", () => {
+  it("finds all reachable nodes via outgoing relationships", () => {
     const data: RawADGraph = {
       nodes: [
         { id: "a", name: "A", type: "User" },
@@ -320,7 +320,7 @@ describe("getReachableNodes", () => {
         { id: "c", name: "C", type: "Computer" },
         { id: "d", name: "D", type: "Domain" },
       ],
-      edges: [
+      relationships: [
         { source: "a", target: "b", type: "MemberOf" },
         { source: "b", target: "c", type: "AdminTo" },
         // d is not reachable from a
@@ -343,7 +343,7 @@ describe("getReachableNodes", () => {
         { id: "b", name: "B", type: "Group" },
         { id: "c", name: "C", type: "Computer" },
       ],
-      edges: [
+      relationships: [
         { source: "a", target: "b", type: "MemberOf" },
         { source: "b", target: "c", type: "AdminTo" },
       ],
@@ -369,7 +369,7 @@ describe("getReachableNodes", () => {
         { id: "b", name: "B", type: "Group" },
         { id: "c", name: "C", type: "Computer" },
       ],
-      edges: [
+      relationships: [
         { source: "a", target: "b", type: "MemberOf" },
         { source: "b", target: "c", type: "AdminTo" },
         { source: "c", target: "a", type: "HasSession" }, // Cycle back to a
@@ -395,14 +395,14 @@ describe("getGraphStats", () => {
     expect(stats.nodesByType).toEqual({});
   });
 
-  it("counts nodes and edges correctly", () => {
+  it("counts nodes and relationships correctly", () => {
     const data: RawADGraph = {
       nodes: [
         { id: "u1", name: "User 1", type: "User" },
         { id: "u2", name: "User 2", type: "User" },
         { id: "g1", name: "Group 1", type: "Group" },
       ],
-      edges: [
+      relationships: [
         { source: "u1", target: "g1", type: "MemberOf" },
         { source: "u2", target: "g1", type: "MemberOf" },
       ],
@@ -421,13 +421,13 @@ describe("getGraphStats", () => {
 // ============================================================================
 
 describe("clearGraph", () => {
-  it("removes all nodes and edges", () => {
+  it("removes all nodes and relationships", () => {
     const data: RawADGraph = {
       nodes: [
         { id: "a", name: "A", type: "User" },
         { id: "b", name: "B", type: "Group" },
       ],
-      edges: [{ source: "a", target: "b", type: "MemberOf" }],
+      relationships: [{ source: "a", target: "b", type: "MemberOf" }],
     };
 
     const graph = loadGraph(data);
@@ -449,7 +449,7 @@ describe("exportGraph", () => {
     const graph = createGraph();
     const exported = exportGraph(graph);
     expect(exported.nodes).toEqual([]);
-    expect(exported.edges).toEqual([]);
+    expect(exported.relationships).toEqual([]);
   });
 
   it("exports nodes with correct structure", () => {
@@ -462,7 +462,7 @@ describe("exportGraph", () => {
           properties: { enabled: true },
         },
       ],
-      edges: [],
+      relationships: [],
     };
 
     const graph = loadGraph(data);
@@ -475,22 +475,22 @@ describe("exportGraph", () => {
     expect(exported.nodes[0]!.properties).toEqual({ enabled: true });
   });
 
-  it("exports edges with correct structure", () => {
+  it("exports relationships with correct structure", () => {
     const data: RawADGraph = {
       nodes: [
         { id: "a", name: "A", type: "User" },
         { id: "b", name: "B", type: "Group" },
       ],
-      edges: [{ source: "a", target: "b", type: "MemberOf" }],
+      relationships: [{ source: "a", target: "b", type: "MemberOf" }],
     };
 
     const graph = loadGraph(data);
     const exported = exportGraph(graph);
 
-    expect(exported.edges).toHaveLength(1);
-    expect(exported.edges[0]!.source).toBe("a");
-    expect(exported.edges[0]!.target).toBe("b");
-    expect(exported.edges[0]!.type).toBe("MemberOf");
+    expect(exported.relationships).toHaveLength(1);
+    expect(exported.relationships[0]!.source).toBe("a");
+    expect(exported.relationships[0]!.target).toBe("b");
+    expect(exported.relationships[0]!.type).toBe("MemberOf");
   });
 
   it("round-trips graph data", () => {
@@ -499,7 +499,7 @@ describe("exportGraph", () => {
         { id: "u1", name: "User 1", type: "User" },
         { id: "g1", name: "Group 1", type: "Group" },
       ],
-      edges: [{ source: "u1", target: "g1", type: "MemberOf" }],
+      relationships: [{ source: "u1", target: "g1", type: "MemberOf" }],
     };
 
     const graph = loadGraph(original);
@@ -543,31 +543,31 @@ describe("addNode", () => {
 });
 
 describe("addEdge", () => {
-  it("adds a new edge", () => {
+  it("adds a new relationship", () => {
     const graph = createGraph();
     addNode(graph, { id: "a", name: "A", type: "User" });
     addNode(graph, { id: "b", name: "B", type: "Group" });
 
-    const edge: RawADEdge = { source: "a", target: "b", type: "MemberOf" };
-    addEdge(graph, edge);
+    const relationship: RawADEdge = { source: "a", target: "b", type: "MemberOf" };
+    addEdge(graph, relationship);
 
     expect(graph.size).toBe(1);
     expect(graph.hasEdge("a", "b")).toBe(true);
   });
 
-  it("does not add duplicate edge with same type", () => {
+  it("does not add duplicate relationship with same type", () => {
     const graph = createGraph();
     addNode(graph, { id: "a", name: "A", type: "User" });
     addNode(graph, { id: "b", name: "B", type: "Group" });
 
-    const edge: RawADEdge = { source: "a", target: "b", type: "MemberOf" };
-    addEdge(graph, edge);
-    addEdge(graph, edge);
+    const relationship: RawADEdge = { source: "a", target: "b", type: "MemberOf" };
+    addEdge(graph, relationship);
+    addEdge(graph, relationship);
 
     expect(graph.size).toBe(1);
   });
 
-  it("allows multiple edges with different types", () => {
+  it("allows multiple relationships with different types", () => {
     const graph = createGraph();
     addNode(graph, { id: "a", name: "A", type: "User" });
     addNode(graph, { id: "b", name: "B", type: "Group" });

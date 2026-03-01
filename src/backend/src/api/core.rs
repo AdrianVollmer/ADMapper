@@ -43,7 +43,7 @@ pub struct SupportedDatabase {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphStats {
     pub nodes: usize,
-    pub edges: usize,
+    pub relationships: usize,
 }
 
 /// Node connection counts.
@@ -72,7 +72,7 @@ pub struct NodeStatus {
 #[derive(Debug, Clone, Serialize)]
 pub struct PathStep {
     pub node: DbNode,
-    pub edge_type: Option<String>,
+    pub rel_type: Option<String>,
 }
 
 /// Path finding response.
@@ -103,7 +103,7 @@ pub struct PathsToDaResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateResponse {
     pub nodes: usize,
-    pub edges: usize,
+    pub relationships: usize,
 }
 
 /// Query history entry.
@@ -230,8 +230,11 @@ pub fn database_disconnect(state: &AppState) {
 
 /// Get basic graph statistics.
 pub fn graph_stats(db: &dyn DatabaseBackend) -> Result<GraphStats, String> {
-    let (nodes, edges) = db.get_stats().map_err(|e| e.to_string())?;
-    Ok(GraphStats { nodes, edges })
+    let (nodes, relationships) = db.get_stats().map_err(|e| e.to_string())?;
+    Ok(GraphStats {
+        nodes,
+        relationships,
+    })
 }
 
 /// Get detailed graph statistics.
@@ -260,19 +263,19 @@ pub fn graph_nodes(db: &dyn DatabaseBackend) -> Result<Vec<DbNode>, String> {
     db.get_all_nodes().map_err(|e| e.to_string())
 }
 
-/// Get all edges.
+/// Get all relationships.
 pub fn graph_edges(db: &dyn DatabaseBackend) -> Result<Vec<GraphEdge>, String> {
-    let edges = db.get_all_edges().map_err(|e| e.to_string())?;
-    Ok(edges.into_iter().map(GraphEdge::from).collect())
+    let relationships = db.get_all_edges().map_err(|e| e.to_string())?;
+    Ok(relationships.into_iter().map(GraphEdge::from).collect())
 }
 
 /// Get full graph.
 pub fn graph_all(db: &dyn DatabaseBackend) -> Result<FullGraph, String> {
     let nodes = db.get_all_nodes().map_err(|e| e.to_string())?;
-    let edges = db.get_all_edges().map_err(|e| e.to_string())?;
+    let relationships = db.get_all_edges().map_err(|e| e.to_string())?;
     Ok(FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
-        edges: edges.into_iter().map(GraphEdge::from).collect(),
+        relationships: relationships.into_iter().map(GraphEdge::from).collect(),
     })
 }
 
@@ -324,12 +327,12 @@ pub fn node_connections(
     node_id: &str,
     direction: &str,
 ) -> Result<FullGraph, String> {
-    let (nodes, edges) = db
+    let (nodes, relationships) = db
         .get_node_connections(node_id, direction)
         .map_err(|e| e.to_string())?;
     Ok(FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
-        edges: edges.into_iter().map(GraphEdge::from).collect(),
+        relationships: relationships.into_iter().map(GraphEdge::from).collect(),
     })
 }
 
@@ -459,7 +462,7 @@ pub fn graph_path(db: &dyn DatabaseBackend, from: &str, to: &str) -> Result<Path
             path: Vec::new(),
             graph: FullGraph {
                 nodes: Vec::new(),
-                edges: Vec::new(),
+                relationships: Vec::new(),
             },
         }),
         Some(path) => {
@@ -473,7 +476,7 @@ pub fn graph_path(db: &dyn DatabaseBackend, from: &str, to: &str) -> Result<Path
 
             let path_steps: Vec<PathStep> = path
                 .iter()
-                .map(|(id, edge_type)| {
+                .map(|(id, rel_type)| {
                     let node = node_map.get(id).cloned().unwrap_or_else(|| DbNode {
                         id: id.clone(),
                         name: id.clone(),
@@ -482,19 +485,19 @@ pub fn graph_path(db: &dyn DatabaseBackend, from: &str, to: &str) -> Result<Path
                     });
                     PathStep {
                         node,
-                        edge_type: edge_type.clone(),
+                        rel_type: rel_type.clone(),
                     }
                 })
                 .collect();
 
-            let edges = db.get_edges_between(&node_ids).map_err(|e| e.to_string())?;
+            let relationships = db.get_edges_between(&node_ids).map_err(|e| e.to_string())?;
 
             let graph = FullGraph {
                 nodes: path_steps
                     .iter()
                     .map(|s| GraphNode::from(s.node.clone()))
                     .collect(),
-                edges: edges.into_iter().map(GraphEdge::from).collect(),
+                relationships: relationships.into_iter().map(GraphEdge::from).collect(),
             };
 
             Ok(PathResponse {
@@ -540,7 +543,7 @@ pub fn graph_insights(db: &dyn DatabaseBackend) -> Result<crate::db::SecurityIns
     db.get_security_insights().map_err(|e| e.to_string())
 }
 
-/// Get edge types.
+/// Get relationship types.
 pub fn graph_edge_types(db: &dyn DatabaseBackend) -> Result<Vec<String>, String> {
     db.get_edge_types().map_err(|e| e.to_string())
 }
@@ -551,7 +554,7 @@ pub fn graph_node_types(db: &dyn DatabaseBackend) -> Result<Vec<String>, String>
 }
 
 // ============================================================================
-// Node/Edge Mutation
+// Node/Relationship Mutation
 // ============================================================================
 
 /// Add a node.
@@ -593,12 +596,12 @@ pub fn add_node(
     })
 }
 
-/// Add an edge.
+/// Add an relationship.
 pub fn add_edge(
     db: &dyn DatabaseBackend,
     source: String,
     target: String,
-    edge_type: String,
+    rel_type: String,
     properties: JsonValue,
 ) -> Result<GraphEdge, String> {
     if source.is_empty() {
@@ -607,14 +610,14 @@ pub fn add_edge(
     if target.is_empty() {
         return Err("Target node ID is required".to_string());
     }
-    if edge_type.is_empty() {
-        return Err("Edge type is required".to_string());
+    if rel_type.is_empty() {
+        return Err("Relationship type is required".to_string());
     }
 
-    let edge = DbEdge {
+    let relationship = DbEdge {
         source: source.clone(),
         target: target.clone(),
-        edge_type: edge_type.clone(),
+        rel_type: rel_type.clone(),
         properties: if properties.is_null() {
             serde_json::json!({})
         } else {
@@ -623,12 +626,12 @@ pub fn add_edge(
         ..Default::default()
     };
 
-    db.insert_edge(edge).map_err(|e| e.to_string())?;
+    db.insert_edge(relationship).map_err(|e| e.to_string())?;
 
     Ok(GraphEdge {
         source,
         target,
-        edge_type,
+        rel_type,
     })
 }
 
@@ -841,17 +844,17 @@ pub fn generate_data(
     }
 
     // Generate
-    let (nodes, edges) = crate::generate::Generator::generate(size);
+    let (nodes, relationships) = crate::generate::Generator::generate(size);
     let node_count = nodes.len();
-    let edge_count = edges.len();
+    let edge_count = relationships.len();
 
     // Insert
     db.insert_nodes(&nodes).map_err(|e| e.to_string())?;
-    db.insert_edges(&edges).map_err(|e| e.to_string())?;
+    db.insert_edges(&relationships).map_err(|e| e.to_string())?;
 
     Ok(GenerateResponse {
         nodes: node_count,
-        edges: edge_count,
+        relationships: edge_count,
     })
 }
 
@@ -917,7 +920,7 @@ pub fn import_from_paths(
                 info!(
                     filename = %filename,
                     nodes = progress.nodes_imported,
-                    edges = progress.edges_imported,
+                    relationships = progress.edges_imported,
                     "File imported successfully"
                 );
                 progress_callback(progress);

@@ -7,7 +7,7 @@ An embedded graph database with SQLite backend and Cypher support, written in Ru
 - **Embedded**: No separate server process, links directly into your application
 - **SQLite Backend**: Battle-tested storage with ACID transactions
 - **Cypher Support**: Industry-standard graph query language
-- **Property Graph Model**: Nodes and edges with labels, types, and arbitrary properties
+- **Property Graph Model**: Nodes and relationships with labels, types, and arbitrary properties
 
 ## SQLite Schema
 
@@ -29,9 +29,9 @@ Normalized storage for node label strings.
 | id | INTEGER PRIMARY KEY | Label ID |
 | name | TEXT UNIQUE | Label name (e.g., "Person", "Movie") |
 
-### Table `edge_types`
+### Table `rel_types`
 
-Normalized storage for edge type strings.
+Normalized storage for relationship type strings.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -54,39 +54,39 @@ Many-to-many relationship between nodes and labels.
 | node_id | INTEGER | FK -> nodes.id |
 | label_id | INTEGER | FK -> node_labels.id |
 
-### Table `edges`
+### Table `relationships`
 
 | Column | Type | Description |
 |--------|------|-------------|
-| id | INTEGER PRIMARY KEY | Edge ID |
+| id | INTEGER PRIMARY KEY | Relationship ID |
 | source_id | INTEGER | FK -> nodes.id |
 | target_id | INTEGER | FK -> nodes.id |
-| type_id | INTEGER | FK -> edge_types.id |
+| type_id | INTEGER | FK -> rel_types.id |
 | properties | TEXT | JSON-encoded properties |
 
 ### Indexes
 
 - `idx_node_label_map_label` on node_label_map(label_id) - Fast label lookups
 - `idx_node_label_map_node` on node_label_map(node_id) - Fast node label retrieval
-- `idx_edges_source` on edges(source_id) - Fast outgoing edge traversal
-- `idx_edges_target` on edges(target_id) - Fast incoming edge traversal
-- `idx_edges_type` on edges(type_id) - Fast edge type filtering
+- `idx_edges_source` on relationships(source_id) - Fast outgoing relationship traversal
+- `idx_edges_target` on relationships(target_id) - Fast incoming relationship traversal
+- `idx_edges_type` on relationships(type_id) - Fast relationship type filtering
 
 ## Milestones
 
 ### M1: Storage Layer [done]
 
-Basic CRUD operations for nodes and edges.
+Basic CRUD operations for nodes and relationships.
 
 - [x] SQLite schema with migrations
 - [x] Insert/get/delete nodes
-- [x] Insert/get/delete edges
+- [x] Insert/get/delete relationships
 - [x] Property serialization (JSON)
 - [x] Database statistics
 
 ### M2: Simple CREATE Queries [done]
 
-Parse and execute basic node/edge creation.
+Parse and execute basic node/relationship creation.
 
 ```cypher
 CREATE (n:Person {name: 'Alice', age: 30})
@@ -317,7 +317,7 @@ cargo run --release --example bench_stress -- --help
 ```
 
 **Topologies:**
-- `dense_cluster` - Near-clique (10% edge density), tests BFS explosion
+- `dense_cluster` - Near-clique (10% relationship density), tests BFS explosion
 - `long_chain` - Linear path with shortcuts, tests deep traversals
 - `wide_fanout` - Tree with branching=100, tests high-degree expansion
 - `power_law` - Barabási-Albert scale-free, tests skewed degree distribution

@@ -43,15 +43,15 @@ Computers configured for unconstrained delegation. These can impersonate any use
 
 Edges with high betweenness centrality. These are critical relationships where many attack paths converge:
 
-- Removing these edges would disrupt many potential attack paths
+- Removing these relationships would disrupt many potential attack paths
 - Good candidates for remediation prioritization
 
 ### How It Works
 
-ADMapper computes edge betweenness centrality using Brandes' algorithm:
+ADMapper computes relationship betweenness centrality using Brandes' algorithm:
 
 1. For each node, compute shortest paths to all other nodes
-2. Count how many shortest paths pass through each edge
+2. Count how many shortest paths pass through each relationship
 3. Edges with high counts are choke points
 
 Results are cached and recomputed when the graph changes.

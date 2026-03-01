@@ -40,7 +40,7 @@ For queries returning a graph (paths):
 {
   "query_id": "550e8400-e29b-41d4-a716-446655440000",
   "nodes": [...],
-  "edges": [...],
+  "relationships": [...],
   "execution_time_ms": 120
 }
 ```
@@ -83,9 +83,9 @@ ADMapper uses CrustDB's Cypher implementation. See the [CrustDB documentation](h
 - `RETURN` - Result projection
 - `ORDER BY` - Sorting
 - `LIMIT` / `SKIP` - Pagination
-- `CREATE` - Create nodes/edges
+- `CREATE` - Create nodes/relationships
 - `SET` - Update properties
-- `DELETE` - Remove nodes/edges
+- `DELETE` - Remove nodes/relationships
 
 ### Examples
 

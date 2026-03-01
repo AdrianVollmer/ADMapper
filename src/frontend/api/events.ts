@@ -159,7 +159,7 @@ export interface QueryProgressEvent {
   results?: unknown;
   graph?: {
     nodes: unknown[];
-    edges: unknown[];
+    relationships: unknown[];
   };
 }
 

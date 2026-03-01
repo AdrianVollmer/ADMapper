@@ -36,7 +36,7 @@ export const Actions = {
   QUIT: "quit",
   // Edit menu
   ADD_NODE: "add-node",
-  ADD_EDGE: "add-edge",
+  ADD_EDGE: "add-relationship",
   CLEAR_DISABLED: "clear-disabled",
   CLEAR_DB: "clear-db",
   CLEAR_CACHE: "clear-cache",
@@ -104,7 +104,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   },
   // Edit menu
   "add-node": () => openAddNode(),
-  "add-edge": () => openAddEdge(),
+  "add-relationship": () => openAddEdge(),
   "clear-disabled": () => clearDisabledObjects(),
   "clear-db": () => clearDatabase(),
   "clear-cache": () => clearCache(),

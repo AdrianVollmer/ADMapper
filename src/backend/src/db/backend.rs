@@ -56,20 +56,20 @@ pub trait DatabaseBackend: Send + Sync {
     /// Insert a single node.
     fn insert_node(&self, node: DbNode) -> Result<()>;
 
-    /// Insert a single edge.
-    fn insert_edge(&self, edge: DbEdge) -> Result<()>;
+    /// Insert a single relationship.
+    fn insert_edge(&self, relationship: DbEdge) -> Result<()>;
 
     /// Insert a batch of nodes.
     fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize>;
 
-    /// Insert a batch of edges.
-    fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize>;
+    /// Insert a batch of relationships.
+    fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize>;
 
     // ========================================================================
     // Statistics
     // ========================================================================
 
-    /// Get basic node and edge counts.
+    /// Get basic node and relationship counts.
     fn get_stats(&self) -> Result<(usize, usize)>;
 
     /// Get detailed statistics including counts by type.
@@ -78,10 +78,10 @@ pub trait DatabaseBackend: Send + Sync {
     /// Get security insights from the graph.
     fn get_security_insights(&self) -> Result<SecurityInsights>;
 
-    /// Get choke points using edge betweenness centrality.
+    /// Get choke points using relationship betweenness centrality.
     ///
-    /// Returns the top edges through which the most shortest paths pass.
-    /// These are critical edges whose removal would disrupt the most attack paths.
+    /// Returns the top relationships through which the most shortest paths pass.
+    /// These are critical relationships whose removal would disrupt the most attack paths.
     ///
     /// Default implementation returns an empty result for backends that don't support it.
     fn get_choke_points(&self, _top_k: usize) -> Result<ChokePointsResponse> {
@@ -93,22 +93,22 @@ pub trait DatabaseBackend: Send + Sync {
     }
 
     // ========================================================================
-    // Node/Edge Retrieval
+    // Node/Relationship Retrieval
     // ========================================================================
 
     /// Get all nodes.
     fn get_all_nodes(&self) -> Result<Vec<DbNode>>;
 
-    /// Get all edges.
+    /// Get all relationships.
     fn get_all_edges(&self) -> Result<Vec<DbEdge>>;
 
     /// Get nodes by their IDs.
     fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>>;
 
-    /// Get edges between a set of nodes.
+    /// Get relationships between a set of nodes.
     fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>>;
 
-    /// Get all distinct edge types.
+    /// Get all distinct relationship types.
     fn get_edge_types(&self) -> Result<Vec<String>>;
 
     /// Get all distinct node types.
@@ -129,27 +129,27 @@ pub trait DatabaseBackend: Send + Sync {
     // ========================================================================
 
     /// Get connections for a node.
-    /// Returns (nodes, edges) for the connections in the specified direction.
-    /// - `incoming`: edges where node is target
-    /// - `outgoing`: edges where node is source
-    /// - `admin`: outgoing admin permission edges (AdminTo, GenericAll, etc.)
-    /// - `memberof`: outgoing MemberOf edges
-    /// - `members`: incoming MemberOf edges
+    /// Returns (nodes, relationships) for the connections in the specified direction.
+    /// - `incoming`: relationships where node is target
+    /// - `outgoing`: relationships where node is source
+    /// - `admin`: outgoing admin permission relationships (AdminTo, GenericAll, etc.)
+    /// - `memberof`: outgoing MemberOf relationships
+    /// - `members`: incoming MemberOf relationships
     fn get_node_connections(
         &self,
         node_id: &str,
         direction: &str,
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)>;
 
-    /// Get edge counts for a node (for badge display).
+    /// Get relationship counts for a node (for badge display).
     /// Returns (incoming, outgoing, admin_to, member_of, members).
     ///
     /// # Performance Warning
-    /// The default implementation loads ALL edges into memory and scans them linearly.
-    /// For large graphs (100k+ edges), this is severely inefficient.
+    /// The default implementation loads ALL relationships into memory and scans them linearly.
+    /// For large graphs (100k+ relationships), this is severely inefficient.
     /// All backends should override this method with an efficient indexed query.
     fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
-        // WARNING: This default implementation is O(n) where n = total edges.
+        // WARNING: This default implementation is O(n) where n = total relationships.
         // Backends should override with efficient indexed queries.
         tracing::warn!(
             node_id = %node_id,
@@ -171,28 +171,28 @@ pub trait DatabaseBackend: Send + Sync {
         .into_iter()
         .collect();
 
-        // Count unique nodes, not edges
-        // e.g., if node A has 3 edges from node B, count as 1 incoming node
+        // Count unique nodes, not relationships
+        // e.g., if node A has 3 relationships from node B, count as 1 incoming node
         let mut incoming_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut outgoing_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut admin_to_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut member_of_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut member_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
 
-        for edge in &all_edges {
-            if edge.target == node_id {
-                incoming_nodes.insert(&edge.source);
-                if edge.edge_type == "MemberOf" {
-                    member_nodes.insert(&edge.source);
+        for relationship in &all_edges {
+            if relationship.target == node_id {
+                incoming_nodes.insert(&relationship.source);
+                if relationship.rel_type == "MemberOf" {
+                    member_nodes.insert(&relationship.source);
                 }
             }
-            if edge.source == node_id {
-                outgoing_nodes.insert(&edge.target);
-                if edge.edge_type == "MemberOf" {
-                    member_of_nodes.insert(&edge.target);
+            if relationship.source == node_id {
+                outgoing_nodes.insert(&relationship.target);
+                if relationship.rel_type == "MemberOf" {
+                    member_of_nodes.insert(&relationship.target);
                 }
-                if admin_types.contains(edge.edge_type.as_str()) {
-                    admin_to_nodes.insert(&edge.target);
+                if admin_types.contains(relationship.rel_type.as_str()) {
+                    admin_to_nodes.insert(&relationship.target);
                 }
             }
         }
@@ -207,20 +207,20 @@ pub trait DatabaseBackend: Send + Sync {
     }
 
     /// Check if a node is a transitive member of a target group.
-    /// Uses MemberOf edges to traverse group membership.
+    /// Uses MemberOf relationships to traverse group membership.
     fn is_member_of(&self, node_id: &str, target_id: &str) -> Result<bool> {
-        // Default implementation using BFS over MemberOf edges
+        // Default implementation using BFS over MemberOf relationships
         let all_edges = self.get_all_edges()?;
 
-        // Build adjacency for MemberOf edges only
+        // Build adjacency for MemberOf relationships only
         let mut member_of_adj: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
-        for edge in &all_edges {
-            if edge.edge_type == "MemberOf" {
+        for relationship in &all_edges {
+            if relationship.rel_type == "MemberOf" {
                 member_of_adj
-                    .entry(edge.source.clone())
+                    .entry(relationship.source.clone())
                     .or_default()
-                    .push(edge.target.clone());
+                    .push(relationship.target.clone());
             }
         }
 
@@ -251,8 +251,8 @@ pub trait DatabaseBackend: Send + Sync {
     /// Returns the group's object_id if found.
     ///
     /// # Performance Warning
-    /// The default implementation loads ALL nodes and ALL edges into memory.
-    /// For large graphs (50k+ nodes, 200k+ edges), this is severely inefficient.
+    /// The default implementation loads ALL nodes and ALL relationships into memory.
+    /// For large graphs (50k+ nodes, 200k+ relationships), this is severely inefficient.
     /// Called multiple times on node hover, this can freeze the UI.
     /// All backends should override this with an efficient graph traversal query.
     fn find_membership_by_sid_suffix(
@@ -260,7 +260,7 @@ pub trait DatabaseBackend: Send + Sync {
         node_id: &str,
         sid_suffix: &str,
     ) -> Result<Option<String>> {
-        // WARNING: This default implementation is O(n+m) where n = nodes, m = edges.
+        // WARNING: This default implementation is O(n+m) where n = nodes, m = relationships.
         // Backends should override with efficient graph traversal queries.
         tracing::warn!(
             node_id = %node_id,
@@ -281,15 +281,15 @@ pub trait DatabaseBackend: Send + Sync {
             return Ok(None);
         }
 
-        // Build adjacency for MemberOf edges
+        // Build adjacency for MemberOf relationships
         let mut member_of_adj: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
-        for edge in &all_edges {
-            if edge.edge_type == "MemberOf" {
+        for relationship in &all_edges {
+            if relationship.rel_type == "MemberOf" {
                 member_of_adj
-                    .entry(edge.source.clone())
+                    .entry(relationship.source.clone())
                     .or_default()
-                    .push(edge.target.clone());
+                    .push(relationship.target.clone());
             }
         }
 
@@ -324,7 +324,7 @@ pub trait DatabaseBackend: Send + Sync {
     // ========================================================================
 
     /// Find shortest path between two nodes.
-    /// Returns the path as a list of (node_id, edge_type) pairs.
+    /// Returns the path as a list of (node_id, rel_type) pairs.
     fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>>;
 
     /// Find all users with paths to Domain Admins.

@@ -78,7 +78,7 @@ Settings are merged with existing values. Only include fields you want to change
 | `layout` | string | `force` | Layout algorithm: `force`, `hierarchical`, `circular` |
 | `node_size` | string | `medium` | Node size: `small`, `medium`, `large` |
 | `show_labels` | boolean | `true` | Display node labels |
-| `edge_style` | string | `curved` | Edge style: `straight`, `curved` |
+| `edge_style` | string | `curved` | Relationship style: `straight`, `curved` |
 
 ### Query Settings
 

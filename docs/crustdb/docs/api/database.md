@@ -80,7 +80,7 @@ db.execute("CREATE (n:Person {name: 'Alice'})")?;
 
 ### `Database::clear`
 
-Delete all nodes and edges from the database.
+Delete all nodes and relationships from the database.
 
 ```rust
 pub fn clear(&self) -> Result<()>
@@ -115,9 +115,9 @@ pub fn stats(&self) -> Result<DatabaseStats>
 | Field | Type | Description |
 |-------|------|-------------|
 | `node_count` | `usize` | Total number of nodes |
-| `edge_count` | `usize` | Total number of edges |
+| `edge_count` | `usize` | Total number of relationships |
 | `label_count` | `usize` | Number of distinct labels |
-| `edge_type_count` | `usize` | Number of distinct edge types |
+| `edge_type_count` | `usize` | Number of distinct relationship types |
 
 **Example:**
 
@@ -270,12 +270,12 @@ assert_eq!(ids1[0], ids2[0]); // Same node ID
 
 ### `Database::insert_edges_batch`
 
-Insert multiple edges in a single transaction.
+Insert multiple relationships in a single transaction.
 
 ```rust
 pub fn insert_edges_batch(
     &self,
-    edges: &[(i64, i64, String, serde_json::Value)],
+    relationships: &[(i64, i64, String, serde_json::Value)],
 ) -> Result<Vec<i64>>
 ```
 
@@ -283,9 +283,9 @@ pub fn insert_edges_batch(
 
 | Name | Type | Description |
 |------|------|-------------|
-| `edges` | `&[(i64, i64, String, Value)]` | Vector of (source_id, target_id, edge_type, properties) tuples |
+| `relationships` | `&[(i64, i64, String, Value)]` | Vector of (source_id, target_id, rel_type, properties) tuples |
 
-**Returns:** `Result<Vec<i64>>` - Vector of created edge IDs.
+**Returns:** `Result<Vec<i64>>` - Vector of created relationship IDs.
 
 **Example:**
 
@@ -380,7 +380,7 @@ pub fn build_property_index(&self, property: &str) -> Result<HashMap<String, i64
 
 **Returns:** `Result<HashMap<String, i64>>` - Map from property value to node ID.
 
-Useful for batch edge insertion when edges reference nodes by a property.
+Useful for batch relationship insertion when relationships reference nodes by a property.
 
 **Example:**
 
@@ -393,13 +393,13 @@ let alice_id = index.get("alice").copied();
 
 ### `Database::get_incoming_connections_by_object_id`
 
-Get all nodes and edges pointing to a node.
+Get all nodes and relationships pointing to a node.
 
 ```rust
 pub fn get_incoming_connections_by_object_id(
     &self,
     object_id: &str,
-) -> Result<(Vec<Node>, Vec<Edge>)>
+) -> Result<(Vec<Node>, Vec<Relationship>)>
 ```
 
 **Arguments:**
@@ -408,7 +408,7 @@ pub fn get_incoming_connections_by_object_id(
 |------|------|-------------|
 | `object_id` | `&str` | The target node's object_id |
 
-**Returns:** `Result<(Vec<Node>, Vec<Edge>)>` - Source nodes and their edges to the target.
+**Returns:** `Result<(Vec<Node>, Vec<Relationship>)>` - Source nodes and their relationships to the target.
 
 **Example:**
 
@@ -419,21 +419,21 @@ db.execute("
     CREATE (a)-[:KNOWS]->(b)
 ")?;
 
-let (nodes, edges) = db.get_incoming_connections_by_object_id("bob")?;
-// nodes contains Alice, edges contains the KNOWS edge
+let (nodes, relationships) = db.get_incoming_connections_by_object_id("bob")?;
+// nodes contains Alice, relationships contains the KNOWS relationship
 ```
 
 ---
 
 ### `Database::get_outgoing_connections_by_object_id`
 
-Get all nodes and edges originating from a node.
+Get all nodes and relationships originating from a node.
 
 ```rust
 pub fn get_outgoing_connections_by_object_id(
     &self,
     object_id: &str,
-) -> Result<(Vec<Node>, Vec<Edge>)>
+) -> Result<(Vec<Node>, Vec<Relationship>)>
 ```
 
 **Arguments:**
@@ -442,19 +442,19 @@ pub fn get_outgoing_connections_by_object_id(
 |------|------|-------------|
 | `object_id` | `&str` | The source node's object_id |
 
-**Returns:** `Result<(Vec<Node>, Vec<Edge>)>` - Target nodes and edges from the source.
+**Returns:** `Result<(Vec<Node>, Vec<Relationship>)>` - Target nodes and relationships from the source.
 
 **Example:**
 
 ```rust
-let (nodes, edges) = db.get_outgoing_connections_by_object_id("alice")?;
+let (nodes, relationships) = db.get_outgoing_connections_by_object_id("alice")?;
 ```
 
 ---
 
 ### `Database::get_node_edges_by_object_id`
 
-Get all edges connected to a node (both directions).
+Get all relationships connected to a node (both directions).
 
 ```rust
 pub fn get_node_edges_by_object_id(
@@ -469,14 +469,14 @@ pub fn get_node_edges_by_object_id(
 |------|------|-------------|
 | `object_id` | `&str` | The node's object_id |
 
-**Returns:** `Result<Vec<(String, String, String)>>` - Tuples of (source_object_id, target_object_id, edge_type).
+**Returns:** `Result<Vec<(String, String, String)>>` - Tuples of (source_object_id, target_object_id, rel_type).
 
 **Example:**
 
 ```rust
-let edges = db.get_node_edges_by_object_id("alice")?;
-for (src, tgt, edge_type) in edges {
-    println!("{} -[{}]-> {}", src, edge_type, tgt);
+let relationships = db.get_node_edges_by_object_id("alice")?;
+for (src, tgt, rel_type) in relationships {
+    println!("{} -[{}]-> {}", src, rel_type, tgt);
 }
 ```
 
@@ -511,25 +511,25 @@ if let Some(node) = db.get_node(42)? {
 
 ### `Database::get_edge`
 
-Get an edge by its ID.
+Get an relationship by its ID.
 
 ```rust
-pub fn get_edge(&self, edge_id: i64) -> Result<Option<Edge>>
+pub fn get_edge(&self, rel_id: i64) -> Result<Option<Relationship>>
 ```
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
-| `edge_id` | `i64` | The edge ID |
+| `rel_id` | `i64` | The relationship ID |
 
-**Returns:** `Result<Option<Edge>>` - The edge if found.
+**Returns:** `Result<Option<Relationship>>` - The relationship if found.
 
 **Example:**
 
 ```rust
-if let Some(edge) = db.get_edge(42)? {
-    println!("{} -[{}]-> {}", edge.source, edge.edge_type, edge.target);
+if let Some(relationship) = db.get_edge(42)? {
+    println!("{} -[{}]-> {}", relationship.source, relationship.rel_type, relationship.target);
 }
 ```
 
@@ -772,14 +772,14 @@ println!("Cached: {} entries, {} bytes", stats.entry_count, stats.total_size);
 
 ### `Database::edge_betweenness_centrality`
 
-Compute edge betweenness centrality for all edges.
+Compute relationship betweenness centrality for all relationships.
 
-Edge betweenness measures how many shortest paths pass through each edge. Edges with high betweenness are "choke points" - removing them would disrupt many paths.
+Relationship betweenness measures how many shortest paths pass through each relationship. Edges with high betweenness are "choke points" - removing them would disrupt many paths.
 
 ```rust
 pub fn edge_betweenness_centrality(
     &self,
-    edge_types: Option<&[&str]>,
+    rel_types: Option<&[&str]>,
     directed: bool,
 ) -> Result<EdgeBetweenness>
 ```
@@ -788,41 +788,41 @@ pub fn edge_betweenness_centrality(
 
 | Name | Type | Description |
 |------|------|-------------|
-| `edge_types` | `Option<&[&str]>` | Filter to specific edge types, or `None` for all |
-| `directed` | `bool` | Whether to treat edges as directed |
+| `rel_types` | `Option<&[&str]>` | Filter to specific relationship types, or `None` for all |
+| `directed` | `bool` | Whether to treat relationships as directed |
 
 **Returns:** `Result<EdgeBetweenness>` with fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `scores` | `HashMap<i64, f64>` | Edge ID to betweenness score |
+| `scores` | `HashMap<i64, f64>` | Relationship ID to betweenness score |
 | `nodes_processed` | `usize` | Number of nodes processed |
-| `edges_count` | `usize` | Number of edges analyzed |
+| `edges_count` | `usize` | Number of relationships analyzed |
 
-**Complexity:** O(V * E) where V = nodes, E = edges.
+**Complexity:** O(V * E) where V = nodes, E = relationships.
 
 Results are cached and automatically invalidated when data changes.
 
 **Example:**
 
 ```rust
-// Compute for all edges, directed
+// Compute for all relationships, directed
 let result = db.edge_betweenness_centrality(None, true)?;
 
 // Get top 5 choke points
-for (edge_id, score) in result.top_k(5) {
-    if let Some(edge) = db.get_edge(edge_id)? {
+for (rel_id, score) in result.top_k(5) {
+    if let Some(relationship) = db.get_edge(rel_id)? {
         println!("{} -> {} ({}): score = {:.2}",
-            edge.source, edge.target, edge.edge_type, score);
+            relationship.source, relationship.target, relationship.rel_type, score);
     }
 }
 
-// Filter by edge type
+// Filter by relationship type
 let result = db.edge_betweenness_centrality(Some(&["KNOWS", "WORKS_WITH"]), true)?;
 
-// Get edges above a threshold
-for (edge_id, score) in result.above_threshold(100.0) {
-    println!("High betweenness edge {}: {}", edge_id, score);
+// Get relationships above a threshold
+for (rel_id, score) in result.above_threshold(100.0) {
+    println!("High betweenness relationship {}: {}", rel_id, score);
 }
 ```
 

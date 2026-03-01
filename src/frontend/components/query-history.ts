@@ -284,7 +284,9 @@ async function runQuery(query: string, name: string): Promise<void> {
     // Show results
     if (result.graph && result.graph.nodes.length > 0) {
       loadGraphData(result.graph as unknown as RawADGraph);
-      showSuccess(`Query returned ${result.graph.nodes.length} nodes and ${result.graph.edges.length} edges`);
+      showSuccess(
+        `Query returned ${result.graph.nodes.length} nodes and ${result.graph.relationships.length} relationships`
+      );
     } else {
       showInfo(`Query returned ${result.resultCount} rows`);
     }

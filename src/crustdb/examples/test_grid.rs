@@ -12,7 +12,7 @@ fn main() {
         parts.push(format!("(n{}:Node {{id: {}}})", i, i));
     }
 
-    // Add edges
+    // Add relationships
     for row in 0..n {
         for col in 0..n {
             let id = row * n + col;
@@ -39,10 +39,10 @@ fn main() {
     let nodes = db.execute("MATCH (n:Node) RETURN n.id").unwrap();
     println!("Nodes: {} rows", nodes.rows.len());
 
-    let edges = db
+    let relationships = db
         .execute("MATCH (a)-[e:EDGE]->(b) RETURN a.id, b.id")
         .unwrap();
-    println!("Edges: {} rows", edges.rows.len());
+    println!("Edges: {} rows", relationships.rows.len());
 
     // Test 1: Simple adjacent path (should find path of length 1)
     println!("\n--- Test 1: Adjacent nodes (0 -> 1) ---");

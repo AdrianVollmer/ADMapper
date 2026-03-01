@@ -1,9 +1,9 @@
 /**
  * Collapsible Graph Functionality
  *
- * Provides functionality to collapse/expand nodes and edges in large graphs.
+ * Provides functionality to collapse/expand nodes and relationships in large graphs.
  * - Nodes with many children can be collapsed to show only the parent
- * - Multiple edges between same nodes are collapsed to show count
+ * - Multiple relationships between same nodes are collapsed to show count
  */
 
 import type { ADGraphType } from "./ADGraph";
@@ -17,7 +17,7 @@ const MIN_CHILDREN_TO_COLLAPSE = 5;
 /** State for collapsed nodes - maps node ID to its hidden children */
 const collapsedNodes = new Map<string, Set<string>>();
 
-/** State for collapsed edges - maps edge pair key to collapsed edge keys */
+/** State for collapsed relationships - maps relationship pair key to collapsed relationship keys */
 const collapsedEdges = new Map<string, string[]>();
 
 /** Check if a node is collapsed (has hidden children) */
@@ -41,7 +41,7 @@ export function isNodeHidden(_graph: ADGraphType, nodeId: string): boolean {
   return false;
 }
 
-/** Get direct children of a node (outgoing edges) */
+/** Get direct children of a node (outgoing relationships) */
 function getDirectChildren(graph: ADGraphType, nodeId: string): string[] {
   const children: string[] = [];
   graph.forEachOutNeighbor(nodeId, (neighbor) => {
@@ -132,30 +132,30 @@ export function getHiddenNodeIds(): Set<string> {
   return hidden;
 }
 
-/** Collapse edges between same node pair */
+/** Collapse relationships between same node pair */
 export function collapseParallelEdges(graph: ADGraphType, source: string, target: string): void {
   const pairKey = source < target ? `${source}|${target}` : `${target}|${source}`;
-  const edges: string[] = [];
+  const relationships: string[] = [];
 
-  graph.forEachEdge(source, target, (edge) => {
-    edges.push(edge);
+  graph.forEachEdge(source, target, (relationship) => {
+    relationships.push(relationship);
   });
-  graph.forEachEdge(target, source, (edge) => {
-    edges.push(edge);
+  graph.forEachEdge(target, source, (relationship) => {
+    relationships.push(relationship);
   });
 
-  if (edges.length > 1) {
-    collapsedEdges.set(pairKey, edges);
+  if (relationships.length > 1) {
+    collapsedEdges.set(pairKey, relationships);
   }
 }
 
-/** Expand collapsed edges */
+/** Expand collapsed relationships */
 export function expandParallelEdges(source: string, target: string): void {
   const pairKey = source < target ? `${source}|${target}` : `${target}|${source}`;
   collapsedEdges.delete(pairKey);
 }
 
-/** Toggle collapse state of parallel edges */
+/** Toggle collapse state of parallel relationships */
 export function toggleEdgeCollapse(graph: ADGraphType, source: string, target: string): boolean {
   const pairKey = source < target ? `${source}|${target}` : `${target}|${source}`;
   if (collapsedEdges.has(pairKey)) {
@@ -167,41 +167,41 @@ export function toggleEdgeCollapse(graph: ADGraphType, source: string, target: s
   }
 }
 
-/** Check if edges between a node pair are collapsed */
+/** Check if relationships between a node pair are collapsed */
 export function areEdgesCollapsed(source: string, target: string): boolean {
   const pairKey = source < target ? `${source}|${target}` : `${target}|${source}`;
   return collapsedEdges.has(pairKey);
 }
 
-/** Get collapsed edge info */
+/** Get collapsed relationship info */
 export function getCollapsedEdgeInfo(
   source: string,
   target: string
 ): { isCollapsed: boolean; edgeCount: number } | null {
   const pairKey = source < target ? `${source}|${target}` : `${target}|${source}`;
-  const edges = collapsedEdges.get(pairKey);
-  if (!edges) return null;
+  const relationships = collapsedEdges.get(pairKey);
+  if (!relationships) return null;
 
   return {
     isCollapsed: true,
-    edgeCount: edges.length,
+    edgeCount: relationships.length,
   };
 }
 
-/** Get the first visible edge for a collapsed edge group */
+/** Get the first visible relationship for a collapsed relationship group */
 export function getVisibleEdgeForCollapsedGroup(source: string, target: string): string | null {
   const pairKey = source < target ? `${source}|${target}` : `${target}|${source}`;
-  const edges = collapsedEdges.get(pairKey);
-  if (!edges || edges.length === 0) return null;
-  return edges[0] ?? null;
+  const relationships = collapsedEdges.get(pairKey);
+  if (!relationships || relationships.length === 0) return null;
+  return relationships[0] ?? null;
 }
 
-/** Check if an edge should be hidden (part of collapsed group but not the first) */
+/** Check if an relationship should be hidden (part of collapsed group but not the first) */
 export function isEdgeHidden(edgeKey: string, source: string, target: string): boolean {
   const pairKey = source < target ? `${source}|${target}` : `${target}|${source}`;
-  const edges = collapsedEdges.get(pairKey);
-  if (!edges) return false;
+  const relationships = collapsedEdges.get(pairKey);
+  if (!relationships) return false;
 
-  // Only the first edge is visible
-  return edges.indexOf(edgeKey) > 0;
+  // Only the first relationship is visible
+  return relationships.indexOf(edgeKey) > 0;
 }

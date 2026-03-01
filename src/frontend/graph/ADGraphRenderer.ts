@@ -58,7 +58,7 @@ export interface RendererOptions {
   enableHover?: boolean;
   /** Callback when a node is clicked */
   onNodeClick?: (nodeId: string, attrs: ADNodeAttributes) => void;
-  /** Callback when an edge is clicked */
+  /** Callback when an relationship is clicked */
   onEdgeClick?: (edgeId: string, attrs: ADEdgeAttributes, source: string, target: string) => void;
   /** Callback when the background is clicked */
   onBackgroundClick?: () => void;
@@ -123,7 +123,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   let currentTheme = theme;
   let draggedNode: string | null = null;
 
-  /** Compute all edges reachable via outgoing edges (transitive) */
+  /** Compute all relationships reachable via outgoing relationships (transitive) */
   function computeReachableEdges(startNode: string): Set<string> {
     const visitedNodes = new Set<string>();
     const reachableEdges = new Set<string>();
@@ -134,9 +134,9 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       if (visitedNodes.has(current)) continue;
       visitedNodes.add(current);
 
-      // Follow outgoing edges
-      graph.forEachOutEdge(current, (edge, _attrs, _source, target) => {
-        reachableEdges.add(edge);
+      // Follow outgoing relationships
+      graph.forEachOutEdge(current, (relationship, _attrs, _source, target) => {
+        reachableEdges.add(relationship);
         if (!visitedNodes.has(target)) {
           queue.push(target);
         }
@@ -274,7 +274,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   // Use the base program directly - texture filtering will be applied after first render
   const NodeImageProgram = BaseNodeImageProgram;
 
-  // Create curved edge program with smooth arrows
+  // Create curved relationship program with smooth arrows
   const CurvedArrowProgram = createEdgeCurveProgram({
     arrowHead: {
       extremity: "target",
@@ -302,7 +302,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     nodeProgramClasses: {
       image: NodeImageProgram,
     },
-    // Use tapered edges for better visual appearance (cone-shaped with antialiasing)
+    // Use tapered relationships for better visual appearance (cone-shaped with antialiasing)
     defaultEdgeType: "tapered",
     edgeProgramClasses: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -312,11 +312,11 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     // Better performance settings
     minCameraRatio: 0.01,
     maxCameraRatio: 10,
-    // Improved edge rendering
-    enableEdgeEvents: true, // Enable for edge click handling
+    // Improved relationship rendering
+    enableEdgeEvents: true, // Enable for relationship click handling
     // Smooth camera transitions
     stagePadding: 30,
-    // Node/edge size behavior: "screen" = fixed visual size, "positions" = scales with zoom
+    // Node/relationship size behavior: "screen" = fixed visual size, "positions" = scales with zoom
     itemSizesReference: getFixedNodeSizes() ? "screen" : "positions",
 
     // Node reducer: bring hovered/selected/path nodes to front, hide collapsed children
@@ -355,43 +355,43 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       return res;
     },
 
-    // Edge reducer: highlight path edges, transitive edges on hover, hide collapsed edges
-    edgeReducer: (edge, data) => {
+    // Relationship reducer: highlight path relationships, transitive relationships on hover, hide collapsed relationships
+    edgeReducer: (relationship, data) => {
       const res: Record<string, unknown> = { ...data };
 
       // Get source and target from graph
-      const edgeSource = graph.source(edge);
-      const edgeTarget = graph.target(edge);
+      const edgeSource = graph.source(relationship);
+      const edgeTarget = graph.target(relationship);
 
-      // Hide edges connected to hidden nodes
+      // Hide relationships connected to hidden nodes
       const hiddenNodes = getHiddenNodeIds();
       if (hiddenNodes.has(edgeSource) || hiddenNodes.has(edgeTarget)) {
         res.hidden = true;
         return res;
       }
 
-      // Hide edges that are part of collapsed groups (except the first)
-      if (isEdgeHidden(edge, edgeSource, edgeTarget)) {
+      // Hide relationships that are part of collapsed groups (except the first)
+      if (isEdgeHidden(relationship, edgeSource, edgeTarget)) {
         res.hidden = true;
         return res;
       }
 
-      // Check if this edge is the visible one in a collapsed group
+      // Check if this relationship is the visible one in a collapsed group
       const collapsedInfo = getCollapsedEdgeInfo(edgeSource, edgeTarget);
       if (collapsedInfo && collapsedInfo.edgeCount > 1) {
         // Show count in label
-        res.label = `${collapsedInfo.edgeCount} edges`;
+        res.label = `${collapsedInfo.edgeCount} relationships`;
         res.forceLabel = true;
       }
 
-      // Path edges get special highlight
-      if (highlightedPathEdges.has(edge)) {
+      // Path relationships get special highlight
+      if (highlightedPathEdges.has(relationship)) {
         res.color = "#22c55e"; // Green for path
         res.size = ((data.size as number | undefined) ?? 3) * 1.5;
         res.zIndex = 2;
-      } else if (hoveredNode && hoveredReachableEdges.has(edge)) {
-        // On hover: highlight edges reachable from hovered node
-        res.color = HIGHLIGHT_COLORS.edge;
+      } else if (hoveredNode && hoveredReachableEdges.has(relationship)) {
+        // On hover: highlight relationships reachable from hovered node
+        res.color = HIGHLIGHT_COLORS.relationship;
         res.size = ((data.size as number | undefined) ?? 3) * HIGHLIGHT_SIZE_MULTIPLIER;
         res.zIndex = 1;
       } else {
@@ -490,7 +490,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   if (enableHover) {
     sigma.on("enterNode", (event) => {
       hoveredNode = event.node;
-      // Compute transitive outgoing edges
+      // Compute transitive outgoing relationships
       hoveredReachableEdges = computeReachableEdges(event.node);
       sigma.refresh();
       if (onNodeHover) {
@@ -667,18 +667,18 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
         highlightedPath.add(nodeId);
       }
 
-      // Find and highlight edges between consecutive path nodes
-      // Check both directions since the path might traverse edges in reverse
+      // Find and highlight relationships between consecutive path nodes
+      // Check both directions since the path might traverse relationships in reverse
       for (let i = 0; i < path.length - 1; i++) {
         const source = path[i];
         const target = path[i + 1];
         // Try source -> target
-        graph.forEachEdge(source, target, (edge) => {
-          highlightedPathEdges.add(edge);
+        graph.forEachEdge(source, target, (relationship) => {
+          highlightedPathEdges.add(relationship);
         });
-        // Also try target -> source (in case edge is reversed)
-        graph.forEachEdge(target, source, (edge) => {
-          highlightedPathEdges.add(edge);
+        // Also try target -> source (in case relationship is reversed)
+        graph.forEachEdge(target, source, (relationship) => {
+          highlightedPathEdges.add(relationship);
         });
       }
 

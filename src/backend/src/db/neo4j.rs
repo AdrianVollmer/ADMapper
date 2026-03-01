@@ -124,7 +124,7 @@ impl Neo4jDatabase {
 
     /// Convert a Neo4j relation to DbEdge.
     fn neo4j_relation_to_db_edge(rel: &Relation, source_id: &str, target_id: &str) -> DbEdge {
-        let edge_type = rel.typ().to_string();
+        let rel_type = rel.typ().to_string();
 
         // Convert properties to JSON
         let mut properties = Map::new();
@@ -141,7 +141,7 @@ impl Neo4jDatabase {
         DbEdge {
             source: source_id.to_string(),
             target: target_id.to_string(),
-            edge_type,
+            rel_type,
             properties: JsonValue::Object(properties),
             ..Default::default()
         }
@@ -303,8 +303,8 @@ impl DatabaseBackend for Neo4jDatabase {
         Ok(())
     }
 
-    fn insert_edge(&self, edge: DbEdge) -> Result<()> {
-        self.insert_edges(&[edge])?;
+    fn insert_edge(&self, relationship: DbEdge) -> Result<()> {
+        self.insert_edges(&[relationship])?;
         Ok(())
     }
 
@@ -350,25 +350,25 @@ impl DatabaseBackend for Neo4jDatabase {
         Ok(nodes.len())
     }
 
-    fn insert_edges(&self, edges: &[DbEdge]) -> Result<usize> {
-        if edges.is_empty() {
+    fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        if relationships.is_empty() {
             return Ok(0);
         }
 
-        // Group edges by type for efficient batching
+        // Group relationships by type for efficient batching
         let mut edges_by_type: HashMap<String, Vec<&DbEdge>> = HashMap::new();
-        for edge in edges {
+        for relationship in relationships {
             edges_by_type
-                .entry(edge.edge_type.clone())
+                .entry(relationship.rel_type.clone())
                 .or_default()
-                .push(edge);
+                .push(relationship);
         }
 
-        // Batch insert edges of each type using UNWIND
+        // Batch insert relationships of each type using UNWIND
         // Use MERGE for nodes to create placeholders if they don't exist
         const BATCH_SIZE: usize = 500;
         let mut inserted = 0;
-        for (edge_type, type_edges) in edges_by_type {
+        for (rel_type, type_edges) in edges_by_type {
             for chunk in type_edges.chunks(BATCH_SIZE) {
                 let srcs: Vec<String> = chunk.iter().map(|e| e.source.clone()).collect();
                 let tgts: Vec<String> = chunk.iter().map(|e| e.target.clone()).collect();
@@ -385,7 +385,7 @@ impl DatabaseBackend for Neo4jDatabase {
                     .map(|e| serde_json::to_string(&e.properties).unwrap_or_default())
                     .collect();
 
-                // MERGE nodes (creates placeholders if not exist), then create edge
+                // MERGE nodes (creates placeholders if not exist), then create relationship
                 // Note: We match on objectid only (not label) so placeholder nodes merge
                 // correctly with real nodes inserted later
                 let q = query(&format!(
@@ -397,7 +397,7 @@ impl DatabaseBackend for Neo4jDatabase {
                      MERGE (a)-[r:{}]->(b) \
                      SET r.properties = $props[i] \
                      RETURN count(r) AS created",
-                    edge_type
+                    rel_type
                 ))
                 .param("srcs", srcs)
                 .param("tgts", tgts)
@@ -414,7 +414,7 @@ impl DatabaseBackend for Neo4jDatabase {
                         inserted += created;
                     }
                     Err(e) => {
-                        debug!("Failed to create {} edges batch: {}", edge_type, e);
+                        debug!("Failed to create {} relationships batch: {}", rel_type, e);
                     }
                 }
             }
@@ -577,7 +577,7 @@ impl DatabaseBackend for Neo4jDatabase {
             "MATCH (a)-[r]->(b) RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel"
         ))?;
 
-        let edges: Vec<DbEdge> = rows
+        let relationships: Vec<DbEdge> = rows
             .iter()
             .filter_map(|r| {
                 let src = r.get::<String>("src").ok()?;
@@ -587,7 +587,7 @@ impl DatabaseBackend for Neo4jDatabase {
             })
             .collect();
 
-        Ok(edges)
+        Ok(relationships)
     }
 
     fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>> {
@@ -620,7 +620,7 @@ impl DatabaseBackend for Neo4jDatabase {
         .param("ids", node_ids.to_vec());
 
         let rows = self.execute_query(q)?;
-        let edges: Vec<DbEdge> = rows
+        let relationships: Vec<DbEdge> = rows
             .iter()
             .filter_map(|r| {
                 let src = r.get::<String>("src").ok()?;
@@ -630,7 +630,7 @@ impl DatabaseBackend for Neo4jDatabase {
             })
             .collect();
 
-        Ok(edges)
+        Ok(relationships)
     }
 
     fn get_edge_types(&self) -> Result<Vec<String>> {
@@ -738,7 +738,7 @@ impl DatabaseBackend for Neo4jDatabase {
         let mut node_ids: HashSet<String> = HashSet::new();
         node_ids.insert(node_id.to_string());
 
-        let mut edges = Vec::new();
+        let mut relationships = Vec::new();
         for row in &rows {
             if let (Ok(a), Ok(r), Ok(b)) = (
                 row.get::<Neo4jNode>("a"),
@@ -749,19 +749,19 @@ impl DatabaseBackend for Neo4jDatabase {
                 let tgt = Self::neo4j_node_to_db_node(&b);
                 node_ids.insert(src.id.clone());
                 node_ids.insert(tgt.id.clone());
-                edges.push(Self::neo4j_relation_to_db_edge(&r, &src.id, &tgt.id));
+                relationships.push(Self::neo4j_relation_to_db_edge(&r, &src.id, &tgt.id));
             }
         }
 
         let node_id_vec: Vec<String> = node_ids.into_iter().collect();
         let nodes = self.get_nodes_by_ids(&node_id_vec)?;
 
-        Ok((nodes, edges))
+        Ok((nodes, relationships))
     }
 
     fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
         // Use a single query with multiple counts for efficiency
-        // Count unique NODES, not edges (e.g., 3 edges from same node = 1 incoming)
+        // Count unique NODES, not relationships (e.g., 3 relationships from same node = 1 incoming)
         let q = query(
             "MATCH (n {objectid: $id})
              OPTIONAL MATCH (n)<-[]-(in_node)
@@ -838,14 +838,14 @@ impl DatabaseBackend for Neo4jDatabase {
             ) {
                 let mut path = Vec::new();
                 for (i, node_id) in node_ids.iter().enumerate() {
-                    let edge_type = if i < rel_types.len() {
+                    let rel_type = if i < rel_types.len() {
                         Some(rel_types[i].clone())
                     } else {
                         None
                     };
-                    path.push((node_id.clone(), edge_type));
+                    path.push((node_id.clone(), rel_type));
                 }
-                // Last node has no outgoing edge
+                // Last node has no outgoing relationship
                 if let Some(last) = path.last_mut() {
                     last.1 = None;
                 }

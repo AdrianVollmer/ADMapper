@@ -47,11 +47,11 @@ ADMapper visualizes the following Active Directory objects:
 | CertTemplate | Certificate templates |
 | EnterpriseCA | Enterprise Certificate Authorities |
 
-## Edge Types
+## Relationship Types
 
 Relationships between objects include:
 
-| Category | Edge Types |
+| Category | Relationship Types |
 |----------|------------|
 | Membership | MemberOf, Contains, LocalGroupMember |
 | Sessions | HasSession, CanRDP, CanPSRemote |

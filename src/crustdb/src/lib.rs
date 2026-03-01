@@ -33,7 +33,7 @@ mod query;
 mod storage;
 
 pub use error::{Error, Result};
-pub use graph::{Edge, Node, PropertyValue};
+pub use graph::{Node, PropertyValue, Relationship};
 pub use query::executor::algorithms::EdgeBetweenness;
 pub use query::{QueryResult, QueryStats, ResultValue, Row};
 
@@ -326,7 +326,7 @@ impl Database {
     ///   replaced entirely.
     /// - Labels are also merged (added if not present).
     ///
-    /// This enables streaming edge import: when an edge references a node that doesn't
+    /// This enables streaming relationship import: when an relationship references a node that doesn't
     /// exist yet, an orphan node can be created with just the object_id. When the full
     /// node data arrives later, upsert_nodes_batch merges in the complete properties.
     pub fn upsert_nodes_batch(
@@ -346,7 +346,7 @@ impl Database {
     /// If it doesn't exist, creates an orphan node with just the object_id
     /// and the specified label, ready to be upserted later with full properties.
     ///
-    /// This is useful for streaming edge import where edges may reference
+    /// This is useful for streaming relationship import where relationships may reference
     /// nodes that haven't been imported yet.
     pub fn get_or_create_node_by_object_id(&self, object_id: &str, label: &str) -> Result<i64> {
         let storage = self
@@ -356,21 +356,21 @@ impl Database {
         storage.get_or_create_node_by_object_id(object_id, label)
     }
 
-    /// Insert multiple edges in a single transaction.
+    /// Insert multiple relationships in a single transaction.
     ///
-    /// Each edge is specified as (source_node_id, target_node_id, edge_type, properties).
-    /// Returns a vector of the created edge IDs in the same order as the input.
+    /// Each relationship is specified as (source_node_id, target_node_id, rel_type, properties).
+    /// Returns a vector of the created relationship IDs in the same order as the input.
     ///
     /// Use `find_node_by_property` or `build_property_index` to look up node IDs first.
     pub fn insert_edges_batch(
         &self,
-        edges: &[(i64, i64, String, serde_json::Value)],
+        relationships: &[(i64, i64, String, serde_json::Value)],
     ) -> Result<Vec<i64>> {
         let mut storage = self
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.insert_edges_batch(edges)
+        storage.insert_edges_batch(relationships)
     }
 
     /// Find a node ID by a property value.
@@ -386,7 +386,7 @@ impl Database {
 
     /// Build an index of property values to node IDs for efficient batch lookups.
     ///
-    /// This is useful when inserting edges that reference nodes by a property value
+    /// This is useful when inserting relationships that reference nodes by a property value
     /// (like object_id) rather than by database ID.
     pub fn build_property_index(
         &self,
@@ -399,10 +399,10 @@ impl Database {
         storage.build_property_index(property)
     }
 
-    /// Get all edges for a node by object_id (both incoming and outgoing).
+    /// Get all relationships for a node by object_id (both incoming and outgoing).
     ///
-    /// Returns (source_object_id, target_object_id, edge_type) tuples.
-    /// This is more efficient than using Cypher queries for edge retrieval.
+    /// Returns (source_object_id, target_object_id, rel_type) tuples.
+    /// This is more efficient than using Cypher queries for relationship retrieval.
     pub fn get_node_edges_by_object_id(
         &self,
         object_id: &str,
@@ -416,32 +416,32 @@ impl Database {
 
     /// Get incoming connections to a node by object_id.
     ///
-    /// Returns all nodes that have edges pointing TO the specified node,
-    /// along with those edges. Uses direct SQL with the object_id index
+    /// Returns all nodes that have relationships pointing TO the specified node,
+    /// along with those relationships. Uses direct SQL with the object_id index
     /// for optimal performance O(degree) instead of O(N) for full scans.
     ///
-    /// Returns `(Vec<Node>, Vec<Edge>)` where nodes include both the target node
-    /// and all source nodes of incoming edges.
+    /// Returns `(Vec<Node>, Vec<Relationship>)` where nodes include both the target node
+    /// and all source nodes of incoming relationships.
     pub fn get_incoming_connections_by_object_id(
         &self,
         object_id: &str,
-    ) -> Result<(Vec<Node>, Vec<Edge>)> {
+    ) -> Result<(Vec<Node>, Vec<Relationship>)> {
         let storage = self.get_read_storage();
         storage.get_incoming_connections_by_object_id(object_id)
     }
 
     /// Get outgoing connections from a node by object_id.
     ///
-    /// Returns all nodes that the specified node has edges pointing TO,
-    /// along with those edges. Uses direct SQL with the object_id index
+    /// Returns all nodes that the specified node has relationships pointing TO,
+    /// along with those relationships. Uses direct SQL with the object_id index
     /// for optimal performance O(degree) instead of O(N) for full scans.
     ///
-    /// Returns `(Vec<Node>, Vec<Edge>)` where nodes include both the source node
-    /// and all target nodes of outgoing edges.
+    /// Returns `(Vec<Node>, Vec<Relationship>)` where nodes include both the source node
+    /// and all target nodes of outgoing relationships.
     pub fn get_outgoing_connections_by_object_id(
         &self,
         object_id: &str,
-    ) -> Result<(Vec<Node>, Vec<Edge>)> {
+    ) -> Result<(Vec<Node>, Vec<Relationship>)> {
         let storage = self.get_read_storage();
         storage.get_outgoing_connections_by_object_id(object_id)
     }
@@ -523,10 +523,10 @@ impl Database {
     // Graph Algorithms
     // ========================================================================
 
-    /// Compute edge betweenness centrality for the graph.
+    /// Compute relationship betweenness centrality for the graph.
     ///
-    /// Edge betweenness centrality measures how many shortest paths pass through
-    /// each edge. Edges with high betweenness are "choke points" - removing them
+    /// Relationship betweenness centrality measures how many shortest paths pass through
+    /// each relationship. Edges with high betweenness are "choke points" - removing them
     /// would disrupt many paths through the graph.
     ///
     /// This is useful for Active Directory security analysis to identify:
@@ -538,23 +538,23 @@ impl Database {
     ///
     /// # Arguments
     ///
-    /// * `edge_types` - Optional filter to only consider specific edge types
+    /// * `rel_types` - Optional filter to only consider specific relationship types
     ///   (e.g., `Some(&["MemberOf", "GenericAll"])`)
-    /// * `directed` - Whether to treat edges as directed (true) or undirected (false).
+    /// * `directed` - Whether to treat relationships as directed (true) or undirected (false).
     ///   For AD graphs, directed is usually appropriate since permissions are directional.
     ///
     /// # Returns
     ///
     /// An `EdgeBetweenness` struct containing:
-    /// - `scores`: HashMap of edge ID to betweenness score
+    /// - `scores`: HashMap of relationship ID to betweenness score
     /// - `nodes_processed`: Number of nodes in the graph
-    /// - `edges_count`: Number of edges analyzed
+    /// - `edges_count`: Number of relationships analyzed
     ///
-    /// Use `result.top_k(10)` to get the top 10 edges by betweenness.
+    /// Use `result.top_k(10)` to get the top 10 relationships by betweenness.
     ///
     /// # Complexity
     ///
-    /// O(V * E) where V is the number of nodes and E is the number of edges.
+    /// O(V * E) where V is the number of nodes and E is the number of relationships.
     /// For large graphs, this may take significant time.
     ///
     /// # Example
@@ -564,13 +564,13 @@ impl Database {
     /// let result = db.edge_betweenness_centrality(None, true)?;
     ///
     /// // Get top 10 choke points
-    /// for (edge_id, score) in result.top_k(10) {
-    ///     println!("Edge {} has betweenness {}", edge_id, score);
+    /// for (rel_id, score) in result.top_k(10) {
+    ///     println!("Relationship {} has betweenness {}", rel_id, score);
     /// }
     /// ```
     pub fn edge_betweenness_centrality(
         &self,
-        edge_types: Option<&[&str]>,
+        rel_types: Option<&[&str]>,
         directed: bool,
     ) -> Result<EdgeBetweenness> {
         let read_storage = self.get_read_storage();
@@ -579,7 +579,7 @@ impl Database {
         let cache_key = format!(
             "algo:edge_betweenness:directed={}:types={}",
             directed,
-            edge_types
+            rel_types
                 .map(|t| t.join(","))
                 .unwrap_or_else(|| "all".to_string())
         );
@@ -595,7 +595,7 @@ impl Database {
         // Compute (expensive)
         let result = query::executor::algorithms::edge_betweenness_centrality(
             &read_storage,
-            edge_types,
+            rel_types,
             directed,
         )?;
 
@@ -616,12 +616,12 @@ impl Database {
         storage.get_node(node_id)
     }
 
-    /// Get an edge by its ID.
+    /// Get an relationship by its ID.
     ///
-    /// Useful for resolving edge IDs returned by algorithms like edge betweenness.
-    pub fn get_edge(&self, edge_id: i64) -> Result<Option<Edge>> {
+    /// Useful for resolving relationship IDs returned by algorithms like relationship betweenness.
+    pub fn get_edge(&self, rel_id: i64) -> Result<Option<Relationship>> {
         let storage = self.get_read_storage();
-        storage.get_edge(edge_id)
+        storage.get_edge(rel_id)
     }
 }
 
@@ -683,11 +683,11 @@ pub struct NewQueryHistoryEntry<'a> {
 pub struct DatabaseStats {
     /// Total number of nodes.
     pub node_count: usize,
-    /// Total number of edges.
+    /// Total number of relationships.
     pub edge_count: usize,
     /// Number of distinct node labels.
     pub label_count: usize,
-    /// Number of distinct edge types.
+    /// Number of distinct relationship types.
     pub edge_type_count: usize,
 }
 
@@ -816,8 +816,8 @@ mod tests {
         let node_ids = db.insert_nodes_batch(&nodes).unwrap();
         assert_eq!(node_ids.len(), 3);
 
-        // Create edges using node IDs
-        let edges = vec![
+        // Create relationships using node IDs
+        let relationships = vec![
             (
                 node_ids[0],
                 node_ids[1],
@@ -832,7 +832,7 @@ mod tests {
             ),
         ];
 
-        let edge_ids = db.insert_edges_batch(&edges).unwrap();
+        let edge_ids = db.insert_edges_batch(&relationships).unwrap();
         assert_eq!(edge_ids.len(), 2);
 
         let stats = db.stats().unwrap();
@@ -936,7 +936,7 @@ mod tests {
     fn test_upsert_nodes_batch() {
         let db = Database::in_memory().unwrap();
 
-        // Create a placeholder node (like an orphan from edge import)
+        // Create a placeholder node (like an orphan from relationship import)
         let placeholder = vec![(
             vec!["Base".to_string()],
             serde_json::json!({
@@ -1045,14 +1045,14 @@ mod tests {
         db.execute("CREATE (c:Person)-[:WORKS_AT]->(d:Company)")
             .unwrap();
 
-        // Count all edges
+        // Count all relationships
         let result = db.execute("MATCH ()-[r]->() RETURN count(r)").unwrap();
         assert_eq!(result.rows.len(), 1);
 
         let count_val = result.rows[0].values.values().next().unwrap();
         match count_val {
             ResultValue::Property(PropertyValue::Integer(n)) => {
-                assert_eq!(*n, 2, "Should count 2 edges");
+                assert_eq!(*n, 2, "Should count 2 relationships");
             }
             other => panic!("Expected integer, got {:?}", other),
         }

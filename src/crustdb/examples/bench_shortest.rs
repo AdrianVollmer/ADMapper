@@ -65,7 +65,7 @@ fn bench_linear_chain(n: usize) -> (f64, f64) {
     // Setup: create chain using a single CREATE statement
     let setup_start = Instant::now();
 
-    // Build CREATE statement with all nodes and edges
+    // Build CREATE statement with all nodes and relationships
     // Format: CREATE (n0:Node {id: 0}), (n1:Node {id: 1}), ..., (n0)-[:NEXT]->(n1), ...
     let mut parts = Vec::new();
 
@@ -74,7 +74,7 @@ fn bench_linear_chain(n: usize) -> (f64, f64) {
         parts.push(format!("(n{}:Node {{id: {}}})", i, i));
     }
 
-    // Add edge definitions
+    // Add relationship definitions
     for i in 0..n - 1 {
         parts.push(format!("(n{})-[:NEXT]->(n{})", i, i + 1));
     }
@@ -102,13 +102,13 @@ fn bench_linear_chain(n: usize) -> (f64, f64) {
 }
 
 /// Benchmark a grid graph with some shortcuts.
-/// Creates n*n nodes in a grid with edges to adjacent cells and some diagonals.
+/// Creates n*n nodes in a grid with relationships to adjacent cells and some diagonals.
 fn bench_grid(n: usize) -> (f64, f64) {
     let db = Database::in_memory().expect("Failed to create database");
 
     let setup_start = Instant::now();
 
-    // Build CREATE statement with all nodes and edges
+    // Build CREATE statement with all nodes and relationships
     let mut parts = Vec::new();
 
     // Add all node definitions
@@ -116,18 +116,18 @@ fn bench_grid(n: usize) -> (f64, f64) {
         parts.push(format!("(n{}:Node {{id: {}}})", i, i));
     }
 
-    // Add edge definitions (right, down, and diagonal shortcuts)
+    // Add relationship definitions (right, down, and diagonal shortcuts)
     for row in 0..n {
         for col in 0..n {
             let id = row * n + col;
 
-            // Right edge
+            // Right relationship
             if col + 1 < n {
                 let right_id = row * n + (col + 1);
                 parts.push(format!("(n{})-[:EDGE]->(n{})", id, right_id));
             }
 
-            // Down edge
+            // Down relationship
             if row + 1 < n {
                 let down_id = (row + 1) * n + col;
                 parts.push(format!("(n{})-[:EDGE]->(n{})", id, down_id));
@@ -171,7 +171,7 @@ fn bench_binary_tree(depth: usize) -> (f64, f64) {
 
     let setup_start = Instant::now();
 
-    // Build CREATE statement with all nodes and edges
+    // Build CREATE statement with all nodes and relationships
     let mut parts = Vec::new();
 
     // Add all node definitions
@@ -179,7 +179,7 @@ fn bench_binary_tree(depth: usize) -> (f64, f64) {
         parts.push(format!("(n{}:Node {{id: {}}})", i, i));
     }
 
-    // Add edge definitions (parent to children)
+    // Add relationship definitions (parent to children)
     for i in 0..num_nodes {
         let left_child = 2 * i + 1;
         let right_child = 2 * i + 2;

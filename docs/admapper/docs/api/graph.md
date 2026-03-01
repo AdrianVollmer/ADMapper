@@ -45,7 +45,7 @@ Get detailed statistics including counts by label.
 
 ## POST /api/graph/clear
 
-Clear all nodes and edges from the graph.
+Clear all nodes and relationships from the graph.
 
 **Response:**
 
@@ -103,7 +103,7 @@ Get relationship counts for a node.
 
 ## GET /api/graph/node/:id/connections/:direction
 
-Get connected nodes and edges.
+Get connected nodes and relationships.
 
 **Parameters:**
 
@@ -132,7 +132,7 @@ Get connected nodes and edges.
       }
     }
   ],
-  "edges": [
+  "relationships": [
     {
       "id": 100,
       "type": "MemberOf",
@@ -194,7 +194,7 @@ Find shortest path between two nodes.
       {"id": 43, "labels": ["Group"], "properties": {...}},
       {"id": 44, "labels": ["Group"], "properties": {...}}
     ],
-    "edges": [
+    "relationships": [
       {"id": 100, "type": "MemberOf", "source": 42, "target": 43},
       {"id": 101, "type": "MemberOf", "source": 43, "target": 44}
     ]
@@ -236,7 +236,7 @@ Get security insights.
 
 ## GET /api/graph/choke-points
 
-Get edges with high betweenness centrality.
+Get relationships with high betweenness centrality.
 
 **Query Parameters:**
 
@@ -250,7 +250,7 @@ Get edges with high betweenness centrality.
 {
   "choke_points": [
     {
-      "edge": {
+      "relationship": {
         "id": 150,
         "type": "AdminTo",
         "source": 42,
@@ -264,4 +264,4 @@ Get edges with high betweenness centrality.
 }
 ```
 
-Higher centrality values indicate edges that many shortest paths pass through.
+Higher centrality values indicate relationships that many shortest paths pass through.

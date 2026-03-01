@@ -20,12 +20,12 @@ pub struct DbNode {
     pub properties: JsonValue,
 }
 
-/// An edge stored in the database.
+/// An relationship stored in the database.
 #[derive(Clone, Debug, Default)]
 pub struct DbEdge {
     pub source: String,
     pub target: String,
-    pub edge_type: String,
+    pub rel_type: String,
     pub properties: JsonValue,
     /// Optional type hint for source node (for creating placeholders)
     pub source_type: Option<String>,
@@ -139,7 +139,7 @@ impl SecurityInsights {
     }
 }
 
-/// A single choke point edge identified by betweenness centrality.
+/// A single choke point relationship identified by betweenness centrality.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ChokePoint {
     /// Source node object ID
@@ -154,8 +154,8 @@ pub struct ChokePoint {
     pub target_name: String,
     /// Target node label/type
     pub target_label: String,
-    /// Edge type (e.g., "MemberOf", "GenericAll")
-    pub edge_type: String,
+    /// Relationship type (e.g., "MemberOf", "GenericAll")
+    pub rel_type: String,
     /// Betweenness centrality score (higher = more paths pass through)
     pub betweenness: f64,
 }
@@ -163,9 +163,9 @@ pub struct ChokePoint {
 /// Response containing choke point analysis results.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ChokePointsResponse {
-    /// Top choke point edges, sorted by betweenness (highest first)
+    /// Top choke point relationships, sorted by betweenness (highest first)
     pub choke_points: Vec<ChokePoint>,
-    /// Total number of edges analyzed
+    /// Total number of relationships analyzed
     pub total_edges: usize,
     /// Total number of nodes in the graph
     pub total_nodes: usize,

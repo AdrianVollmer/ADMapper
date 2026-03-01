@@ -150,7 +150,7 @@ fn create_relationship(
     storage: &SqliteStorage,
     stats: &mut QueryStats,
 ) -> Result<i64> {
-    let edge_type = pattern
+    let rel_type = pattern
         .types
         .first()
         .ok_or_else(|| Error::Cypher("Relationship must have a type".into()))?;
@@ -166,7 +166,7 @@ fn create_relationship(
         Direction::Both => (source_id, target_id),
     };
 
-    let edge_id = storage.insert_edge(actual_source, actual_target, edge_type, &properties)?;
+    let rel_id = storage.insert_edge(actual_source, actual_target, rel_type, &properties)?;
 
     stats.relationships_created += 1;
 
@@ -174,7 +174,7 @@ fn create_relationship(
         stats.properties_set += map.len();
     }
 
-    Ok(edge_id)
+    Ok(rel_id)
 }
 
 /// Convert an AST Expression to a JSON value.

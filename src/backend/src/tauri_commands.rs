@@ -103,7 +103,7 @@ pub fn graph_nodes(state: State<'_, AppState>) -> Result<Vec<DbNode>, String> {
     core::graph_nodes(db.as_ref())
 }
 
-/// Get all edges.
+/// Get all relationships.
 #[tauri::command]
 pub fn graph_edges(state: State<'_, AppState>) -> Result<Vec<GraphEdge>, String> {
     let db = state.db().ok_or("Not connected to database")?;
@@ -223,7 +223,7 @@ pub fn graph_insights(state: State<'_, AppState>) -> Result<crate::db::SecurityI
     core::graph_insights(db.as_ref())
 }
 
-/// Get edge types.
+/// Get relationship types.
 #[tauri::command]
 pub fn graph_edge_types(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let db = state.db().ok_or("Not connected to database")?;
@@ -238,7 +238,7 @@ pub fn graph_node_types(state: State<'_, AppState>) -> Result<Vec<String>, Strin
 }
 
 // ============================================================================
-// Node/Edge Mutation Commands
+// Node/Relationship Mutation Commands
 // ============================================================================
 
 /// Add a node.
@@ -261,22 +261,22 @@ pub fn add_node(
     )
 }
 
-/// Add an edge.
+/// Add an relationship.
 #[tauri::command]
 pub fn add_edge(
     state: State<'_, AppState>,
     source: String,
     target: String,
-    edge_type: String,
+    rel_type: String,
     properties: Option<JsonValue>,
 ) -> Result<GraphEdge, String> {
     let db = state.db().ok_or("Not connected to database")?;
-    info!(source = %source, target = %target, edge_type = %edge_type, "Adding edge (IPC)");
+    info!(source = %source, target = %target, rel_type = %rel_type, "Adding relationship (IPC)");
     core::add_edge(
         db.as_ref(),
         source,
         target,
-        edge_type,
+        rel_type,
         properties.unwrap_or(JsonValue::Null),
     )
 }

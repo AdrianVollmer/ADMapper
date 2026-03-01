@@ -59,7 +59,7 @@ describe("isGraphNode", () => {
 // ============================================================================
 
 describe("isGraphEdge", () => {
-  it("returns true for valid edge", () => {
+  it("returns true for valid relationship", () => {
     expect(isGraphEdge({ source: "a", target: "b", type: "MemberOf" })).toBe(true);
   });
 
@@ -77,26 +77,26 @@ describe("isGraphData", () => {
     expect(
       isGraphData({
         nodes: [{ id: "1", name: "A", type: "User" }],
-        edges: [{ source: "1", target: "2", type: "MemberOf" }],
+        relationships: [{ source: "1", target: "2", type: "MemberOf" }],
       })
     ).toBe(true);
   });
 
   it("returns true for empty graph", () => {
-    expect(isGraphData({ nodes: [], edges: [] })).toBe(true);
+    expect(isGraphData({ nodes: [], relationships: [] })).toBe(true);
   });
 
   it("returns false for invalid node in array", () => {
     expect(
       isGraphData({
         nodes: [{ id: "1" }], // Missing label and type
-        edges: [],
+        relationships: [],
       })
     ).toBe(false);
   });
 
   it("returns false for missing nodes", () => {
-    expect(isGraphData({ edges: [] })).toBe(false);
+    expect(isGraphData({ relationships: [] })).toBe(false);
   });
 });
 
@@ -146,12 +146,12 @@ describe("isPathStep", () => {
     expect(
       isPathStep({
         node: { id: "1", name: "A", type: "User" },
-        edge_type: "MemberOf",
+        rel_type: "MemberOf",
       })
     ).toBe(true);
   });
 
-  it("returns true for step without edge_type", () => {
+  it("returns true for step without rel_type", () => {
     expect(
       isPathStep({
         node: { id: "1", name: "A", type: "User" },
@@ -160,7 +160,7 @@ describe("isPathStep", () => {
   });
 
   it("returns false for missing node", () => {
-    expect(isPathStep({ edge_type: "MemberOf" })).toBe(false);
+    expect(isPathStep({ rel_type: "MemberOf" })).toBe(false);
   });
 });
 
@@ -174,10 +174,10 @@ describe("isPathResponse", () => {
       isPathResponse({
         found: true,
         path: [
-          { node: { id: "a", name: "A", type: "User" }, edge_type: "MemberOf" },
+          { node: { id: "a", name: "A", type: "User" }, rel_type: "MemberOf" },
           { node: { id: "b", name: "B", type: "Group" } },
         ],
-        graph: { nodes: [], edges: [] },
+        graph: { nodes: [], relationships: [] },
       })
     ).toBe(true);
   });
@@ -187,7 +187,7 @@ describe("isPathResponse", () => {
       isPathResponse({
         found: false,
         path: [],
-        graph: { nodes: [], edges: [] },
+        graph: { nodes: [], relationships: [] },
       })
     ).toBe(true);
   });
@@ -196,7 +196,7 @@ describe("isPathResponse", () => {
     expect(
       isPathResponse({
         path: [],
-        graph: { nodes: [], edges: [] },
+        graph: { nodes: [], relationships: [] },
       })
     ).toBe(false);
   });
@@ -206,7 +206,7 @@ describe("isPathResponse", () => {
       isPathResponse({
         found: "yes",
         path: [],
-        graph: { nodes: [], edges: [] },
+        graph: { nodes: [], relationships: [] },
       })
     ).toBe(false);
   });
@@ -232,7 +232,7 @@ describe("isQueryResponse", () => {
     expect(
       isQueryResponse({
         results: { headers: [], rows: [] },
-        graph: { nodes: [], edges: [] },
+        graph: { nodes: [], relationships: [] },
       })
     ).toBe(true);
   });

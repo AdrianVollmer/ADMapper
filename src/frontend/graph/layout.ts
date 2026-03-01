@@ -3,7 +3,7 @@
  *
  * Supports:
  * - ForceAtlas2: Force-directed layout, good for exploring relationships
- * - Hierarchical: Left-to-right layered layout, edges flow from sources to targets
+ * - Hierarchical: Left-to-right layered layout, relationships flow from sources to targets
  * - Grid: Simple grid arrangement
  * - Circular: Concentric circles based on node depth, sinks at center
  */
@@ -78,7 +78,7 @@ export interface ForceAtlas2Settings {
   barnesHutTheta?: number;
   /** Adjust speed based on graph size */
   adjustSizes?: boolean;
-  /** Edge weight influence */
+  /** Relationship weight influence */
   edgeWeightInfluence?: number;
   /** LinLog mode (better for clusters) */
   linLogMode?: boolean;
@@ -224,15 +224,15 @@ function applyForceLayout(graph: ADGraphType, options: LayoutOptions): void {
  * Apply hierarchical layout using dagre.
  *
  * Dagre is a JavaScript library for laying out directed graphs.
- * It handles layer assignment, edge crossing minimization, and coordinate assignment.
+ * It handles layer assignment, relationship crossing minimization, and coordinate assignment.
  *
- * Falls back to lattice layout if there are no edges (single level).
+ * Falls back to lattice layout if there are no relationships (single level).
  * Scales the layout wider for graphs with few levels.
  *
  * @returns true if hierarchical was applied, false if fell back to grid
  */
 function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettings = {}): boolean {
-  // If no edges, fall back to lattice layout (all nodes would be on same level)
+  // If no relationships, fall back to lattice layout (all nodes would be on same level)
   if (graph.size === 0) {
     applyLatticeLayout(graph);
     return false;
@@ -253,7 +253,7 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
     marginy: 0,
   });
 
-  // Default edge label (required by dagre)
+  // Default relationship label (required by dagre)
   g.setDefaultEdgeLabel(() => ({}));
 
   // Add nodes to dagre graph
@@ -261,7 +261,7 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
     g.setNode(nodeId, { width: 40, height: 40 });
   });
 
-  // Add edges to dagre graph
+  // Add relationships to dagre graph
   graph.forEachEdge((_, _attrs, source, target) => {
     g.setEdge(source, target);
   });
@@ -416,7 +416,7 @@ function applyLatticeLayout(graph: ADGraphType, options: LatticeSettings = {}): 
 /**
  * Apply circular layout - arranges nodes in concentric circles based on depth.
  *
- * Sinks (nodes with no outgoing edges) are at the center or innermost ring.
+ * Sinks (nodes with no outgoing relationships) are at the center or innermost ring.
  * If there's exactly one sink, it's placed at the center.
  * Otherwise, sinks form the first ring around an empty center.
  * Higher-depth nodes form outer rings, positioned at angular centroid of their children.
@@ -603,13 +603,13 @@ function placeNodesOnCircleWithAngles(
 }
 
 /**
- * Compute layers based on distance from sink nodes (nodes with no outgoing edges).
+ * Compute layers based on distance from sink nodes (nodes with no outgoing relationships).
  * Sinks are at layer 0, nodes that connect directly to sinks are at layer 1, etc.
  */
 function computeSinkBasedLayers(graph: ADGraphType): Map<string, number> {
   const layers = new Map<string, number>();
 
-  // Find sink nodes (no outgoing edges)
+  // Find sink nodes (no outgoing relationships)
   const sinks: string[] = [];
   graph.forEachNode((nodeId) => {
     if (graph.outDegree(nodeId) === 0) {
@@ -617,7 +617,7 @@ function computeSinkBasedLayers(graph: ADGraphType): Map<string, number> {
     }
   });
 
-  // If no sinks (fully cyclic or all nodes have outgoing edges), use nodes with minimum out-degree
+  // If no sinks (fully cyclic or all nodes have outgoing relationships), use nodes with minimum out-degree
   if (sinks.length === 0) {
     let minOutDegree = Infinity;
     graph.forEachNode((nodeId) => {
@@ -632,7 +632,7 @@ function computeSinkBasedLayers(graph: ADGraphType): Map<string, number> {
     });
   }
 
-  // BFS from sinks, traversing edges in reverse
+  // BFS from sinks, traversing relationships in reverse
   const queue: string[] = [];
   for (const sink of sinks) {
     layers.set(sink, 0);
@@ -643,7 +643,7 @@ function computeSinkBasedLayers(graph: ADGraphType): Map<string, number> {
     const current = queue.shift()!;
     const currentLayer = layers.get(current)!;
 
-    // Traverse incoming edges (reverse direction)
+    // Traverse incoming relationships (reverse direction)
     graph.forEachInNeighbor(current, (neighbor) => {
       if (!layers.has(neighbor)) {
         layers.set(neighbor, currentLayer + 1);
@@ -668,7 +668,7 @@ function computeSinkBasedLayers(graph: ADGraphType): Map<string, number> {
  * Runs dagre in a separate thread to avoid blocking the UI.
  */
 async function applyHierarchicalLayoutAsync(graph: ADGraphType, options: HierarchicalSettings = {}): Promise<boolean> {
-  // If no edges, fall back to lattice layout (all nodes would be on same level)
+  // If no relationships, fall back to lattice layout (all nodes would be on same level)
   if (graph.size === 0) {
     applyLatticeLayout(graph);
     return false;
@@ -676,16 +676,16 @@ async function applyHierarchicalLayoutAsync(graph: ADGraphType, options: Hierarc
 
   const settings = { ...DEFAULT_HIERARCHICAL_SETTINGS, ...options };
 
-  // Extract node and edge data for the worker
+  // Extract node and relationship data for the worker
   const nodes: Array<{ id: string }> = [];
-  const edges: Array<{ source: string; target: string }> = [];
+  const relationships: Array<{ source: string; target: string }> = [];
 
   graph.forEachNode((nodeId) => {
     nodes.push({ id: nodeId });
   });
 
   graph.forEachEdge((_, _attrs, source, target) => {
-    edges.push({ source, target });
+    relationships.push({ source, target });
   });
 
   // Create worker and run layout
@@ -703,7 +703,7 @@ async function applyHierarchicalLayoutAsync(graph: ADGraphType, options: Hierarc
 
     worker.postMessage({
       nodes,
-      edges,
+      relationships,
       settings: {
         layerSpacing: settings.layerSpacing,
         nodeSpacing: settings.nodeSpacing,

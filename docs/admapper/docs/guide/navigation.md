@@ -9,7 +9,7 @@ ADMapper provides an interactive graph visualization for exploring Active Direct
 | Action | Effect |
 |--------|--------|
 | Click node | Select node, show details |
-| Click edge | Select edge, show relationship info |
+| Click relationship | Select relationship, show relationship info |
 | Click background | Deselect all |
 | Drag node | Move node position |
 | Drag background | Pan the view |
@@ -51,13 +51,13 @@ Toggle visibility of node types using the filter panel:
 - Show/hide Groups
 - etc.
 
-### By Edge Type
+### By Relationship Type
 
 Filter which relationship types are displayed:
 
-- Membership edges
-- Session edges
-- Dangerous permission edges
+- Membership relationships
+- Session relationships
+- Dangerous permission relationships
 - etc.
 
 ## Layout
@@ -93,7 +93,7 @@ Results appear in a dropdown. Click to navigate to the node.
 When viewing a path (from shortest path query or path finding), the path is highlighted:
 
 - Path nodes: Full color
-- Path edges: Highlighted
+- Path relationships: Highlighted
 - Other elements: Dimmed
 
 ### Neighbor Highlighting
