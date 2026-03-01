@@ -71,8 +71,21 @@ rm src/backend/tauri.conf.json.bak
 
 # Update Cargo.lock
 if [ -n "${IN_CONTAINER:-}" ]; then
-	echo "Updating src/backend/Cargo.lock (via cargo check)..."
-	cargo check --manifest-path src/backend/Cargo.toml --quiet
+	echo "Updating src/backend/Cargo.lock (via cargo check in container)..."
+	# Detect container runtime (prefer podman, fall back to docker)
+	if command -v podman >/dev/null 2>&1; then
+		RUNTIME="podman"
+	elif command -v docker >/dev/null 2>&1; then
+		RUNTIME="docker"
+	else
+		echo "Error: Neither podman nor docker found. Cannot run cargo check in container."
+		exit 1
+	fi
+	$RUNTIME run --rm \
+		-v "$PROJECT_ROOT:/workspace" \
+		-w /workspace \
+		admapper-dev \
+		cargo check --manifest-path src/backend/Cargo.toml --quiet
 else
 	echo "Updating src/backend/Cargo.lock (via sed, no build env)..."
 	sed -i.bak "/^name = \"admapper\"/{n;s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/;}" src/backend/Cargo.lock
