@@ -40,6 +40,9 @@ jobs:
       - name: Frontend tests
         run: npm test
 
+      - name: Create empty build dir for rust-embed
+        run: mkdir -p build
+
       - name: Backend tests
         run: cargo test --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb
 
@@ -90,6 +93,9 @@ jobs:
           workspaces: |
             src/backend
             src/crustdb
+
+      - name: Create empty build dir for rust-embed
+        run: mkdir -p build
 
       - name: Build backend
         run: cargo build --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb --release

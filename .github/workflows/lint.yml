@@ -54,6 +54,9 @@ jobs:
           cargo fmt --manifest-path src/crustdb/Cargo.toml --check
           cargo fmt --manifest-path src/crustdb-cli/Cargo.toml --check
 
+      - name: Create empty build dir for rust-embed
+        run: mkdir -p build
+
       - name: Clippy (backend)
         run: cargo clippy --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb -- -D warnings
 

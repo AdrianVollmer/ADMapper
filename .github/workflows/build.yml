@@ -29,6 +29,9 @@ jobs:
             src/crustdb-cli
           cache-on-failure: true
 
+      - name: Create empty build dir for rust-embed
+        run: mkdir -p build
+
       - name: Build backend (headless)
         run: cargo build --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb --release
 
