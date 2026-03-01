@@ -67,5 +67,3 @@ nav:
   - API Reference:
     - Overview: api/index.md
     - Database: api/database.md
-    - Graph Algorithms: api/algorithms.md
-  - Query Caching: caching.md

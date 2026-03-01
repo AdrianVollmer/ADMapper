@@ -1,21 +1,21 @@
 # API Reference
 
-CrustDB provides a Rust API for embedded graph database operations.
+CrustDB provides a Rust API for embedded graph database operations. The `Database` struct is the main entry point.
+
+## Sections
+
+| Section | Description |
+|---------|-------------|
+| [Database Lifecycle](database.md#database-lifecycle) | Opening databases, clearing data, getting statistics |
+| [Query Execution](database.md#query-execution) | Running Cypher queries |
+| [Batch Operations](database.md#batch-operations) | Bulk insert and upsert of nodes and edges |
+| [Graph Traversal](database.md#graph-traversal) | Direct lookups and neighbor retrieval |
+| [Indexes](database.md#indexes) | Property index management |
+| [Caching](database.md#caching) | Query result caching |
+| [Graph Algorithms](database.md#graph-algorithms) | Built-in algorithms |
+| [Query History](database.md#query-history) | Query history management |
 
 ## Core Types
-
-### Database
-
-The main entry point. Manages connections, executes queries, and provides access to graph operations.
-
-```rust
-use crustdb::Database;
-
-let db = Database::open("graph.db")?;
-let result = db.execute("MATCH (n) RETURN n")?;
-```
-
-See [Database API](database.md) for full documentation.
 
 ### QueryResult
 
@@ -101,6 +101,34 @@ pub struct DatabaseStats {
 }
 ```
 
+### CacheStats
+
+Statistics about the query cache.
+
+```rust
+pub struct CacheStats {
+    pub entry_count: usize,
+    pub total_size: usize,
+}
+```
+
+### EdgeBetweenness
+
+Result of edge betweenness centrality computation.
+
+```rust
+pub struct EdgeBetweenness {
+    pub scores: HashMap<i64, f64>,
+    pub nodes_processed: usize,
+    pub edges_count: usize,
+}
+
+impl EdgeBetweenness {
+    pub fn top_k(&self, k: usize) -> Vec<(i64, f64)>;
+    pub fn above_threshold(&self, threshold: f64) -> Vec<(i64, f64)>;
+}
+```
+
 ### Error
 
 Error types returned by CrustDB operations.
@@ -125,8 +153,6 @@ pub enum Error {
 | `crustdb::error` | Error types |
 
 ## Re-exports
-
-The following types are re-exported from the crate root:
 
 ```rust
 pub use error::{Error, Result};

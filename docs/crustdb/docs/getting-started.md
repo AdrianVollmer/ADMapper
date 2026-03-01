@@ -222,6 +222,5 @@ match db.execute("INVALID QUERY") {
 
 ## Next Steps
 
-- [Cypher Query Reference](api/cypher.md) - Full query language documentation
-- [Graph Algorithms](api/algorithms.md) - Built-in algorithms like betweenness centrality
-- [Query Caching](caching.md) - Enable caching for repeated queries
+- [Feature Support](features.md) - Supported Cypher features
+- [API Reference](api/index.md) - Full API documentation
