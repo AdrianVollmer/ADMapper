@@ -36,6 +36,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Rust components for linting/formatting
+RUN rustup component add clippy rustfmt
+
 # Download pre-built tauri-cli
 ENV TAURI_CLI_VERSION=2.2.5
 RUN curl -fsSL "https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v${TAURI_CLI_VERSION}/cargo-tauri-x86_64-unknown-linux-gnu.tgz" \
