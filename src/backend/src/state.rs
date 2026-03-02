@@ -390,6 +390,9 @@ impl AppState {
             }
         };
 
+        // Verify the connection is working before storing it
+        backend.ping().map_err(|e| e.to_string())?;
+
         let db_type = parsed.db_type;
 
         // Create history service based on backend type

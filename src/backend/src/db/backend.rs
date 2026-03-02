@@ -45,6 +45,11 @@ pub trait DatabaseBackend: Send + Sync {
     /// Get the default query language for this backend.
     fn default_language(&self) -> QueryLanguage;
 
+    /// Verify the database connection is alive and credentials are valid.
+    ///
+    /// This should perform a lightweight query to confirm connectivity.
+    fn ping(&self) -> Result<()>;
+
     // ========================================================================
     // Basic CRUD Operations
     // ========================================================================

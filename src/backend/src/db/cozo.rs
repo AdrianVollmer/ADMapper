@@ -971,6 +971,11 @@ impl DatabaseBackend for GraphDatabase {
         QueryLanguage::Datalog
     }
 
+    fn ping(&self) -> Result<()> {
+        self.run_custom_query("?[] <- [[1]]")?;
+        Ok(())
+    }
+
     fn clear(&self) -> Result<()> {
         GraphDatabase::clear(self)
     }

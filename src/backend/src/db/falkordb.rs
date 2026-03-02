@@ -303,6 +303,11 @@ impl DatabaseBackend for FalkorDbDatabase {
         QueryLanguage::Cypher
     }
 
+    fn ping(&self) -> Result<()> {
+        self.run_query("RETURN 1")?;
+        Ok(())
+    }
+
     fn clear(&self) -> Result<()> {
         info!("Clearing all data from FalkorDB");
         // Delete all relationships first, then all nodes

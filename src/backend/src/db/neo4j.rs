@@ -255,6 +255,11 @@ impl DatabaseBackend for Neo4jDatabase {
         QueryLanguage::Cypher
     }
 
+    fn ping(&self) -> Result<()> {
+        self.run_query(query("RETURN 1"))?;
+        Ok(())
+    }
+
     fn clear(&self) -> Result<()> {
         info!("Clearing all data from Neo4j");
         // Delete all relationships first, then all nodes

@@ -1256,6 +1256,11 @@ impl DatabaseBackend for KuzuDatabase {
         QueryLanguage::Cypher
     }
 
+    fn ping(&self) -> Result<()> {
+        self.run_custom_query("RETURN 1")?;
+        Ok(())
+    }
+
     fn clear(&self) -> Result<()> {
         KuzuDatabase::clear(self)
     }

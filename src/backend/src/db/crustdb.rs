@@ -1572,6 +1572,12 @@ impl DatabaseBackend for CrustDatabase {
         QueryLanguage::Cypher
     }
 
+    fn ping(&self) -> Result<()> {
+        // CrustDB validates on file open, so if we got here the connection is valid.
+        // TODO: Use `RETURN 1` once standalone RETURN is supported.
+        Ok(())
+    }
+
     fn clear(&self) -> Result<()> {
         CrustDatabase::clear(self)
     }

@@ -167,6 +167,22 @@ function updateFormFields(): void {
   }
 }
 
+/** Set disabled state for all form inputs */
+function setFormDisabled(disabled: boolean): void {
+  const inputs = ["db-path", "db-path-browse", "db-host", "db-port", "db-user", "db-password", "db-name", "db-ssl"];
+  for (const id of inputs) {
+    const el = document.getElementById(id) as HTMLInputElement | HTMLButtonElement | null;
+    if (el) {
+      el.disabled = disabled;
+    }
+  }
+  // Disable/enable database type tabs
+  const tabs = document.querySelectorAll(".db-type-tab");
+  for (const tab of tabs) {
+    (tab as HTMLButtonElement).disabled = disabled;
+  }
+}
+
 /** Connect to database */
 async function connectToDatabase(): Promise<void> {
   const url = buildConnectionUrl();
@@ -187,6 +203,8 @@ async function connectToDatabase(): Promise<void> {
     errorEl.hidden = true;
   }
 
+  setFormDisabled(true);
+
   try {
     const result = await api.post<DatabaseStatusResponse>("/api/database/connect", { url });
     appState.databaseConnected = result.connected;
@@ -206,6 +224,7 @@ async function connectToDatabase(): Promise<void> {
   } catch (error) {
     showError(`Connection error: ${error}`);
   } finally {
+    setFormDisabled(false);
     if (connectBtn) {
       connectBtn.disabled = false;
       connectBtn.textContent = "Connect";
