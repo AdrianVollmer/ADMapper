@@ -369,33 +369,13 @@ pub fn node_status_quick(db: &dyn DatabaseBackend, node_id: &str) -> Result<Node
         .map(|enabled| !enabled) // disabled = NOT enabled
         .unwrap_or(false); // if no enabled property, assume not disabled
 
-    // High-value RIDs (well-known privileged groups)
-    const HIGH_VALUE_RIDS: &[&str] = &[
-        "-512", // Domain Admins
-        "-519", // Enterprise Admins
-        "-518", // Schema Admins
-        "-516", // Domain Controllers
-        "-498", // Enterprise Domain Controllers
-        "-544", // Administrators (Builtin)
-        "-548", // Account Operators
-        "-549", // Server Operators
-        "-551", // Backup Operators
-    ];
-
-    // Check if the node itself is a high-value target by its SID
-    let is_high_value_self = node
-        .and_then(|n| {
-            let props = &n.properties;
-            props
-                .get("objectsid")
-                .or(props.get("objectid"))
-                .or(props.get("object_id"))
-                .and_then(|v| v.as_str())
-        })
-        .map(|sid| HIGH_VALUE_RIDS.iter().any(|rid| sid.ends_with(rid)))
+    // Check if the node has is_highvalue property set at import time (preferred)
+    let is_high_value_property = node
+        .and_then(|n| n.properties.get("is_highvalue"))
+        .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // Check group memberships
+    // Check group memberships for Domain Admins and Enterprise Admins
     let is_enterprise_admin = db
         .find_membership_by_sid_suffix(node_id, "-519")
         .map_err(|e| e.to_string())?
@@ -405,14 +385,8 @@ pub fn node_status_quick(db: &dyn DatabaseBackend, node_id: &str) -> Result<Node
         .map_err(|e| e.to_string())?
         .is_some();
 
-    // Check if member of a high-value group
-    let is_high_value_member = HIGH_VALUE_RIDS.iter().any(|rid| {
-        db.find_membership_by_sid_suffix(node_id, rid)
-            .unwrap_or(None)
-            .is_some()
-    });
-
-    let is_high_value = is_high_value_self || is_high_value_member;
+    // Node is high value if property is set or if it's a member of DA/EA
+    let is_high_value = is_high_value_property || is_domain_admin || is_enterprise_admin;
 
     Ok(NodeStatus {
         owned,

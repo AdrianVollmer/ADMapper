@@ -16,6 +16,53 @@ use zip::ZipArchive;
 /// Batch size for database inserts.
 const BATCH_SIZE: usize = 1000;
 
+/// Well-known high-value RIDs in Active Directory.
+/// These are built-in privileged groups that attackers typically target.
+/// See: https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
+mod high_value_rids {
+    // Domain-relative RIDs
+    pub const DOMAIN_ADMINS: &str = "-512";
+    pub const DOMAIN_CONTROLLERS: &str = "-516";
+    pub const CERT_PUBLISHERS: &str = "-517";
+    pub const SCHEMA_ADMINS: &str = "-518";
+    pub const ENTERPRISE_ADMINS: &str = "-519";
+    pub const GROUP_POLICY_CREATOR_OWNERS: &str = "-520";
+    pub const READONLY_DOMAIN_CONTROLLERS: &str = "-521";
+    pub const PROTECTED_USERS: &str = "-525";
+    pub const KEY_ADMINS: &str = "-526";
+    pub const ENTERPRISE_KEY_ADMINS: &str = "-527";
+
+    // Well-known Builtin RIDs (S-1-5-32-xxx)
+    pub const ADMINISTRATORS: &str = "-544";
+    pub const ACCOUNT_OPERATORS: &str = "-548";
+    pub const SERVER_OPERATORS: &str = "-549";
+    pub const PRINT_OPERATORS: &str = "-550";
+    pub const BACKUP_OPERATORS: &str = "-551";
+
+    // Enterprise-wide RIDs
+    pub const ENTERPRISE_DOMAIN_CONTROLLERS: &str = "-498";
+
+    /// All high-value RID suffixes
+    pub const ALL: &[&str] = &[
+        DOMAIN_ADMINS,
+        DOMAIN_CONTROLLERS,
+        CERT_PUBLISHERS,
+        SCHEMA_ADMINS,
+        ENTERPRISE_ADMINS,
+        GROUP_POLICY_CREATOR_OWNERS,
+        READONLY_DOMAIN_CONTROLLERS,
+        PROTECTED_USERS,
+        KEY_ADMINS,
+        ENTERPRISE_KEY_ADMINS,
+        ADMINISTRATORS,
+        ACCOUNT_OPERATORS,
+        SERVER_OPERATORS,
+        PRINT_OPERATORS,
+        BACKUP_OPERATORS,
+        ENTERPRISE_DOMAIN_CONTROLLERS,
+    ];
+}
+
 /// User Account Control flags from Active Directory.
 /// See: https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/useraccountcontrol-manipulate-account-properties
 #[allow(dead_code)]
@@ -339,6 +386,9 @@ impl BloodHoundImporter {
 
             // Expand useraccountcontrol into individual boolean properties
             Self::expand_uac_flags(props);
+
+            // Mark high-value objects based on SID
+            Self::mark_high_value(props, &id);
         }
 
         let label = properties
@@ -348,6 +398,15 @@ impl BloodHoundImporter {
             .to_string();
 
         let node_type = self.normalize_type(data_type);
+
+        // Domains are always high-value targets
+        if node_type == "Domain" {
+            if let Some(props) = properties.as_object_mut() {
+                if !props.contains_key("is_highvalue") {
+                    props.insert("is_highvalue".to_string(), JsonValue::Bool(true));
+                }
+            }
+        }
 
         Some(DbNode {
             id,
@@ -458,6 +517,24 @@ impl BloodHoundImporter {
             if flag {
                 props.insert("account_locked_out".to_string(), JsonValue::Bool(true));
             }
+        }
+    }
+
+    /// Mark high-value objects based on their SID.
+    /// Sets is_highvalue=true for objects with well-known privileged RIDs.
+    fn mark_high_value(props: &mut serde_json::Map<String, JsonValue>, object_id: &str) {
+        // Skip if already marked
+        if props.contains_key("is_highvalue") {
+            return;
+        }
+
+        // Check if the object's SID ends with a high-value RID
+        let is_high_value = high_value_rids::ALL
+            .iter()
+            .any(|rid| object_id.ends_with(rid));
+
+        if is_high_value {
+            props.insert("is_highvalue".to_string(), JsonValue::Bool(true));
         }
     }
 
@@ -1150,6 +1227,107 @@ mod tests {
 
         // Should preserve the existing 'enabled' value
         assert_eq!(node.properties["enabled"], true);
+    }
+
+    // ========================================================================
+    // High Value Detection Tests
+    // ========================================================================
+
+    #[test]
+    fn test_extract_node_marks_domain_admins_high_value() {
+        let mut importer = test_importer();
+
+        // Domain Admins group (SID ends with -512)
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234567890-512",
+            "Properties": {
+                "name": "DOMAIN ADMINS@CORP.LOCAL"
+            }
+        });
+
+        let node = importer.extract_node("groups", &entity).unwrap();
+        assert_eq!(node.properties["is_highvalue"], true);
+    }
+
+    #[test]
+    fn test_extract_node_marks_enterprise_admins_high_value() {
+        let mut importer = test_importer();
+
+        // Enterprise Admins group (SID ends with -519)
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234567890-519",
+            "Properties": {
+                "name": "ENTERPRISE ADMINS@CORP.LOCAL"
+            }
+        });
+
+        let node = importer.extract_node("groups", &entity).unwrap();
+        assert_eq!(node.properties["is_highvalue"], true);
+    }
+
+    #[test]
+    fn test_extract_node_marks_builtin_administrators_high_value() {
+        let mut importer = test_importer();
+
+        // Builtin Administrators (SID ends with -544)
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-32-544",
+            "Properties": {
+                "name": "ADMINISTRATORS@CORP.LOCAL"
+            }
+        });
+
+        let node = importer.extract_node("groups", &entity).unwrap();
+        assert_eq!(node.properties["is_highvalue"], true);
+    }
+
+    #[test]
+    fn test_extract_node_marks_domain_high_value() {
+        let mut importer = test_importer();
+
+        // Domain objects should be high value
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234567890",
+            "Properties": {
+                "name": "CORP.LOCAL"
+            }
+        });
+
+        let node = importer.extract_node("domains", &entity).unwrap();
+        assert_eq!(node.properties["is_highvalue"], true);
+    }
+
+    #[test]
+    fn test_extract_node_regular_user_not_high_value() {
+        let mut importer = test_importer();
+
+        // Regular user should NOT be high value
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234567890-1001",
+            "Properties": {
+                "name": "regularuser@corp.local"
+            }
+        });
+
+        let node = importer.extract_node("users", &entity).unwrap();
+        assert!(node.properties.get("is_highvalue").is_none());
+    }
+
+    #[test]
+    fn test_extract_node_preserves_existing_highvalue() {
+        let mut importer = test_importer();
+
+        // If BloodHound already marks as high value, preserve it
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234567890-1001",
+            "Properties": {
+                "name": "specialuser@corp.local",
+                "is_highvalue": true
+            }
+        });
+
+        let node = importer.extract_node("users", &entity).unwrap();
+        assert_eq!(node.properties["is_highvalue"], true);
     }
 
     // ========================================================================
