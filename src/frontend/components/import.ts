@@ -38,7 +38,7 @@ export function initImport(): void {
   progressFiles = document.getElementById("import-progress-files");
   currentFileEl = document.getElementById("import-current-file");
   nodesCountEl = document.getElementById("import-nodes-count");
-  edgesCountEl = document.getElementById("import-relationships-count");
+  edgesCountEl = document.getElementById("import-edges-count");
   errorEl = document.getElementById("import-error");
   doneBtn = document.getElementById("import-done-btn");
   cancelBtn = document.getElementById("import-cancel-btn");

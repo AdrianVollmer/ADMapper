@@ -603,8 +603,17 @@ pub fn import_from_paths(
         use std::path::{Path, PathBuf};
         use tokio::sync::broadcast;
 
-        let (tx, _) = broadcast::channel::<ImportProgress>(100);
+        let (tx, mut rx) = broadcast::channel::<ImportProgress>(100);
         let mut importer = BloodHoundImporter::new(db, tx);
+
+        // Spawn a thread to forward broadcast messages to Tauri events
+        let state_for_events = state_clone.clone();
+        let job_id_for_events = job_id_clone.clone();
+        std::thread::spawn(move || {
+            while let Ok(progress) = rx.blocking_recv() {
+                state_for_events.emit_import_progress(&job_id_for_events, &progress);
+            }
+        });
 
         let mut total_nodes = 0usize;
         let mut total_edges = 0usize;

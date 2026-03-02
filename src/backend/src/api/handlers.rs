@@ -275,7 +275,10 @@ pub async fn import_bloodhound(
                         relationships = progress.edges_imported,
                         "ZIP imported successfully"
                     );
+                    // Set final_state first, then send to channel to avoid race condition
+                    // where SSE subscriber misses the final message
                     *job_for_task.final_state.write() = Some(progress.clone());
+                    let _ = job_for_task.channel.send(progress.clone());
                     state_for_task.emit_import_progress(&job_id_for_events, progress);
                 }
                 Err(e) => {
@@ -304,7 +307,9 @@ pub async fn import_bloodhound(
                             relationships = progress.edges_imported,
                             "JSON files imported successfully"
                         );
+                        // Set final_state first, then send to channel to avoid race condition
                         *job_for_task.final_state.write() = Some(progress.clone());
+                        let _ = job_for_task.channel.send(progress.clone());
                         state_for_task.emit_import_progress(&job_id_for_events, progress);
                     }
                     Err(e) => {
