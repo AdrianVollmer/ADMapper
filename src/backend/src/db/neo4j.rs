@@ -2,7 +2,7 @@
 //!
 //! Uses the `neo4rs` crate for connecting to Neo4j via Bolt protocol.
 
-use neo4rs::{query, Graph, Node as Neo4jNode, Query, Relation, Row};
+use neo4rs::{query, ConfigBuilder, Graph, Node as Neo4jNode, Query, Relation, Row};
 use serde_json::{json, Map, Value as JsonValue};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -68,8 +68,14 @@ impl Neo4jDatabase {
             }
         };
 
-        // Connect to Neo4j
-        let graph = runtime.block_on(async { Graph::new(&uri, &user, &pass).await })?;
+        // Connect to Neo4j with limited connection pool to reduce retry attempts
+        let config = ConfigBuilder::default()
+            .uri(&uri)
+            .user(&user)
+            .password(&pass)
+            .max_connections(3)
+            .build()?;
+        let graph = runtime.block_on(async { Graph::connect(config).await })?;
 
         info!("Connected to Neo4j");
 
