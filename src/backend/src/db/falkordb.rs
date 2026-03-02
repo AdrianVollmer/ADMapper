@@ -43,7 +43,7 @@ impl FalkorDbDatabase {
 
         let client = FalkorClientBuilder::new()
             .with_connection_info(connection_info)
-            .with_num_connections(3)
+            .with_num_connections(std::num::NonZero::new(3).unwrap())
             .build()
             .map_err(|e| DbError::Database(format!("Failed to build client: {}", e)))?;
 
