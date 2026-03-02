@@ -371,6 +371,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         }
 
         // Batch insert nodes of each label using UNWIND with flattened properties
+        // Use MERGE on objectid only to find existing placeholder nodes, then set label
         const BATCH_SIZE: usize = 200;
         for (cypher_label, label_nodes) in nodes_by_label {
             for chunk in label_nodes.chunks(BATCH_SIZE) {
@@ -383,10 +384,13 @@ impl DatabaseBackend for FalkorDbDatabase {
                     })
                     .collect();
 
+                // MERGE on objectid only (finds placeholders), then add label and set properties
+                // REMOVE n.placeholder clears the placeholder marker if this was a placeholder
                 let cypher = format!(
                     "UNWIND [{}] AS props \
-                     MERGE (n:{} {{objectid: props.objectid}}) \
-                     SET n += props",
+                     MERGE (n {{objectid: props.objectid}}) \
+                     SET n:{}, n += props \
+                     REMOVE n.placeholder",
                     items.join(", "),
                     cypher_label
                 );

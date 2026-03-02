@@ -1517,10 +1517,9 @@ mod tests {
     fn test_run_custom_query_with_filter() {
         let db = setup_test_db();
 
+        // Filter by label (CozoDB schema uses 'label' not 'node_type')
         let result = db
-            .run_custom_query(
-                "?[object_id, label] := *nodes{object_id, label, node_type}, node_type = 'User'",
-            )
+            .run_custom_query("?[object_id, label] := *nodes{object_id, label}, label = 'User'")
             .unwrap();
 
         let rows = result["rows"].as_array().unwrap();

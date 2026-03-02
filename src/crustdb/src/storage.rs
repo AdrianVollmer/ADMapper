@@ -597,11 +597,15 @@ impl SqliteStorage {
 
         // Upsert nodes using prepared statements
         // json_patch merges the new properties into the existing ones
+        // If incoming data is not a placeholder, remove the placeholder property from existing node
         {
             let mut upsert_stmt = tx.prepare(
                 "INSERT INTO nodes (object_id, properties) VALUES (?1, jsonb(?2))
                  ON CONFLICT(object_id) DO UPDATE SET
-                   properties = jsonb(json_patch(json(properties), json(?2)))",
+                   properties = CASE
+                     WHEN json_extract(?2, '$.placeholder') = 1 THEN jsonb(json_patch(json(properties), json(?2)))
+                     ELSE jsonb(json_remove(json_patch(json(properties), json(?2)), '$.placeholder'))
+                   END",
             )?;
             let mut get_id_stmt = tx.prepare("SELECT id FROM nodes WHERE object_id = ?1")?;
             let mut label_stmt = tx.prepare(
@@ -2346,9 +2350,8 @@ mod tests {
             ))
         );
 
-        // Original placeholder property should still be there (json_patch merges)
-        // Note: json_patch replaces values when keys conflict, so "name" is updated
-        // but "placeholder" from the original should remain
+        // placeholder property should be REMOVED when upserting non-placeholder data
+        assert!(node.properties.get("placeholder").is_none());
 
         // Labels should be merged (both Base and User)
         assert!(node.has_label("User"));
