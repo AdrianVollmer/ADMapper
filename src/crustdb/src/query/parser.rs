@@ -28,6 +28,8 @@ pub enum Statement {
     Delete(DeleteClause),
     /// SET statement
     Set(SetClause),
+    /// Standalone RETURN (e.g., RETURN 1, RETURN "hello")
+    Return(ReturnClause),
 }
 
 impl Statement {
@@ -39,6 +41,7 @@ impl Statement {
     pub fn is_read_only(&self) -> bool {
         match self {
             Statement::Match(m) => m.set_clause.is_none() && m.delete_clause.is_none(),
+            Statement::Return(_) => true,
             Statement::Create(_)
             | Statement::Merge(_)
             | Statement::Delete(_)
@@ -390,6 +393,11 @@ fn build_single_part_query(pair: Pair<Rule>) -> Result<Statement> {
     // Standalone DELETE or SET without MATCH is not supported
     if delete_clause.is_some() || set_clause.is_some() {
         return Err(Error::Parse("DELETE and SET require a MATCH clause".into()));
+    }
+
+    // Standalone RETURN (e.g., RETURN 1, RETURN "hello")
+    if let Some(ret) = return_clause {
+        return Ok(Statement::Return(ret));
     }
 
     Err(Error::Parse("Unsupported query type".into()))

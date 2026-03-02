@@ -335,6 +335,7 @@ pub fn plan(statement: &Statement) -> Result<QueryPlan> {
     let root = match statement {
         Statement::Create(create) => plan_create(create)?,
         Statement::Match(match_clause) => plan_match(match_clause)?,
+        Statement::Return(return_clause) => plan_standalone_return(return_clause)?,
         Statement::Delete(_) => {
             return Err(Error::Cypher("Standalone DELETE not supported".into()));
         }
@@ -717,6 +718,12 @@ pub fn plan_shortest_path_pattern(pattern: &Pattern, all_paths: bool) -> Result<
     }
 
     Ok(plan)
+}
+
+/// Plan a standalone RETURN statement (e.g., RETURN 1, RETURN "hello").
+fn plan_standalone_return(return_clause: &ReturnClause) -> Result<PlanOperator> {
+    // Use ProduceRow to create a single empty row, then project the expressions
+    plan_return(PlanOperator::ProduceRow, return_clause)
 }
 
 /// Plan a RETURN clause into projection, aggregation, and pagination.

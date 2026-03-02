@@ -465,4 +465,43 @@ mod tests {
             panic!("Expected list");
         }
     }
+
+    #[test]
+    fn test_standalone_return() {
+        let (storage, _dir) = create_test_storage();
+
+        // Test RETURN with literal integer
+        let stmt = parse("RETURN 1").unwrap();
+        let result = execute(&stmt, &storage).unwrap();
+        assert_eq!(result.rows.len(), 1);
+        match result.rows[0].values.get("1") {
+            Some(ResultValue::Property(PropertyValue::Integer(1))) => {}
+            other => panic!("Expected integer 1, got {:?}", other),
+        }
+
+        // Test RETURN with literal string
+        let stmt = parse("RETURN 'hello'").unwrap();
+        let result = execute(&stmt, &storage).unwrap();
+        assert_eq!(result.rows.len(), 1);
+        match result.rows[0].values.get("'hello'") {
+            Some(ResultValue::Property(PropertyValue::String(s))) if s == "hello" => {}
+            other => panic!("Expected string 'hello', got {:?}", other),
+        }
+
+        // Test RETURN with alias
+        let stmt = parse("RETURN 42 AS answer").unwrap();
+        let result = execute(&stmt, &storage).unwrap();
+        assert_eq!(result.rows.len(), 1);
+        match result.rows[0].values.get("answer") {
+            Some(ResultValue::Property(PropertyValue::Integer(42))) => {}
+            other => panic!("Expected integer 42, got {:?}", other),
+        }
+
+        // Test RETURN with multiple items
+        let stmt = parse("RETURN 1, 'test'").unwrap();
+        let result = execute(&stmt, &storage).unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert!(result.rows[0].values.contains_key("1"));
+        assert!(result.rows[0].values.contains_key("'test'"));
+    }
 }

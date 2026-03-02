@@ -1573,8 +1573,7 @@ impl DatabaseBackend for CrustDatabase {
     }
 
     fn ping(&self) -> Result<()> {
-        // CrustDB validates on file open, so if we got here the connection is valid.
-        // TODO: Use `RETURN 1` once standalone RETURN is supported.
+        self.run_custom_query("RETURN 1")?;
         Ok(())
     }
 
