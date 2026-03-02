@@ -775,20 +775,16 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
-        // Use a single query with multiple counts for efficiency
-        // Count unique NODES, not relationships (e.g., 3 relationships from same node = 1 incoming)
+        // Use separate CALL subqueries to avoid Cartesian product explosion
+        // Each count is independent and efficient
         let q = query(
             "MATCH (n {objectid: $id})
-             OPTIONAL MATCH (n)<-[]-(in_node)
-             OPTIONAL MATCH (n)-[]->(out_node)
-             OPTIONAL MATCH (n)-[admin]->(admin_node) WHERE type(admin) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']
-             OPTIONAL MATCH (n)-[:MemberOf]->(mo_node)
-             OPTIONAL MATCH (n)<-[:MemberOf]-(mem_node)
-             RETURN count(DISTINCT in_node) AS incoming,
-                    count(DISTINCT out_node) AS outgoing,
-                    count(DISTINCT admin_node) AS admin_to,
-                    count(DISTINCT mo_node) AS member_of,
-                    count(DISTINCT mem_node) AS members"
+             CALL { WITH n MATCH (n)<-[]-(in_node) RETURN count(DISTINCT in_node) AS incoming }
+             CALL { WITH n MATCH (n)-[]->(out_node) RETURN count(DISTINCT out_node) AS outgoing }
+             CALL { WITH n MATCH (n)-[admin]->(admin_node) WHERE type(admin) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember'] RETURN count(DISTINCT admin_node) AS admin_to }
+             CALL { WITH n MATCH (n)-[:MemberOf]->(mo_node) RETURN count(DISTINCT mo_node) AS member_of }
+             CALL { WITH n MATCH (n)<-[:MemberOf]-(mem_node) RETURN count(DISTINCT mem_node) AS members }
+             RETURN incoming, outgoing, admin_to, member_of, members"
         )
         .param("id", node_id.to_string());
 

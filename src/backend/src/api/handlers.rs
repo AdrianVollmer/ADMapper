@@ -890,8 +890,10 @@ async fn check_path_to_condition(
 
     let escaped_id = node_id.replace('\'', "\\'");
     let query_name = format!("Path to {}: {}", target_name, node_id);
+    // Use standard Cypher variable-length path syntax (1 to 20 hops)
+    // -[*1..20]-> is supported by all backends (CrustDB, Neo4j, FalkorDB)
     let query_text = format!(
-        "MATCH p = (a)-[]-+(b) WHERE a.object_id = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
+        "MATCH p = (a)-[*1..20]->(b) WHERE a.object_id = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
         escaped_id, condition
     );
 

@@ -901,20 +901,20 @@ impl DatabaseBackend for FalkorDbDatabase {
     fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
         let id_escaped = node_id.replace('\'', "\\'");
 
-        // Use a single query with multiple counts for efficiency
-        // Count unique NODES, not relationships (a node with multiple relationships to us counts as 1)
+        // Use WITH to chain counts and avoid Cartesian product explosion
+        // Each OPTIONAL MATCH is followed by aggregation before the next
         let cypher = format!(
             "MATCH (n {{objectid: '{}'}})
              OPTIONAL MATCH (n)<-[]-(in_node)
+             WITH n, count(DISTINCT in_node) AS incoming
              OPTIONAL MATCH (n)-[]->(out_node)
+             WITH n, incoming, count(DISTINCT out_node) AS outgoing
              OPTIONAL MATCH (n)-[admin]->(admin_node) WHERE type(admin) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']
+             WITH n, incoming, outgoing, count(DISTINCT admin_node) AS admin_to
              OPTIONAL MATCH (n)-[:MemberOf]->(mo_node)
+             WITH n, incoming, outgoing, admin_to, count(DISTINCT mo_node) AS member_of
              OPTIONAL MATCH (n)<-[:MemberOf]-(mem_node)
-             RETURN count(DISTINCT in_node) AS incoming,
-                    count(DISTINCT out_node) AS outgoing,
-                    count(DISTINCT admin_node) AS admin_to,
-                    count(DISTINCT mo_node) AS member_of,
-                    count(DISTINCT mem_node) AS members",
+             RETURN incoming, outgoing, admin_to, member_of, count(DISTINCT mem_node) AS members",
             id_escaped
         );
 
