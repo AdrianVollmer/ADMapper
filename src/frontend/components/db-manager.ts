@@ -150,7 +150,7 @@ function renderStats(body: HTMLElement, footer: HTMLElement, stats: DetailedStat
       </div>
       <div class="db-stat-card db-stat-primary">
         <div class="db-stat-value">${stats.total_edges.toLocaleString()}</div>
-        <div class="db-stat-label">Total Edges</div>
+        <div class="db-stat-label">Total Relationships</div>
       </div>
     </div>
 

@@ -383,7 +383,7 @@ function renderChokePointsTab(): string {
       <div class="insight-section">
         <h3 class="insight-section-title">Choke Points</h3>
         <p class="insight-desc">
-          Edges with the highest betweenness centrality - removing these would disrupt the most attack paths.
+          Relationships with the highest betweenness centrality - removing these would disrupt the most attack paths.
           Analyzed ${total_nodes.toLocaleString()} nodes and ${total_edges.toLocaleString()} relationships.
         </p>
         <div class="choke-points-list">
