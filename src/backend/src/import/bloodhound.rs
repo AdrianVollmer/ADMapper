@@ -66,7 +66,7 @@ pub struct BloodHoundImporter {
     progress_tx: broadcast::Sender<ImportProgress>,
     /// Track which object IDs we've seen to avoid duplicate nodes
     seen_nodes: HashSet<String>,
-    /// Buffer relationships across all files, flush at end when all nodes exist
+    /// Buffer relationships within current file, flushed per-file for live progress
     edge_buffer: Vec<DbEdge>,
     /// Buffer domain nodes from trust relationships (for orphaned domains)
     trust_domain_buffer: Vec<DbNode>,
@@ -161,13 +161,6 @@ impl BloodHoundImporter {
             }
         }
 
-        // Flush all buffered relationships now that all nodes from all files exist
-        info!(
-            edge_count = self.edge_buffer.len(),
-            "Flushing all buffered relationships"
-        );
-        self.flush_edge_buffer(&mut progress)?;
-
         progress.complete();
         self.send_progress(&progress);
         Ok(progress)
@@ -187,9 +180,6 @@ impl BloodHoundImporter {
         self.send_progress(&progress);
 
         self.import_json_str(&contents, &mut progress)?;
-
-        // Flush buffered relationships for single-file import
-        self.flush_edge_buffer(&mut progress)?;
 
         progress.files_processed = 1;
         progress.complete();
@@ -243,19 +233,13 @@ impl BloodHoundImporter {
             }
         }
 
-        // Flush all buffered relationships now that all nodes from all files exist
-        info!(
-            edge_count = self.edge_buffer.len(),
-            "Flushing all buffered relationships"
-        );
-        self.flush_edge_buffer(&mut progress)?;
-
         progress.complete();
         self.send_progress(&progress);
         Ok(progress)
     }
 
     /// Import from JSON string.
+    /// Flushes both nodes and edges per-file for live progress updates.
     fn import_json_str(
         &mut self,
         contents: &str,
@@ -323,13 +307,16 @@ impl BloodHoundImporter {
                 }
             }
 
-            // Extract relationships - buffer them for later (after all nodes from all files exist)
+            // Extract relationships - buffered and flushed at end of file
             let relationships = self.extract_edges(&data_type, &entity);
             self.edge_buffer.extend(relationships);
         }
 
-        // Flush remaining nodes (relationships are flushed at the end of import_zip)
+        // Flush remaining nodes
         self.flush_nodes(&mut node_batch, progress)?;
+
+        // Flush edges for this file - placeholder nodes handle missing targets
+        self.flush_edge_buffer(progress)?;
 
         Ok(())
     }
@@ -910,7 +897,7 @@ impl BloodHoundImporter {
     }
 
     /// Flush all buffered relationships in batches.
-    /// Called at the end of import after all nodes from all files are inserted.
+    /// Called per-file after nodes are flushed. Placeholder nodes handle missing targets.
     fn flush_edge_buffer(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
         // First flush any domain nodes from trust relationships
         self.flush_trust_domains(progress)?;
