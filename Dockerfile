@@ -37,6 +37,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy frontend build output (needed for RustEmbed at compile time)
+COPY --from=frontend-builder /app/build build
+
 # Copy workspace files
 COPY src/backend src/backend
 COPY src/crustdb src/crustdb
@@ -60,11 +63,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy built artifacts
+# Copy built binary (frontend is embedded via RustEmbed)
 COPY --from=backend-builder /app/src/backend/target/release/admapper /usr/local/bin/
-COPY --from=frontend-builder /app/build /app/build
-
-WORKDIR /app
 
 # Expose default port
 EXPOSE 9191
