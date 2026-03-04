@@ -208,12 +208,17 @@ run_tests() {
 	# Mount the binary and test data into the container
 	local exit_code=0
 
+	# Get git commit hash to pass to container (git not available inside)
+	local git_commit
+	git_commit=$(git -C "$SCRIPT_DIR/.." rev-parse HEAD 2>/dev/null || echo "unknown")
+
 	$COMPOSE_CMD run \
 		--rm \
 		-v "$ADMAPPER_BIN:/admapper:ro" \
 		-v "$TEST_DATA:/test_data.zip:ro" \
 		-e "ADMAPPER_BIN=/admapper" \
-        -e RUST_LOG=debug \
+		-e "GIT_COMMIT=$git_commit" \
+		-e RUST_LOG=debug \
 		tests \
 		./e2e/run_tests.py /test_data.zip "$BACKEND" || exit_code=$?
 

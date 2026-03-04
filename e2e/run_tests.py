@@ -471,7 +471,17 @@ proof::before {
         self.logger.info(f"Generated CSS: {css_file}")
 
     def _get_git_commit(self) -> str:
-        """Get the current git commit hash."""
+        """Get the current git commit hash.
+
+        First checks GIT_COMMIT environment variable (set by e2e-test.sh when
+        running in a container), then falls back to running git directly.
+        """
+        # Check environment variable first (container environment)
+        env_commit = os.environ.get("GIT_COMMIT")
+        if env_commit and env_commit != "unknown":
+            return env_commit
+
+        # Fall back to running git directly
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
