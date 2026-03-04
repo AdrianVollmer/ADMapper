@@ -27,6 +27,7 @@ function connectToActivityStream(): void {
     unsubscribe = null;
   }
 
+  // Note: fetchInitial: false because the endpoint is SSE-only (it sends initial state on connect)
   unsubscribe = subscribe(
     QUERY_ACTIVITY_CHANNEL,
     {}, // No params needed for this channel
@@ -38,7 +39,7 @@ function connectToActivityStream(): void {
       // Connection lost - reset indicator (transport handles reconnection)
       updateQueryIndicator(false);
     },
-    { fetchInitial: true, autoReconnect: true, reconnectDelay: 5000 }
+    { fetchInitial: false, autoReconnect: true, reconnectDelay: 5000 }
   );
 }
 

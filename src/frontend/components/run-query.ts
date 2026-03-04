@@ -318,6 +318,7 @@ async function executeQuery(): Promise<void> {
     currentQueryId = startResponse.query_id;
 
     // Subscribe to progress events
+    // Note: fetchInitial: false because the endpoint is SSE-only, not JSON
     unsubscribeProgress = subscribe(
       QUERY_PROGRESS_CHANNEL,
       { queryId: currentQueryId },
@@ -331,7 +332,8 @@ async function executeQuery(): Promise<void> {
           errorMessage = "Lost connection to server";
           renderModal();
         }
-      }
+      },
+      { fetchInitial: false }
     );
   } catch (err) {
     cleanup();
