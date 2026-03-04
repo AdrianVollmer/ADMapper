@@ -230,42 +230,46 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
             JsonValue::Object(obj)
         }
         falkordb::FalkorValue::Node(node) => {
-            let mut obj = Map::new();
-            obj.insert("id".to_string(), JsonValue::Number(node.entity_id.into()));
-            obj.insert(
-                "labels".to_string(),
-                JsonValue::Array(node.labels.into_iter().map(JsonValue::String).collect()),
-            );
+            // Get object_id from properties if available
+            let object_id = node
+                .properties
+                .get("objectid")
+                .or_else(|| node.properties.get("object_id"))
+                .and_then(|v| {
+                    if let falkordb::FalkorValue::String(s) = v {
+                        Some(s.clone())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| node.entity_id.to_string());
             let props: Map<String, JsonValue> = node
                 .properties
                 .into_iter()
                 .map(|(k, v)| (k, falkor_value_to_json(v)))
                 .collect();
-            obj.insert("properties".to_string(), JsonValue::Object(props));
-            JsonValue::Object(obj)
+            json!({
+                "_type": "node",
+                "id": node.entity_id,
+                "object_id": object_id,
+                "labels": node.labels,
+                "properties": props
+            })
         }
         falkordb::FalkorValue::Edge(edge) => {
-            let mut obj = Map::new();
-            obj.insert("id".to_string(), JsonValue::Number(edge.entity_id.into()));
-            obj.insert(
-                "type".to_string(),
-                JsonValue::String(edge.relationship_type),
-            );
-            obj.insert(
-                "source".to_string(),
-                JsonValue::Number(edge.src_node_id.into()),
-            );
-            obj.insert(
-                "target".to_string(),
-                JsonValue::Number(edge.dst_node_id.into()),
-            );
             let props: Map<String, JsonValue> = edge
                 .properties
                 .into_iter()
                 .map(|(k, v)| (k, falkor_value_to_json(v)))
                 .collect();
-            obj.insert("properties".to_string(), JsonValue::Object(props));
-            JsonValue::Object(obj)
+            json!({
+                "_type": "relationship",
+                "id": edge.entity_id,
+                "source": edge.src_node_id,
+                "target": edge.dst_node_id,
+                "rel_type": edge.relationship_type,
+                "properties": props
+            })
         }
         falkordb::FalkorValue::Path(path) => {
             let nodes: Vec<JsonValue> = path
@@ -278,7 +282,7 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
                 .into_iter()
                 .map(|e| falkor_value_to_json(falkordb::FalkorValue::Edge(e)))
                 .collect();
-            json!({ "nodes": nodes, "relationships": relationships })
+            json!({ "_type": "path", "nodes": nodes, "relationships": relationships })
         }
         falkordb::FalkorValue::Point(point) => {
             json!({ "latitude": point.latitude, "longitude": point.longitude })
@@ -1079,6 +1083,7 @@ impl DatabaseBackend for FalkorDbDatabase {
 
         let rows = self.execute_query(cypher)?;
 
-        Ok(json!({ "results": rows }))
+        // Return in expected format with rows array
+        Ok(json!({ "rows": rows }))
     }
 }

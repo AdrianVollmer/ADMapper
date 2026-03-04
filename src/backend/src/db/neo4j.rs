@@ -922,71 +922,108 @@ impl DatabaseBackend for Neo4jDatabase {
         // Execute the query and collect results
         let graph = self.graph.clone();
         let cypher = cypher.to_string();
-        let result = self.runtime.block_on(async {
+        let (headers, rows) = self.runtime.block_on(async {
             let mut stream = graph.execute(query(&cypher)).await?;
             let mut rows = Vec::new();
+            let mut found_headers: Vec<String> = Vec::new();
+
+            // Try common column names that might be returned
+            // Note: neo4rs doesn't expose column names, so we try common patterns
+            let try_columns = [
+                "n",
+                "m",
+                "a",
+                "b",
+                "r",
+                "e",
+                "p",
+                "result",
+                "count",
+                "total",
+                "name",
+                "id",
+                "value",
+                "nodes",
+                "relationships",
+                "path",
+                "src",
+                "tgt",
+                "hops",
+                "node_ids",
+                "rel_types",
+                "source",
+                "target",
+                "length",
+                "type",
+            ];
 
             while let Some(row) = stream.next().await? {
-                // Neo4rs Row doesn't expose column names, so we try common patterns
-                // For custom queries, users should use aliases like "RETURN x AS result"
-                let mut obj = Map::new();
-
-                // Try common column names that might be returned
-                // Note: neo4rs doesn't expose column names, so we try common patterns
-                let try_columns = [
-                    "n",
-                    "m",
-                    "r",
-                    "p",
-                    "result",
-                    "count",
-                    "total",
-                    "name",
-                    "id",
-                    "value",
-                    "nodes",
-                    "relationships",
-                    "path",
-                    "src",
-                    "tgt",
-                    "hops",
-                    "node_ids",
-                    "rel_types",
-                ];
+                let mut row_values: Vec<JsonValue> = Vec::new();
 
                 for col in try_columns {
-                    if let Ok(val) = row.get::<String>(col) {
-                        obj.insert(col.to_string(), JsonValue::String(val));
-                    } else if let Ok(val) = row.get::<i64>(col) {
-                        obj.insert(col.to_string(), JsonValue::Number(val.into()));
-                    } else if let Ok(val) = row.get::<f64>(col) {
-                        if let Some(n) = serde_json::Number::from_f64(val) {
-                            obj.insert(col.to_string(), JsonValue::Number(n));
-                        }
-                    } else if let Ok(val) = row.get::<bool>(col) {
-                        obj.insert(col.to_string(), JsonValue::Bool(val));
-                    } else if let Ok(node) = row.get::<Neo4jNode>(col) {
+                    // Try different types for each column
+                    let val: Option<JsonValue> = if let Ok(node) = row.get::<Neo4jNode>(col) {
+                        // Convert node with _type marker for graph extraction
                         let db_node = Neo4jDatabase::neo4j_node_to_db_node(&node);
-                        obj.insert(
-                            col.to_string(),
-                            json!({
-                                "id": db_node.id,
-                                "name": db_node.name,
-                                "type": db_node.label,
-                                "properties": db_node.properties,
-                            }),
-                        );
+                        Some(json!({
+                            "_type": "node",
+                            "id": node.id(),
+                            "object_id": db_node.id,
+                            "labels": node.labels(),
+                            "properties": db_node.properties,
+                        }))
+                    } else if let Ok(rel) = row.get::<Relation>(col) {
+                        // Convert relationship with _type marker for graph extraction
+                        let mut props = Map::new();
+                        for key in rel.keys() {
+                            if let Ok(v) = rel.get::<String>(key) {
+                                props.insert(key.to_string(), JsonValue::String(v));
+                            } else if let Ok(v) = rel.get::<i64>(key) {
+                                props.insert(key.to_string(), JsonValue::Number(v.into()));
+                            } else if let Ok(v) = rel.get::<bool>(key) {
+                                props.insert(key.to_string(), JsonValue::Bool(v));
+                            }
+                        }
+                        Some(json!({
+                            "_type": "relationship",
+                            "id": rel.id(),
+                            "source": rel.start_node_id(),
+                            "target": rel.end_node_id(),
+                            "rel_type": rel.typ(),
+                            "properties": props,
+                        }))
+                    } else if let Ok(val) = row.get::<String>(col) {
+                        Some(JsonValue::String(val))
+                    } else if let Ok(val) = row.get::<i64>(col) {
+                        Some(JsonValue::Number(val.into()))
+                    } else if let Ok(val) = row.get::<f64>(col) {
+                        serde_json::Number::from_f64(val).map(JsonValue::Number)
+                    } else if let Ok(val) = row.get::<bool>(col) {
+                        Some(JsonValue::Bool(val))
+                    } else {
+                        None
+                    };
+
+                    if let Some(v) = val {
+                        // Track which columns we found
+                        if !found_headers.contains(&col.to_string()) {
+                            found_headers.push(col.to_string());
+                        }
+                        row_values.push(v);
                     }
                 }
 
-                if !obj.is_empty() {
-                    rows.push(JsonValue::Object(obj));
+                if !row_values.is_empty() {
+                    rows.push(JsonValue::Array(row_values));
                 }
             }
 
-            Ok::<_, neo4rs::Error>(rows)
+            Ok::<_, neo4rs::Error>((found_headers, rows))
         })?;
 
-        Ok(json!({ "results": result }))
+        Ok(json!({
+            "headers": headers,
+            "rows": rows
+        }))
     }
 }
