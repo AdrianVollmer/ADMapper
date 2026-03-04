@@ -6,6 +6,7 @@
 use super::{Binding, Path};
 use crate::error::{Error, Result};
 use crate::graph::{Node, PropertyValue, Relationship};
+use crate::query::operators::{ExpandRequest, VariableLengthExpandRequest};
 use crate::query::planner::{
     AggregateFunction, CreateEdge, CreateNode, ExpandDirection, FilterPredicate, PlanExpr,
     PlanLiteral, PlanOperator, ProjectColumn, QueryPlan, SetOperation, TargetPropertyFilter,
@@ -95,17 +96,16 @@ fn execute_operator(
             direction,
         } => {
             let bindings = execute_operator_to_bindings(source, storage, stats)?;
-            execute_expand(
-                bindings,
+            let request = ExpandRequest {
                 source_variable,
-                rel_variable.as_deref(),
+                rel_variable: rel_variable.as_deref(),
                 target_variable,
                 target_labels,
-                path_variable.as_deref(),
+                path_variable: path_variable.as_deref(),
                 types,
-                *direction,
-                storage,
-            )
+                direction: *direction,
+            };
+            execute_expand(bindings, &request, storage)
         }
 
         PlanOperator::VariableLengthExpand {
@@ -124,22 +124,21 @@ fn execute_operator(
             target_property_filter,
         } => {
             let bindings = execute_operator_to_bindings(source, storage, stats)?;
-            execute_variable_length_expand(
-                bindings,
+            let request = VariableLengthExpandRequest {
                 source_variable,
-                rel_variable.as_deref(),
+                rel_variable: rel_variable.as_deref(),
                 target_variable,
                 target_labels,
-                path_variable.as_deref(),
+                path_variable: path_variable.as_deref(),
                 types,
-                *direction,
-                *min_hops,
-                *max_hops,
-                target_ids.as_deref(),
-                *limit,
-                target_property_filter.as_ref(),
-                storage,
-            )
+                direction: *direction,
+                min_hops: *min_hops,
+                max_hops: *max_hops,
+                target_ids: target_ids.as_deref(),
+                limit: *limit,
+                target_property_filter: target_property_filter.as_ref(),
+            };
+            execute_variable_length_expand(bindings, &request, storage)
         }
 
         PlanOperator::ShortestPath {
@@ -359,51 +358,45 @@ fn execute_node_scan(
 // Expand Operators
 // =============================================================================
 
-#[allow(clippy::too_many_arguments)]
 fn execute_expand(
     bindings: Vec<Binding>,
-    source_variable: &str,
-    rel_variable: Option<&str>,
-    target_variable: &str,
-    target_labels: &[String],
-    path_variable: Option<&str>,
-    types: &[String],
-    direction: ExpandDirection,
+    req: &ExpandRequest<'_>,
     storage: &SqliteStorage,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
 
     for binding in bindings {
         let source_node = binding
-            .get_node(source_variable)
-            .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
+            .get_node(req.source_variable)
+            .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", req.source_variable)))?;
 
-        let relationships = get_edges(source_node.id, direction, storage)?;
-        let relationships = filter_edges_by_type(relationships, types);
+        let relationships = get_edges(source_node.id, req.direction, storage)?;
+        let relationships = filter_edges_by_type(relationships, req.types);
 
         for relationship in relationships {
-            let target_id = get_target_id(&relationship, source_node.id, direction);
+            let target_id = get_target_id(&relationship, source_node.id, req.direction);
             let target_node = match storage.get_node(target_id)? {
                 Some(n) => n,
                 None => continue,
             };
 
             // Check target labels
-            if !target_labels.is_empty() && !target_labels.iter().any(|l| target_node.has_label(l))
+            if !req.target_labels.is_empty()
+                && !req.target_labels.iter().any(|l| target_node.has_label(l))
             {
                 continue;
             }
 
             let mut new_binding = binding
                 .clone()
-                .with_node(target_variable, target_node.clone());
+                .with_node(req.target_variable, target_node.clone());
 
-            if let Some(rv) = rel_variable {
+            if let Some(rv) = req.rel_variable {
                 new_binding = new_binding.with_edge(rv, relationship.clone());
             }
 
             // Bind the path if path_variable is set
-            if let Some(pv) = path_variable {
+            if let Some(pv) = req.path_variable {
                 new_binding = new_binding.with_path(
                     pv,
                     Path {
@@ -444,28 +437,17 @@ fn resolve_target_property_filter(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn execute_variable_length_expand(
     bindings: Vec<Binding>,
-    source_variable: &str,
-    rel_variable: Option<&str>,
-    target_variable: &str,
-    target_labels: &[String],
-    path_variable: Option<&str>,
-    types: &[String],
-    direction: ExpandDirection,
-    min_hops: u32,
-    max_hops: u32,
-    target_ids: Option<&[i64]>,
-    limit: Option<u64>,
-    target_property_filter: Option<&TargetPropertyFilter>,
+    req: &VariableLengthExpandRequest<'_>,
     storage: &SqliteStorage,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
 
     // Resolve target_property_filter to node IDs for early termination
-    let filter_resolved_ids: Option<HashSet<i64>> = if let Some(filter) = target_property_filter {
-        let nodes = resolve_target_property_filter(filter, target_labels, storage)?;
+    let filter_resolved_ids: Option<HashSet<i64>> = if let Some(filter) = req.target_property_filter
+    {
+        let nodes = resolve_target_property_filter(filter, req.target_labels, storage)?;
         if nodes.is_empty() {
             // No matching targets exist - can return early
             return Ok(ExecutionResult::Bindings(result));
@@ -476,7 +458,7 @@ fn execute_variable_length_expand(
     };
 
     // Combine explicit target_ids with filter-resolved IDs
-    let target_id_set: Option<HashSet<i64>> = match (target_ids, &filter_resolved_ids) {
+    let target_id_set: Option<HashSet<i64>> = match (req.target_ids, &filter_resolved_ids) {
         (Some(ids), Some(filter_ids)) => {
             // Intersection: node must be in both sets
             let explicit: HashSet<i64> = ids.iter().copied().collect();
@@ -487,7 +469,7 @@ fn execute_variable_length_expand(
         (None, None) => None,
     };
 
-    let limit = limit.map(|l| l as usize);
+    let limit = req.limit.map(|l| l as usize);
 
     for binding in bindings {
         // Early termination: check if we've reached the limit
@@ -498,8 +480,8 @@ fn execute_variable_length_expand(
         }
 
         let source_node = binding
-            .get_node(source_variable)
-            .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
+            .get_node(req.source_variable)
+            .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", req.source_variable)))?;
 
         // BFS traversal with global visited set to prevent exponential explosion.
         // Without this, dense graphs would explore the same node via every possible path,
@@ -521,7 +503,7 @@ fn execute_variable_length_expand(
             }
 
             // Check if we've reached a valid target
-            if depth >= min_hops && depth <= max_hops && current_id != source_node.id {
+            if depth >= req.min_hops && depth <= req.max_hops && current_id != source_node.id {
                 // If target_ids is set, only consider nodes in that set
                 let matches_target_ids = match &target_id_set {
                     Some(ids) => ids.contains(&current_id),
@@ -531,14 +513,14 @@ fn execute_variable_length_expand(
                 if matches_target_ids {
                     if let Some(target_node) = storage.get_node(current_id)? {
                         // Check target labels
-                        let matches_labels = target_labels.is_empty()
-                            || target_labels.iter().any(|l| target_node.has_label(l));
+                        let matches_labels = req.target_labels.is_empty()
+                            || req.target_labels.iter().any(|l| target_node.has_label(l));
 
                         if matches_labels {
                             let mut new_binding =
-                                binding.clone().with_node(target_variable, target_node);
+                                binding.clone().with_node(req.target_variable, target_node);
 
-                            if let Some(pv) = path_variable {
+                            if let Some(pv) = req.path_variable {
                                 // Build full path
                                 let mut nodes = Vec::new();
                                 for &nid in &path_nodes {
@@ -555,7 +537,7 @@ fn execute_variable_length_expand(
                                 );
                             }
 
-                            if let Some(rv) = rel_variable {
+                            if let Some(rv) = req.rel_variable {
                                 new_binding = new_binding.with_edge_list(rv, path_edges.clone());
                             }
 
@@ -573,16 +555,16 @@ fn execute_variable_length_expand(
             }
 
             // Don't expand beyond max depth
-            if depth >= max_hops {
+            if depth >= req.max_hops {
                 continue;
             }
 
             // Expand to neighbors
-            let relationships = get_edges(current_id, direction, storage)?;
-            let relationships = filter_edges_by_type(relationships, types);
+            let relationships = get_edges(current_id, req.direction, storage)?;
+            let relationships = filter_edges_by_type(relationships, req.types);
 
             for relationship in relationships {
-                let next_id = get_target_id(&relationship, current_id, direction);
+                let next_id = get_target_id(&relationship, current_id, req.direction);
 
                 // Skip already visited nodes (global deduplication)
                 if visited.contains(&next_id) {

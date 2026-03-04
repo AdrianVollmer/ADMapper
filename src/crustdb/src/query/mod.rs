@@ -1,6 +1,8 @@
 //! Cypher query parsing and execution.
 
+pub mod ast;
 pub mod executor;
+pub mod operators;
 pub mod parser;
 pub mod planner;
 
