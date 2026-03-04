@@ -105,7 +105,6 @@ export async function executeQuery(query: string, options: QueryExecutionOptions
       }
     };
 
-    // Note: fetchInitial: false because the endpoint is SSE-only, not JSON
     unsubscribe = subscribe(
       QUERY_PROGRESS_CHANNEL,
       { queryId },
@@ -145,8 +144,7 @@ export async function executeQuery(query: string, options: QueryExecutionOptions
       () => {
         cleanup();
         reject(new Error("Lost connection to query progress stream"));
-      },
-      { fetchInitial: false }
+      }
     );
   });
 }

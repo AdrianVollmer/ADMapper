@@ -32,10 +32,19 @@ export interface ChannelDefinition<T> {
   name: string;
   /** URL for SSE subscription (HTTP mode) */
   sseUrl: string | ((params: Record<string, string>) => string);
-  /** URL to fetch initial state */
-  initialStateUrl: string | ((params: Record<string, string>) => string);
+  /**
+   * URL to fetch initial state (JSON endpoint).
+   * Optional when sseOnly is true since initial state comes from SSE stream.
+   */
+  initialStateUrl?: string | ((params: Record<string, string>) => string);
   /** Key in event payload to filter by (e.g., 'job_id', 'query_id') */
   filterKey?: keyof T;
+  /**
+   * When true, the endpoint is SSE-only and doesn't support JSON initial state fetch.
+   * The SSE stream itself delivers initial state on connect.
+   * This prevents subscribe() from attempting api.get() which would hang.
+   */
+  sseOnly?: boolean;
 }
 
 // ============================================================================
@@ -50,7 +59,7 @@ export interface QueryActivityEvent {
 export const QUERY_ACTIVITY_CHANNEL: ChannelDefinition<QueryActivityEvent> = {
   name: "query-activity",
   sseUrl: "/api/query/activity",
-  initialStateUrl: "/api/query/activity",
+  sseOnly: true, // SSE stream sends initial state on connect
 };
 
 /** Query progress channel - tracks individual query progress */
@@ -71,8 +80,8 @@ export interface QueryProgressEvent {
 export const QUERY_PROGRESS_CHANNEL: ChannelDefinition<QueryProgressEvent> = {
   name: "query-progress",
   sseUrl: (params) => `/api/query/progress/${params.queryId}`,
-  initialStateUrl: (params) => `/api/query/progress/${params.queryId}`,
   filterKey: "query_id",
+  sseOnly: true, // SSE stream sends final state for completed queries
 };
 
 /** Import progress channel - tracks BloodHound import progress */
@@ -90,8 +99,8 @@ export interface ImportProgressEvent {
 export const IMPORT_PROGRESS_CHANNEL: ChannelDefinition<ImportProgressEvent> = {
   name: "import-progress",
   sseUrl: (params) => `/api/import/progress/${params.jobId}`,
-  initialStateUrl: (params) => `/api/import/progress/${params.jobId}`,
   filterKey: "job_id",
+  sseOnly: true, // SSE stream sends final state for completed imports
 };
 
 // ============================================================================
@@ -120,7 +129,9 @@ export function subscribe<T>(
   onError?: (error: string) => void,
   options: SubscribeOptions = {}
 ): Unsubscribe {
-  const { fetchInitial = true, autoReconnect = true, reconnectDelay = 5000 } = options;
+  // For SSE-only channels, don't attempt initial state fetch (would hang on streaming response)
+  const fetchInitialDefault = !channel.sseOnly;
+  const { fetchInitial = fetchInitialDefault, autoReconnect = true, reconnectDelay = 5000 } = options;
 
   let cancelled = false;
   let cleanup: (() => void) | null = null;
@@ -129,8 +140,8 @@ export function subscribe<T>(
   const start = async () => {
     if (cancelled) return;
 
-    // Fetch initial state if requested
-    if (fetchInitial) {
+    // Fetch initial state if requested and endpoint is available
+    if (fetchInitial && channel.initialStateUrl) {
       try {
         const url =
           typeof channel.initialStateUrl === "function" ? channel.initialStateUrl(params) : channel.initialStateUrl;

@@ -108,7 +108,6 @@ async function triggerTauriImport(): Promise<void> {
     });
 
     // Subscribe to progress events using the real job ID
-    // Note: fetchInitial: false because the endpoint is SSE-only, not JSON
     unsubscribe = subscribe(
       IMPORT_PROGRESS_CHANNEL,
       { jobId: response.job_id },
@@ -128,8 +127,7 @@ async function triggerTauriImport(): Promise<void> {
       () => {
         unsubscribe?.();
         unsubscribe = null;
-      },
-      { fetchInitial: false }
+      }
     );
   } catch (err) {
     showError(err instanceof Error ? err.message : String(err));
@@ -185,7 +183,6 @@ function subscribeToProgressUpdates(jobId: string): void {
     unsubscribe();
   }
 
-  // Note: fetchInitial: false because the endpoint is SSE-only, not JSON
   unsubscribe = subscribe(
     IMPORT_PROGRESS_CHANNEL,
     { jobId },
@@ -207,8 +204,7 @@ function subscribeToProgressUpdates(jobId: string): void {
       // Connection closed/error, clean up
       unsubscribe?.();
       unsubscribe = null;
-    },
-    { fetchInitial: false }
+    }
   );
 }
 
