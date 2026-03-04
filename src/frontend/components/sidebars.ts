@@ -1118,10 +1118,10 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
 async function showPathToHighValue(nodeId: string): Promise<void> {
   // High-value RIDs to check (same as backend)
   const HIGH_VALUE_RIDS = ["-519", "-512", "-518", "-516", "-498", "-544", "-548", "-549", "-551"];
-  const ridConditions = HIGH_VALUE_RIDS.map((rid) => `b.object_id ENDS WITH '${rid}'`).join(" OR ");
+  const ridConditions = HIGH_VALUE_RIDS.map((rid) => `b.objectid ENDS WITH '${rid}'`).join(" OR ");
 
   const escapedId = nodeId.replace(/'/g, "\\'");
-  const query = `MATCH p = (a)-[]-+(b) WHERE a.object_id = '${escapedId}' AND (${ridConditions}) RETURN p LIMIT 1`;
+  const query = `MATCH p = (a)-[]-+(b) WHERE a.objectid = '${escapedId}' AND (${ridConditions}) RETURN p LIMIT 1`;
 
   try {
     const result = await executeQuery(query, { extractGraph: true });

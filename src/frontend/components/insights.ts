@@ -403,11 +403,11 @@ async function loadDAAnalysis(): Promise<void> {
   try {
     // Run both queries in parallel - return distinct users to get accurate count
     const [effectiveResult, realResult] = await Promise.all([
-      executeQuery(`MATCH (u:User)-[r*1..10]->(g:Group) WHERE g.object_id ENDS WITH '-512' RETURN DISTINCT u`, {
+      executeQuery(`MATCH (u:User)-[r*1..10]->(g:Group) WHERE g.objectid ENDS WITH '-512' RETURN DISTINCT u`, {
         extractGraph: false,
         background: true,
       }),
-      executeQuery(`MATCH (u:User)-[:MemberOf*1..10]->(g:Group) WHERE g.object_id ENDS WITH '-512' RETURN DISTINCT u`, {
+      executeQuery(`MATCH (u:User)-[:MemberOf*1..10]->(g:Group) WHERE g.objectid ENDS WITH '-512' RETURN DISTINCT u`, {
         extractGraph: false,
         background: true,
       }),
@@ -451,7 +451,7 @@ async function loadReachability(): Promise<void> {
         // Use NONE() to exclude MemberOf relationships from the path
         const query = `
           MATCH (g:Group)-[r*1..5]->(target)
-          WHERE g.object_id ENDS WITH '${p.sid}'
+          WHERE g.objectid ENDS WITH '${p.sid}'
           AND NONE(rel IN r WHERE type(rel) = 'MemberOf')
           RETURN DISTINCT target
         `;
@@ -548,15 +548,15 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
 
   switch (queryType) {
     case "effective-das":
-      query = `MATCH p=(u:User)-[r*1..10]->(g:Group) WHERE g.object_id ENDS WITH '-512' RETURN p LIMIT 500`;
+      query = `MATCH p=(u:User)-[r*1..10]->(g:Group) WHERE g.objectid ENDS WITH '-512' RETURN p LIMIT 500`;
       break;
     case "real-das":
-      query = `MATCH p=(u:User)-[:MemberOf*1..10]->(g:Group) WHERE g.object_id ENDS WITH '-512' RETURN p LIMIT 500`;
+      query = `MATCH p=(u:User)-[:MemberOf*1..10]->(g:Group) WHERE g.objectid ENDS WITH '-512' RETURN p LIMIT 500`;
       break;
     case "reachability":
       query = `
         MATCH p=(g:Group)-[r*1..5]->(target)
-        WHERE g.object_id ENDS WITH '${extraData}'
+        WHERE g.objectid ENDS WITH '${extraData}'
         AND NONE(rel IN r WHERE type(rel) = 'MemberOf')
         RETURN p LIMIT 500
       `;
@@ -577,7 +577,7 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
       const cp = chokePointsState.data?.choke_points[index];
       if (!cp) return;
       // Query for the relationship and its connected nodes
-      query = `MATCH p=(a)-[r]->(b) WHERE a.object_id = '${cp.source_id}' AND b.object_id = '${cp.target_id}' AND type(r) = '${cp.rel_type}' RETURN p`;
+      query = `MATCH p=(a)-[r]->(b) WHERE a.objectid = '${cp.source_id}' AND b.objectid = '${cp.target_id}' AND type(r) = '${cp.rel_type}' RETURN p`;
       break;
     }
     default:

@@ -140,8 +140,10 @@ impl FalkorDbDatabase {
     fn flatten_node_properties(node: &DbNode) -> JsonValue {
         let mut props = Map::new();
 
-        // Add core identifiers
+        // Add core identifiers - include both objectid (BloodHound standard) and
+        // object_id (internal standard) for query compatibility across all backends
         props.insert("objectid".to_string(), json!(node.id));
+        props.insert("object_id".to_string(), json!(node.id));
         props.insert("name".to_string(), json!(node.name));
 
         // Flatten BloodHound properties into top-level fields
