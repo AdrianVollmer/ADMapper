@@ -2,7 +2,7 @@
 //!
 //! Uses the `neo4rs` crate for connecting to Neo4j via Bolt protocol.
 
-use neo4rs::{query, ConfigBuilder, Graph, Node as Neo4jNode, Query, Relation, Row};
+use neo4rs::{query, ConfigBuilder, Graph, Node as Neo4jNode, Path, Query, Relation, Row};
 use serde_json::{json, Map, Value as JsonValue};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -991,6 +991,58 @@ impl DatabaseBackend for Neo4jDatabase {
                             "target": rel.end_node_id(),
                             "rel_type": rel.typ(),
                             "properties": props,
+                        }))
+                    } else if let Ok(path) = row.get::<Path>(col) {
+                        // Convert path with _type marker for graph extraction
+                        // Get all nodes first so we can derive relationship endpoints
+                        let path_nodes = path.nodes();
+                        let nodes: Vec<JsonValue> = path_nodes
+                            .iter()
+                            .map(|node| {
+                                let db_node = Neo4jDatabase::neo4j_node_to_db_node(node);
+                                json!({
+                                    "_type": "node",
+                                    "id": node.id(),
+                                    "object_id": db_node.id,
+                                    "labels": node.labels(),
+                                    "properties": db_node.properties,
+                                })
+                            })
+                            .collect();
+                        // Relationships connect consecutive nodes in the path
+                        // Relationship i connects node i to node i+1
+                        let relationships: Vec<JsonValue> = path
+                            .rels()
+                            .iter()
+                            .enumerate()
+                            .map(|(i, rel)| {
+                                let mut props = Map::new();
+                                for key in rel.keys() {
+                                    if let Ok(v) = rel.get::<String>(key) {
+                                        props.insert(key.to_string(), JsonValue::String(v));
+                                    } else if let Ok(v) = rel.get::<i64>(key) {
+                                        props.insert(key.to_string(), JsonValue::Number(v.into()));
+                                    } else if let Ok(v) = rel.get::<bool>(key) {
+                                        props.insert(key.to_string(), JsonValue::Bool(v));
+                                    }
+                                }
+                                // Get source/target from adjacent nodes in the path
+                                let source = path_nodes.get(i).map(|n| n.id()).unwrap_or(0);
+                                let target = path_nodes.get(i + 1).map(|n| n.id()).unwrap_or(0);
+                                json!({
+                                    "_type": "relationship",
+                                    "id": rel.id(),
+                                    "source": source,
+                                    "target": target,
+                                    "rel_type": rel.typ(),
+                                    "properties": props,
+                                })
+                            })
+                            .collect();
+                        Some(json!({
+                            "_type": "path",
+                            "nodes": nodes,
+                            "relationships": relationships,
                         }))
                     } else if let Ok(val) = row.get::<String>(col) {
                         Some(JsonValue::String(val))
