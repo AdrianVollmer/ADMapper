@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::graph::{Node, PropertyValue, Relationship};
 use crate::query::planner::{
     AggregateFunction, CreateEdge, CreateNode, ExpandDirection, FilterPredicate, PlanExpr,
-    PlanLiteral, PlanOperator, ProjectColumn, QueryPlan, SetOperation,
+    PlanLiteral, PlanOperator, ProjectColumn, QueryPlan, SetOperation, TargetPropertyFilter,
 };
 use crate::query::{PathEdge, PathNode, QueryResult, QueryStats, ResultValue, Row};
 use crate::storage::SqliteStorage;
@@ -119,6 +119,9 @@ fn execute_operator(
             direction,
             min_hops,
             max_hops,
+            target_ids,
+            limit,
+            target_property_filter,
         } => {
             let bindings = execute_operator_to_bindings(source, storage, stats)?;
             execute_variable_length_expand(
@@ -132,6 +135,9 @@ fn execute_operator(
                 *direction,
                 *min_hops,
                 *max_hops,
+                target_ids.as_deref(),
+                *limit,
+                target_property_filter.as_ref(),
                 storage,
             )
         }
@@ -414,6 +420,30 @@ fn execute_expand(
     Ok(ExecutionResult::Bindings(result))
 }
 
+/// Resolve a target property filter to matching nodes.
+/// This enables early termination during BFS by pre-computing valid targets.
+fn resolve_target_property_filter(
+    filter: &TargetPropertyFilter,
+    target_labels: &[String],
+    storage: &SqliteStorage,
+) -> Result<Vec<Node>> {
+    match filter {
+        TargetPropertyFilter::Eq { property, value } => {
+            storage.find_nodes_by_property(property, value, target_labels, None)
+        }
+        TargetPropertyFilter::EndsWith { property, suffix } => {
+            storage.find_nodes_by_property_suffix(property, suffix, target_labels)
+        }
+        TargetPropertyFilter::StartsWith { property, prefix } => {
+            storage.find_nodes_by_property_prefix(property, prefix, target_labels)
+        }
+        TargetPropertyFilter::Contains {
+            property,
+            substring,
+        } => storage.find_nodes_by_property_contains(property, substring, target_labels),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn execute_variable_length_expand(
     bindings: Vec<Binding>,
@@ -426,11 +456,47 @@ fn execute_variable_length_expand(
     direction: ExpandDirection,
     min_hops: u32,
     max_hops: u32,
+    target_ids: Option<&[i64]>,
+    limit: Option<u64>,
+    target_property_filter: Option<&TargetPropertyFilter>,
     storage: &SqliteStorage,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
 
+    // Resolve target_property_filter to node IDs for early termination
+    let filter_resolved_ids: Option<HashSet<i64>> = if let Some(filter) = target_property_filter {
+        let nodes = resolve_target_property_filter(filter, target_labels, storage)?;
+        if nodes.is_empty() {
+            // No matching targets exist - can return early
+            return Ok(ExecutionResult::Bindings(result));
+        }
+        Some(nodes.into_iter().map(|n| n.id).collect())
+    } else {
+        None
+    };
+
+    // Combine explicit target_ids with filter-resolved IDs
+    let target_id_set: Option<HashSet<i64>> = match (target_ids, &filter_resolved_ids) {
+        (Some(ids), Some(filter_ids)) => {
+            // Intersection: node must be in both sets
+            let explicit: HashSet<i64> = ids.iter().copied().collect();
+            Some(explicit.intersection(filter_ids).copied().collect())
+        }
+        (Some(ids), None) => Some(ids.iter().copied().collect()),
+        (None, Some(filter_ids)) => Some(filter_ids.clone()),
+        (None, None) => None,
+    };
+
+    let limit = limit.map(|l| l as usize);
+
     for binding in bindings {
+        // Early termination: check if we've reached the limit
+        if let Some(lim) = limit {
+            if result.len() >= lim {
+                break;
+            }
+        }
+
         let source_node = binding
             .get_node(source_variable)
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
@@ -444,42 +510,64 @@ fn execute_variable_length_expand(
         queue.push_back((source_node.id, vec![source_node.id], Vec::new()));
         visited.insert(source_node.id);
 
-        while let Some((current_id, path_nodes, path_edges)) = queue.pop_front() {
+        'bfs: while let Some((current_id, path_nodes, path_edges)) = queue.pop_front() {
             let depth = path_edges.len() as u32;
+
+            // Early termination: check if we've reached the limit
+            if let Some(lim) = limit {
+                if result.len() >= lim {
+                    break 'bfs;
+                }
+            }
 
             // Check if we've reached a valid target
             if depth >= min_hops && depth <= max_hops && current_id != source_node.id {
-                if let Some(target_node) = storage.get_node(current_id)? {
-                    // Check target labels
-                    let matches_labels = target_labels.is_empty()
-                        || target_labels.iter().any(|l| target_node.has_label(l));
+                // If target_ids is set, only consider nodes in that set
+                let matches_target_ids = match &target_id_set {
+                    Some(ids) => ids.contains(&current_id),
+                    None => true,
+                };
 
-                    if matches_labels {
-                        let mut new_binding =
-                            binding.clone().with_node(target_variable, target_node);
+                if matches_target_ids {
+                    if let Some(target_node) = storage.get_node(current_id)? {
+                        // Check target labels
+                        let matches_labels = target_labels.is_empty()
+                            || target_labels.iter().any(|l| target_node.has_label(l));
 
-                        if let Some(pv) = path_variable {
-                            // Build full path
-                            let mut nodes = Vec::new();
-                            for &nid in &path_nodes {
-                                if let Some(n) = storage.get_node(nid)? {
-                                    nodes.push(n);
+                        if matches_labels {
+                            let mut new_binding =
+                                binding.clone().with_node(target_variable, target_node);
+
+                            if let Some(pv) = path_variable {
+                                // Build full path
+                                let mut nodes = Vec::new();
+                                for &nid in &path_nodes {
+                                    if let Some(n) = storage.get_node(nid)? {
+                                        nodes.push(n);
+                                    }
+                                }
+                                new_binding = new_binding.with_path(
+                                    pv,
+                                    Path {
+                                        nodes,
+                                        relationships: path_edges.clone(),
+                                    },
+                                );
+                            }
+
+                            if let Some(rv) = rel_variable {
+                                new_binding = new_binding.with_edge_list(rv, path_edges.clone());
+                            }
+
+                            result.push(new_binding);
+
+                            // Early termination after finding a match if limit is 1
+                            if let Some(lim) = limit {
+                                if result.len() >= lim {
+                                    break 'bfs;
                                 }
                             }
-                            new_binding = new_binding.with_path(
-                                pv,
-                                Path {
-                                    nodes,
-                                    relationships: path_edges.clone(),
-                                },
-                            );
                         }
-
-                        if let Some(rv) = rel_variable {
-                            new_binding = new_binding.with_edge_list(rv, path_edges.clone());
-                        }
-
-                        result.push(new_binding);
                     }
                 }
             }

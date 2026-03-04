@@ -65,6 +65,14 @@ pub enum PlanOperator {
         direction: ExpandDirection,
         min_hops: u32,
         max_hops: u32,
+        /// Pre-resolved target node IDs for early termination.
+        /// When set, BFS only reports paths to these specific nodes.
+        target_ids: Option<Vec<i64>>,
+        /// Limit for early termination (pushed down from RETURN ... LIMIT).
+        limit: Option<u64>,
+        /// Target property filter for early termination (e.g., object_id ENDS WITH '-519').
+        /// Format: (property_name, operator, value) where operator is "=", "ENDS WITH", etc.
+        target_property_filter: Option<TargetPropertyFilter>,
     },
     /// Shortest path search (BFS with k paths).
     ShortestPath {
@@ -162,6 +170,23 @@ impl From<Direction> for ExpandDirection {
             Direction::Both => ExpandDirection::Both,
         }
     }
+}
+
+/// Target property filter for variable-length path early termination.
+/// Used to pre-resolve matching target nodes during BFS.
+#[derive(Debug, Clone)]
+pub enum TargetPropertyFilter {
+    /// Exact property match: property = value
+    Eq {
+        property: String,
+        value: serde_json::Value,
+    },
+    /// Property ends with suffix: property ENDS WITH 'suffix'
+    EndsWith { property: String, suffix: String },
+    /// Property starts with prefix: property STARTS WITH 'prefix'
+    StartsWith { property: String, prefix: String },
+    /// Property contains substring: property CONTAINS 'substring'
+    Contains { property: String, substring: String },
 }
 
 /// Filter predicate in execution plan.
@@ -579,6 +604,9 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
                 direction: rel.direction.into(),
                 min_hops,
                 max_hops,
+                target_ids: None,
+                limit: None,
+                target_property_filter: None, // Will be populated by predicate pushdown
             };
         } else {
             // Single-hop expand
@@ -1244,20 +1272,51 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                     property_filter,
                 },
 
-                // LIMIT on Project(NodeScan) can be pushed through
-                PlanOperator::Project {
+                // LIMIT on VariableLengthExpand can be pushed down for early termination
+                PlanOperator::VariableLengthExpand {
                     source: inner_source,
+                    source_variable,
+                    rel_variable,
+                    target_variable,
+                    target_labels,
+                    path_variable,
+                    types,
+                    direction,
+                    min_hops,
+                    max_hops,
+                    target_ids,
+                    limit: None,
+                    target_property_filter,
+                } => PlanOperator::VariableLengthExpand {
+                    source: Box::new(optimize_operator(*inner_source)),
+                    source_variable,
+                    rel_variable,
+                    target_variable,
+                    target_labels,
+                    path_variable,
+                    types,
+                    direction,
+                    min_hops,
+                    max_hops,
+                    target_ids,
+                    limit: Some(count),
+                    target_property_filter,
+                },
+
+                // LIMIT on Project can be pushed through to inner operators
+                PlanOperator::Project {
+                    source: project_source,
                     columns,
                     distinct: false,
                 } => {
-                    if let PlanOperator::NodeScan {
-                        variable,
-                        label_groups,
-                        limit: None,
-                        property_filter,
-                    } = *inner_source
-                    {
-                        PlanOperator::Project {
+                    match *project_source {
+                        // Push through to NodeScan
+                        PlanOperator::NodeScan {
+                            variable,
+                            label_groups,
+                            limit: None,
+                            property_filter,
+                        } => PlanOperator::Project {
                             source: Box::new(PlanOperator::NodeScan {
                                 variable,
                                 label_groups,
@@ -1266,16 +1325,50 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                             }),
                             columns,
                             distinct: false,
-                        }
-                    } else {
-                        PlanOperator::Limit {
-                            source: Box::new(PlanOperator::Project {
+                        },
+                        // Push through to VariableLengthExpand
+                        PlanOperator::VariableLengthExpand {
+                            source: inner_source,
+                            source_variable,
+                            rel_variable,
+                            target_variable,
+                            target_labels,
+                            path_variable,
+                            types,
+                            direction,
+                            min_hops,
+                            max_hops,
+                            target_ids,
+                            limit: None,
+                            target_property_filter,
+                        } => PlanOperator::Project {
+                            source: Box::new(PlanOperator::VariableLengthExpand {
                                 source: Box::new(optimize_operator(*inner_source)),
+                                source_variable,
+                                rel_variable,
+                                target_variable,
+                                target_labels,
+                                path_variable,
+                                types,
+                                direction,
+                                min_hops,
+                                max_hops,
+                                target_ids,
+                                limit: Some(count),
+                                target_property_filter,
+                            }),
+                            columns,
+                            distinct: false,
+                        },
+                        // Default: keep LIMIT on top
+                        other => PlanOperator::Limit {
+                            source: Box::new(PlanOperator::Project {
+                                source: Box::new(optimize_operator(other)),
                                 columns,
                                 distinct: false,
                             }),
                             count,
-                        }
+                        },
                     }
                 }
 
@@ -1286,11 +1379,82 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             }
         }
 
-        // Recursively optimize other operators
-        PlanOperator::Filter { source, predicate } => PlanOperator::Filter {
-            source: Box::new(optimize_operator(*source)),
-            predicate,
-        },
+        // Optimize Filter: try to push predicates into underlying operators
+        PlanOperator::Filter { source, predicate } => {
+            // Try to push target predicates into VariableLengthExpand
+            if let PlanOperator::VariableLengthExpand {
+                source: inner_source,
+                source_variable,
+                rel_variable,
+                target_variable,
+                target_labels,
+                path_variable,
+                types,
+                direction,
+                min_hops,
+                max_hops,
+                target_ids,
+                limit,
+                target_property_filter: None, // Only if not already set
+            } = *source
+            {
+                // Try to extract a pushable target predicate
+                if let Some((pushed_filter, remaining_predicate)) =
+                    extract_target_property_filter(&predicate, &target_variable)
+                {
+                    let optimized_expand = PlanOperator::VariableLengthExpand {
+                        source: Box::new(optimize_operator(*inner_source)),
+                        source_variable,
+                        rel_variable,
+                        target_variable,
+                        target_labels,
+                        path_variable,
+                        types,
+                        direction,
+                        min_hops,
+                        max_hops,
+                        target_ids,
+                        limit,
+                        target_property_filter: Some(pushed_filter),
+                    };
+
+                    // If there's remaining predicate, wrap with Filter
+                    if let Some(remaining) = remaining_predicate {
+                        PlanOperator::Filter {
+                            source: Box::new(optimized_expand),
+                            predicate: remaining,
+                        }
+                    } else {
+                        optimized_expand
+                    }
+                } else {
+                    // Couldn't push predicate, just optimize recursively
+                    PlanOperator::Filter {
+                        source: Box::new(PlanOperator::VariableLengthExpand {
+                            source: Box::new(optimize_operator(*inner_source)),
+                            source_variable,
+                            rel_variable,
+                            target_variable,
+                            target_labels,
+                            path_variable,
+                            types,
+                            direction,
+                            min_hops,
+                            max_hops,
+                            target_ids,
+                            limit,
+                            target_property_filter: None,
+                        }),
+                        predicate,
+                    }
+                }
+            } else {
+                PlanOperator::Filter {
+                    source: Box::new(optimize_operator(*source)),
+                    predicate,
+                }
+            }
+        }
         PlanOperator::Project {
             source,
             columns,
@@ -1334,6 +1498,9 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             direction,
             min_hops,
             max_hops,
+            target_ids,
+            limit,
+            target_property_filter,
         } => PlanOperator::VariableLengthExpand {
             source: Box::new(optimize_operator(*source)),
             source_variable,
@@ -1345,6 +1512,9 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             direction,
             min_hops,
             max_hops,
+            target_ids,
+            limit,
+            target_property_filter,
         },
         PlanOperator::ShortestPath {
             source,
@@ -1396,6 +1566,137 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
 
         // Leaf operators - no optimization needed
         other => other,
+    }
+}
+
+/// Extract a target property filter from a predicate, if possible.
+///
+/// Looks for simple property conditions on the target variable that can be
+/// pushed into VariableLengthExpand for early termination during BFS.
+///
+/// Supported patterns:
+/// - `target.property = value` → Eq filter
+/// - `target.property ENDS WITH 'suffix'` → EndsWith filter
+/// - `target.property STARTS WITH 'prefix'` → StartsWith filter
+/// - `target.property CONTAINS 'substring'` → Contains filter
+///
+/// Returns (pushed_filter, remaining_predicate) where remaining_predicate
+/// is None if the entire predicate was pushed.
+fn extract_target_property_filter(
+    predicate: &FilterPredicate,
+    target_variable: &str,
+) -> Option<(TargetPropertyFilter, Option<FilterPredicate>)> {
+    match predicate {
+        // Simple equality: target.property = value
+        FilterPredicate::Eq { left, right } => {
+            if let PlanExpr::Property { variable, property } = left {
+                if variable == target_variable {
+                    if let PlanExpr::Literal(PlanLiteral::String(s)) = right {
+                        return Some((
+                            TargetPropertyFilter::Eq {
+                                property: property.clone(),
+                                value: serde_json::Value::String(s.clone()),
+                            },
+                            None,
+                        ));
+                    }
+                    if let PlanExpr::Literal(PlanLiteral::Int(i)) = right {
+                        return Some((
+                            TargetPropertyFilter::Eq {
+                                property: property.clone(),
+                                value: serde_json::Value::Number((*i).into()),
+                            },
+                            None,
+                        ));
+                    }
+                }
+            }
+            None
+        }
+
+        // ENDS WITH: target.property ENDS WITH 'suffix'
+        FilterPredicate::EndsWith { expr, suffix } => {
+            if let PlanExpr::Property { variable, property } = expr {
+                if variable == target_variable {
+                    return Some((
+                        TargetPropertyFilter::EndsWith {
+                            property: property.clone(),
+                            suffix: suffix.clone(),
+                        },
+                        None,
+                    ));
+                }
+            }
+            None
+        }
+
+        // STARTS WITH: target.property STARTS WITH 'prefix'
+        FilterPredicate::StartsWith { expr, prefix } => {
+            if let PlanExpr::Property { variable, property } = expr {
+                if variable == target_variable {
+                    return Some((
+                        TargetPropertyFilter::StartsWith {
+                            property: property.clone(),
+                            prefix: prefix.clone(),
+                        },
+                        None,
+                    ));
+                }
+            }
+            None
+        }
+
+        // CONTAINS: target.property CONTAINS 'substring'
+        FilterPredicate::Contains { expr, substring } => {
+            if let PlanExpr::Property { variable, property } = expr {
+                if variable == target_variable {
+                    return Some((
+                        TargetPropertyFilter::Contains {
+                            property: property.clone(),
+                            substring: substring.clone(),
+                        },
+                        None,
+                    ));
+                }
+            }
+            None
+        }
+
+        // AND: try to extract from either side
+        FilterPredicate::And { left, right } => {
+            // Try left side first
+            if let Some((filter, remaining_left)) =
+                extract_target_property_filter(left, target_variable)
+            {
+                // Combine remaining left (if any) with right
+                let remaining = match remaining_left {
+                    Some(rem_left) => Some(FilterPredicate::And {
+                        left: Box::new(rem_left),
+                        right: right.clone(),
+                    }),
+                    None => Some((**right).clone()),
+                };
+                return Some((filter, remaining));
+            }
+            // Try right side
+            if let Some((filter, remaining_right)) =
+                extract_target_property_filter(right, target_variable)
+            {
+                // Combine left with remaining right (if any)
+                let remaining = match remaining_right {
+                    Some(rem_right) => Some(FilterPredicate::And {
+                        left: left.clone(),
+                        right: Box::new(rem_right),
+                    }),
+                    None => Some((**left).clone()),
+                };
+                return Some((filter, remaining));
+            }
+            None
+        }
+
+        // Other predicates can't be pushed
+        _ => None,
     }
 }
 
@@ -1456,6 +1757,55 @@ mod tests {
         // Should be: Project -> Expand -> NodeScan
         if let PlanOperator::Project { source, .. } = plan.root {
             assert!(matches!(*source, PlanOperator::Expand { .. }));
+        } else {
+            panic!("Expected Project");
+        }
+    }
+
+    #[test]
+    fn test_plan_variable_length_limit_pushdown() {
+        let plan = plan_query("MATCH (a)-[*1..5]->(b) RETURN b LIMIT 1");
+        // Should have limit pushed into VariableLengthExpand
+        if let PlanOperator::Project { source, .. } = plan.root {
+            if let PlanOperator::VariableLengthExpand { limit, .. } = *source {
+                assert_eq!(
+                    limit,
+                    Some(1),
+                    "LIMIT should be pushed into VariableLengthExpand"
+                );
+            } else {
+                panic!("Expected VariableLengthExpand");
+            }
+        } else {
+            panic!("Expected Project");
+        }
+    }
+
+    #[test]
+    fn test_plan_variable_length_filter_pushdown() {
+        let plan = plan_query("MATCH (a)-[*1..5]->(b) WHERE b.name ENDS WITH 'admin' RETURN b");
+        // Should have target_property_filter pushed into VariableLengthExpand
+        if let PlanOperator::Project { source, .. } = plan.root {
+            if let PlanOperator::VariableLengthExpand {
+                target_property_filter,
+                ..
+            } = *source
+            {
+                assert!(
+                    target_property_filter.is_some(),
+                    "ENDS WITH predicate should be pushed into VariableLengthExpand"
+                );
+                if let Some(TargetPropertyFilter::EndsWith { property, suffix }) =
+                    target_property_filter
+                {
+                    assert_eq!(property, "name");
+                    assert_eq!(suffix, "admin");
+                } else {
+                    panic!("Expected EndsWith filter");
+                }
+            } else {
+                panic!("Expected VariableLengthExpand");
+            }
         } else {
             panic!("Expected Project");
         }

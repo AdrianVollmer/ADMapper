@@ -867,6 +867,95 @@ impl SqliteStorage {
         }
     }
 
+    /// Find nodes where a property ends with a given suffix.
+    /// Used for pattern matching like `object_id ENDS WITH '-519'`.
+    pub fn find_nodes_by_property_suffix(
+        &self,
+        property: &str,
+        suffix: &str,
+        labels: &[String],
+    ) -> Result<Vec<Node>> {
+        self.find_nodes_by_property_pattern(property, &format!("%{}", suffix), labels)
+    }
+
+    /// Find nodes where a property starts with a given prefix.
+    /// Used for pattern matching like `object_id STARTS WITH 'S-1-5'`.
+    pub fn find_nodes_by_property_prefix(
+        &self,
+        property: &str,
+        prefix: &str,
+        labels: &[String],
+    ) -> Result<Vec<Node>> {
+        self.find_nodes_by_property_pattern(property, &format!("{}%", prefix), labels)
+    }
+
+    /// Find nodes where a property contains a given substring.
+    /// Used for pattern matching like `name CONTAINS 'admin'`.
+    pub fn find_nodes_by_property_contains(
+        &self,
+        property: &str,
+        substring: &str,
+        labels: &[String],
+    ) -> Result<Vec<Node>> {
+        self.find_nodes_by_property_pattern(property, &format!("%{}%", substring), labels)
+    }
+
+    /// Internal helper for LIKE-based property pattern matching.
+    fn find_nodes_by_property_pattern(
+        &self,
+        property: &str,
+        pattern: &str,
+        labels: &[String],
+    ) -> Result<Vec<Node>> {
+        validate_property_name(property)?;
+
+        let sql = if labels.is_empty() {
+            format!(
+                "SELECT n.id, json(n.properties), GROUP_CONCAT(nl.name) as labels
+                 FROM nodes n
+                 LEFT JOIN node_label_map nlm ON n.id = nlm.node_id
+                 LEFT JOIN node_labels nl ON nlm.label_id = nl.id
+                 WHERE json_extract(n.properties, '$.{}') LIKE ?1
+                 GROUP BY n.id",
+                property
+            )
+        } else {
+            let label_placeholders: Vec<String> =
+                (2..=labels.len() + 1).map(|i| format!("?{}", i)).collect();
+            format!(
+                "SELECT n.id, json(n.properties), GROUP_CONCAT(all_labels.name) as labels
+                 FROM (
+                     SELECT DISTINCT nodes.id, nodes.properties
+                     FROM nodes
+                     JOIN node_label_map nlm ON nodes.id = nlm.node_id
+                     JOIN node_labels nl ON nlm.label_id = nl.id
+                     WHERE json_extract(nodes.properties, '$.{}') LIKE ?1
+                       AND nl.name IN ({})
+                 ) AS n
+                 LEFT JOIN node_label_map nlm2 ON n.id = nlm2.node_id
+                 LEFT JOIN node_labels all_labels ON nlm2.label_id = all_labels.id
+                 GROUP BY n.id, n.properties",
+                property,
+                label_placeholders.join(", ")
+            )
+        };
+
+        let mut stmt = self.conn.prepare(&sql)?;
+
+        if labels.is_empty() {
+            self.collect_nodes_from_stmt(&mut stmt, [&pattern as &dyn rusqlite::ToSql])
+        } else {
+            let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            param_values.push(Box::new(pattern.to_string()));
+            for label in labels {
+                param_values.push(Box::new(label.clone()));
+            }
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                param_values.iter().map(|p| p.as_ref()).collect();
+            self.collect_nodes_from_stmt(&mut stmt, params_refs.as_slice())
+        }
+    }
+
     /// Build an index of property values to node IDs for efficient batch lookups.
     ///
     /// Returns a HashMap from property value to node ID.
