@@ -176,6 +176,10 @@ pub fn run_desktop(database_url: Option<&str>) {
             // Mutations
             tauri_commands::add_node,
             tauri_commands::add_edge,
+            tauri_commands::delete_node,
+            tauri_commands::delete_edge,
+            // Insights (additional)
+            tauri_commands::graph_choke_points,
             // Query
             tauri_commands::graph_query,
             // Query history
@@ -194,6 +198,8 @@ pub fn run_desktop(database_url: Option<&str>) {
             tauri_commands::generate_data,
             // Health
             tauri_commands::health_check,
+            // Query activity
+            tauri_commands::get_query_activity,
             // Import
             tauri_commands::import_from_paths,
             // File operations

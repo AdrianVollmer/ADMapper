@@ -337,12 +337,15 @@ pub fn node_connections(
     })
 }
 
-/// Get node security status (quick checks only, no path finding).
-pub fn node_status_quick(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeStatus, String> {
+/// Get node security status with full path-finding checks.
+pub fn node_status_full(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeStatus, String> {
     let nodes = db
         .get_nodes_by_ids(std::slice::from_ref(&node_id.to_string()))
         .map_err(|e| e.to_string())?;
     let node = nodes.first();
+
+    // Get node label to check if we should do expensive membership/path checks
+    let node_label = node.map(|n| n.label.to_lowercase()).unwrap_or_default();
 
     // Check owned status
     let owned = node
@@ -369,34 +372,195 @@ pub fn node_status_quick(db: &dyn DatabaseBackend, node_id: &str) -> Result<Node
         .map(|enabled| !enabled) // disabled = NOT enabled
         .unwrap_or(false); // if no enabled property, assume not disabled
 
-    // Check if the node has is_highvalue property set at import time (preferred)
-    let is_high_value_property = node
-        .and_then(|n| n.properties.get("is_highvalue"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    // Only run expensive membership/path checks for users, computers, and groups
+    let dominated_types = ["user", "computer", "group"];
+    if !dominated_types.contains(&node_label.as_str()) {
+        return Ok(NodeStatus {
+            owned,
+            is_disabled: false,
+            is_enterprise_admin: false,
+            is_domain_admin: false,
+            is_high_value: false,
+            has_path_to_high_value: false,
+            path_length: None,
+        });
+    }
 
-    // Check group memberships for Domain Admins and Enterprise Admins
+    // Check group memberships for Enterprise Admins (-519)
     let is_enterprise_admin = db
         .find_membership_by_sid_suffix(node_id, "-519")
         .map_err(|e| e.to_string())?
         .is_some();
+
+    if is_enterprise_admin {
+        return Ok(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: true,
+            is_domain_admin: false,
+            is_high_value: true,
+            has_path_to_high_value: false,
+            path_length: None,
+        });
+    }
+
+    // Check group memberships for Domain Admins (-512)
     let is_domain_admin = db
         .find_membership_by_sid_suffix(node_id, "-512")
         .map_err(|e| e.to_string())?
         .is_some();
 
-    // Node is high value if property is set or if it's a member of DA/EA
-    let is_high_value = is_high_value_property || is_domain_admin || is_enterprise_admin;
+    if is_domain_admin {
+        return Ok(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: false,
+            is_domain_admin: true,
+            is_high_value: true,
+            has_path_to_high_value: false,
+            path_length: None,
+        });
+    }
 
+    // Check if the node has highvalue property or is member of other high-value groups
+    let is_high_value_property = node
+        .and_then(|n| {
+            let props = &n.properties;
+            props
+                .get("highvalue")
+                .or(props.get("HighValue"))
+                .or(props.get("highValue"))
+                .or(props.get("is_highvalue"))
+                .and_then(|v| {
+                    v.as_bool()
+                        .or_else(|| v.as_i64().map(|i| i == 1))
+                        .or_else(|| v.as_str().map(|s| s == "true"))
+                })
+        })
+        .unwrap_or(false);
+
+    // Other high-value RIDs (excluding -512 DA and -519 EA which are checked above)
+    const OTHER_HIGH_VALUE_RIDS: &[&str] =
+        &["-518", "-516", "-498", "-544", "-548", "-549", "-551"];
+
+    let mut is_high_value = is_high_value_property;
+    if !is_high_value {
+        for rid in OTHER_HIGH_VALUE_RIDS {
+            if db
+                .find_membership_by_sid_suffix(node_id, rid)
+                .map_err(|e| e.to_string())?
+                .is_some()
+            {
+                is_high_value = true;
+                break;
+            }
+        }
+    }
+
+    if is_high_value {
+        return Ok(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: false,
+            is_domain_admin: false,
+            is_high_value: true,
+            has_path_to_high_value: false,
+            path_length: None,
+        });
+    }
+
+    // Check paths to high-value targets
+    // First check path to Enterprise Admins (-519)
+    if let Some(hops) = check_path_to_rid(db, node_id, "-519")? {
+        return Ok(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: false,
+            is_domain_admin: false,
+            is_high_value: false,
+            has_path_to_high_value: true,
+            path_length: Some(hops),
+        });
+    }
+
+    // Check path to Domain Admins (-512)
+    if let Some(hops) = check_path_to_rid(db, node_id, "-512")? {
+        return Ok(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: false,
+            is_domain_admin: false,
+            is_high_value: false,
+            has_path_to_high_value: true,
+            path_length: Some(hops),
+        });
+    }
+
+    // Check path to other high-value groups
+    let rid_conditions: Vec<String> = OTHER_HIGH_VALUE_RIDS
+        .iter()
+        .map(|rid| format!("b.object_id ENDS WITH '{}'", rid))
+        .collect();
+    if let Some(hops) = check_path_to_condition(db, node_id, &rid_conditions.join(" OR "))? {
+        return Ok(NodeStatus {
+            owned,
+            is_disabled,
+            is_enterprise_admin: false,
+            is_domain_admin: false,
+            is_high_value: false,
+            has_path_to_high_value: true,
+            path_length: Some(hops),
+        });
+    }
+
+    // No high-value status or paths found
     Ok(NodeStatus {
         owned,
         is_disabled,
-        is_enterprise_admin,
-        is_domain_admin,
-        is_high_value,
+        is_enterprise_admin: false,
+        is_domain_admin: false,
+        is_high_value: false,
         has_path_to_high_value: false,
         path_length: None,
     })
+}
+
+/// Helper: Check if there's a path to a group with given RID suffix.
+/// Returns Some(hops) if path found, None otherwise.
+fn check_path_to_rid(
+    db: &dyn DatabaseBackend,
+    node_id: &str,
+    rid: &str,
+) -> Result<Option<usize>, String> {
+    let condition = format!("b.object_id ENDS WITH '{}'", rid);
+    check_path_to_condition(db, node_id, &condition)
+}
+
+/// Helper: Check if there's a path matching a WHERE condition.
+/// Returns Some(hops) if path found, None otherwise.
+fn check_path_to_condition(
+    db: &dyn DatabaseBackend,
+    node_id: &str,
+    condition: &str,
+) -> Result<Option<usize>, String> {
+    let escaped_id = node_id.replace('\'', "\\'");
+    // Use variable-length path syntax (1 to 20 hops)
+    let query_text = format!(
+        "MATCH p = (a)-[*1..20]->(b) WHERE a.object_id = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
+        escaped_id, condition
+    );
+
+    let result = db
+        .run_custom_query(&query_text)
+        .map_err(|e| e.to_string())?;
+    if let Some(rows) = result.get("rows").and_then(|v| v.as_array()) {
+        if let Some(first_row) = rows.first().and_then(|r| r.as_array()) {
+            if let Some(hops) = first_row.first().and_then(|h| h.as_i64()) {
+                return Ok(Some(hops as usize));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Set node owned status.
@@ -608,6 +772,50 @@ pub fn add_edge(
         target,
         rel_type,
     })
+}
+
+/// Delete a node from the graph.
+pub fn delete_node(db: &dyn DatabaseBackend, node_id: &str) -> Result<(), String> {
+    // Escape single quotes in the ID to prevent injection
+    let escaped_id = node_id.replace('\'', "\\'");
+    // Use DETACH DELETE to also remove connected relationships
+    let query = format!(
+        "MATCH (n) WHERE n.objectid = '{}' OR n.name = '{}' DETACH DELETE n",
+        escaped_id, escaped_id
+    );
+    db.run_custom_query(&query).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Delete an edge from the graph.
+pub fn delete_edge(
+    db: &dyn DatabaseBackend,
+    source: &str,
+    target: &str,
+    rel_type: &str,
+) -> Result<(), String> {
+    // Escape single quotes to prevent injection
+    let escaped_source = source.replace('\'', "\\'");
+    let escaped_target = target.replace('\'', "\\'");
+    // Relationship type should be alphanumeric (relationship name)
+    let safe_edge_type: String = rel_type
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    let query = format!(
+        "MATCH (a)-[r:{}]->(b) WHERE (a.objectid = '{}' OR a.name = '{}') AND (b.objectid = '{}' OR b.name = '{}') DELETE r",
+        safe_edge_type, escaped_source, escaped_source, escaped_target, escaped_target
+    );
+    db.run_custom_query(&query).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Get choke points in the graph using relationship betweenness centrality.
+pub fn graph_choke_points(
+    db: &dyn DatabaseBackend,
+    limit: usize,
+) -> Result<crate::db::ChokePointsResponse, String> {
+    db.get_choke_points(limit).map_err(|e| e.to_string())
 }
 
 // ============================================================================

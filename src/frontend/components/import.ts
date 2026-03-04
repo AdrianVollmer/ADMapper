@@ -7,10 +7,9 @@
 
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph, ADNodeType, ADEdgeType } from "../graph/types";
-import type { ImportProgress } from "../api/types";
 import { showError as showNotification } from "../utils/notifications";
 import { executeQuery } from "../utils/query";
-import { subscribeToImportProgress, type Unsubscribe } from "../api/events";
+import { subscribe, IMPORT_PROGRESS_CHANNEL, type ImportProgressEvent, type Unsubscribe } from "../api/transport";
 import { isRunningInTauri } from "../api/client";
 
 // DOM element references
@@ -109,9 +108,10 @@ async function triggerTauriImport(): Promise<void> {
     });
 
     // Subscribe to progress events using the real job ID
-    unsubscribe = subscribeToImportProgress(
-      response.job_id,
-      (progress: ImportProgress) => {
+    unsubscribe = subscribe(
+      IMPORT_PROGRESS_CHANNEL,
+      { jobId: response.job_id },
+      (progress: ImportProgressEvent) => {
         updateProgressUI(progress);
         if (progress.status === "completed") {
           unsubscribe?.();
@@ -183,9 +183,10 @@ function subscribeToProgressUpdates(jobId: string): void {
     unsubscribe();
   }
 
-  unsubscribe = subscribeToImportProgress(
-    jobId,
-    (progress: ImportProgress) => {
+  unsubscribe = subscribe(
+    IMPORT_PROGRESS_CHANNEL,
+    { jobId },
+    (progress: ImportProgressEvent) => {
       updateProgressUI(progress);
 
       if (progress.status === "completed") {
@@ -208,7 +209,7 @@ function subscribeToProgressUpdates(jobId: string): void {
 }
 
 /** Update the progress UI */
-function updateProgressUI(progress: ImportProgress): void {
+function updateProgressUI(progress: ImportProgressEvent): void {
   const percent = progress.total_files > 0 ? Math.round((progress.files_processed / progress.total_files) * 100) : 0;
 
   if (progressFill) {

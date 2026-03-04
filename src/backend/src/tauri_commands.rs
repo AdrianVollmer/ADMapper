@@ -159,12 +159,12 @@ pub fn node_connections(
     core::node_connections(db.as_ref(), &id, &direction)
 }
 
-/// Get node security status.
+/// Get node security status (includes path finding).
 #[tauri::command]
 pub fn node_status(state: State<'_, AppState>, id: String) -> Result<core::NodeStatus, String> {
     let db = state.db().ok_or("Not connected to database")?;
     debug!(node_id = %id, "Checking node status (IPC)");
-    core::node_status_quick(db.as_ref(), &id)
+    core::node_status_full(db.as_ref(), &id)
 }
 
 /// Set node owned status.
@@ -279,6 +279,37 @@ pub fn add_edge(
         rel_type,
         properties.unwrap_or(JsonValue::Null),
     )
+}
+
+/// Delete a node from the graph.
+#[tauri::command]
+pub fn delete_node(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let db = state.db().ok_or("Not connected to database")?;
+    info!(id = %id, "Deleting node (IPC)");
+    core::delete_node(db.as_ref(), &id)
+}
+
+/// Delete an edge from the graph.
+#[tauri::command]
+pub fn delete_edge(
+    state: State<'_, AppState>,
+    source: String,
+    target: String,
+    rel_type: String,
+) -> Result<(), String> {
+    let db = state.db().ok_or("Not connected to database")?;
+    info!(source = %source, target = %target, rel_type = %rel_type, "Deleting edge (IPC)");
+    core::delete_edge(db.as_ref(), &source, &target, &rel_type)
+}
+
+/// Get choke points in the graph.
+#[tauri::command]
+pub fn graph_choke_points(
+    state: State<'_, AppState>,
+) -> Result<crate::db::ChokePointsResponse, String> {
+    let db = state.db().ok_or("Not connected to database")?;
+    debug!("Getting choke points (IPC)");
+    core::graph_choke_points(db.as_ref(), 10)
 }
 
 // ============================================================================
@@ -551,6 +582,18 @@ pub fn generate_data(
 #[tauri::command]
 pub fn health_check() -> JsonValue {
     serde_json::json!({"status": "ok"})
+}
+
+// ============================================================================
+// Query Activity
+// ============================================================================
+
+/// Get current query activity (number of active queries).
+/// Used by the frontend to get initial state since Tauri events are push-only.
+#[tauri::command]
+pub fn get_query_activity(state: State<'_, AppState>) -> JsonValue {
+    let active = state.active_query_count();
+    serde_json::json!({"active": active})
 }
 
 // ============================================================================

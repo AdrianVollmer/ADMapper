@@ -1,5 +1,6 @@
 //! API route handlers.
 
+use super::core;
 use crate::api::types::{
     AddEdgeRequest, AddHistoryRequest, AddNodeRequest, ApiError, BrowseEntry, BrowseParams,
     BrowseResponse, ConnectRequest, DatabaseStatus, GenerateRequest, GenerateResponse,
@@ -1274,8 +1275,10 @@ pub async fn graph_choke_points(
 ) -> Result<Json<crate::db::ChokePointsResponse>, ApiError> {
     let db = state.require_db()?;
     // Return top 10 choke points by default
-    // CrustDB caches the result and auto-invalidates on data changes
-    let result = run_db(db, |db| db.get_choke_points(10)).await?;
+    let result = run_db(db, |db| {
+        core::graph_choke_points(db, 10).map_err(DbError::Database)
+    })
+    .await?;
     info!(
         count = result.choke_points.len(),
         total_edges = result.total_edges,
@@ -1386,18 +1389,12 @@ pub async fn delete_node(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let db = state.require_db()?;
-    // Escape single quotes in the ID to prevent injection
-    let escaped_id = id.replace('\'', "\\'");
+    let id_for_log = id.clone();
     run_db(db, move |db| {
-        // Use DETACH DELETE to also remove connected relationships
-        let query = format!(
-            "MATCH (n) WHERE n.objectid = '{}' OR n.name = '{}' DETACH DELETE n",
-            escaped_id, escaped_id
-        );
-        db.run_custom_query(&query)
+        core::delete_node(db, &id).map_err(DbError::Database)
     })
     .await?;
-    info!(id = %id, "Node deleted");
+    info!(id = %id_for_log, "Node deleted");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1408,23 +1405,14 @@ pub async fn delete_edge(
     Path((source, target, rel_type)): Path<(String, String, String)>,
 ) -> Result<StatusCode, ApiError> {
     let db = state.require_db()?;
-    // Escape single quotes to prevent injection
-    let escaped_source = source.replace('\'', "\\'");
-    let escaped_target = target.replace('\'', "\\'");
-    // Relationship type should be alphanumeric (relationship name)
-    let safe_edge_type = rel_type
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '_')
-        .collect::<String>();
+    let source_for_log = source.clone();
+    let target_for_log = target.clone();
+    let rel_type_for_log = rel_type.clone();
     run_db(db, move |db| {
-        let query = format!(
-            "MATCH (a)-[r:{}]->(b) WHERE (a.objectid = '{}' OR a.name = '{}') AND (b.objectid = '{}' OR b.name = '{}') DELETE r",
-            safe_edge_type, escaped_source, escaped_source, escaped_target, escaped_target
-        );
-        db.run_custom_query(&query)
+        core::delete_edge(db, &source, &target, &rel_type).map_err(DbError::Database)
     })
     .await?;
-    info!(source = %source, target = %target, rel_type = %rel_type, "Relationship deleted");
+    info!(source = %source_for_log, target = %target_for_log, rel_type = %rel_type_for_log, "Relationship deleted");
     Ok(StatusCode::NO_CONTENT)
 }
 

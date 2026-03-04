@@ -7,7 +7,7 @@
 
 import { api, ApiClientError } from "../api/client";
 import type { QueryStartResponse, QueryProgressEvent, GraphData, QueryResult } from "../api/types";
-import { subscribeToQueryProgress } from "../api/events";
+import { subscribe, QUERY_PROGRESS_CHANNEL } from "../api/transport";
 
 /** Callback for when a foreground query starts */
 let onForegroundQueryStart: (() => void) | null = null;
@@ -105,8 +105,9 @@ export async function executeQuery(query: string, options: QueryExecutionOptions
       }
     };
 
-    unsubscribe = subscribeToQueryProgress(
-      queryId,
+    unsubscribe = subscribe(
+      QUERY_PROGRESS_CHANNEL,
+      { queryId },
       (progress) => {
         const progressEvent = progress as QueryProgressEvent;
 

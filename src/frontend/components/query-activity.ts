@@ -1,11 +1,11 @@
 /**
  * Query Activity Tracking
  *
- * Subscribes to query activity events (via SSE or Tauri) and controls
- * the query indicator in the menubar.
+ * Subscribes to query activity events and controls the query indicator in the menubar.
+ * Uses the unified transport abstraction for consistent behavior in both HTTP and Tauri modes.
  */
 
-import { subscribeToQueryActivity, type Unsubscribe } from "../api/events";
+import { subscribe, QUERY_ACTIVITY_CHANNEL, type Unsubscribe } from "../api/transport";
 
 /** Unsubscribe function for current connection */
 let unsubscribe: Unsubscribe | null = null;
@@ -27,22 +27,18 @@ function connectToActivityStream(): void {
     unsubscribe = null;
   }
 
-  unsubscribe = subscribeToQueryActivity(
+  unsubscribe = subscribe(
+    QUERY_ACTIVITY_CHANNEL,
+    {}, // No params needed for this channel
     (data) => {
       activeQueryCount = data.active;
       updateQueryIndicator(activeQueryCount > 0);
     },
     () => {
-      // Connection lost, try to reconnect after a delay
-      if (unsubscribe) {
-        unsubscribe();
-        unsubscribe = null;
-      }
-      // Reset indicator to idle state
+      // Connection lost - reset indicator (transport handles reconnection)
       updateQueryIndicator(false);
-      // Reconnect after 5 seconds
-      setTimeout(connectToActivityStream, 5000);
-    }
+    },
+    { fetchInitial: true, autoReconnect: true, reconnectDelay: 5000 }
   );
 }
 

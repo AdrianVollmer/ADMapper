@@ -102,6 +102,8 @@ const COMMAND_MAPPING: Record<string, string> = {
   // Mutations
   "POST /api/graph/node": "add_node",
   "POST /api/graph/relationship": "add_edge",
+  "DELETE /api/graph/nodes/:id": "delete_node",
+  "DELETE /api/graph/relationships/:source/:target/:rel_type": "delete_edge",
   // Query
   "POST /api/graph/query": "graph_query",
   // Query history
@@ -118,6 +120,8 @@ const COMMAND_MAPPING: Record<string, string> = {
   "POST /api/graph/generate": "generate_data",
   // Health
   "GET /api/health": "health_check",
+  // Query activity
+  "GET /api/query/activity": "get_query_activity",
 };
 
 /**
@@ -136,6 +140,11 @@ function normalizeUrl(url: string): string {
     .replace(/\/api\/graph\/node\/([^/]+)\/status/, "/api/graph/node/:id/status")
     .replace(/\/api\/graph\/node\/([^/]+)\/owned/, "/api/graph/node/:id/owned")
     .replace(/\/api\/graph\/node\/([^/]+)$/, "/api/graph/node/:id")
+    .replace(/\/api\/graph\/nodes\/([^/]+)$/, "/api/graph/nodes/:id")
+    .replace(
+      /\/api\/graph\/relationships\/([^/]+)\/([^/]+)\/([^/]+)$/,
+      "/api/graph/relationships/:source/:target/:rel_type"
+    )
     .replace(/\/api\/query-history\/([^/]+)$/, "/api/query-history/:id");
 }
 
@@ -172,6 +181,20 @@ function extractArgs(url: string, body?: unknown, command?: string): Record<stri
   const nodeMatch = url.match(/\/api\/graph\/node\/([^/?]+)/);
   if (nodeMatch?.[1]) {
     args.id = decodeURIComponent(nodeMatch[1]);
+  }
+
+  // Node ID from /api/graph/nodes/:id (delete endpoint)
+  const nodesMatch = url.match(/\/api\/graph\/nodes\/([^/?]+)$/);
+  if (nodesMatch?.[1]) {
+    args.id = decodeURIComponent(nodesMatch[1]);
+  }
+
+  // Edge params from /api/graph/relationships/:source/:target/:rel_type (delete endpoint)
+  const edgeMatch = url.match(/\/api\/graph\/relationships\/([^/]+)\/([^/]+)\/([^/?]+)$/);
+  if (edgeMatch?.[1] && edgeMatch?.[2] && edgeMatch?.[3]) {
+    args.source = decodeURIComponent(edgeMatch[1]);
+    args.target = decodeURIComponent(edgeMatch[2]);
+    args.rel_type = decodeURIComponent(edgeMatch[3]);
   }
 
   // Direction from /connections/:direction

@@ -12,7 +12,7 @@ import { api } from "../api/client";
 import type { QueryHistoryResponse, QueryStartResponse, QueryProgressEvent } from "../api/types";
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph } from "../graph/types";
-import { subscribeToQueryProgress, type Unsubscribe } from "../api/events";
+import { subscribe, QUERY_PROGRESS_CHANNEL, type Unsubscribe } from "../api/transport";
 
 /** Modal element */
 let modalEl: HTMLElement | null = null;
@@ -318,8 +318,9 @@ async function executeQuery(): Promise<void> {
     currentQueryId = startResponse.query_id;
 
     // Subscribe to progress events
-    unsubscribeProgress = subscribeToQueryProgress(
-      currentQueryId,
+    unsubscribeProgress = subscribe(
+      QUERY_PROGRESS_CHANNEL,
+      { queryId: currentQueryId },
       (progress) => {
         handleQueryProgress(progress as QueryProgressEvent);
       },
