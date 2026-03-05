@@ -8,7 +8,7 @@ import { loadGraph, createRenderer, applyLayoutAsync as applyLayoutFromModule, g
 import type { ADGraphRenderer, LayoutType } from "../graph";
 import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel, updateDetailPanelForEdge } from "./sidebars";
-import { autoCollapseGraph, clearCollapseState } from "../graph/collapse";
+import { clearCollapseState } from "../graph/collapse";
 import { dispatchAction, type Action } from "./actions";
 import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-visibility";
 import { getDefaultLayout } from "./settings";
@@ -232,9 +232,6 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
   const layoutToUse = edgeCount === 0 ? "lattice" : currentLayout;
   await applyLayoutAsync(graph, layoutToUse);
 
-  // Auto-collapse nodes with many children for large graphs
-  autoCollapseGraph(graph);
-
   // Create renderer
   renderer = createRenderer({
     container,
@@ -259,7 +256,9 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
     },
   });
 
-  // Fit graph with padding (no animation on initial load)
+  // Force a refresh to ensure sigma computes bounds from current positions,
+  // then fit camera to show all nodes with padding (no animation on initial load)
+  renderer.refresh();
   renderer.resetCamera(false);
 
   // Update stats display

@@ -91,7 +91,6 @@ export {
   collapseNode,
   expandNode,
   toggleNodeCollapse,
-  autoCollapseGraph,
   clearCollapseState,
   getNodeCollapseInfo,
 } from "./collapse";

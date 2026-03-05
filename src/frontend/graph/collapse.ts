@@ -8,12 +8,6 @@
 
 import type { ADGraphType } from "./ADGraph";
 
-/** Threshold for auto-collapsing (graph must have this many nodes) */
-const AUTO_COLLAPSE_THRESHOLD = 100;
-
-/** Minimum children to collapse a node */
-const MIN_CHILDREN_TO_COLLAPSE = 5;
-
 /** State for collapsed nodes - maps node ID to its hidden children */
 const collapsedNodes = new Map<string, Set<string>>();
 
@@ -74,25 +68,6 @@ export function toggleNodeCollapse(graph: ADGraphType, nodeId: string): boolean 
     collapseNode(graph, nodeId);
     return true;
   }
-}
-
-/** Auto-collapse nodes with many children when graph exceeds threshold */
-export function autoCollapseGraph(graph: ADGraphType): void {
-  // Clear previous state
-  collapsedNodes.clear();
-
-  // Only auto-collapse if graph is large enough
-  if (graph.order < AUTO_COLLAPSE_THRESHOLD) {
-    return;
-  }
-
-  // Find nodes with many children and collapse them
-  graph.forEachNode((nodeId) => {
-    const children = getDirectChildren(graph, nodeId);
-    if (children.length >= MIN_CHILDREN_TO_COLLAPSE) {
-      collapsedNodes.set(nodeId, new Set(children));
-    }
-  });
 }
 
 /** Clear all collapse state */
