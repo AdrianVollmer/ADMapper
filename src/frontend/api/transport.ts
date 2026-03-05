@@ -179,6 +179,9 @@ export function subscribe<T>(
 
 /**
  * Subscribe to Tauri events.
+ *
+ * For sseOnly channels, fetches initial state via the sseUrl (which maps to a Tauri command).
+ * This is necessary because Tauri events are push-only and don't provide initial state.
  */
 function subscribeTauri<T>(
   channel: ChannelDefinition<T>,
@@ -187,6 +190,22 @@ function subscribeTauri<T>(
 ): Unsubscribe {
   let unlistenFn: (() => void) | null = null;
   let cancelled = false;
+
+  // For sseOnly channels, fetch initial state via the sseUrl
+  // In Tauri mode, this maps to a command (e.g., GET /api/query/activity -> get_query_activity)
+  if (channel.sseOnly) {
+    const url = typeof channel.sseUrl === "function" ? channel.sseUrl(params) : channel.sseUrl;
+    api
+      .get<T>(url)
+      .then((initial) => {
+        if (!cancelled) {
+          handler(initial);
+        }
+      })
+      .catch((err) => {
+        console.warn(`Failed to fetch initial state for ${channel.name}:`, err);
+      });
+  }
 
   window
     .__TAURI__!.event.listen<T>(channel.name, (e) => {
