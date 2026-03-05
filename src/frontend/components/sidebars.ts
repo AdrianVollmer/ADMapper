@@ -12,7 +12,7 @@ import { api } from "../api/client";
 import { setPathStart, setPathEnd } from "./search";
 import { getRenderer, loadGraphData } from "./graph-view";
 import { showError, showConfirm } from "../utils/notifications";
-import { executeQuery } from "../utils/query";
+import { executeQuery, QueryAbortedError } from "../utils/query";
 
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
@@ -1152,6 +1152,11 @@ async function showPathToHighValue(nodeId: string): Promise<void> {
       });
     }
   } catch (err) {
+    // Don't show error if query was aborted (e.g., user started a new query)
+    if (err instanceof QueryAbortedError) {
+      console.debug("Path query was aborted:", err.message);
+      return;
+    }
     console.error("Failed to show path to high-value target:", err);
     showError("Failed to load path to high-value target");
   }

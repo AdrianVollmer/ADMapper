@@ -6,7 +6,7 @@
 
 import { loadGraphData } from "../graph-view";
 import { escapeHtml } from "../../utils/html";
-import { executeQueryWithHistory, getQueryErrorMessage } from "../../utils/query";
+import { executeQueryWithHistory, getQueryErrorMessage, QueryAbortedError } from "../../utils/query";
 import { showSuccess, showError, showInfo } from "../../utils/notifications";
 import type { RawADGraph } from "../../graph/types";
 import type { Query, QueryCategory } from "./types";
@@ -312,6 +312,10 @@ async function runQuery(queryId: string): Promise<void> {
       showInfo(`"${query.name}" returned no results`);
     }
   } catch (err) {
+    // Silently ignore aborted queries (user started a new query)
+    if (err instanceof QueryAbortedError) {
+      return;
+    }
     console.error("Query execution failed:", err);
     showError(`Query failed: ${getQueryErrorMessage(err)}`);
   }

@@ -11,7 +11,7 @@
  */
 
 import { escapeHtml } from "../utils/html";
-import { executeQuery, getQueryErrorMessage } from "../utils/query";
+import { executeQuery, getQueryErrorMessage, QueryAbortedError } from "../utils/query";
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph } from "../graph/types";
 
@@ -423,6 +423,10 @@ async function loadDAAnalysis(): Promise<void> {
       data: { effectiveCount, realCount, ratio },
     };
   } catch (err) {
+    // If query was aborted, just ignore silently
+    if (err instanceof QueryAbortedError) {
+      return;
+    }
     daState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
@@ -468,6 +472,9 @@ async function loadReachability(): Promise<void> {
 
     reachabilityState = { loading: false, error: null, data: results };
   } catch (err) {
+    if (err instanceof QueryAbortedError) {
+      return;
+    }
     reachabilityState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
@@ -515,6 +522,9 @@ async function loadStaleObjects(): Promise<void> {
       },
     };
   } catch (err) {
+    if (err instanceof QueryAbortedError) {
+      return;
+    }
     staleState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
@@ -597,6 +607,10 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
       loadGraphData(emptyGraph);
     }
   } catch (err) {
+    // Silently ignore aborted queries
+    if (err instanceof QueryAbortedError) {
+      return;
+    }
     console.error("Failed to execute graph query:", err);
   }
 }

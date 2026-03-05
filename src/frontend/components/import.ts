@@ -8,7 +8,7 @@
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph, ADNodeType, ADEdgeType } from "../graph/types";
 import { showError as showNotification } from "../utils/notifications";
-import { executeQuery } from "../utils/query";
+import { executeQuery, QueryAbortedError } from "../utils/query";
 import { subscribe, IMPORT_PROGRESS_CHANNEL, type ImportProgressEvent, type Unsubscribe } from "../api/transport";
 import { isRunningInTauri } from "../api/client";
 
@@ -340,6 +340,10 @@ async function loadDomainAdmins(): Promise<void> {
       loadGraphData({ nodes: [], relationships: [] });
     }
   } catch (err) {
+    // Silently ignore if query was aborted
+    if (err instanceof QueryAbortedError) {
+      return;
+    }
     console.error("Failed to load Domain Admins:", err);
     showNotification("Failed to load Domain Admin members. Use the query panel to explore the data.");
   }

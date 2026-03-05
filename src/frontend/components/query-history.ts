@@ -9,7 +9,12 @@ import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import type { QueryHistoryEntry, QueryHistoryResponse, QueryStatus } from "../api/types";
 import type { RawADGraph } from "../graph";
-import { executeQueryWithHistory, getQueryErrorMessage, setForegroundQueryCallback } from "../utils/query";
+import {
+  executeQueryWithHistory,
+  getQueryErrorMessage,
+  setForegroundQueryCallback,
+  QueryAbortedError,
+} from "../utils/query";
 import { hasActiveQueries } from "./query-activity";
 import { loadGraphData } from "./graph-view";
 import { showSuccess, showError, showInfo, showConfirm } from "../utils/notifications";
@@ -291,6 +296,10 @@ async function runQuery(query: string, name: string): Promise<void> {
       showInfo(`Query returned ${result.resultCount} rows`);
     }
   } catch (err) {
+    // Silently ignore aborted queries (user started a new query)
+    if (err instanceof QueryAbortedError) {
+      return;
+    }
     console.error("Query execution failed:", err);
     showError(`Query failed: ${getQueryErrorMessage(err)}`);
   }
@@ -722,6 +731,10 @@ export async function goBackInHistory(): Promise<boolean> {
 
     return true;
   } catch (err) {
+    // Silently ignore aborted queries
+    if (err instanceof QueryAbortedError) {
+      return false;
+    }
     console.error("Failed to go back in history:", err);
     return false;
   }

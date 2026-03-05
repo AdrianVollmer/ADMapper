@@ -13,6 +13,7 @@ import type { QueryHistoryResponse, QueryStartResponse, QueryProgressEvent } fro
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph } from "../graph/types";
 import { subscribe, QUERY_PROGRESS_CHANNEL, type Unsubscribe } from "../api/transport";
+import { registerForegroundQuery, unregisterForegroundQuery } from "../utils/query";
 
 /** Modal element */
 let modalEl: HTMLElement | null = null;
@@ -28,6 +29,9 @@ let currentQueryId: string | null = null;
 
 /** Unsubscribe function for progress events */
 let unsubscribeProgress: Unsubscribe | null = null;
+
+/** Abort controller for the current query (from foreground query registration) */
+let currentAbortController: AbortController | null = null;
 
 /** Error message */
 let errorMessage = "";
@@ -317,16 +321,38 @@ async function executeQuery(): Promise<void> {
 
     currentQueryId = startResponse.query_id;
 
+    // Register as the current foreground query (aborts any previous foreground query)
+    currentAbortController = registerForegroundQuery(currentQueryId, () => {
+      // This cleanup is called if another query aborts us
+      if (unsubscribeProgress) {
+        unsubscribeProgress();
+        unsubscribeProgress = null;
+      }
+    });
+
+    // Listen for abort from the foreground query system
+    currentAbortController.signal.addEventListener("abort", () => {
+      if (isExecuting) {
+        cleanup();
+        infoMessage = "Query was superseded by a new query";
+        renderModal();
+      }
+    });
+
     // Subscribe to progress events
     unsubscribeProgress = subscribe(
       QUERY_PROGRESS_CHANNEL,
       { queryId: currentQueryId },
       (progress) => {
+        // Ignore events if we've been aborted
+        if (currentAbortController?.signal.aborted) {
+          return;
+        }
         handleQueryProgress(progress as QueryProgressEvent);
       },
       () => {
-        // Connection closed, check if we're still executing
-        if (isExecuting) {
+        // Connection closed, check if we're still executing and not aborted
+        if (isExecuting && !currentAbortController?.signal.aborted) {
           cleanup();
           errorMessage = "Lost connection to server";
           renderModal();
@@ -394,7 +420,13 @@ async function abortQuery(): Promise<void> {
 /** Clean up after query completes */
 function cleanup(): void {
   isExecuting = false;
+
+  // Unregister from foreground query tracking
+  if (currentQueryId) {
+    unregisterForegroundQuery(currentQueryId);
+  }
   currentQueryId = null;
+  currentAbortController = null;
 
   if (unsubscribeProgress) {
     unsubscribeProgress();
