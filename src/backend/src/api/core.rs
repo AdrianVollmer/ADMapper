@@ -49,6 +49,7 @@ pub struct GraphStats {
 
 /// Node connection counts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NodeCounts {
     pub incoming: usize,
     pub outgoing: usize,
@@ -59,6 +60,7 @@ pub struct NodeCounts {
 
 /// Node security status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NodeStatus {
     pub owned: bool,
     pub is_disabled: bool,
