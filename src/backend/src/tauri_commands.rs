@@ -142,9 +142,14 @@ pub fn node_get(state: State<'_, AppState>, id: String) -> Result<DbNode, String
 
 /// Get node connection counts.
 #[tauri::command]
-pub fn node_counts(state: State<'_, AppState>, id: String) -> Result<core::NodeCounts, String> {
+pub async fn node_counts(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<core::NodeCounts, String> {
     let db = state.db().ok_or("Not connected to database")?;
-    core::node_counts(db.as_ref(), &id)
+    tokio::task::spawn_blocking(move || core::node_counts(db.as_ref(), &id))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
 }
 
 /// Get node connections.
@@ -161,10 +166,15 @@ pub fn node_connections(
 
 /// Get node security status (includes path finding).
 #[tauri::command]
-pub fn node_status(state: State<'_, AppState>, id: String) -> Result<core::NodeStatus, String> {
+pub async fn node_status(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<core::NodeStatus, String> {
     let db = state.db().ok_or("Not connected to database")?;
     debug!(node_id = %id, "Checking node status (IPC)");
-    core::node_status_full(db.as_ref(), &id)
+    tokio::task::spawn_blocking(move || core::node_status_full(db.as_ref(), &id))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
 }
 
 /// Set node owned status.
