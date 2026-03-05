@@ -116,9 +116,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload binary
-        uses: softprops/action-gh-release@v2
+        run: |
+          cp src/backend/target/release/admapper src/backend/target/release/admapper-linux-amd64
+      - uses: softprops/action-gh-release@v2
         with:
-          files: src/backend/target/release/admapper
+          files: src/backend/target/release/admapper-linux-amd64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -170,9 +172,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload binary
-        uses: softprops/action-gh-release@v2
+        run: |
+          copy src\backend\target\release\admapper.exe src\backend\target\release\admapper-windows-amd64.exe
+      - uses: softprops/action-gh-release@v2
         with:
-          files: src/backend/target/release/admapper.exe
+          files: src/backend/target/release/admapper-windows-amd64.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -218,8 +222,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload binary
-        uses: softprops/action-gh-release@v2
+        run: |
+          cp src/backend/target/universal-apple-darwin/release/admapper src/backend/target/universal-apple-darwin/release/admapper-macos-universal
+      - uses: softprops/action-gh-release@v2
         with:
-          files: src/backend/target/universal-apple-darwin/release/admapper
+          files: src/backend/target/universal-apple-darwin/release/admapper-macos-universal
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
