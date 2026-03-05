@@ -58,6 +58,7 @@ export {
   applyLayout,
   applyLayoutAsync,
   normalizePositions,
+  validateAndFixPositions,
   setUserForceSettings,
   getUserForceSettings,
 } from "./layout";

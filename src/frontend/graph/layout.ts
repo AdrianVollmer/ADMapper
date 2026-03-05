@@ -765,6 +765,7 @@ export async function applyLayoutAsync(
   // Hierarchical layout runs in a Web Worker
   if (layoutType === "hierarchical") {
     await applyHierarchicalLayoutAsync(graph, options.hierarchical);
+    validateAndFixPositions(graph);
     if (onProgress) onProgress(1);
     return;
   }
@@ -772,16 +773,19 @@ export async function applyLayoutAsync(
   // Grid, circular, and lattice are fast enough to run synchronously
   if (layoutType === "grid") {
     applyGridLayout(graph, options.grid);
+    validateAndFixPositions(graph);
     if (onProgress) onProgress(1);
     return;
   }
   if (layoutType === "circular") {
     applyCircularLayout(graph, options.circular);
+    validateAndFixPositions(graph);
     if (onProgress) onProgress(1);
     return;
   }
   if (layoutType === "lattice") {
     applyLatticeLayout(graph, options.lattice);
+    validateAndFixPositions(graph);
     if (onProgress) onProgress(1);
     return;
   }
@@ -835,6 +839,9 @@ export async function applyLayoutAsync(
     },
   });
 
+  // Validate positions - ForceAtlas2 can produce NaN/Infinity in edge cases
+  validateAndFixPositions(graph);
+
   if (onProgress) {
     onProgress(1);
   }
@@ -877,4 +884,77 @@ export function normalizePositions(graph: ADGraphType, width = 1000, height = 10
     graph.setNodeAttribute(nodeId, "x", attrs.x * scale + offsetX);
     graph.setNodeAttribute(nodeId, "y", attrs.y * scale + offsetY);
   });
+}
+
+/**
+ * Validate and fix invalid node positions.
+ *
+ * ForceAtlas2 and other algorithms can produce NaN or Infinity positions
+ * when the algorithm doesn't converge properly. This function detects
+ * invalid positions and reassigns them to valid coordinates.
+ *
+ * @returns Number of nodes that had invalid positions fixed
+ */
+export function validateAndFixPositions(graph: ADGraphType): number {
+  if (graph.order === 0) return 0;
+
+  // First pass: collect valid positions to compute bounds
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let validCount = 0;
+
+  const invalidNodes: string[] = [];
+
+  graph.forEachNode((nodeId, attrs) => {
+    const x = attrs.x;
+    const y = attrs.y;
+
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      invalidNodes.push(nodeId);
+    } else {
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+      validCount++;
+    }
+  });
+
+  if (invalidNodes.length === 0) {
+    return 0;
+  }
+
+  // Log warning for debugging
+  console.warn(
+    `[layout] Found ${invalidNodes.length} nodes with invalid positions (NaN/Infinity). Reassigning to grid.`
+  );
+
+  // If all nodes are invalid, use a default range
+  if (validCount === 0) {
+    minX = -500;
+    maxX = 500;
+    minY = -500;
+    maxY = 500;
+  }
+
+  // Assign invalid nodes to a grid within the valid bounds
+  // Add some margin to avoid overlap with valid nodes
+  const margin = 100;
+  const gridStartX = maxX + margin;
+  const gridStartY = minY;
+  const gridSpacing = 100;
+  const columns = Math.ceil(Math.sqrt(invalidNodes.length));
+
+  for (let i = 0; i < invalidNodes.length; i++) {
+    const nodeId = invalidNodes[i]!;
+    const col = i % columns;
+    const row = Math.floor(i / columns);
+
+    graph.setNodeAttribute(nodeId, "x", gridStartX + col * gridSpacing);
+    graph.setNodeAttribute(nodeId, "y", gridStartY + row * gridSpacing);
+  }
+
+  return invalidNodes.length;
 }
