@@ -182,17 +182,40 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       x += clearWidth;
     }
 
-    // Draw blurred part with blur filter (or opacity fallback)
+    // Draw blurred part with blur filter (or redaction bar fallback)
     if (parts.blurred) {
       context.save();
       if (isBlurFilterSupported) {
         context.filter = "blur(3px)";
+        context.textAlign = "left";
+        context.fillText(parts.blurred, x, y);
       } else {
-        // Fallback: use reduced opacity for webviews that don't support blur
-        context.globalAlpha = 0.4;
+        // Fallback: draw a redaction bar for webviews that don't support blur
+        // This is a semi-transparent rounded rectangle that obscures the text
+        const padding = 2;
+        const barHeight = size + padding * 2;
+        const barWidth = blurredWidth + padding * 2;
+        const barX = x - padding;
+        const barY = y - padding;
+        const radius = 3;
+
+        // Draw rounded rectangle
+        context.beginPath();
+        context.moveTo(barX + radius, barY);
+        context.lineTo(barX + barWidth - radius, barY);
+        context.quadraticCurveTo(barX + barWidth, barY, barX + barWidth, barY + radius);
+        context.lineTo(barX + barWidth, barY + barHeight - radius);
+        context.quadraticCurveTo(barX + barWidth, barY + barHeight, barX + barWidth - radius, barY + barHeight);
+        context.lineTo(barX + radius, barY + barHeight);
+        context.quadraticCurveTo(barX, barY + barHeight, barX, barY + barHeight - radius);
+        context.lineTo(barX, barY + radius);
+        context.quadraticCurveTo(barX, barY, barX + radius, barY);
+        context.closePath();
+
+        // Fill with theme-appropriate semi-transparent color (visible but not harsh)
+        context.fillStyle = currentTheme === "dark" ? "rgba(180, 180, 180, 0.5)" : "rgba(80, 80, 80, 0.5)";
+        context.fill();
       }
-      context.textAlign = "left";
-      context.fillText(parts.blurred, x, y);
       context.restore();
     }
 
