@@ -41,6 +41,12 @@ vi.mock("../../utils/notifications", () => ({
 vi.mock("../../utils/query", () => ({
   executeQueryWithHistory: vi.fn(),
   getQueryErrorMessage: vi.fn((err) => String(err)),
+  QueryAbortedError: class QueryAbortedError extends Error {
+    constructor(queryId: string) {
+      super(`Query ${queryId} was aborted`);
+      this.name = "QueryAbortedError";
+    }
+  },
 }));
 
 // Import actual handlers after mocking their dependencies
