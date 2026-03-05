@@ -19,7 +19,7 @@ use super::{Binding, Path, PathConstraints};
 /// Default maximum path length for unbounded traversals.
 ///
 /// Used when queries specify open-ended patterns like `(a)-[:REL*]->(b)` or
-/// `(a)-[:REL]-+(b)` without an explicit upper bound. This prevents infinite
+/// `(a)-[:REL*1..]->(b)` without an explicit upper bound. This prevents infinite
 /// loops and memory exhaustion on cyclic or very deep graphs.
 ///
 /// The value 10000 allows traversing reasonably large graphs while providing

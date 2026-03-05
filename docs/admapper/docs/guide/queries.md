@@ -75,7 +75,7 @@ RETURN n.name, c.name
 Find the shortest path between two nodes:
 
 ```cypher
-MATCH p = SHORTEST (src:User)-[:MemberOf|AdminTo|HasSession]-+(dst:Group)
+MATCH p = SHORTEST (src:User)-[:MemberOf|AdminTo|HasSession*1..]->(dst:Group)
 WHERE src.name = 'JSMITH@CORP.LOCAL'
   AND dst.name = 'Domain Admins@CORP.LOCAL'
 RETURN p

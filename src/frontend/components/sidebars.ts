@@ -1121,7 +1121,7 @@ async function showPathToHighValue(nodeId: string): Promise<void> {
   const ridConditions = HIGH_VALUE_RIDS.map((rid) => `b.objectid ENDS WITH '${rid}'`).join(" OR ");
 
   const escapedId = nodeId.replace(/'/g, "\\'");
-  const query = `MATCH p = (a)-[]-+(b) WHERE a.objectid = '${escapedId}' AND (${ridConditions}) RETURN p LIMIT 1`;
+  const query = `MATCH p = (a)-[*1..]->(b) WHERE a.objectid = '${escapedId}' AND (${ridConditions}) RETURN p LIMIT 1`;
 
   try {
     const result = await executeQuery(query, { extractGraph: true });

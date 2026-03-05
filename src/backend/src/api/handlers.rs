@@ -1040,7 +1040,7 @@ pub async fn graph_path(
     let escaped_to = to_id.replace('\'', "\\'");
     let query_name = format!("Path: {} → {}", params.from, params.to);
     let query_text = format!(
-        "MATCH p = SHORTEST 1 (a)-[]-+(b) WHERE a.object_id = '{}' AND b.object_id = '{}' RETURN p",
+        "MATCH p = SHORTEST 1 (a)-[*1..]->(b) WHERE a.object_id = '{}' AND b.object_id = '{}' RETURN p",
         escaped_from, escaped_to
     );
 
