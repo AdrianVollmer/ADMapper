@@ -1,4 +1,4 @@
-//! Query operations for finding and counting nodes and edges.
+//! Query operations for finding and counting nodes and relationships.
 
 use crate::error::Result;
 use crate::graph::{Node, PropertyValue, Relationship};
@@ -255,31 +255,31 @@ impl SqliteStorage {
     }
 
     /// Find relationships by type.
-    pub fn find_edges_by_type(&self, rel_type: &str) -> Result<Vec<Relationship>> {
+    pub fn find_relationships_by_type(&self, rel_type: &str) -> Result<Vec<Relationship>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
-             FROM relationships e
-             JOIN rel_types et ON e.type_id = et.id
-             WHERE et.name = ?1",
+            "SELECT r.id, r.source_id, r.target_id, rt.name, json(r.properties)
+             FROM relationships r
+             JOIN rel_types rt ON r.type_id = rt.id
+             WHERE rt.name = ?1",
         )?;
 
-        self.collect_edges_from_stmt(&mut stmt, params![rel_type])
+        self.collect_relationships_from_stmt(&mut stmt, params![rel_type])
     }
 
     /// Scan all relationships in the database.
-    pub fn scan_all_edges(&self) -> Result<Vec<Relationship>> {
+    pub fn scan_all_relationships(&self) -> Result<Vec<Relationship>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
-             FROM relationships e
-             JOIN rel_types et ON e.type_id = et.id",
+            "SELECT r.id, r.source_id, r.target_id, rt.name, json(r.properties)
+             FROM relationships r
+             JOIN rel_types rt ON r.type_id = rt.id",
         )?;
 
-        self.collect_edges_from_stmt(&mut stmt, [])
+        self.collect_relationships_from_stmt(&mut stmt, [])
     }
 
     /// Helper: collect relationships from a prepared statement that returns
     /// (id, source_id, target_id, rel_type, properties).
-    pub(crate) fn collect_edges_from_stmt<P: rusqlite::Params>(
+    pub(crate) fn collect_relationships_from_stmt<P: rusqlite::Params>(
         &self,
         stmt: &mut rusqlite::Statement,
         params: P,
@@ -334,7 +334,7 @@ impl SqliteStorage {
     }
 
     /// Count all relationships.
-    pub fn count_edges(&self) -> Result<u64> {
+    pub fn count_relationships(&self) -> Result<u64> {
         let count: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM relationships", [], |row| row.get(0))?;
@@ -342,11 +342,11 @@ impl SqliteStorage {
     }
 
     /// Count relationships with a specific type.
-    pub fn count_edges_by_type(&self, rel_type: &str) -> Result<u64> {
+    pub fn count_relationships_by_type(&self, rel_type: &str) -> Result<u64> {
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM relationships e
-             JOIN rel_types et ON e.type_id = et.id
-             WHERE et.name = ?1",
+            "SELECT COUNT(*) FROM relationships r
+             JOIN rel_types rt ON r.type_id = rt.id
+             WHERE rt.name = ?1",
             params![rel_type],
             |row| row.get(0),
         )?;
@@ -452,31 +452,31 @@ impl SqliteStorage {
     }
 
     /// Find outgoing relationships from a node.
-    pub fn find_outgoing_edges(&self, node_id: i64) -> Result<Vec<Relationship>> {
+    pub fn find_outgoing_relationships(&self, node_id: i64) -> Result<Vec<Relationship>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
-             FROM relationships e
-             JOIN rel_types et ON e.type_id = et.id
-             WHERE e.source_id = ?1",
+            "SELECT r.id, r.source_id, r.target_id, rt.name, json(r.properties)
+             FROM relationships r
+             JOIN rel_types rt ON r.type_id = rt.id
+             WHERE r.source_id = ?1",
         )?;
 
-        self.collect_edges_from_stmt(&mut stmt, params![node_id])
+        self.collect_relationships_from_stmt(&mut stmt, params![node_id])
     }
 
     /// Find incoming relationships to a node.
-    pub fn find_incoming_edges(&self, node_id: i64) -> Result<Vec<Relationship>> {
+    pub fn find_incoming_relationships(&self, node_id: i64) -> Result<Vec<Relationship>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT e.id, e.source_id, e.target_id, et.name, json(e.properties)
-             FROM relationships e
-             JOIN rel_types et ON e.type_id = et.id
-             WHERE e.target_id = ?1",
+            "SELECT r.id, r.source_id, r.target_id, rt.name, json(r.properties)
+             FROM relationships r
+             JOIN rel_types rt ON r.type_id = rt.id
+             WHERE r.target_id = ?1",
         )?;
 
-        self.collect_edges_from_stmt(&mut stmt, params![node_id])
+        self.collect_relationships_from_stmt(&mut stmt, params![node_id])
     }
 
     /// Count outgoing relationships from a node.
-    pub fn count_outgoing_edges(&self, node_id: i64) -> Result<usize> {
+    pub fn count_outgoing_relationships(&self, node_id: i64) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM relationships WHERE source_id = ?1",
             params![node_id],
@@ -486,7 +486,7 @@ impl SqliteStorage {
     }
 
     /// Count incoming relationships to a node.
-    pub fn count_incoming_edges(&self, node_id: i64) -> Result<usize> {
+    pub fn count_incoming_relationships(&self, node_id: i64) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM relationships WHERE target_id = ?1",
             params![node_id],
@@ -497,10 +497,10 @@ impl SqliteStorage {
 
     /// Count incoming relationships to a node by object_id.
     /// Uses the dedicated object_id column for efficient indexed lookup.
-    pub fn count_incoming_edges_by_object_id(&self, object_id: &str) -> Result<usize> {
+    pub fn count_incoming_relationships_by_object_id(&self, object_id: &str) -> Result<usize> {
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM relationships e \
-             JOIN nodes n ON e.target_id = n.id \
+            "SELECT COUNT(*) FROM relationships r \
+             JOIN nodes n ON r.target_id = n.id \
              WHERE n.object_id = ?1",
             params![object_id],
             |row| row.get(0),
@@ -510,10 +510,10 @@ impl SqliteStorage {
 
     /// Count outgoing relationships from a node by object_id.
     /// Uses the dedicated object_id column for efficient indexed lookup.
-    pub fn count_outgoing_edges_by_object_id(&self, object_id: &str) -> Result<usize> {
+    pub fn count_outgoing_relationships_by_object_id(&self, object_id: &str) -> Result<usize> {
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM relationships e \
-             JOIN nodes n ON e.source_id = n.id \
+            "SELECT COUNT(*) FROM relationships r \
+             JOIN nodes n ON r.source_id = n.id \
              WHERE n.object_id = ?1",
             params![object_id],
             |row| row.get(0),
@@ -524,7 +524,7 @@ impl SqliteStorage {
     /// Get all relationships for a node by object_id (both incoming and outgoing).
     /// Returns (source_object_id, target_object_id, rel_type) tuples.
     /// Uses the dedicated object_id column for efficient indexed lookup.
-    pub fn get_node_edges_by_object_id(
+    pub fn get_node_relationships_by_object_id(
         &self,
         object_id: &str,
     ) -> Result<Vec<(String, String, String)>> {
@@ -791,7 +791,7 @@ impl SqliteStorage {
     }
 
     /// Get all relationship types.
-    pub fn get_all_edge_types(&self) -> Result<Vec<String>> {
+    pub fn get_all_relationship_types(&self) -> Result<Vec<String>> {
         let mut stmt = self
             .conn
             .prepare_cached("SELECT name FROM rel_types ORDER BY name")?;
@@ -801,24 +801,24 @@ impl SqliteStorage {
         Ok(types)
     }
 
-    /// Find outgoing edges from a node by object_id.
+    /// Find outgoing relationships from a node by object_id.
     ///
-    /// Returns `(target_object_id, rel_type)` tuples for all outgoing edges.
+    /// Returns `(target_object_id, rel_type)` tuples for all outgoing relationships.
     /// This is optimized for BFS traversal where we only need neighbor identifiers,
-    /// not full node/edge objects.
+    /// not full node/relationship objects.
     ///
     /// Uses the dedicated object_id column index for O(1) node lookup,
-    /// then O(degree) for edge retrieval.
-    pub fn find_outgoing_edges_by_object_id(
+    /// then O(degree) for relationship retrieval.
+    pub fn find_outgoing_relationships_by_object_id(
         &self,
         object_id: &str,
     ) -> Result<Vec<(String, String)>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT tgt.object_id, et.name
-             FROM relationships e
-             JOIN nodes src ON e.source_id = src.id
-             JOIN nodes tgt ON e.target_id = tgt.id
-             JOIN rel_types et ON e.type_id = et.id
+            "SELECT tgt.object_id, rt.name
+             FROM relationships r
+             JOIN nodes src ON r.source_id = src.id
+             JOIN nodes tgt ON r.target_id = tgt.id
+             JOIN rel_types rt ON r.type_id = rt.id
              WHERE src.object_id = ?1",
         )?;
 
@@ -826,12 +826,12 @@ impl SqliteStorage {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
 
-        let mut edges = Vec::new();
+        let mut rels = Vec::new();
         for row in rows {
-            edges.push(row?);
+            rels.push(row?);
         }
 
-        Ok(edges)
+        Ok(rels)
     }
 
     /// Get counts for all node labels in a single query.

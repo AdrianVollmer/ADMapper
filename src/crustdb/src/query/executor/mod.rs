@@ -65,7 +65,7 @@ pub struct Binding {
     /// Paths bound to variables (for `p = (a)-[*]->(b)` syntax).
     paths: SmallVec<[(String, Path); 1]>,
     /// Relationship lists for variable-length relationship bindings.
-    edge_lists: SmallVec<[(String, Vec<Relationship>); 1]>,
+    relationship_lists: SmallVec<[(String, Vec<Relationship>); 1]>,
 }
 
 impl Binding {
@@ -74,7 +74,7 @@ impl Binding {
             nodes: SmallVec::new(),
             relationships: SmallVec::new(),
             paths: SmallVec::new(),
-            edge_lists: SmallVec::new(),
+            relationship_lists: SmallVec::new(),
         }
     }
 
@@ -87,9 +87,9 @@ impl Binding {
             .map(|(_, node)| node)
     }
 
-    /// Look up an relationship by variable name.
+    /// Look up a relationship by variable name.
     #[inline]
-    pub fn get_edge(&self, name: &str) -> Option<&Relationship> {
+    pub fn get_relationship(&self, name: &str) -> Option<&Relationship> {
         self.relationships
             .iter()
             .find(|(n, _)| n == name)
@@ -105,10 +105,10 @@ impl Binding {
             .map(|(_, path)| path)
     }
 
-    /// Look up an relationship list by variable name.
+    /// Look up a relationship list by variable name.
     #[inline]
-    pub fn get_edge_list(&self, name: &str) -> Option<&Vec<Relationship>> {
-        self.edge_lists
+    pub fn get_relationship_list(&self, name: &str) -> Option<&Vec<Relationship>> {
+        self.relationship_lists
             .iter()
             .find(|(n, _)| n == name)
             .map(|(_, relationships)| relationships)
@@ -120,9 +120,9 @@ impl Binding {
         self.nodes.iter().any(|(n, _)| n == name)
     }
 
-    /// Check if an relationship variable exists.
+    /// Check if a relationship variable exists.
     #[inline]
-    pub fn has_edge(&self, name: &str) -> bool {
+    pub fn has_relationship(&self, name: &str) -> bool {
         self.relationships.iter().any(|(n, _)| n == name)
     }
 
@@ -131,7 +131,7 @@ impl Binding {
         self
     }
 
-    pub fn with_edge(mut self, var: &str, relationship: Relationship) -> Self {
+    pub fn with_relationship(mut self, var: &str, relationship: Relationship) -> Self {
         self.relationships.push((var.to_string(), relationship));
         self
     }
@@ -141,8 +141,9 @@ impl Binding {
         self
     }
 
-    pub fn with_edge_list(mut self, var: &str, relationships: Vec<Relationship>) -> Self {
-        self.edge_lists.push((var.to_string(), relationships));
+    pub fn with_relationship_list(mut self, var: &str, relationships: Vec<Relationship>) -> Self {
+        self.relationship_lists
+            .push((var.to_string(), relationships));
         self
     }
 }
@@ -268,7 +269,7 @@ mod tests {
         assert_eq!(nodes.len(), 2);
 
         // Verify relationship
-        let relationships = storage.find_edges_by_type("KNOWS").unwrap();
+        let relationships = storage.find_relationships_by_type("KNOWS").unwrap();
         assert_eq!(relationships.len(), 1);
     }
 

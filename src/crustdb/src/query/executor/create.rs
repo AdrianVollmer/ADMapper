@@ -166,7 +166,8 @@ fn create_relationship(
         Direction::Both => (source_id, target_id),
     };
 
-    let rel_id = storage.insert_edge(actual_source, actual_target, rel_type, &properties)?;
+    let rel_id =
+        storage.insert_relationship(actual_source, actual_target, rel_type, &properties)?;
 
     stats.relationships_created += 1;
 

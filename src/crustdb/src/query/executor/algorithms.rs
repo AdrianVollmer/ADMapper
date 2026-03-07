@@ -10,16 +10,16 @@ use std::collections::{HashMap, VecDeque};
 
 /// Result of relationship betweenness centrality computation.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EdgeBetweenness {
+pub struct RelationshipBetweenness {
     /// Relationship ID to betweenness score mapping.
     pub scores: HashMap<i64, f64>,
     /// Number of nodes processed.
     pub nodes_processed: usize,
     /// Number of relationships in the graph.
-    pub edges_count: usize,
+    pub relationships_count: usize,
 }
 
-impl EdgeBetweenness {
+impl RelationshipBetweenness {
     /// Get the top k relationships by betweenness score.
     pub fn top_k(&self, k: usize) -> Vec<(i64, f64)> {
         let mut sorted: Vec<_> = self
@@ -70,14 +70,14 @@ impl EdgeBetweenness {
 /// # Returns
 ///
 /// Relationship betweenness scores for all relationships (or filtered relationships).
-pub fn edge_betweenness_centrality(
+pub fn relationship_betweenness_centrality(
     storage: &SqliteStorage,
     rel_types: Option<&[&str]>,
     directed: bool,
-) -> Result<EdgeBetweenness> {
+) -> Result<RelationshipBetweenness> {
     // Use sampled version with automatic sample size selection
     // For graphs > 500 nodes, sample to keep runtime reasonable
-    edge_betweenness_centrality_sampled(storage, rel_types, directed, None)
+    relationship_betweenness_centrality_sampled(storage, rel_types, directed, None)
 }
 
 /// Compute relationship betweenness centrality with optional sampling.
@@ -96,29 +96,29 @@ pub fn edge_betweenness_centrality(
 /// * `rel_types` - Optional filter to only consider specific relationship types
 /// * `directed` - Whether to treat relationships as directed or undirected
 /// * `sample_size` - Optional number of source nodes to sample (None = auto)
-pub fn edge_betweenness_centrality_sampled(
+pub fn relationship_betweenness_centrality_sampled(
     storage: &SqliteStorage,
     rel_types: Option<&[&str]>,
     directed: bool,
     sample_size: Option<usize>,
-) -> Result<EdgeBetweenness> {
+) -> Result<RelationshipBetweenness> {
     // Load the graph structure
     let all_nodes = storage.scan_all_nodes()?;
-    let all_edges = storage.scan_all_edges()?;
+    let all_relationships = storage.scan_all_relationships()?;
 
     // Filter relationships by type if specified
     let relationships: Vec<Relationship> = if let Some(types) = rel_types {
-        all_edges
+        all_relationships
             .into_iter()
-            .filter(|e| types.contains(&e.rel_type.as_str()))
+            .filter(|r| types.contains(&r.rel_type.as_str()))
             .collect()
     } else {
-        all_edges
+        all_relationships
     };
 
     let node_ids: Vec<i64> = all_nodes.iter().map(|n| n.id).collect();
     let num_nodes = node_ids.len();
-    let num_edges = relationships.len();
+    let num_relationships = relationships.len();
 
     // Determine sample size
     // Default: exact for small graphs, sample for large
@@ -176,9 +176,9 @@ pub fn edge_betweenness_centrality_sampled(
     }
 
     // Initialize betweenness scores
-    let mut edge_betweenness: HashMap<i64, f64> = HashMap::new();
+    let mut relationship_betweenness: HashMap<i64, f64> = HashMap::new();
     for relationship in &relationships {
-        edge_betweenness.insert(relationship.id, 0.0);
+        relationship_betweenness.insert(relationship.id, 0.0);
     }
 
     // Brandes' algorithm: iterate over source nodes (sampled or all)
@@ -242,7 +242,7 @@ pub fn edge_betweenness_centrality_sampled(
                     let contrib = (sigma_v / sigma_w) * (1.0 + delta_w);
 
                     // Update relationship betweenness
-                    *edge_betweenness.get_mut(&rel_id).unwrap() += contrib;
+                    *relationship_betweenness.get_mut(&rel_id).unwrap() += contrib;
 
                     // Update node dependency for backpropagation
                     *delta.get_mut(&v).unwrap() += contrib;
@@ -254,22 +254,22 @@ pub fn edge_betweenness_centrality_sampled(
     // For undirected graphs, each relationship is counted twice (once from each endpoint)
     // so we divide by 2
     if !directed {
-        for score in edge_betweenness.values_mut() {
+        for score in relationship_betweenness.values_mut() {
             *score /= 2.0;
         }
     }
 
     // Scale up scores if we used sampling to extrapolate to full graph
     if is_sampled {
-        for score in edge_betweenness.values_mut() {
+        for score in relationship_betweenness.values_mut() {
             *score *= scale_factor;
         }
     }
 
-    Ok(EdgeBetweenness {
-        scores: edge_betweenness,
+    Ok(RelationshipBetweenness {
+        scores: relationship_betweenness,
         nodes_processed: num_nodes,
-        edges_count: num_edges,
+        relationships_count: num_relationships,
     })
 }
 
@@ -286,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn test_edge_betweenness_simple_chain() {
+    fn test_relationship_betweenness_simple_chain() {
         // Create a simple chain: A -> B -> C -> D
         // The middle relationships should have higher betweenness
         let (storage, _dir) = create_test_storage();
@@ -306,27 +306,27 @@ mod tests {
             .unwrap();
 
         // Insert relationships
-        let edge_ab = storage
-            .insert_edge(node_a, node_b, "NEXT", &serde_json::json!({}))
+        let rel_ab = storage
+            .insert_relationship(node_a, node_b, "NEXT", &serde_json::json!({}))
             .unwrap();
-        let edge_bc = storage
-            .insert_edge(node_b, node_c, "NEXT", &serde_json::json!({}))
+        let rel_bc = storage
+            .insert_relationship(node_b, node_c, "NEXT", &serde_json::json!({}))
             .unwrap();
-        let edge_cd = storage
-            .insert_edge(node_c, node_d, "NEXT", &serde_json::json!({}))
+        let rel_cd = storage
+            .insert_relationship(node_c, node_d, "NEXT", &serde_json::json!({}))
             .unwrap();
 
         // Compute betweenness (undirected)
-        let result = edge_betweenness_centrality(&storage, None, false).unwrap();
+        let result = relationship_betweenness_centrality(&storage, None, false).unwrap();
 
         assert_eq!(result.nodes_processed, 4);
-        assert_eq!(result.edges_count, 3);
+        assert_eq!(result.relationships_count, 3);
 
         // In an undirected chain A-B-C-D:
         // Relationship B-C is on more shortest paths than A-B or C-D
-        let score_ab = *result.scores.get(&edge_ab).unwrap();
-        let score_bc = *result.scores.get(&edge_bc).unwrap();
-        let score_cd = *result.scores.get(&edge_cd).unwrap();
+        let score_ab = *result.scores.get(&rel_ab).unwrap();
+        let score_bc = *result.scores.get(&rel_bc).unwrap();
+        let score_cd = *result.scores.get(&rel_cd).unwrap();
 
         assert!(
             score_bc >= score_ab,
@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn test_edge_betweenness_star() {
+    fn test_relationship_betweenness_star() {
         // Create a star graph: center connected to 4 outer nodes
         // All relationships from center should have equal betweenness
         let (storage, _dir) = create_test_storage();
@@ -359,12 +359,12 @@ mod tests {
             let outer = storage.insert_node(&["Node".to_string()], &props).unwrap();
             outer_nodes.push(outer);
             let relationship = storage
-                .insert_edge(center, outer, "LINK", &serde_json::json!({}))
+                .insert_relationship(center, outer, "LINK", &serde_json::json!({}))
                 .unwrap();
             relationships.push(relationship);
         }
 
-        let result = edge_betweenness_centrality(&storage, None, false).unwrap();
+        let result = relationship_betweenness_centrality(&storage, None, false).unwrap();
 
         // All relationships should have the same betweenness (by symmetry)
         let first_score = *result.scores.get(&relationships[0]).unwrap();
@@ -378,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn test_edge_betweenness_with_type_filter() {
+    fn test_relationship_betweenness_with_type_filter() {
         let (storage, _dir) = create_test_storage();
 
         let node_a = storage
@@ -392,18 +392,19 @@ mod tests {
             .unwrap();
 
         // Create two types of relationships
-        let edge_ab = storage
-            .insert_edge(node_a, node_b, "IMPORTANT", &serde_json::json!({}))
+        let rel_ab = storage
+            .insert_relationship(node_a, node_b, "IMPORTANT", &serde_json::json!({}))
             .unwrap();
-        let _edge_bc = storage
-            .insert_edge(node_b, node_c, "TRIVIAL", &serde_json::json!({}))
+        let _rel_bc = storage
+            .insert_relationship(node_b, node_c, "TRIVIAL", &serde_json::json!({}))
             .unwrap();
 
         // Filter to only IMPORTANT relationships
-        let result = edge_betweenness_centrality(&storage, Some(&["IMPORTANT"]), false).unwrap();
+        let result =
+            relationship_betweenness_centrality(&storage, Some(&["IMPORTANT"]), false).unwrap();
 
-        assert_eq!(result.edges_count, 1);
-        assert!(result.scores.contains_key(&edge_ab));
+        assert_eq!(result.relationships_count, 1);
+        assert!(result.scores.contains_key(&rel_ab));
     }
 
     #[test]
@@ -422,13 +423,13 @@ mod tests {
             .unwrap();
 
         storage
-            .insert_edge(node_a, node_b, "NEXT", &serde_json::json!({}))
+            .insert_relationship(node_a, node_b, "NEXT", &serde_json::json!({}))
             .unwrap();
         storage
-            .insert_edge(node_b, node_c, "NEXT", &serde_json::json!({}))
+            .insert_relationship(node_b, node_c, "NEXT", &serde_json::json!({}))
             .unwrap();
 
-        let result = edge_betweenness_centrality(&storage, None, false).unwrap();
+        let result = relationship_betweenness_centrality(&storage, None, false).unwrap();
         let top_1 = result.top_k(1);
 
         assert_eq!(top_1.len(), 1);

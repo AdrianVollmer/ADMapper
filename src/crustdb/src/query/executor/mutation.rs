@@ -76,7 +76,7 @@ pub fn execute_delete(
                             stats.nodes_deleted += 1;
                         } else {
                             // Regular DELETE - fail if node has relationships
-                            if storage.has_edges(node.id)? {
+                            if storage.has_relationships(node.id)? {
                                 return Err(Error::Cypher(format!(
                                     "Cannot delete node {} because it still has relationships. Use DETACH DELETE to delete it along with its relationships.",
                                     node.id
@@ -85,9 +85,9 @@ pub fn execute_delete(
                             storage.delete_node(node.id)?;
                             stats.nodes_deleted += 1;
                         }
-                    } else if let Some(relationship) = binding.get_edge(name) {
+                    } else if let Some(relationship) = binding.get_relationship(name) {
                         // Delete relationship
-                        storage.delete_edge(relationship.id)?;
+                        storage.delete_relationship(relationship.id)?;
                         stats.relationships_deleted += 1;
                     } else {
                         return Err(Error::Cypher(format!(

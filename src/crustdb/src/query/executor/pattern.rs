@@ -34,7 +34,7 @@ struct TraversalState {
     /// Node IDs in the path (including current).
     path_nodes: Vec<i64>,
     /// Edges traversed to reach this state.
-    path_edges: Vec<Relationship>,
+    path_rels: Vec<Relationship>,
 }
 
 /// Check if pattern is a single node pattern.
@@ -202,7 +202,7 @@ pub fn execute_shortest_path_pattern(
     struct PathState {
         node_id: i64,
         path_nodes: Vec<i64>,
-        path_edges: Vec<i64>,
+        path_rels: Vec<i64>,
     }
 
     // For collecting shortest paths
@@ -210,7 +210,7 @@ pub fn execute_shortest_path_pattern(
     struct PathResult {
         length: usize,
         path_nodes: Vec<i64>,
-        path_edges: Vec<i64>,
+        path_rels: Vec<i64>,
         source_node: Node,
         target_node: Node,
     }
@@ -270,13 +270,13 @@ pub fn execute_shortest_path_pattern(
         queue.push_back(PathState {
             node_id: source_node.id,
             path_nodes: vec![source_node.id],
-            path_edges: vec![],
+            path_rels: vec![],
         });
         visited.insert(source_node.id);
 
         // BFS level by level to ensure shortest paths first
         while let Some(state) = queue.pop_front() {
-            let current_depth = state.path_edges.len();
+            let current_depth = state.path_rels.len();
 
             // Early termination: if we've found enough paths, stop
             if found_paths.len() >= k {
@@ -304,7 +304,7 @@ pub fn execute_shortest_path_pattern(
                         found_paths.push(PathResult {
                             length: current_depth,
                             path_nodes: state.path_nodes.clone(),
-                            path_edges: state.path_edges.clone(),
+                            path_rels: state.path_rels.clone(),
                             source_node: source_node.clone(),
                             target_node: target_node.clone(),
                         });
@@ -333,11 +333,11 @@ pub fn execute_shortest_path_pattern(
 
             // Expand to neighbors
             let relationships = match rel_pattern.direction {
-                Direction::Outgoing => storage.find_outgoing_edges(state.node_id)?,
-                Direction::Incoming => storage.find_incoming_edges(state.node_id)?,
+                Direction::Outgoing => storage.find_outgoing_relationships(state.node_id)?,
+                Direction::Incoming => storage.find_incoming_relationships(state.node_id)?,
                 Direction::Both => {
-                    let mut relationships = storage.find_outgoing_edges(state.node_id)?;
-                    relationships.extend(storage.find_incoming_edges(state.node_id)?);
+                    let mut relationships = storage.find_outgoing_relationships(state.node_id)?;
+                    relationships.extend(storage.find_incoming_relationships(state.node_id)?);
                     relationships
                 }
             };
@@ -380,13 +380,13 @@ pub fn execute_shortest_path_pattern(
                 let mut new_path_nodes = state.path_nodes.clone();
                 new_path_nodes.push(next_node_id);
 
-                let mut new_path_edges = state.path_edges.clone();
-                new_path_edges.push(relationship.id);
+                let mut new_path_rels = state.path_rels.clone();
+                new_path_rels.push(relationship.id);
 
                 queue.push_back(PathState {
                     node_id: next_node_id,
                     path_nodes: new_path_nodes,
-                    path_edges: new_path_edges,
+                    path_rels: new_path_rels,
                 });
             }
         }
@@ -413,17 +413,17 @@ pub fn execute_shortest_path_pattern(
                 }
             }
             // Fetch full relationship objects for path
-            let mut path_edges: Vec<Relationship> = Vec::new();
-            for &eid in &result.path_edges {
-                if let Some(relationship) = storage.get_edge(eid)? {
-                    path_edges.push(relationship);
+            let mut path_rels: Vec<Relationship> = Vec::new();
+            for &eid in &result.path_rels {
+                if let Some(relationship) = storage.get_relationship(eid)? {
+                    path_rels.push(relationship);
                 }
             }
             binding = binding.with_path(
                 pv,
                 Path {
                     nodes: path_nodes,
-                    relationships: path_edges,
+                    relationships: path_rels,
                 },
             );
         }
@@ -517,11 +517,11 @@ pub fn execute_single_hop_pattern(
     // For each source node, find matching relationships and targets
     for source_node in source_nodes {
         let relationships = match rel_pattern.direction {
-            Direction::Outgoing => storage.find_outgoing_edges(source_node.id)?,
-            Direction::Incoming => storage.find_incoming_edges(source_node.id)?,
+            Direction::Outgoing => storage.find_outgoing_relationships(source_node.id)?,
+            Direction::Incoming => storage.find_incoming_relationships(source_node.id)?,
             Direction::Both => {
-                let mut relationships = storage.find_outgoing_edges(source_node.id)?;
-                relationships.extend(storage.find_incoming_edges(source_node.id)?);
+                let mut relationships = storage.find_outgoing_relationships(source_node.id)?;
+                relationships.extend(storage.find_incoming_relationships(source_node.id)?);
                 relationships
             }
         };
@@ -537,7 +537,7 @@ pub fn execute_single_hop_pattern(
         };
 
         // Filter relationships by properties if specified
-        let relationships = filter_edges_by_properties(relationships, rel_pattern)?;
+        let relationships = filter_relationships_by_properties(relationships, rel_pattern)?;
 
         // For each matching relationship, get the target node and check if it matches
         for relationship in relationships {
@@ -571,7 +571,7 @@ pub fn execute_single_hop_pattern(
                 .with_node(target_var, target_node.clone());
 
             if let Some(rv) = rel_var {
-                binding = binding.with_edge(rv, relationship.clone());
+                binding = binding.with_relationship(rv, relationship.clone());
             }
 
             // Add path variable if specified
@@ -618,11 +618,11 @@ fn execute_single_hop_pattern_flipped(
         // - Original Incoming (a)<-(b): now find outgoing relationships from b
         // - Original Both: still need both directions
         let relationships = match rel_pattern.direction {
-            Direction::Outgoing => storage.find_incoming_edges(target_node.id)?,
-            Direction::Incoming => storage.find_outgoing_edges(target_node.id)?,
+            Direction::Outgoing => storage.find_incoming_relationships(target_node.id)?,
+            Direction::Incoming => storage.find_outgoing_relationships(target_node.id)?,
             Direction::Both => {
-                let mut relationships = storage.find_outgoing_edges(target_node.id)?;
-                relationships.extend(storage.find_incoming_edges(target_node.id)?);
+                let mut relationships = storage.find_outgoing_relationships(target_node.id)?;
+                relationships.extend(storage.find_incoming_relationships(target_node.id)?);
                 relationships
             }
         };
@@ -638,7 +638,7 @@ fn execute_single_hop_pattern_flipped(
         };
 
         // Filter relationships by properties if specified
-        let relationships = filter_edges_by_properties(relationships, rel_pattern)?;
+        let relationships = filter_relationships_by_properties(relationships, rel_pattern)?;
 
         // For each matching relationship, get the source node (we're traversing backwards)
         for relationship in relationships {
@@ -674,7 +674,7 @@ fn execute_single_hop_pattern_flipped(
                 .with_node(target_var, target_node.clone());
 
             if let Some(rv) = rel_var {
-                binding = binding.with_edge(rv, relationship.clone());
+                binding = binding.with_relationship(rv, relationship.clone());
             }
 
             // Add path variable if specified
@@ -749,17 +749,17 @@ pub fn execute_multi_hop_pattern(
 
         let mut next_bindings: Vec<(Binding, Vec<i64>, Vec<i64>)> = Vec::new();
 
-        for (binding, path_nodes, path_edges) in current_bindings {
+        for (binding, path_nodes, path_rels) in current_bindings {
             // Get the last node in the path
             let last_node_id = *path_nodes.last().unwrap();
 
             // Find relationships from the last node
             let relationships = match rel_pattern.direction {
-                Direction::Outgoing => storage.find_outgoing_edges(last_node_id)?,
-                Direction::Incoming => storage.find_incoming_edges(last_node_id)?,
+                Direction::Outgoing => storage.find_outgoing_relationships(last_node_id)?,
+                Direction::Incoming => storage.find_incoming_relationships(last_node_id)?,
                 Direction::Both => {
-                    let mut relationships = storage.find_outgoing_edges(last_node_id)?;
-                    relationships.extend(storage.find_incoming_edges(last_node_id)?);
+                    let mut relationships = storage.find_outgoing_relationships(last_node_id)?;
+                    relationships.extend(storage.find_incoming_relationships(last_node_id)?);
                     relationships
                 }
             };
@@ -775,7 +775,7 @@ pub fn execute_multi_hop_pattern(
             };
 
             // Filter relationships by properties
-            let relationships = filter_edges_by_properties(relationships, rel_pattern)?;
+            let relationships = filter_relationships_by_properties(relationships, rel_pattern)?;
 
             for relationship in relationships {
                 // Determine the target node
@@ -806,16 +806,16 @@ pub fn execute_multi_hop_pattern(
                 let mut new_binding = binding.clone().with_node(target_var, target_node);
 
                 if let Some(rv) = rel_var {
-                    new_binding = new_binding.with_edge(rv, relationship.clone());
+                    new_binding = new_binding.with_relationship(rv, relationship.clone());
                 }
 
                 // Update path
                 let mut new_path_nodes = path_nodes.clone();
                 new_path_nodes.push(target_id);
-                let mut new_path_edges = path_edges.clone();
-                new_path_edges.push(relationship.id);
+                let mut new_path_rels = path_rels.clone();
+                new_path_rels.push(relationship.id);
 
-                next_bindings.push((new_binding, new_path_nodes, new_path_edges));
+                next_bindings.push((new_binding, new_path_nodes, new_path_rels));
             }
         }
 
@@ -824,7 +824,7 @@ pub fn execute_multi_hop_pattern(
 
     // Convert to final bindings with optional path variable
     let mut bindings = Vec::new();
-    for (mut binding, path_node_ids, path_edge_ids) in current_bindings {
+    for (mut binding, path_node_ids, path_rel_ids) in current_bindings {
         if let Some(pv) = path_var {
             // Fetch full node objects
             let mut path_nodes: Vec<Node> = Vec::new();
@@ -834,15 +834,15 @@ pub fn execute_multi_hop_pattern(
                 }
             }
             // Fetch full relationship objects
-            let mut path_edges: Vec<Relationship> = Vec::new();
-            for &eid in &path_edge_ids {
-                if let Some(relationship) = storage.get_edge(eid)? {
-                    path_edges.push(relationship);
+            let mut path_rels: Vec<Relationship> = Vec::new();
+            for &eid in &path_rel_ids {
+                if let Some(relationship) = storage.get_relationship(eid)? {
+                    path_rels.push(relationship);
                 }
             }
             let path = Path {
                 nodes: path_nodes,
-                relationships: path_edges,
+                relationships: path_rels,
             };
             binding = binding.with_path(pv, path);
         }
@@ -898,11 +898,11 @@ pub fn execute_variable_length_pattern(
         queue.push_back(TraversalState {
             node_id: source_node.id,
             path_nodes: vec![source_node.id],
-            path_edges: vec![],
+            path_rels: vec![],
         });
 
         while let Some(state) = queue.pop_front() {
-            let depth = state.path_edges.len();
+            let depth = state.path_rels.len();
 
             // If we've reached a valid depth, check if current node matches target pattern
             if depth >= min_depth && depth <= max_depth {
@@ -931,14 +931,15 @@ pub fn execute_variable_length_pattern(
                                     pv,
                                     Path {
                                         nodes: path_nodes_full,
-                                        relationships: state.path_edges.clone(),
+                                        relationships: state.path_rels.clone(),
                                     },
                                 );
                             }
 
                             // Add relationship list if relationship variable is specified
                             if let Some(rv) = rel_var {
-                                binding = binding.with_edge_list(rv, state.path_edges.clone());
+                                binding =
+                                    binding.with_relationship_list(rv, state.path_rels.clone());
                             }
 
                             bindings.push(binding);
@@ -954,11 +955,11 @@ pub fn execute_variable_length_pattern(
 
             // Get relationships from current node
             let relationships = match rel_pattern.direction {
-                Direction::Outgoing => storage.find_outgoing_edges(state.node_id)?,
-                Direction::Incoming => storage.find_incoming_edges(state.node_id)?,
+                Direction::Outgoing => storage.find_outgoing_relationships(state.node_id)?,
+                Direction::Incoming => storage.find_incoming_relationships(state.node_id)?,
                 Direction::Both => {
-                    let mut relationships = storage.find_outgoing_edges(state.node_id)?;
-                    relationships.extend(storage.find_incoming_edges(state.node_id)?);
+                    let mut relationships = storage.find_outgoing_relationships(state.node_id)?;
+                    relationships.extend(storage.find_incoming_relationships(state.node_id)?);
                     relationships
                 }
             };
@@ -995,13 +996,13 @@ pub fn execute_variable_length_pattern(
                 let mut new_path_nodes = state.path_nodes.clone();
                 new_path_nodes.push(next_id);
 
-                let mut new_path_edges = state.path_edges.clone();
-                new_path_edges.push(relationship);
+                let mut new_path_rels = state.path_rels.clone();
+                new_path_rels.push(relationship);
 
                 queue.push_back(TraversalState {
                     node_id: next_id,
                     path_nodes: new_path_nodes,
-                    path_edges: new_path_edges,
+                    path_rels: new_path_rels,
                 });
             }
         }
@@ -1047,7 +1048,7 @@ pub fn node_matches_pattern(node: &Node, pattern: &NodePattern) -> bool {
 }
 
 /// Filter relationships by properties specified in the relationship pattern.
-pub fn filter_edges_by_properties(
+pub fn filter_relationships_by_properties(
     relationships: Vec<Relationship>,
     pattern: &RelationshipPattern,
 ) -> Result<Vec<Relationship>> {
@@ -1074,7 +1075,7 @@ pub fn filter_edges_by_properties(
             required_props
                 .iter()
                 .all(|(key, value)| match relationship.properties.get(key) {
-                    Some(edge_value) => property_matches(edge_value, value),
+                    Some(rel_value) => property_matches(rel_value, value),
                     None => matches!(value, Expression::Literal(Literal::Null)),
                 })
         })

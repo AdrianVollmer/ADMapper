@@ -298,24 +298,24 @@ fn build_ad_like_graph(db: &Database, node_count: usize, edges_per_node: usize) 
         }
     }
 
-    let edge_ids = db
-        .insert_edges_batch(&edges)
-        .expect("Failed to insert edges");
+    let rel_ids = db
+        .insert_relationships_batch(&edges)
+        .expect("Failed to insert relationships");
     eprintln!(
-        "  Inserted {} edges in {:?}",
-        edge_ids.len(),
+        "  Inserted {} relationships in {:?}",
+        rel_ids.len(),
         edge_start.elapsed()
     );
     eprintln!("  Total build time: {:?}", start.elapsed());
 }
 
-/// Profile edge betweenness centrality (choke points).
+/// Profile relationship betweenness centrality (choke points).
 ///
 /// This is the biggest bottleneck: O(V*E) complexity.
 fn profile_choke_points(db: &Database, iterations: usize, warmup: usize, output: &str) {
     eprintln!("Warming up ({} iterations)...", warmup);
     for _ in 0..warmup {
-        let result = db.edge_betweenness_centrality(None, true);
+        let result = db.relationship_betweenness_centrality(None, true);
         let _ = black_box(result);
     }
 
@@ -323,7 +323,7 @@ fn profile_choke_points(db: &Database, iterations: usize, warmup: usize, output:
     let _ = db.clear_cache();
 
     eprintln!(
-        "Profiling edge_betweenness_centrality ({} iterations)...",
+        "Profiling relationship_betweenness_centrality ({} iterations)...",
         iterations
     );
 
@@ -338,7 +338,7 @@ fn profile_choke_points(db: &Database, iterations: usize, warmup: usize, output:
         // Clear cache each iteration to profile the actual computation
         let _ = db.clear_cache();
         let result = db
-            .edge_betweenness_centrality(None, true)
+            .relationship_betweenness_centrality(None, true)
             .expect("Query failed");
         black_box(result);
     }

@@ -4,7 +4,7 @@
 //! organized into the following submodules:
 //!
 //! - `schema`: Database schema creation and migrations
-//! - `crud`: Node and edge CRUD operations
+//! - `crud`: Node and relationship CRUD operations
 //! - `query`: Query operations (find, count, scan)
 //! - `history`: Query history management
 //! - `cache`: Query cache management
@@ -90,7 +90,7 @@ impl SqliteStorage {
             .conn
             .query_row("SELECT COUNT(*) FROM nodes", [], |row| row.get(0))?;
 
-        let edge_count: usize =
+        let relationship_count: usize =
             self.conn
                 .query_row("SELECT COUNT(*) FROM relationships", [], |row| row.get(0))?;
 
@@ -98,15 +98,15 @@ impl SqliteStorage {
             self.conn
                 .query_row("SELECT COUNT(*) FROM node_labels", [], |row| row.get(0))?;
 
-        let edge_type_count: usize =
+        let relationship_type_count: usize =
             self.conn
                 .query_row("SELECT COUNT(*) FROM rel_types", [], |row| row.get(0))?;
 
         Ok(DatabaseStats {
             node_count,
-            edge_count,
+            relationship_count,
             label_count,
-            edge_type_count,
+            relationship_type_count,
         })
     }
 
@@ -196,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_and_query_edge() {
+    fn test_create_and_query_relationship() {
         let storage = SqliteStorage::in_memory().unwrap();
 
         let alice_id = storage
@@ -210,7 +210,7 @@ mod tests {
             .unwrap();
 
         let rel_id = storage
-            .insert_edge(
+            .insert_relationship(
                 alice_id,
                 bob_id,
                 "KNOWS",
@@ -218,7 +218,7 @@ mod tests {
             )
             .unwrap();
 
-        let relationship = storage.get_edge(rel_id).unwrap().unwrap();
+        let relationship = storage.get_relationship(rel_id).unwrap().unwrap();
         assert_eq!(relationship.source, alice_id);
         assert_eq!(relationship.target, bob_id);
         assert_eq!(relationship.rel_type, "KNOWS");
@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_edges_by_type() {
+    fn test_find_relationships_by_type() {
         let storage = SqliteStorage::in_memory().unwrap();
 
         let alice_id = storage
@@ -266,21 +266,21 @@ mod tests {
             .unwrap();
 
         storage
-            .insert_edge(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
+            .insert_relationship(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
             .unwrap();
         storage
-            .insert_edge(alice_id, acme_id, "WORKS_AT", &serde_json::json!({}))
+            .insert_relationship(alice_id, acme_id, "WORKS_AT", &serde_json::json!({}))
             .unwrap();
 
-        let knows_edges = storage.find_edges_by_type("KNOWS").unwrap();
-        assert_eq!(knows_edges.len(), 1);
+        let knows_rels = storage.find_relationships_by_type("KNOWS").unwrap();
+        assert_eq!(knows_rels.len(), 1);
 
-        let works_at_edges = storage.find_edges_by_type("WORKS_AT").unwrap();
-        assert_eq!(works_at_edges.len(), 1);
+        let works_at_rels = storage.find_relationships_by_type("WORKS_AT").unwrap();
+        assert_eq!(works_at_rels.len(), 1);
     }
 
     #[test]
-    fn test_outgoing_incoming_edges() {
+    fn test_outgoing_incoming_relationships() {
         let storage = SqliteStorage::in_memory().unwrap();
 
         let alice_id = storage
@@ -294,19 +294,19 @@ mod tests {
             .unwrap();
 
         storage
-            .insert_edge(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
+            .insert_relationship(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
             .unwrap();
         storage
-            .insert_edge(alice_id, charlie_id, "KNOWS", &serde_json::json!({}))
+            .insert_relationship(alice_id, charlie_id, "KNOWS", &serde_json::json!({}))
             .unwrap();
         storage
-            .insert_edge(bob_id, alice_id, "KNOWS", &serde_json::json!({}))
+            .insert_relationship(bob_id, alice_id, "KNOWS", &serde_json::json!({}))
             .unwrap();
 
-        let alice_outgoing = storage.find_outgoing_edges(alice_id).unwrap();
+        let alice_outgoing = storage.find_outgoing_relationships(alice_id).unwrap();
         assert_eq!(alice_outgoing.len(), 2);
 
-        let alice_incoming = storage.find_incoming_edges(alice_id).unwrap();
+        let alice_incoming = storage.find_incoming_relationships(alice_id).unwrap();
         assert_eq!(alice_incoming.len(), 1);
     }
 
@@ -324,14 +324,14 @@ mod tests {
             .insert_node(&["Company".to_string()], &serde_json::json!({}))
             .unwrap();
         storage
-            .insert_edge(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
+            .insert_relationship(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
             .unwrap();
 
         let stats = storage.stats().unwrap();
         assert_eq!(stats.node_count, 3);
-        assert_eq!(stats.edge_count, 1);
+        assert_eq!(stats.relationship_count, 1);
         assert_eq!(stats.label_count, 2);
-        assert_eq!(stats.edge_type_count, 1);
+        assert_eq!(stats.relationship_type_count, 1);
     }
 
     #[test]
@@ -346,14 +346,14 @@ mod tests {
             .unwrap();
 
         let rel_id = storage
-            .insert_edge(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
+            .insert_relationship(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
             .unwrap();
 
         // Delete alice - should cascade delete the relationship
         storage.delete_node(alice_id).unwrap();
 
         assert!(storage.get_node(alice_id).unwrap().is_none());
-        assert!(storage.get_edge(rel_id).unwrap().is_none());
+        assert!(storage.get_relationship(rel_id).unwrap().is_none());
         assert!(storage.get_node(bob_id).unwrap().is_some());
     }
 
@@ -372,16 +372,16 @@ mod tests {
             .unwrap();
 
         storage
-            .insert_edge(alice_id, movie_id, "ACTED_IN", &serde_json::json!({}))
+            .insert_relationship(alice_id, movie_id, "ACTED_IN", &serde_json::json!({}))
             .unwrap();
         storage
-            .insert_edge(alice_id, movie_id, "DIRECTED", &serde_json::json!({}))
+            .insert_relationship(alice_id, movie_id, "DIRECTED", &serde_json::json!({}))
             .unwrap();
 
         let labels = storage.get_all_labels().unwrap();
         assert_eq!(labels, vec!["Actor", "Movie", "Person"]);
 
-        let types = storage.get_all_edge_types().unwrap();
+        let types = storage.get_all_relationship_types().unwrap();
         assert_eq!(types, vec!["ACTED_IN", "DIRECTED"]);
     }
 
@@ -582,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_outgoing_edges_by_object_id() {
+    fn test_find_outgoing_relationships_by_object_id() {
         let storage = SqliteStorage::in_memory().unwrap();
 
         // Create nodes with object_id
@@ -605,40 +605,46 @@ mod tests {
             )
             .unwrap();
 
-        // Create edges: alice -> bob (KNOWS), alice -> charlie (WORKS_WITH)
+        // Create relationships: alice -> bob (KNOWS), alice -> charlie (WORKS_WITH)
         storage
-            .insert_edge(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
+            .insert_relationship(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
             .unwrap();
         storage
-            .insert_edge(alice_id, charlie_id, "WORKS_WITH", &serde_json::json!({}))
+            .insert_relationship(alice_id, charlie_id, "WORKS_WITH", &serde_json::json!({}))
             .unwrap();
-        // Also bob -> charlie to ensure we don't get extra edges
+        // Also bob -> charlie to ensure we don't get extra relationships
         storage
-            .insert_edge(bob_id, charlie_id, "KNOWS", &serde_json::json!({}))
+            .insert_relationship(bob_id, charlie_id, "KNOWS", &serde_json::json!({}))
             .unwrap();
 
-        // Find outgoing edges from alice
-        let alice_edges = storage.find_outgoing_edges_by_object_id("alice-1").unwrap();
-        assert_eq!(alice_edges.len(), 2);
+        // Find outgoing relationships from alice
+        let alice_rels = storage
+            .find_outgoing_relationships_by_object_id("alice-1")
+            .unwrap();
+        assert_eq!(alice_rels.len(), 2);
 
         // Check we get the correct targets and types
-        let edge_set: std::collections::HashSet<_> = alice_edges.into_iter().collect();
-        assert!(edge_set.contains(&("bob-2".to_string(), "KNOWS".to_string())));
-        assert!(edge_set.contains(&("charlie-3".to_string(), "WORKS_WITH".to_string())));
+        let rel_set: std::collections::HashSet<_> = alice_rels.into_iter().collect();
+        assert!(rel_set.contains(&("bob-2".to_string(), "KNOWS".to_string())));
+        assert!(rel_set.contains(&("charlie-3".to_string(), "WORKS_WITH".to_string())));
 
-        // Find outgoing edges from bob
-        let bob_edges = storage.find_outgoing_edges_by_object_id("bob-2").unwrap();
-        assert_eq!(bob_edges.len(), 1);
-        assert_eq!(bob_edges[0], ("charlie-3".to_string(), "KNOWS".to_string()));
-
-        // Find outgoing edges from charlie (none)
-        let charlie_edges = storage
-            .find_outgoing_edges_by_object_id("charlie-3")
+        // Find outgoing relationships from bob
+        let bob_rels = storage
+            .find_outgoing_relationships_by_object_id("bob-2")
             .unwrap();
-        assert!(charlie_edges.is_empty());
+        assert_eq!(bob_rels.len(), 1);
+        assert_eq!(bob_rels[0], ("charlie-3".to_string(), "KNOWS".to_string()));
+
+        // Find outgoing relationships from charlie (none)
+        let charlie_rels = storage
+            .find_outgoing_relationships_by_object_id("charlie-3")
+            .unwrap();
+        assert!(charlie_rels.is_empty());
 
         // Non-existent node returns empty
-        let nobody_edges = storage.find_outgoing_edges_by_object_id("nobody").unwrap();
-        assert!(nobody_edges.is_empty());
+        let nobody_rels = storage
+            .find_outgoing_relationships_by_object_id("nobody")
+            .unwrap();
+        assert!(nobody_rels.is_empty());
     }
 }

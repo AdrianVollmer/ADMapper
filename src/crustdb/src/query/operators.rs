@@ -34,7 +34,7 @@ pub enum PlanOperator {
     },
     /// Scan all relationships with optional type filter.
     #[allow(dead_code)]
-    EdgeScan {
+    RelationshipScan {
         variable: String,
         types: Vec<String>,
     },
@@ -111,9 +111,9 @@ pub enum PlanOperator {
         label: Option<String>,
         alias: String,
     },
-    /// SQL pushdown for DISTINCT type(r) - returns all edge types directly.
-    /// Much faster than scanning all edges: O(distinct_types) vs O(edges).
-    EdgeTypesScan { alias: String },
+    /// SQL pushdown for DISTINCT type(r) - returns all relationship types directly.
+    /// Much faster than scanning all relationships: O(distinct_types) vs O(relationships).
+    RelationshipTypesScan { alias: String },
     /// Sort rows.
     #[allow(dead_code)]
     Sort {
@@ -134,7 +134,7 @@ pub enum PlanOperator {
     Create {
         source: Option<Box<PlanOperator>>,
         nodes: Vec<CreateNode>,
-        relationships: Vec<CreateEdge>,
+        relationships: Vec<CreateRelationship>,
     },
     /// Delete nodes/relationships.
     Delete {
@@ -323,7 +323,7 @@ pub struct CreateNode {
 
 /// Relationship creation specification.
 #[derive(Debug, Clone)]
-pub struct CreateEdge {
+pub struct CreateRelationship {
     pub variable: Option<String>,
     pub source: String,
     pub target: String,

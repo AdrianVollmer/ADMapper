@@ -24,9 +24,9 @@ pub enum Error {
     #[error("Node not found: {0}")]
     NodeNotFound(String),
 
-    /// Edge not found.
-    #[error("Edge not found: {0}")]
-    EdgeNotFound(String),
+    /// Relationship not found.
+    #[error("Relationship not found: {0}")]
+    RelationshipNotFound(String),
 
     /// Invalid property value.
     #[error("Invalid property: {0}")]

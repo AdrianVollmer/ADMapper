@@ -8,10 +8,10 @@ use crate::error::{Error, Result};
 use crate::graph::{Node, PropertyValue, Relationship};
 use crate::query::operators::{ExpandRequest, VariableLengthExpandRequest};
 use crate::query::planner::{
-    AggregateFunction, CreateEdge, CreateNode, ExpandDirection, FilterPredicate, PlanExpr,
+    AggregateFunction, CreateNode, CreateRelationship, ExpandDirection, FilterPredicate, PlanExpr,
     PlanLiteral, PlanOperator, ProjectColumn, QueryPlan, SetOperation, TargetPropertyFilter,
 };
-use crate::query::{PathEdge, PathNode, QueryResult, QueryStats, ResultValue, Row};
+use crate::query::{PathNode, PathRelationship, QueryResult, QueryStats, ResultValue, Row};
 use crate::storage::SqliteStorage;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -199,7 +199,9 @@ fn execute_operator(
             execute_count_pushdown(label.as_deref(), alias, storage)
         }
 
-        PlanOperator::EdgeTypesScan { alias } => execute_edge_types_scan(alias, storage),
+        PlanOperator::RelationshipTypesScan { alias } => {
+            execute_relationship_types_scan(alias, storage)
+        }
 
         PlanOperator::Limit { source, count } => {
             // Limit can work on either Bindings or Rows
@@ -260,7 +262,9 @@ fn execute_operator(
             Ok(ExecutionResult::Bindings(bindings))
         }
 
-        PlanOperator::EdgeScan { .. } => Err(Error::Cypher("EdgeScan not implemented".into())),
+        PlanOperator::RelationshipScan { .. } => {
+            Err(Error::Cypher("RelationshipScan not implemented".into()))
+        }
     }
 }
 
@@ -372,8 +376,8 @@ fn execute_expand(
             .get_node(req.source_variable)
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", req.source_variable)))?;
 
-        let relationships = get_edges(source_node.id, req.direction, storage)?;
-        let relationships = filter_edges_by_type(relationships, req.types);
+        let relationships = get_relationships(source_node.id, req.direction, storage)?;
+        let relationships = filter_relationships_by_type(relationships, req.types);
 
         for relationship in relationships {
             let target_id = get_target_id(&relationship, source_node.id, req.direction);
@@ -394,7 +398,7 @@ fn execute_expand(
                 .with_node(req.target_variable, target_node.clone());
 
             if let Some(rv) = req.rel_variable {
-                new_binding = new_binding.with_edge(rv, relationship.clone());
+                new_binding = new_binding.with_relationship(rv, relationship.clone());
             }
 
             // Bind the path if path_variable is set
@@ -494,8 +498,8 @@ fn execute_variable_length_expand(
         queue.push_back((source_node.id, vec![source_node.id], Vec::new()));
         visited.insert(source_node.id);
 
-        'bfs: while let Some((current_id, path_nodes, path_edges)) = queue.pop_front() {
-            let depth = path_edges.len() as u32;
+        'bfs: while let Some((current_id, path_nodes, path_rels)) = queue.pop_front() {
+            let depth = path_rels.len() as u32;
 
             // Early termination: check if we've reached the limit
             if let Some(lim) = limit {
@@ -534,13 +538,14 @@ fn execute_variable_length_expand(
                                     pv,
                                     Path {
                                         nodes,
-                                        relationships: path_edges.clone(),
+                                        relationships: path_rels.clone(),
                                     },
                                 );
                             }
 
                             if let Some(rv) = req.rel_variable {
-                                new_binding = new_binding.with_edge_list(rv, path_edges.clone());
+                                new_binding =
+                                    new_binding.with_relationship_list(rv, path_rels.clone());
                             }
 
                             result.push(new_binding);
@@ -562,8 +567,8 @@ fn execute_variable_length_expand(
             }
 
             // Expand to neighbors
-            let relationships = get_edges(current_id, req.direction, storage)?;
-            let relationships = filter_edges_by_type(relationships, req.types);
+            let relationships = get_relationships(current_id, req.direction, storage)?;
+            let relationships = filter_relationships_by_type(relationships, req.types);
 
             for relationship in relationships {
                 let next_id = get_target_id(&relationship, current_id, req.direction);
@@ -577,10 +582,10 @@ fn execute_variable_length_expand(
                 let mut new_path_nodes = path_nodes.clone();
                 new_path_nodes.push(next_id);
 
-                let mut new_path_edges = path_edges.clone();
-                new_path_edges.push(relationship);
+                let mut new_path_rels = path_rels.clone();
+                new_path_rels.push(relationship);
 
-                queue.push_back((next_id, new_path_nodes, new_path_edges));
+                queue.push_back((next_id, new_path_nodes, new_path_rels));
             }
         }
     }
@@ -644,8 +649,8 @@ fn execute_shortest_path(
         queue.push_back((source_node.id, vec![source_node.id], Vec::new()));
         visited.insert(source_node.id);
 
-        while let Some((current_id, path_nodes, path_edge_ids)) = queue.pop_front() {
-            let depth = path_edge_ids.len() as u32;
+        while let Some((current_id, path_nodes, path_rel_ids)) = queue.pop_front() {
+            let depth = path_rel_ids.len() as u32;
 
             // Stop BFS at max depth
             if depth > max_hops {
@@ -672,7 +677,7 @@ fn execute_shortest_path(
 
                 if is_target {
                     if let Some(target_node) = storage.get_node(current_id)? {
-                        found_paths.push((target_node, path_nodes.clone(), path_edge_ids.clone()));
+                        found_paths.push((target_node, path_nodes.clone(), path_rel_ids.clone()));
                         // If we have a specific target, we found it - can terminate early
                         if specific_target_id.is_some() {
                             found_specific_target = true;
@@ -687,8 +692,8 @@ fn execute_shortest_path(
             }
 
             // Expand
-            let relationships = get_edges(current_id, direction, storage)?;
-            let relationships = filter_edges_by_type(relationships, types);
+            let relationships = get_relationships(current_id, direction, storage)?;
+            let relationships = filter_relationships_by_type(relationships, types);
 
             for relationship in relationships {
                 let next_id = get_target_id(&relationship, current_id, direction);
@@ -703,15 +708,15 @@ fn execute_shortest_path(
                 let mut new_path_nodes = path_nodes.clone();
                 new_path_nodes.push(next_id);
 
-                let mut new_path_edge_ids = path_edge_ids.clone();
-                new_path_edge_ids.push(relationship.id);
+                let mut new_path_rel_ids = path_rel_ids.clone();
+                new_path_rel_ids.push(relationship.id);
 
-                queue.push_back((next_id, new_path_nodes, new_path_edge_ids));
+                queue.push_back((next_id, new_path_nodes, new_path_rel_ids));
             }
         }
 
         // Convert found paths to bindings
-        for (target_node, path_node_ids, path_edge_ids) in found_paths {
+        for (target_node, path_node_ids, path_rel_ids) in found_paths {
             let mut new_binding = binding.clone().with_node(target_variable, target_node);
 
             if let Some(pv) = path_variable {
@@ -722,8 +727,8 @@ fn execute_shortest_path(
                     }
                 }
                 let mut relationships = Vec::new();
-                for &eid in &path_edge_ids {
-                    if let Some(e) = storage.get_edge(eid)? {
+                for &eid in &path_rel_ids {
+                    if let Some(e) = storage.get_relationship(eid)? {
                         relationships.push(e);
                     }
                 }
@@ -747,23 +752,26 @@ fn execute_shortest_path(
 // Helper Functions for Traversal
 // =============================================================================
 
-fn get_edges(
+fn get_relationships(
     node_id: i64,
     direction: ExpandDirection,
     storage: &SqliteStorage,
 ) -> Result<Vec<Relationship>> {
     match direction {
-        ExpandDirection::Outgoing => storage.find_outgoing_edges(node_id),
-        ExpandDirection::Incoming => storage.find_incoming_edges(node_id),
+        ExpandDirection::Outgoing => storage.find_outgoing_relationships(node_id),
+        ExpandDirection::Incoming => storage.find_incoming_relationships(node_id),
         ExpandDirection::Both => {
-            let mut relationships = storage.find_outgoing_edges(node_id)?;
-            relationships.extend(storage.find_incoming_edges(node_id)?);
+            let mut relationships = storage.find_outgoing_relationships(node_id)?;
+            relationships.extend(storage.find_incoming_relationships(node_id)?);
             Ok(relationships)
         }
     }
 }
 
-fn filter_edges_by_type(relationships: Vec<Relationship>, types: &[String]) -> Vec<Relationship> {
+fn filter_relationships_by_type(
+    relationships: Vec<Relationship>,
+    types: &[String],
+) -> Vec<Relationship> {
     if types.is_empty() {
         relationships
     } else {
@@ -950,7 +958,7 @@ fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalValue> {
         PlanExpr::Variable(v) => {
             if let Some(node) = binding.get_node(v) {
                 Ok(EvalValue::Node(node.clone()))
-            } else if let Some(relationship) = binding.get_edge(v) {
+            } else if let Some(relationship) = binding.get_relationship(v) {
                 Ok(EvalValue::Relationship(relationship.clone()))
             } else if let Some(path) = binding.get_path(v) {
                 Ok(EvalValue::Path(path.clone()))
@@ -962,7 +970,7 @@ fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalValue> {
         PlanExpr::Property { variable, property } => {
             if let Some(node) = binding.get_node(variable) {
                 Ok(property_to_eval_value(node.properties.get(property)))
-            } else if let Some(relationship) = binding.get_edge(variable) {
+            } else if let Some(relationship) = binding.get_relationship(variable) {
                 Ok(property_to_eval_value(
                     relationship.properties.get(property),
                 ))
@@ -1361,14 +1369,17 @@ fn execute_count_pushdown(
     })
 }
 
-/// Execute edge types scan - returns all distinct relationship types.
+/// Execute relationship types scan - returns all distinct relationship types.
 ///
-/// This is O(distinct_types) instead of O(edges) because it queries the
-/// normalized rel_types table directly rather than scanning all edges.
-fn execute_edge_types_scan(alias: &str, storage: &SqliteStorage) -> Result<ExecutionResult> {
-    let edge_types = storage.get_all_edge_types()?;
+/// This is O(distinct_types) instead of O(relationships) because it queries the
+/// normalized rel_types table directly rather than scanning all relationships.
+fn execute_relationship_types_scan(
+    alias: &str,
+    storage: &SqliteStorage,
+) -> Result<ExecutionResult> {
+    let rel_types = storage.get_all_relationship_types()?;
 
-    let rows: Vec<Row> = edge_types
+    let rows: Vec<Row> = rel_types
         .into_iter()
         .map(|type_name| {
             let mut values = HashMap::new();
@@ -1393,7 +1404,7 @@ fn execute_edge_types_scan(alias: &str, storage: &SqliteStorage) -> Result<Execu
 fn execute_create(
     source: Option<&PlanOperator>,
     nodes: &[CreateNode],
-    relationships: &[CreateEdge],
+    relationships: &[CreateRelationship],
     storage: &SqliteStorage,
     stats: &mut QueryStats,
 ) -> Result<ExecutionResult> {
@@ -1414,18 +1425,18 @@ fn execute_create(
     }
 
     // Create relationships using variable name lookup
-    for create_edge in relationships {
-        let source_id = var_to_id.get(&create_edge.source).ok_or_else(|| {
-            Error::Cypher(format!("Unknown source variable: {}", create_edge.source))
+    for create_rel in relationships {
+        let source_id = var_to_id.get(&create_rel.source).ok_or_else(|| {
+            Error::Cypher(format!("Unknown source variable: {}", create_rel.source))
         })?;
-        let target_id = var_to_id.get(&create_edge.target).ok_or_else(|| {
-            Error::Cypher(format!("Unknown target variable: {}", create_edge.target))
+        let target_id = var_to_id.get(&create_rel.target).ok_or_else(|| {
+            Error::Cypher(format!("Unknown target variable: {}", create_rel.target))
         })?;
-        let props = plan_properties_to_json(&create_edge.properties)?;
+        let props = plan_properties_to_json(&create_rel.properties)?;
 
-        storage.insert_edge(*source_id, *target_id, &create_edge.rel_type, &props)?;
+        storage.insert_relationship(*source_id, *target_id, &create_rel.rel_type, &props)?;
         stats.relationships_created += 1;
-        stats.properties_set += create_edge.properties.len();
+        stats.properties_set += create_rel.properties.len();
     }
 
     // Return empty result for CREATE
@@ -1484,15 +1495,15 @@ fn execute_delete(
         for var in variables {
             if let Some(node) = binding.get_node(var) {
                 // Check for relationships if not DETACH DELETE
-                if !detach && storage.has_edges(node.id)? {
+                if !detach && storage.has_relationships(node.id)? {
                     return Err(Error::Cypher(
                         "Cannot delete node with relationships. Use DETACH DELETE.".into(),
                     ));
                 }
                 storage.delete_node(node.id)?;
                 stats.nodes_deleted += 1;
-            } else if let Some(relationship) = binding.get_edge(var) {
-                storage.delete_edge(relationship.id)?;
+            } else if let Some(relationship) = binding.get_relationship(var) {
+                storage.delete_relationship(relationship.id)?;
                 stats.relationships_deleted += 1;
             }
         }
@@ -1540,7 +1551,7 @@ fn eval_to_result_value(v: EvalValue) -> ResultValue {
             relationships: p
                 .relationships
                 .into_iter()
-                .map(|e| PathEdge {
+                .map(|e| PathRelationship {
                     id: e.id,
                     source: e.source,
                     target: e.target,

@@ -34,7 +34,7 @@ mod storage;
 
 pub use error::{Error, Result};
 pub use graph::{Node, PropertyValue, Relationship};
-pub use query::executor::algorithms::EdgeBetweenness;
+pub use query::executor::algorithms::RelationshipBetweenness;
 pub use query::{QueryResult, QueryStats, ResultValue, Row};
 
 use std::collections::hash_map::DefaultHasher;
@@ -362,7 +362,7 @@ impl Database {
     /// Returns a vector of the created relationship IDs in the same order as the input.
     ///
     /// Use `find_node_by_property` or `build_property_index` to look up node IDs first.
-    pub fn insert_edges_batch(
+    pub fn insert_relationships_batch(
         &self,
         relationships: &[(i64, i64, String, serde_json::Value)],
     ) -> Result<Vec<i64>> {
@@ -370,7 +370,7 @@ impl Database {
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.insert_edges_batch(relationships)
+        storage.insert_relationships_batch(relationships)
     }
 
     /// Find a node ID by a property value.
@@ -403,7 +403,7 @@ impl Database {
     ///
     /// Returns (source_object_id, target_object_id, rel_type) tuples.
     /// This is more efficient than using Cypher queries for relationship retrieval.
-    pub fn get_node_edges_by_object_id(
+    pub fn get_node_relationships_by_object_id(
         &self,
         object_id: &str,
     ) -> Result<Vec<(String, String, String)>> {
@@ -411,7 +411,7 @@ impl Database {
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.get_node_edges_by_object_id(object_id)
+        storage.get_node_relationships_by_object_id(object_id)
     }
 
     /// Get incoming connections to a node by object_id.
@@ -458,20 +458,20 @@ impl Database {
         storage.get_label_counts()
     }
 
-    /// Find outgoing edges from a node by object_id.
+    /// Find outgoing relationships from a node by object_id.
     ///
-    /// Returns `(target_object_id, rel_type)` tuples for all outgoing edges.
+    /// Returns `(target_object_id, rel_type)` tuples for all outgoing relationships.
     /// This is optimized for BFS traversal where we only need neighbor identifiers,
-    /// not full node/edge objects.
+    /// not full node/relationship objects.
     ///
     /// Uses the dedicated object_id column index for O(1) node lookup,
-    /// then O(degree) for edge retrieval.
-    pub fn find_outgoing_edges_by_object_id(
+    /// then O(degree) for relationship retrieval.
+    pub fn find_outgoing_relationships_by_object_id(
         &self,
         object_id: &str,
     ) -> Result<Vec<(String, String)>> {
         let storage = self.get_read_storage();
-        storage.find_outgoing_edges_by_object_id(object_id)
+        storage.find_outgoing_relationships_by_object_id(object_id)
     }
 
     // ========================================================================
@@ -542,8 +542,8 @@ impl Database {
     /// Compute relationship betweenness centrality for the graph.
     ///
     /// Relationship betweenness centrality measures how many shortest paths pass through
-    /// each relationship. Edges with high betweenness are "choke points" - removing them
-    /// would disrupt many paths through the graph.
+    /// each relationship. Relationships with high betweenness are "choke points" - removing
+    /// them would disrupt many paths through the graph.
     ///
     /// This is useful for Active Directory security analysis to identify:
     /// - Critical permissions that enable many attack paths
@@ -561,10 +561,10 @@ impl Database {
     ///
     /// # Returns
     ///
-    /// An `EdgeBetweenness` struct containing:
+    /// A `RelationshipBetweenness` struct containing:
     /// - `scores`: HashMap of relationship ID to betweenness score
     /// - `nodes_processed`: Number of nodes in the graph
-    /// - `edges_count`: Number of relationships analyzed
+    /// - `relationships_count`: Number of relationships analyzed
     ///
     /// Use `result.top_k(10)` to get the top 10 relationships by betweenness.
     ///
@@ -577,23 +577,23 @@ impl Database {
     ///
     /// ```ignore
     /// let db = Database::open("graph.db")?;
-    /// let result = db.edge_betweenness_centrality(None, true)?;
+    /// let result = db.relationship_betweenness_centrality(None, true)?;
     ///
     /// // Get top 10 choke points
     /// for (rel_id, score) in result.top_k(10) {
     ///     println!("Relationship {} has betweenness {}", rel_id, score);
     /// }
     /// ```
-    pub fn edge_betweenness_centrality(
+    pub fn relationship_betweenness_centrality(
         &self,
         rel_types: Option<&[&str]>,
         directed: bool,
-    ) -> Result<EdgeBetweenness> {
+    ) -> Result<RelationshipBetweenness> {
         let read_storage = self.get_read_storage();
 
         // Generate cache key based on algorithm parameters
         let cache_key = format!(
-            "algo:edge_betweenness:directed={}:types={}",
+            "algo:relationship_betweenness:directed={}:types={}",
             directed,
             rel_types
                 .map(|t| t.join(","))
@@ -609,7 +609,7 @@ impl Database {
         }
 
         // Compute (expensive)
-        let result = query::executor::algorithms::edge_betweenness_centrality(
+        let result = query::executor::algorithms::relationship_betweenness_centrality(
             &read_storage,
             rel_types,
             directed,
@@ -632,21 +632,21 @@ impl Database {
         storage.get_node(node_id)
     }
 
-    /// Get an relationship by its ID.
+    /// Get a relationship by its ID.
     ///
     /// Useful for resolving relationship IDs returned by algorithms like relationship betweenness.
-    pub fn get_edge(&self, rel_id: i64) -> Result<Option<Relationship>> {
+    pub fn get_relationship(&self, rel_id: i64) -> Result<Option<Relationship>> {
         let storage = self.get_read_storage();
-        storage.get_edge(rel_id)
+        storage.get_relationship(rel_id)
     }
 
     /// Get all distinct relationship types.
     ///
     /// Uses direct SQL query on the normalized rel_types table for O(distinct_types)
-    /// performance instead of O(edges) via Cypher MATCH.
-    pub fn get_all_edge_types(&self) -> Result<Vec<String>> {
+    /// performance instead of O(relationships) via Cypher MATCH.
+    pub fn get_all_relationship_types(&self) -> Result<Vec<String>> {
         let storage = self.get_read_storage();
-        storage.get_all_edge_types()
+        storage.get_all_relationship_types()
     }
 
     /// Get all distinct node labels.
@@ -718,11 +718,11 @@ pub struct DatabaseStats {
     /// Total number of nodes.
     pub node_count: usize,
     /// Total number of relationships.
-    pub edge_count: usize,
+    pub relationship_count: usize,
     /// Number of distinct node labels.
     pub label_count: usize,
     /// Number of distinct relationship types.
-    pub edge_type_count: usize,
+    pub relationship_type_count: usize,
 }
 
 #[cfg(test)]
@@ -758,8 +758,8 @@ mod tests {
 
         let stats = db.stats().unwrap();
         assert_eq!(stats.node_count, 2);
-        assert_eq!(stats.edge_count, 1);
-        assert_eq!(stats.edge_type_count, 1);
+        assert_eq!(stats.relationship_count, 1);
+        assert_eq!(stats.relationship_type_count, 1);
     }
 
     #[test]
@@ -788,8 +788,8 @@ mod tests {
 
         let stats = db.stats().unwrap();
         assert_eq!(stats.node_count, 3);
-        assert_eq!(stats.edge_count, 2);
-        assert_eq!(stats.edge_type_count, 2); // KNOWS, WORKS_AT
+        assert_eq!(stats.relationship_count, 2);
+        assert_eq!(stats.relationship_type_count, 2); // KNOWS, WORKS_AT
     }
 
     #[test]
@@ -828,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn test_batch_insert_edges() {
+    fn test_batch_insert_relationships() {
         let db = Database::in_memory().unwrap();
 
         // Create nodes first
@@ -866,13 +866,13 @@ mod tests {
             ),
         ];
 
-        let edge_ids = db.insert_edges_batch(&relationships).unwrap();
-        assert_eq!(edge_ids.len(), 2);
+        let rel_ids = db.insert_relationships_batch(&relationships).unwrap();
+        assert_eq!(rel_ids.len(), 2);
 
         let stats = db.stats().unwrap();
         assert_eq!(stats.node_count, 3);
-        assert_eq!(stats.edge_count, 2);
-        assert_eq!(stats.edge_type_count, 2);
+        assert_eq!(stats.relationship_count, 2);
+        assert_eq!(stats.relationship_type_count, 2);
     }
 
     #[test]
@@ -1070,7 +1070,7 @@ mod tests {
     }
 
     #[test]
-    fn test_count_edges() {
+    fn test_count_relationships() {
         let db = Database::in_memory().unwrap();
 
         // Create nodes with relationships

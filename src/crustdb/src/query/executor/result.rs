@@ -3,7 +3,7 @@
 use crate::error::{Error, Result};
 use crate::graph::PropertyValue;
 use crate::query::parser::{Expression, ReturnClause};
-use crate::query::{PathEdge, PathNode, QueryResult, QueryStats, ResultValue, Row};
+use crate::query::{PathNode, PathRelationship, QueryResult, QueryStats, ResultValue, Row};
 use std::collections::HashMap;
 
 use super::aggregate::{evaluate_aggregate, has_aggregate_functions, is_aggregate_function};
@@ -129,7 +129,7 @@ pub fn evaluate_return_item_with_bindings(
                     labels: node.labels.clone(),
                     properties: node.properties.clone(),
                 })
-            } else if let Some(relationship) = binding.get_edge(name) {
+            } else if let Some(relationship) = binding.get_relationship(name) {
                 Ok(ResultValue::Relationship {
                     id: relationship.id,
                     source: relationship.source,
@@ -151,7 +151,7 @@ pub fn evaluate_return_item_with_bindings(
                     relationships: path
                         .relationships
                         .iter()
-                        .map(|e| PathEdge {
+                        .map(|e| PathRelationship {
                             id: e.id,
                             source: e.source,
                             target: e.target,
@@ -160,8 +160,8 @@ pub fn evaluate_return_item_with_bindings(
                         })
                         .collect(),
                 })
-            } else if let Some(edge_list) = binding.get_edge_list(name) {
-                let list: Vec<PropertyValue> = edge_list
+            } else if let Some(rel_list) = binding.get_relationship_list(name) {
+                let list: Vec<PropertyValue> = rel_list
                     .iter()
                     .map(|e| PropertyValue::Map(e.properties.clone()))
                     .collect();
@@ -176,7 +176,7 @@ pub fn evaluate_return_item_with_bindings(
                     let value = node.get(property).cloned().unwrap_or(PropertyValue::Null);
                     return Ok(ResultValue::Property(value));
                 }
-                if let Some(relationship) = binding.get_edge(base_name) {
+                if let Some(relationship) = binding.get_relationship(base_name) {
                     let value = relationship
                         .properties
                         .get(property)

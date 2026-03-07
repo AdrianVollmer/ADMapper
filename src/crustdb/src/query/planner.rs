@@ -11,8 +11,8 @@ use crate::error::{Error, Result};
 
 // Re-export plan types for backwards compatibility
 pub use super::operators::{
-    AggregateColumn, AggregateFunction, CreateEdge, CreateNode, ExpandDirection, FilterPredicate,
-    PlanExpr, PlanLiteral, PlanOperator, ProjectColumn, QueryPlan, SetOperation,
+    AggregateColumn, AggregateFunction, CreateNode, CreateRelationship, ExpandDirection,
+    FilterPredicate, PlanExpr, PlanLiteral, PlanOperator, ProjectColumn, QueryPlan, SetOperation,
     TargetPropertyFilter,
 };
 
@@ -69,7 +69,7 @@ fn plan_create(create: &super::parser::CreateClause) -> Result<PlanOperator> {
                         super::parser::Direction::Incoming => (var.clone(), source_var),
                         super::parser::Direction::Both => (source_var, var.clone()), // Default to outgoing
                     };
-                    relationships.push(CreateEdge {
+                    relationships.push(CreateRelationship {
                         variable: rp.variable.clone(),
                         source,
                         target,
@@ -1247,15 +1247,15 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             columns,
             distinct,
         } => {
-            // Optimize: RETURN DISTINCT type(r) -> EdgeTypesScan
+            // Optimize: RETURN DISTINCT type(r) -> RelationshipTypesScan
             // Pattern: Project(distinct=true) over Expand with single column type(r)
             if distinct && columns.len() == 1 {
                 if let PlanExpr::Function { name, args } = &columns[0].expr {
                     if name.to_uppercase() == "TYPE" && args.len() == 1 {
                         if let PlanExpr::Variable(rel_var) = &args[0] {
-                            // Check if source involves an edge variable matching rel_var
-                            if is_edge_pattern_with_var(&source, rel_var) {
-                                return PlanOperator::EdgeTypesScan {
+                            // Check if source involves a relationship variable matching rel_var
+                            if is_relationship_pattern_with_var(&source, rel_var) {
+                                return PlanOperator::RelationshipTypesScan {
                                     alias: columns[0].alias.clone(),
                                 };
                             }
@@ -1375,17 +1375,17 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
     }
 }
 
-/// Check if a plan involves an edge pattern that binds the given variable.
+/// Check if a plan involves a relationship pattern that binds the given variable.
 ///
 /// This is used to detect patterns like `MATCH ()-[r]->() RETURN DISTINCT type(r)`
-/// where we can optimize to use EdgeTypesScan instead of scanning all edges.
-fn is_edge_pattern_with_var(op: &PlanOperator, rel_var: &str) -> bool {
+/// where we can optimize to use RelationshipTypesScan instead of scanning all relationships.
+fn is_relationship_pattern_with_var(op: &PlanOperator, rel_var: &str) -> bool {
     match op {
         PlanOperator::Expand { rel_variable, .. } => rel_variable.as_deref() == Some(rel_var),
         PlanOperator::VariableLengthExpand { rel_variable, .. } => {
             rel_variable.as_deref() == Some(rel_var)
         }
-        PlanOperator::Filter { source, .. } => is_edge_pattern_with_var(source, rel_var),
+        PlanOperator::Filter { source, .. } => is_relationship_pattern_with_var(source, rel_var),
         _ => false,
     }
 }

@@ -1,4 +1,4 @@
-//! Node and edge CRUD operations.
+//! Node and relationship CRUD operations.
 
 use crate::error::Result;
 use crate::graph::{Node, PropertyValue, Relationship};
@@ -28,8 +28,8 @@ impl SqliteStorage {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Get or create an relationship type ID.
-    pub(crate) fn get_or_create_edge_type(&self, rel_type: &str) -> Result<i64> {
+    /// Get or create a relationship type ID.
+    pub(crate) fn get_or_create_relationship_type(&self, rel_type: &str) -> Result<i64> {
         // Try to get existing
         if let Some(id) = self
             .conn
@@ -76,15 +76,15 @@ impl SqliteStorage {
         Ok(node_id)
     }
 
-    /// Insert an relationship into the database.
-    pub fn insert_edge(
+    /// Insert a relationship into the database.
+    pub fn insert_relationship(
         &self,
         source_id: i64,
         target_id: i64,
         rel_type: &str,
         properties: &serde_json::Value,
     ) -> Result<i64> {
-        let type_id = self.get_or_create_edge_type(rel_type)?;
+        let type_id = self.get_or_create_relationship_type(rel_type)?;
         let props_json = serde_json::to_string(properties)?;
         self.conn.execute(
             "INSERT INTO relationships (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, jsonb(?4))",
@@ -317,7 +317,7 @@ impl SqliteStorage {
     ///
     /// Each relationship is specified as (source_id, target_id, rel_type, properties).
     /// Returns a vector of the created relationship IDs in the same order as the input.
-    pub fn insert_edges_batch(
+    pub fn insert_relationships_batch(
         &mut self,
         relationships: &[(i64, i64, String, serde_json::Value)],
     ) -> Result<Vec<i64>> {
@@ -326,7 +326,7 @@ impl SqliteStorage {
         }
 
         let tx = self.conn.transaction()?;
-        let mut edge_ids = Vec::with_capacity(relationships.len());
+        let mut rel_ids = Vec::with_capacity(relationships.len());
 
         // Pre-collect all unique relationship types and create them
         let mut type_cache: std::collections::HashMap<String, i64> =
@@ -356,20 +356,20 @@ impl SqliteStorage {
 
         // Insert relationships using prepared statement
         {
-            let mut edge_stmt = tx.prepare(
+            let mut rel_stmt = tx.prepare(
                 "INSERT INTO relationships (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, jsonb(?4))",
             )?;
 
             for (source_id, target_id, rel_type, properties) in relationships {
                 let props_json = serde_json::to_string(properties)?;
                 let type_id = type_cache.get(rel_type).copied().unwrap_or(0);
-                edge_stmt.execute(params![source_id, target_id, type_id, props_json])?;
-                edge_ids.push(tx.last_insert_rowid());
+                rel_stmt.execute(params![source_id, target_id, type_id, props_json])?;
+                rel_ids.push(tx.last_insert_rowid());
             }
         }
 
         tx.commit()?;
-        Ok(edge_ids)
+        Ok(rel_ids)
     }
 
     /// Get a node by ID.
@@ -408,8 +408,8 @@ impl SqliteStorage {
         }))
     }
 
-    /// Get an relationship by ID.
-    pub fn get_edge(&self, id: i64) -> Result<Option<Relationship>> {
+    /// Get a relationship by ID.
+    pub fn get_relationship(&self, id: i64) -> Result<Option<Relationship>> {
         // Use json() to convert JSONB blob back to JSON text
         let relationship: Option<(i64, i64, i64, String, String)> = self
             .conn
@@ -455,8 +455,8 @@ impl SqliteStorage {
         Ok(affected > 0)
     }
 
-    /// Delete an relationship.
-    pub fn delete_edge(&self, id: i64) -> Result<bool> {
+    /// Delete a relationship.
+    pub fn delete_relationship(&self, id: i64) -> Result<bool> {
         let affected = self
             .conn
             .execute("DELETE FROM relationships WHERE id = ?1", params![id])?;
@@ -464,7 +464,7 @@ impl SqliteStorage {
     }
 
     /// Check if a node has any connected relationships.
-    pub fn has_edges(&self, node_id: i64) -> Result<bool> {
+    pub fn has_relationships(&self, node_id: i64) -> Result<bool> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM relationships WHERE source_id = ?1 OR target_id = ?1",
             params![node_id],

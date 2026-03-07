@@ -334,7 +334,7 @@ fn load_crustdb(db: &Database, graph: &GeneratedGraph) -> Result<(), String> {
         })
         .collect();
 
-    db.insert_edges_batch(&relationships)
+    db.insert_relationships_batch(&relationships)
         .map_err(|e| e.to_string())?;
 
     Ok(())

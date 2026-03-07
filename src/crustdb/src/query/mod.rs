@@ -64,9 +64,9 @@ pub struct PathNode {
     pub properties: HashMap<String, PropertyValue>,
 }
 
-/// An relationship in a path result.
+/// A relationship in a path result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PathEdge {
+pub struct PathRelationship {
     pub id: i64,
     pub source: i64,
     pub target: i64,
@@ -97,7 +97,7 @@ pub enum ResultValue {
     /// A path (sequence of nodes and relationships) with full data.
     Path {
         nodes: Vec<PathNode>,
-        relationships: Vec<PathEdge>,
+        relationships: Vec<PathRelationship>,
     },
 }
 
