@@ -837,6 +837,45 @@ fn test_type_function_in_where() {
 }
 
 #[test]
+fn test_distinct_type_optimization() {
+    let db = Database::in_memory().unwrap();
+
+    // Create multiple relationships of different types
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})")
+        .unwrap();
+    db.execute("CREATE (b:Person {name: 'Bob'})-[:WORKS_WITH]->(c:Person {name: 'Charlie'})")
+        .unwrap();
+    db.execute("CREATE (a:Person {name: 'Alice'})-[:MANAGES]->(c:Person {name: 'Charlie'})")
+        .unwrap();
+    // Add another KNOWS relationship to test deduplication
+    db.execute("CREATE (c:Person {name: 'Charlie'})-[:KNOWS]->(d:Person {name: 'Dan'})")
+        .unwrap();
+
+    // Query DISTINCT type(r) - this should be optimized to EdgeTypesScan
+    let result = db
+        .execute("MATCH ()-[r]->() RETURN DISTINCT type(r)")
+        .unwrap();
+
+    // Should return 3 distinct types: KNOWS, WORKS_WITH, MANAGES
+    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.columns, vec!["type(r)"]);
+
+    // Collect all types
+    let types: std::collections::HashSet<String> = result
+        .rows
+        .iter()
+        .map(|row| match row.values.get("type(r)").unwrap() {
+            crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => s.clone(),
+            _ => panic!("Expected string value"),
+        })
+        .collect();
+
+    assert!(types.contains("KNOWS"));
+    assert!(types.contains("WORKS_WITH"));
+    assert!(types.contains("MANAGES"));
+}
+
+#[test]
 fn test_id_function() {
     let db = Database::in_memory().unwrap();
     db.execute("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})")

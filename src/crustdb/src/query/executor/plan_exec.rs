@@ -199,6 +199,8 @@ fn execute_operator(
             execute_count_pushdown(label.as_deref(), alias, storage)
         }
 
+        PlanOperator::EdgeTypesScan { alias } => execute_edge_types_scan(alias, storage),
+
         PlanOperator::Limit { source, count } => {
             // Limit can work on either Bindings or Rows
             match execute_operator(source, storage, stats)? {
@@ -1356,6 +1358,31 @@ fn execute_count_pushdown(
     Ok(ExecutionResult::Rows {
         columns: vec![alias.to_string()],
         rows: vec![Row { values }],
+    })
+}
+
+/// Execute edge types scan - returns all distinct relationship types.
+///
+/// This is O(distinct_types) instead of O(edges) because it queries the
+/// normalized rel_types table directly rather than scanning all edges.
+fn execute_edge_types_scan(alias: &str, storage: &SqliteStorage) -> Result<ExecutionResult> {
+    let edge_types = storage.get_all_edge_types()?;
+
+    let rows: Vec<Row> = edge_types
+        .into_iter()
+        .map(|type_name| {
+            let mut values = HashMap::new();
+            values.insert(
+                alias.to_string(),
+                ResultValue::Property(PropertyValue::String(type_name)),
+            );
+            Row { values }
+        })
+        .collect();
+
+    Ok(ExecutionResult::Rows {
+        columns: vec![alias.to_string()],
+        rows,
     })
 }
 

@@ -111,6 +111,9 @@ pub enum PlanOperator {
         label: Option<String>,
         alias: String,
     },
+    /// SQL pushdown for DISTINCT type(r) - returns all edge types directly.
+    /// Much faster than scanning all edges: O(distinct_types) vs O(edges).
+    EdgeTypesScan { alias: String },
     /// Sort rows.
     #[allow(dead_code)]
     Sort {

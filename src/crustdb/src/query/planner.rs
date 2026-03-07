@@ -1124,11 +1124,30 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             source,
             columns,
             distinct,
-        } => PlanOperator::Project {
-            source: Box::new(optimize_operator(*source)),
-            columns,
-            distinct,
-        },
+        } => {
+            // Optimize: RETURN DISTINCT type(r) -> EdgeTypesScan
+            // Pattern: Project(distinct=true) over Expand with single column type(r)
+            if distinct && columns.len() == 1 {
+                if let PlanExpr::Function { name, args } = &columns[0].expr {
+                    if name.to_uppercase() == "TYPE" && args.len() == 1 {
+                        if let PlanExpr::Variable(rel_var) = &args[0] {
+                            // Check if source involves an edge variable matching rel_var
+                            if is_edge_pattern_with_var(&source, rel_var) {
+                                return PlanOperator::EdgeTypesScan {
+                                    alias: columns[0].alias.clone(),
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+
+            PlanOperator::Project {
+                source: Box::new(optimize_operator(*source)),
+                columns,
+                distinct,
+            }
+        }
         PlanOperator::Skip { source, count } => PlanOperator::Skip {
             source: Box::new(optimize_operator(*source)),
             count,
@@ -1231,6 +1250,21 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
 
         // Leaf operators - no optimization needed
         other => other,
+    }
+}
+
+/// Check if a plan involves an edge pattern that binds the given variable.
+///
+/// This is used to detect patterns like `MATCH ()-[r]->() RETURN DISTINCT type(r)`
+/// where we can optimize to use EdgeTypesScan instead of scanning all edges.
+fn is_edge_pattern_with_var(op: &PlanOperator, rel_var: &str) -> bool {
+    match op {
+        PlanOperator::Expand { rel_variable, .. } => rel_variable.as_deref() == Some(rel_var),
+        PlanOperator::VariableLengthExpand { rel_variable, .. } => {
+            rel_variable.as_deref() == Some(rel_var)
+        }
+        PlanOperator::Filter { source, .. } => is_edge_pattern_with_var(source, rel_var),
+        _ => false,
     }
 }
 
