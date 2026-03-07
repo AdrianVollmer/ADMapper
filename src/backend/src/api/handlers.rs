@@ -795,44 +795,13 @@ pub async fn node_status(
         }));
     }
 
-    // === Step 5: Check path to Enterprise Admins (-519) ===
-    let path_to_ea = check_path_to_rid(&state, &db, &node_id, "-519", "Enterprise Admins").await?;
-    if let Some(hops) = path_to_ea {
-        return Ok(Json(NodeStatus {
-            owned,
-            is_disabled,
-            is_enterprise_admin: false,
-            is_domain_admin: false,
-            is_high_value: false,
-            has_path_to_high_value: true,
-            path_length: Some(hops),
-        }));
-    }
-
-    // === Step 6: Check path to Domain Admins (-512) ===
-    let path_to_da = check_path_to_rid(&state, &db, &node_id, "-512", "Domain Admins").await?;
-    if let Some(hops) = path_to_da {
-        return Ok(Json(NodeStatus {
-            owned,
-            is_disabled,
-            is_enterprise_admin: false,
-            is_domain_admin: false,
-            is_high_value: false,
-            has_path_to_high_value: true,
-            path_length: Some(hops),
-        }));
-    }
-
-    // === Step 7: Check path to other high-value groups ===
-    let rid_conditions: Vec<String> = OTHER_HIGH_VALUE_RIDS
-        .iter()
-        .map(|rid| format!("b.object_id ENDS WITH '{}'", rid))
-        .collect();
+    // === Step 5: Check path to any high-value target ===
+    // Uses is_highvalue property set at import time for all privileged groups and domains
     let path_to_hv = check_path_to_condition(
         &state,
         &db,
         &node_id,
-        &rid_conditions.join(" OR "),
+        "b.is_highvalue = true",
         "high-value",
     )
     .await?;
@@ -858,19 +827,6 @@ pub async fn node_status(
         has_path_to_high_value: false,
         path_length: None,
     }))
-}
-
-/// Helper: Check if there's a path to a group with given RID suffix.
-/// Returns Some(hops) if path found, None otherwise.
-async fn check_path_to_rid(
-    state: &AppState,
-    db: &Arc<dyn DatabaseBackend>,
-    node_id: &str,
-    rid: &str,
-    target_name: &str,
-) -> Result<Option<usize>, ApiError> {
-    let condition = format!("b.object_id ENDS WITH '{}'", rid);
-    check_path_to_condition(state, db, node_id, &condition, target_name).await
 }
 
 /// Helper: Check if there's a path matching a WHERE condition.

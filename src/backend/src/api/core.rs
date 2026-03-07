@@ -471,39 +471,9 @@ pub fn node_status_full(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeS
         });
     }
 
-    // Check paths to high-value targets
-    // First check path to Enterprise Admins (-519)
-    if let Some(hops) = check_path_to_rid(db, node_id, "-519")? {
-        return Ok(NodeStatus {
-            owned,
-            is_disabled,
-            is_enterprise_admin: false,
-            is_domain_admin: false,
-            is_high_value: false,
-            has_path_to_high_value: true,
-            path_length: Some(hops),
-        });
-    }
-
-    // Check path to Domain Admins (-512)
-    if let Some(hops) = check_path_to_rid(db, node_id, "-512")? {
-        return Ok(NodeStatus {
-            owned,
-            is_disabled,
-            is_enterprise_admin: false,
-            is_domain_admin: false,
-            is_high_value: false,
-            has_path_to_high_value: true,
-            path_length: Some(hops),
-        });
-    }
-
-    // Check path to other high-value groups
-    let rid_conditions: Vec<String> = OTHER_HIGH_VALUE_RIDS
-        .iter()
-        .map(|rid| format!("b.object_id ENDS WITH '{}'", rid))
-        .collect();
-    if let Some(hops) = check_path_to_condition(db, node_id, &rid_conditions.join(" OR "))? {
+    // Check path to any high-value target using the is_highvalue property
+    // (set at import time for all privileged groups and domains)
+    if let Some(hops) = check_path_to_condition(db, node_id, "b.is_highvalue = true")? {
         return Ok(NodeStatus {
             owned,
             is_disabled,
@@ -525,17 +495,6 @@ pub fn node_status_full(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeS
         has_path_to_high_value: false,
         path_length: None,
     })
-}
-
-/// Helper: Check if there's a path to a group with given RID suffix.
-/// Returns Some(hops) if path found, None otherwise.
-fn check_path_to_rid(
-    db: &dyn DatabaseBackend,
-    node_id: &str,
-    rid: &str,
-) -> Result<Option<usize>, String> {
-    let condition = format!("b.object_id ENDS WITH '{}'", rid);
-    check_path_to_condition(db, node_id, &condition)
 }
 
 /// Helper: Check if there's a path matching a WHERE condition.
