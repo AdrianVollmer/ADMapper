@@ -1025,6 +1025,128 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                             columns,
                             distinct: false,
                         },
+                        // Push through Filter -> VariableLengthExpand
+                        // This handles: MATCH (a)-[*]->(b) WHERE ... RETURN ... LIMIT n
+                        // First optimize the Filter (which may push target predicates),
+                        // then push LIMIT into the result
+                        PlanOperator::Filter {
+                            source: filter_source,
+                            predicate,
+                        } => {
+                            // Optimize the Filter first to allow target predicate pushdown
+                            let optimized_filter = optimize_operator(PlanOperator::Filter {
+                                source: filter_source,
+                                predicate,
+                            });
+
+                            // Now check if we can push LIMIT into the result
+                            match optimized_filter {
+                                // Filter was kept, check what's inside
+                                PlanOperator::Filter {
+                                    source: opt_filter_source,
+                                    predicate: opt_predicate,
+                                } => {
+                                    if let PlanOperator::VariableLengthExpand {
+                                        source: inner_source,
+                                        source_variable,
+                                        rel_variable,
+                                        target_variable,
+                                        target_labels,
+                                        path_variable,
+                                        types,
+                                        direction,
+                                        min_hops,
+                                        max_hops,
+                                        target_ids,
+                                        limit: None,
+                                        target_property_filter,
+                                    } = *opt_filter_source
+                                    {
+                                        PlanOperator::Project {
+                                            source: Box::new(PlanOperator::Filter {
+                                                source: Box::new(
+                                                    PlanOperator::VariableLengthExpand {
+                                                        source: inner_source,
+                                                        source_variable,
+                                                        rel_variable,
+                                                        target_variable,
+                                                        target_labels,
+                                                        path_variable,
+                                                        types,
+                                                        direction,
+                                                        min_hops,
+                                                        max_hops,
+                                                        target_ids,
+                                                        limit: Some(count),
+                                                        target_property_filter,
+                                                    },
+                                                ),
+                                                predicate: opt_predicate,
+                                            }),
+                                            columns,
+                                            distinct: false,
+                                        }
+                                    } else {
+                                        // Can't push further, keep LIMIT on top
+                                        PlanOperator::Limit {
+                                            source: Box::new(PlanOperator::Project {
+                                                source: Box::new(PlanOperator::Filter {
+                                                    source: opt_filter_source,
+                                                    predicate: opt_predicate,
+                                                }),
+                                                columns,
+                                                distinct: false,
+                                            }),
+                                            count,
+                                        }
+                                    }
+                                }
+                                // Filter was optimized away (predicate fully pushed),
+                                // check if we got VariableLengthExpand
+                                PlanOperator::VariableLengthExpand {
+                                    source: inner_source,
+                                    source_variable,
+                                    rel_variable,
+                                    target_variable,
+                                    target_labels,
+                                    path_variable,
+                                    types,
+                                    direction,
+                                    min_hops,
+                                    max_hops,
+                                    target_ids,
+                                    limit: None,
+                                    target_property_filter,
+                                } => PlanOperator::Project {
+                                    source: Box::new(PlanOperator::VariableLengthExpand {
+                                        source: inner_source,
+                                        source_variable,
+                                        rel_variable,
+                                        target_variable,
+                                        target_labels,
+                                        path_variable,
+                                        types,
+                                        direction,
+                                        min_hops,
+                                        max_hops,
+                                        target_ids,
+                                        limit: Some(count),
+                                        target_property_filter,
+                                    }),
+                                    columns,
+                                    distinct: false,
+                                },
+                                // Something else, keep LIMIT on top
+                                other => PlanOperator::Limit {
+                                    source: Box::new(PlanOperator::Project {
+                                        source: Box::new(other),
+                                        columns,
+                                        distinct: false,
+                                    }),
+                                    count,
+                                },
+                            }
+                        }
                         // Default: keep LIMIT on top
                         other => PlanOperator::Limit {
                             source: Box::new(PlanOperator::Project {
@@ -1504,6 +1626,50 @@ mod tests {
                 }
             } else {
                 panic!("Expected VariableLengthExpand");
+            }
+        } else {
+            panic!("Expected Project");
+        }
+    }
+
+    #[test]
+    fn test_plan_variable_length_limit_through_filter() {
+        // This pattern is used by node_status: MATCH path with WHERE and LIMIT 1
+        let plan = plan_query(
+            "MATCH p = (a)-[*1..20]->(b) WHERE a.name = 'test' AND b.id ENDS WITH '-519' RETURN length(p) LIMIT 1",
+        );
+        // Should have limit pushed into VariableLengthExpand even through Filter
+        // Structure: Project -> Filter -> VariableLengthExpand(limit=1)
+        if let PlanOperator::Project { source, .. } = plan.root {
+            if let PlanOperator::Filter {
+                source: filter_source,
+                ..
+            } = *source
+            {
+                if let PlanOperator::VariableLengthExpand {
+                    limit,
+                    target_property_filter,
+                    ..
+                } = *filter_source
+                {
+                    assert_eq!(
+                        limit,
+                        Some(1),
+                        "LIMIT should be pushed into VariableLengthExpand through Filter"
+                    );
+                    // Also verify target property filter was pushed
+                    assert!(
+                        target_property_filter.is_some(),
+                        "Target property filter should be pushed"
+                    );
+                } else {
+                    panic!(
+                        "Expected VariableLengthExpand under Filter, got {:?}",
+                        filter_source
+                    );
+                }
+            } else {
+                panic!("Expected Filter under Project, got {:?}", source);
             }
         } else {
             panic!("Expected Project");
