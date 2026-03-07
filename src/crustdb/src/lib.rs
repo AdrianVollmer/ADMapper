@@ -458,6 +458,22 @@ impl Database {
         storage.get_label_counts()
     }
 
+    /// Find outgoing edges from a node by object_id.
+    ///
+    /// Returns `(target_object_id, rel_type)` tuples for all outgoing edges.
+    /// This is optimized for BFS traversal where we only need neighbor identifiers,
+    /// not full node/edge objects.
+    ///
+    /// Uses the dedicated object_id column index for O(1) node lookup,
+    /// then O(degree) for edge retrieval.
+    pub fn find_outgoing_edges_by_object_id(
+        &self,
+        object_id: &str,
+    ) -> Result<Vec<(String, String)>> {
+        let storage = self.get_read_storage();
+        storage.find_outgoing_edges_by_object_id(object_id)
+    }
+
     // ========================================================================
     // Query History Methods
     // ========================================================================

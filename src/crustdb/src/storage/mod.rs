@@ -580,4 +580,65 @@ mod tests {
             Some(&PropertyValue::String("Display".to_string()))
         );
     }
+
+    #[test]
+    fn test_find_outgoing_edges_by_object_id() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create nodes with object_id
+        let alice_id = storage
+            .insert_node(
+                &["Person".to_string()],
+                &serde_json::json!({"object_id": "alice-1", "name": "Alice"}),
+            )
+            .unwrap();
+        let bob_id = storage
+            .insert_node(
+                &["Person".to_string()],
+                &serde_json::json!({"object_id": "bob-2", "name": "Bob"}),
+            )
+            .unwrap();
+        let charlie_id = storage
+            .insert_node(
+                &["Person".to_string()],
+                &serde_json::json!({"object_id": "charlie-3", "name": "Charlie"}),
+            )
+            .unwrap();
+
+        // Create edges: alice -> bob (KNOWS), alice -> charlie (WORKS_WITH)
+        storage
+            .insert_edge(alice_id, bob_id, "KNOWS", &serde_json::json!({}))
+            .unwrap();
+        storage
+            .insert_edge(alice_id, charlie_id, "WORKS_WITH", &serde_json::json!({}))
+            .unwrap();
+        // Also bob -> charlie to ensure we don't get extra edges
+        storage
+            .insert_edge(bob_id, charlie_id, "KNOWS", &serde_json::json!({}))
+            .unwrap();
+
+        // Find outgoing edges from alice
+        let alice_edges = storage.find_outgoing_edges_by_object_id("alice-1").unwrap();
+        assert_eq!(alice_edges.len(), 2);
+
+        // Check we get the correct targets and types
+        let edge_set: std::collections::HashSet<_> = alice_edges.into_iter().collect();
+        assert!(edge_set.contains(&("bob-2".to_string(), "KNOWS".to_string())));
+        assert!(edge_set.contains(&("charlie-3".to_string(), "WORKS_WITH".to_string())));
+
+        // Find outgoing edges from bob
+        let bob_edges = storage.find_outgoing_edges_by_object_id("bob-2").unwrap();
+        assert_eq!(bob_edges.len(), 1);
+        assert_eq!(bob_edges[0], ("charlie-3".to_string(), "KNOWS".to_string()));
+
+        // Find outgoing edges from charlie (none)
+        let charlie_edges = storage
+            .find_outgoing_edges_by_object_id("charlie-3")
+            .unwrap();
+        assert!(charlie_edges.is_empty());
+
+        // Non-existent node returns empty
+        let nobody_edges = storage.find_outgoing_edges_by_object_id("nobody").unwrap();
+        assert!(nobody_edges.is_empty());
+    }
 }

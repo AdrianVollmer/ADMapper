@@ -801,6 +801,39 @@ impl SqliteStorage {
         Ok(types)
     }
 
+    /// Find outgoing edges from a node by object_id.
+    ///
+    /// Returns `(target_object_id, rel_type)` tuples for all outgoing edges.
+    /// This is optimized for BFS traversal where we only need neighbor identifiers,
+    /// not full node/edge objects.
+    ///
+    /// Uses the dedicated object_id column index for O(1) node lookup,
+    /// then O(degree) for edge retrieval.
+    pub fn find_outgoing_edges_by_object_id(
+        &self,
+        object_id: &str,
+    ) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT tgt.object_id, et.name
+             FROM relationships e
+             JOIN nodes src ON e.source_id = src.id
+             JOIN nodes tgt ON e.target_id = tgt.id
+             JOIN rel_types et ON e.type_id = et.id
+             WHERE src.object_id = ?1",
+        )?;
+
+        let rows = stmt.query_map(params![object_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut edges = Vec::new();
+        for row in rows {
+            edges.push(row?);
+        }
+
+        Ok(edges)
+    }
+
     /// Get counts for all node labels in a single query.
     /// Returns a HashMap of label name to count.
     pub fn get_label_counts(&self) -> Result<std::collections::HashMap<String, usize>> {

@@ -688,7 +688,11 @@ impl CrustDatabase {
         Ok(None)
     }
 
-    /// Find shortest path between two nodes using BFS.
+    /// Find shortest path between two nodes using incremental BFS.
+    ///
+    /// Uses on-demand neighbor lookups instead of preloading the entire graph,
+    /// which dramatically reduces memory usage and improves time-to-first-result
+    /// for large graphs. Complexity is O(visited * avg_degree) instead of O(E).
     #[allow(clippy::type_complexity)]
     pub fn shortest_path(
         &self,
@@ -697,17 +701,6 @@ impl CrustDatabase {
     ) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));
-        }
-
-        // Use BFS over relationships
-        let relationships = self.get_all_edges()?;
-
-        let mut adj: std::collections::HashMap<String, Vec<(String, String)>> =
-            std::collections::HashMap::new();
-        for relationship in &relationships {
-            adj.entry(relationship.source.clone())
-                .or_default()
-                .push((relationship.target.clone(), relationship.rel_type.clone()));
         }
 
         let mut visited = std::collections::HashSet::new();
@@ -730,13 +723,17 @@ impl CrustDatabase {
                 return Ok(Some(path));
             }
 
-            if let Some(neighbors) = adj.get(&current) {
-                for (neighbor, rel_type) in neighbors {
-                    if !visited.contains(neighbor) {
-                        visited.insert(neighbor.clone());
-                        parent.insert(neighbor.clone(), (current.clone(), rel_type.clone()));
-                        queue.push_back(neighbor.clone());
-                    }
+            // Query neighbors on-demand instead of preloading entire graph
+            let edges = self
+                .db
+                .find_outgoing_edges_by_object_id(&current)
+                .map_err(|e| DbError::Database(e.to_string()))?;
+
+            for (neighbor, rel_type) in edges {
+                if !visited.contains(&neighbor) {
+                    visited.insert(neighbor.clone());
+                    parent.insert(neighbor.clone(), (current.clone(), rel_type));
+                    queue.push_back(neighbor);
                 }
             }
         }
