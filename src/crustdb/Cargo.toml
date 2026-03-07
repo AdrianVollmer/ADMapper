@@ -63,3 +63,7 @@ path = "examples/profile_shortest.rs"
 [[example]]
 name = "test_grid"
 path = "examples/test_grid.rs"
+
+[[example]]
+name = "profile_bottlenecks"
+path = "examples/profile_bottlenecks.rs"

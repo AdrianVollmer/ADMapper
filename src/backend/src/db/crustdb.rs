@@ -606,37 +606,27 @@ impl CrustDatabase {
     }
 
     /// Get all distinct relationship types.
+    ///
+    /// Uses direct SQL query on the normalized rel_types table for O(distinct_types)
+    /// performance instead of O(edges) full scan via Cypher.
     pub fn get_edge_types(&self) -> Result<Vec<String>> {
-        let result = self.execute("MATCH ()-[r]->() RETURN DISTINCT type(r)")?;
-
-        let mut types = Vec::new();
-        for row in &result.rows {
-            for value in row.values.values() {
-                if let crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) = value {
-                    types.push(s.clone());
-                }
-            }
-        }
-
-        Ok(types)
+        // Use the optimized storage method that queries rel_types table directly
+        // This is O(distinct_types) instead of O(edges)
+        self.db
+            .get_all_edge_types()
+            .map_err(|e| DbError::Database(e.to_string()))
     }
 
     /// Get all distinct node labels (Cypher labels).
+    ///
+    /// Uses direct SQL query on the normalized node_labels table for O(distinct_labels)
+    /// performance instead of O(nodes) full scan via Cypher.
     pub fn get_node_types(&self) -> Result<Vec<String>> {
-        let result = self.execute("MATCH (n) RETURN DISTINCT n.label")?;
-
-        let mut types = Vec::new();
-        for row in &result.rows {
-            for value in row.values.values() {
-                if let crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) = value {
-                    if !s.is_empty() {
-                        types.push(s.clone());
-                    }
-                }
-            }
-        }
-
-        Ok(types)
+        // Use the optimized storage method that queries node_labels table directly
+        // This is O(distinct_labels) instead of O(nodes)
+        self.db
+            .get_all_labels()
+            .map_err(|e| DbError::Database(e.to_string()))
     }
 
     /// Search nodes by name (case-insensitive substring match).

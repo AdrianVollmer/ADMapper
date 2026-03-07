@@ -623,6 +623,24 @@ impl Database {
         let storage = self.get_read_storage();
         storage.get_edge(rel_id)
     }
+
+    /// Get all distinct relationship types.
+    ///
+    /// Uses direct SQL query on the normalized rel_types table for O(distinct_types)
+    /// performance instead of O(edges) via Cypher MATCH.
+    pub fn get_all_edge_types(&self) -> Result<Vec<String>> {
+        let storage = self.get_read_storage();
+        storage.get_all_edge_types()
+    }
+
+    /// Get all distinct node labels.
+    ///
+    /// Uses direct SQL query on the normalized node_labels table for O(distinct_labels)
+    /// performance instead of O(nodes) via Cypher MATCH.
+    pub fn get_all_labels(&self) -> Result<Vec<String>> {
+        let storage = self.get_read_storage();
+        storage.get_all_labels()
+    }
 }
 
 impl Drop for Database {

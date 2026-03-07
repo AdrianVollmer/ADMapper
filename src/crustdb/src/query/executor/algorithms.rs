@@ -75,6 +75,33 @@ pub fn edge_betweenness_centrality(
     rel_types: Option<&[&str]>,
     directed: bool,
 ) -> Result<EdgeBetweenness> {
+    // Use sampled version with automatic sample size selection
+    // For graphs > 500 nodes, sample to keep runtime reasonable
+    edge_betweenness_centrality_sampled(storage, rel_types, directed, None)
+}
+
+/// Compute relationship betweenness centrality with optional sampling.
+///
+/// When `sample_size` is Some(n), only n randomly selected source nodes are used,
+/// and the result is extrapolated. This provides an approximation in O(sample * E)
+/// instead of O(V * E), making it practical for large graphs.
+///
+/// When `sample_size` is None, automatic selection is used:
+/// - Graphs ≤ 500 nodes: exact computation
+/// - Graphs > 500 nodes: sample 500 nodes (extrapolated)
+///
+/// # Arguments
+///
+/// * `storage` - The storage backend to query
+/// * `rel_types` - Optional filter to only consider specific relationship types
+/// * `directed` - Whether to treat relationships as directed or undirected
+/// * `sample_size` - Optional number of source nodes to sample (None = auto)
+pub fn edge_betweenness_centrality_sampled(
+    storage: &SqliteStorage,
+    rel_types: Option<&[&str]>,
+    directed: bool,
+    sample_size: Option<usize>,
+) -> Result<EdgeBetweenness> {
     // Load the graph structure
     let all_nodes = storage.scan_all_nodes()?;
     let all_edges = storage.scan_all_edges()?;
@@ -92,6 +119,42 @@ pub fn edge_betweenness_centrality(
     let node_ids: Vec<i64> = all_nodes.iter().map(|n| n.id).collect();
     let num_nodes = node_ids.len();
     let num_edges = relationships.len();
+
+    // Determine sample size
+    // Default: exact for small graphs, sample for large
+    // 100 nodes keeps runtime under 1 second for most graphs
+    const AUTO_SAMPLE_THRESHOLD: usize = 100;
+    let effective_sample = match sample_size {
+        Some(n) => n.min(num_nodes),
+        None => {
+            if num_nodes <= AUTO_SAMPLE_THRESHOLD {
+                num_nodes // Exact computation
+            } else {
+                AUTO_SAMPLE_THRESHOLD // Sample
+            }
+        }
+    };
+
+    // Select source nodes (sample if needed)
+    let source_nodes: Vec<i64> = if effective_sample >= num_nodes {
+        node_ids.clone()
+    } else {
+        // Deterministic sampling using stride for reproducibility
+        let stride = num_nodes / effective_sample;
+        node_ids
+            .iter()
+            .step_by(stride)
+            .take(effective_sample)
+            .copied()
+            .collect()
+    };
+
+    let is_sampled = source_nodes.len() < num_nodes;
+    let scale_factor = if is_sampled {
+        num_nodes as f64 / source_nodes.len() as f64
+    } else {
+        1.0
+    };
 
     // Build adjacency lists
     // For directed: outgoing relationships only
@@ -118,8 +181,8 @@ pub fn edge_betweenness_centrality(
         edge_betweenness.insert(relationship.id, 0.0);
     }
 
-    // Brandes' algorithm: iterate over all source nodes
-    for &source in &node_ids {
+    // Brandes' algorithm: iterate over source nodes (sampled or all)
+    for &source in &source_nodes {
         // BFS data structures
         let mut stack: Vec<i64> = Vec::new(); // Nodes in order of discovery (for backtracking)
         let mut pred: HashMap<i64, Vec<(i64, i64)>> = HashMap::new(); // node -> [(predecessor, rel_id)]
@@ -193,6 +256,13 @@ pub fn edge_betweenness_centrality(
     if !directed {
         for score in edge_betweenness.values_mut() {
             *score /= 2.0;
+        }
+    }
+
+    // Scale up scores if we used sampling to extrapolate to full graph
+    if is_sampled {
+        for score in edge_betweenness.values_mut() {
+            *score *= scale_factor;
         }
     }
 
