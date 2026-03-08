@@ -11,9 +11,9 @@ use pest_derive::Parser;
 
 // Re-export AST types for backwards compatibility
 pub use super::ast::{
-    BinaryOperator, CreateClause, DeleteClause, Direction, Expression, LengthSpec, Literal,
-    NodePattern, Pattern, PatternElement, RelationshipPattern, ReturnClause, SetClause, SetItem,
-    ShortestPathMode, Statement, UnaryOperator,
+    BinaryOperator, CreateClause, DeleteClause, Direction, Expression, LengthSpec,
+    ListPredicateKind, Literal, NodePattern, Pattern, PatternElement, RelationshipPattern,
+    ReturnClause, SetClause, SetItem, ShortestPathMode, Statement, UnaryOperator,
 };
 
 mod clause;

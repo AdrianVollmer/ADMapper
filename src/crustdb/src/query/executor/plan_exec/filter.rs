@@ -1,5 +1,6 @@
 use super::{compare_values, evaluate_expr, values_equal, Binding, EvalValue};
 use crate::error::Result;
+use crate::query::ast::ListPredicateKind;
 use crate::query::planner::FilterPredicate;
 
 pub(super) fn filter_bindings(
@@ -131,5 +132,66 @@ pub(super) fn evaluate_predicate(predicate: &FilterPredicate, binding: &Binding)
             }
             Ok(false)
         }
+
+        FilterPredicate::ListPredicate {
+            kind,
+            variable,
+            list,
+            filter,
+        } => {
+            // Resolve the list: typically a relationship list from variable-length path
+            let items = resolve_list_items(list, binding)?;
+            let mut match_count: usize = 0;
+
+            for item in &items {
+                let matches = match item {
+                    ListItemRef::Relationship(rel) => {
+                        if let Some(pred) = filter {
+                            let inner = binding.clone().with_relationship(variable, (*rel).clone());
+                            evaluate_predicate(pred, &inner)?
+                        } else {
+                            true
+                        }
+                    }
+                };
+
+                if matches {
+                    match_count += 1;
+                }
+
+                // Short-circuit
+                match kind {
+                    ListPredicateKind::Any if matches => return Ok(true),
+                    ListPredicateKind::None if matches => return Ok(false),
+                    ListPredicateKind::All if !matches => return Ok(false),
+                    _ => {}
+                }
+            }
+
+            Ok(match kind {
+                ListPredicateKind::All => true,
+                ListPredicateKind::Any => false,
+                ListPredicateKind::None => true,
+                ListPredicateKind::Single => match_count == 1,
+            })
+        }
     }
+}
+
+enum ListItemRef<'a> {
+    Relationship(&'a crate::graph::Relationship),
+}
+
+/// Resolve a PlanExpr to a list of items for list predicate evaluation.
+fn resolve_list_items<'a>(
+    list_expr: &crate::query::planner::PlanExpr,
+    binding: &'a Binding,
+) -> Result<Vec<ListItemRef<'a>>> {
+    if let crate::query::planner::PlanExpr::Variable(var_name) = list_expr {
+        if let Some(rel_list) = binding.get_relationship_list(var_name) {
+            return Ok(rel_list.iter().map(ListItemRef::Relationship).collect());
+        }
+    }
+    // If not a relationship list variable, return empty
+    Ok(Vec::new())
 }

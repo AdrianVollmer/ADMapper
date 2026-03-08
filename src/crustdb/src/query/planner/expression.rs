@@ -146,6 +146,23 @@ pub(super) fn plan_expression_as_predicate(expr: &Expression) -> Result<FilterPr
                 Err(Error::Cypher("Negation not supported as predicate".into()))
             }
         },
+        Expression::ListPredicate {
+            kind,
+            variable,
+            list,
+            filter,
+        } => {
+            let planned_filter = match filter {
+                Some(f) => Some(Box::new(plan_expression_as_predicate(f)?)),
+                None => None,
+            };
+            Ok(FilterPredicate::ListPredicate {
+                kind: *kind,
+                variable: variable.clone(),
+                list: plan_expression(list)?,
+                filter: planned_filter,
+            })
+        }
         Expression::Literal(Literal::Boolean(true)) => Ok(FilterPredicate::True),
         _ => Err(Error::Cypher(format!(
             "Expression not supported as predicate: {:?}",

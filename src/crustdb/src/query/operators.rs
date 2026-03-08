@@ -3,7 +3,7 @@
 //! This module contains all the data types used in query execution plans,
 //! including operators, predicates, expressions, and helper structures.
 
-use super::ast::Direction;
+use super::ast::{Direction, ListPredicateKind};
 
 // =============================================================================
 // Plan Data Structures
@@ -311,6 +311,13 @@ pub enum FilterPredicate {
     In {
         expr: PlanExpr,
         list: Vec<PlanExpr>,
+    },
+    /// List predicate: ALL/ANY/NONE/SINGLE(var IN list WHERE pred).
+    ListPredicate {
+        kind: ListPredicateKind,
+        variable: String,
+        list: PlanExpr,
+        filter: Option<Box<FilterPredicate>>,
     },
     /// Always true (for optimized-away predicates).
     True,

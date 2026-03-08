@@ -2,7 +2,7 @@
 
 use crate::error::{Error, Result};
 use crate::graph::PropertyValue;
-use crate::query::parser::{BinaryOperator, Expression, Literal, UnaryOperator};
+use crate::query::parser::{BinaryOperator, Expression, ListPredicateKind, Literal, UnaryOperator};
 
 use super::Binding;
 
@@ -117,6 +117,13 @@ pub fn evaluate_expression_with_bindings(
                 .collect();
             Ok(PropertyValue::List(values?))
         }
+
+        Expression::ListPredicate {
+            kind,
+            variable,
+            list,
+            filter,
+        } => evaluate_list_predicate(*kind, variable, list, filter.as_deref(), binding),
 
         _ => Err(Error::Cypher("Expression type not supported".into())),
     }
@@ -469,5 +476,99 @@ pub fn literal_matches_property(lit: &Literal, prop: &PropertyValue) -> bool {
         (Literal::Integer(a), PropertyValue::Float(b)) => floats_equal(*a as f64, *b),
         (Literal::Float(a), PropertyValue::Integer(b)) => floats_equal(*a, *b as f64),
         _ => false,
+    }
+}
+
+/// Evaluate ALL/ANY/NONE/SINGLE(variable IN list WHERE filter).
+///
+/// The list is typically a relationship list from a variable-length path binding.
+/// Each element is bound as a relationship under the given variable name, and the
+/// filter predicate is evaluated against it.
+fn evaluate_list_predicate(
+    kind: ListPredicateKind,
+    variable: &str,
+    list_expr: &Expression,
+    filter: Option<&Expression>,
+    binding: &Binding,
+) -> Result<PropertyValue> {
+    // Resolve the list -- it may be a relationship list variable or a regular list
+    let items = resolve_list_for_predicate(list_expr, binding)?;
+
+    let mut match_count: usize = 0;
+    for item in &items {
+        let matches = match item {
+            ListItem::Relationship(rel) => {
+                if let Some(filter_expr) = filter {
+                    let inner_binding = binding.clone().with_relationship(variable, rel.clone());
+                    let val = evaluate_expression_with_bindings(filter_expr, &inner_binding)?;
+                    is_truthy(&val)
+                } else {
+                    true
+                }
+            }
+            ListItem::Value(val) => {
+                if filter.is_some() {
+                    // For scalar values, bind as a node-like property map isn't right.
+                    // This path is less common; for now we don't support it.
+                    return Err(Error::Cypher(
+                        "List predicate over scalar values not yet supported".into(),
+                    ));
+                }
+                is_truthy(val)
+            }
+        };
+
+        if matches {
+            match_count += 1;
+        }
+
+        // Short-circuit where possible
+        match kind {
+            ListPredicateKind::Any if matches => return Ok(PropertyValue::Bool(true)),
+            ListPredicateKind::None if matches => return Ok(PropertyValue::Bool(false)),
+            ListPredicateKind::All if !matches => return Ok(PropertyValue::Bool(false)),
+            _ => {}
+        }
+    }
+
+    let result = match kind {
+        ListPredicateKind::All => true,  // all matched (or empty)
+        ListPredicateKind::Any => false, // none matched (fell through)
+        ListPredicateKind::None => true, // none matched (fell through)
+        ListPredicateKind::Single => match_count == 1,
+    };
+
+    Ok(PropertyValue::Bool(result))
+}
+
+/// Items that can appear in a list predicate's collection.
+enum ListItem {
+    Relationship(crate::graph::Relationship),
+    Value(PropertyValue),
+}
+
+/// Resolve the list expression for a list predicate.
+///
+/// Handles both relationship list variables (from `[r*1..5]`) and regular list values.
+fn resolve_list_for_predicate(list_expr: &Expression, binding: &Binding) -> Result<Vec<ListItem>> {
+    // Check if it's a variable referencing a relationship list
+    if let Expression::Variable(var_name) = list_expr {
+        if let Some(rel_list) = binding.get_relationship_list(var_name) {
+            return Ok(rel_list
+                .iter()
+                .map(|r| ListItem::Relationship(r.clone()))
+                .collect());
+        }
+    }
+
+    // Fall back to evaluating as a regular expression
+    let val = evaluate_expression_with_bindings(list_expr, binding)?;
+    match val {
+        PropertyValue::List(items) => Ok(items.into_iter().map(ListItem::Value).collect()),
+        PropertyValue::Null => Ok(Vec::new()),
+        other => Err(Error::Cypher(format!(
+            "List predicate requires a list, got: {:?}",
+            other
+        ))),
     }
 }

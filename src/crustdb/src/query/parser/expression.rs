@@ -1,6 +1,8 @@
 //! Expression-related builders for the Cypher parser.
 
-use super::super::ast::{BinaryOperator, Expression, Literal, Pattern, UnaryOperator};
+use super::super::ast::{
+    BinaryOperator, Expression, ListPredicateKind, Literal, Pattern, UnaryOperator,
+};
 use super::Rule;
 use crate::error::{Error, Result};
 use pest::iterators::Pair;
@@ -466,32 +468,33 @@ pub(super) fn build_property_or_labels_expression(pair: Pair<Rule>) -> Result<Ex
 
 /// Build an atom (literal, variable, function call, etc.).
 pub(super) fn build_atom(pair: Pair<Rule>) -> Result<Expression> {
-    for inner in pair.into_inner() {
+    let children: Vec<Pair<Rule>> = pair.into_inner().collect();
+
+    for (i, inner) in children.iter().enumerate() {
         match inner.as_rule() {
             Rule::Literal => {
-                return build_literal(inner);
+                return build_literal(inner.clone());
             }
             Rule::Variable => {
-                return Ok(Expression::Variable(extract_variable(inner)?));
+                return Ok(Expression::Variable(extract_variable(inner.clone())?));
             }
             Rule::Parameter => {
-                return build_parameter(inner);
+                return build_parameter(inner.clone());
             }
             Rule::FunctionInvocation => {
-                return build_function_invocation(inner);
+                return build_function_invocation(inner.clone());
             }
             Rule::ParenthesizedExpression => {
-                for paren_inner in inner.into_inner() {
+                for paren_inner in inner.clone().into_inner() {
                     if paren_inner.as_rule() == Rule::Expression {
                         return build_expression(paren_inner);
                     }
                 }
             }
             Rule::CaseExpression => {
-                return build_case_expression(inner);
+                return build_case_expression(inner.clone());
             }
             Rule::COUNT => {
-                // count(*) - handled specially
                 return Ok(Expression::FunctionCall {
                     name: "count".into(),
                     args: vec![Expression::Variable("*".into())],
@@ -506,12 +509,74 @@ pub(super) fn build_atom(pair: Pair<Rule>) -> Result<Expression> {
                 ));
             }
             Rule::ShortestPathPattern => {
-                return build_shortest_path_pattern(inner);
+                return build_shortest_path_pattern(inner.clone());
+            }
+            Rule::ALL | Rule::ANY_ | Rule::NONE | Rule::SINGLE => {
+                let kind = match inner.as_rule() {
+                    Rule::ALL => ListPredicateKind::All,
+                    Rule::ANY_ => ListPredicateKind::Any,
+                    Rule::NONE => ListPredicateKind::None,
+                    Rule::SINGLE => ListPredicateKind::Single,
+                    _ => unreachable!(),
+                };
+                // FilterExpression is the next sibling
+                let filter_expr = children
+                    .get(i + 1)
+                    .ok_or_else(|| Error::Parse("Missing FilterExpression".into()))?;
+                return build_list_predicate(filter_expr.clone(), kind);
             }
             _ => {}
         }
     }
     Err(Error::Parse("Unknown atom type".into()))
+}
+
+/// Build a list predicate expression: ALL/ANY/NONE/SINGLE(var IN list WHERE pred).
+///
+/// Grammar: FilterExpression = { IdInColl ~ (SP? ~ Where)? }
+///          IdInColl = { Variable ~ SP ~ IN ~ SP ~ Expression }
+fn build_list_predicate(filter_pair: Pair<Rule>, kind: ListPredicateKind) -> Result<Expression> {
+    let mut variable = None;
+    let mut list_expr = None;
+    let mut filter = None;
+
+    for inner in filter_pair.into_inner() {
+        match inner.as_rule() {
+            Rule::IdInColl => {
+                for id_inner in inner.into_inner() {
+                    match id_inner.as_rule() {
+                        Rule::Variable => {
+                            variable = Some(extract_variable(id_inner)?);
+                        }
+                        Rule::Expression => {
+                            list_expr = Some(build_expression(id_inner)?);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Rule::Where => {
+                for where_inner in inner.into_inner() {
+                    if where_inner.as_rule() == Rule::Expression {
+                        filter = Some(build_expression(where_inner)?);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let variable =
+        variable.ok_or_else(|| Error::Parse("List predicate missing variable".into()))?;
+    let list =
+        list_expr.ok_or_else(|| Error::Parse("List predicate missing list expression".into()))?;
+
+    Ok(Expression::ListPredicate {
+        kind,
+        variable,
+        list: Box::new(list),
+        filter: filter.map(Box::new),
+    })
 }
 
 /// Build a shortestPath() or allShortestPaths() expression.

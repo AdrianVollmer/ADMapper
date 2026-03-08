@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// A parsed Cypher statement.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum Statement {
     /// MATCH ... RETURN query
     Match(MatchClause),
@@ -226,6 +227,23 @@ pub enum Expression {
     ShortestPath(Box<Pattern>),
     /// allShortestPaths((a)-[*]->(b)) - returns all paths of shortest length
     AllShortestPaths(Box<Pattern>),
+    /// List predicate: ALL(x IN list WHERE predicate),
+    /// ANY(x IN list WHERE predicate), NONE(...), SINGLE(...)
+    ListPredicate {
+        kind: ListPredicateKind,
+        variable: String,
+        list: Box<Expression>,
+        filter: Option<Box<Expression>>,
+    },
+}
+
+/// Kind of list predicate function.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ListPredicateKind {
+    All,
+    Any,
+    None,
+    Single,
 }
 
 /// A literal value.
