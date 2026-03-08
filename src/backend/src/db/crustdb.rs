@@ -2,7 +2,7 @@
 //!
 //! Uses Cypher queries for graph operations via the embedded crustdb engine.
 
-use crustdb::Database;
+use crustdb::{Database, EntityCacheConfig};
 use serde_json::Value as JsonValue;
 use std::path::Path;
 use std::sync::Arc;
@@ -55,6 +55,8 @@ impl CrustDatabase {
 
         let mut db = Database::open(&path_str).map_err(|e| DbError::Database(e.to_string()))?;
         db.set_caching(enable_caching);
+        // Enable entity cache for faster BFS/shortest path traversals
+        db.set_entity_cache(EntityCacheConfig::with_capacity(500_000));
 
         let instance = Self { db: Arc::new(db) };
         instance.init_schema()?;
@@ -67,6 +69,8 @@ impl CrustDatabase {
         debug!("Creating in-memory CrustDB");
         let mut db = Database::in_memory().map_err(|e| DbError::Database(e.to_string()))?;
         db.set_caching(true); // Enable caching by default for tests too
+                              // Enable entity cache for faster BFS/shortest path traversals
+        db.set_entity_cache(EntityCacheConfig::with_capacity(500_000));
 
         let instance = Self { db: Arc::new(db) };
         instance.init_schema()?;
