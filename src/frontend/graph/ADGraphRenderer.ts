@@ -115,6 +115,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   const highlightedPathEdges = new Set<string>();
   let currentTheme = theme;
   let draggedNode: string | null = null;
+  let hoveredEdgeLabel: string | null = null;
 
   /** Compute all relationships reachable via outgoing relationships (transitive) */
   function computeReachableEdges(startNode: string): Set<string> {
@@ -137,6 +138,37 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     }
 
     return reachableEdges;
+  }
+
+  const LABEL_HIT_RADIUS_SQ = 30 * 30; // 30px hit radius for edge labels
+
+  /** Find the nearest edge label within hit radius of viewport coordinates. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function findEdgeLabelAt(sigmaInstance: any, viewportX: number, viewportY: number): string | null {
+    let closestEdge: string | null = null;
+    let closestDistSq = LABEL_HIT_RADIUS_SQ;
+
+    graph.forEachEdge((edgeKey, _attrs, source, target) => {
+      const displayData = sigmaInstance.getEdgeDisplayData(edgeKey);
+      if (!displayData || displayData.hidden) return;
+
+      const sx = graph.getNodeAttribute(source, "x");
+      const sy = graph.getNodeAttribute(source, "y");
+      const tx = graph.getNodeAttribute(target, "x");
+      const ty = graph.getNodeAttribute(target, "y");
+      const mid = sigmaInstance.graphToViewport({ x: (sx + tx) / 2, y: (sy + ty) / 2 });
+
+      const dx = viewportX - mid.x;
+      const dy = viewportY - mid.y;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq < closestDistSq) {
+        closestDistSq = distSq;
+        closestEdge = edgeKey;
+      }
+    });
+
+    return closestEdge;
   }
 
   // Custom label renderer: draws label below node, centered
@@ -392,6 +424,15 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
         res.forceLabel = true;
       }
 
+      // Highlight edge whose label is hovered
+      if (relationship === hoveredEdgeLabel) {
+        res.color = HIGHLIGHT_COLORS.relationship;
+        res.size = ((data.size as number | undefined) ?? 3) * HIGHLIGHT_SIZE_MULTIPLIER;
+        res.forceLabel = true;
+        res.zIndex = 2;
+        return res;
+      }
+
       // Path relationships get special highlight
       if (highlightedPathEdges.has(relationship)) {
         res.color = "#22c55e"; // Green for path
@@ -548,36 +589,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   sigma.on("clickStage", (event) => {
     // Check if an edge label was clicked (labels are hard to hit on the edge line itself)
     if (onEdgeClick) {
-      const clickX = event.event.x;
-      const clickY = event.event.y;
-      const LABEL_HIT_RADIUS = 30; // pixels
-      const LABEL_HIT_RADIUS_SQ = LABEL_HIT_RADIUS * LABEL_HIT_RADIUS;
-
-      let closestEdge: string | null = null;
-      let closestDistSq = LABEL_HIT_RADIUS_SQ;
-
-      graph.forEachEdge((edgeKey, _attrs, source, target) => {
-        // Skip hidden edges
-        const displayData = sigma.getEdgeDisplayData(edgeKey);
-        if (!displayData || displayData.hidden) return;
-
-        // Label position is at the midpoint between source and target (in graph coords)
-        const sx = graph.getNodeAttribute(source, "x");
-        const sy = graph.getNodeAttribute(source, "y");
-        const tx = graph.getNodeAttribute(target, "x");
-        const ty = graph.getNodeAttribute(target, "y");
-        const midViewport = sigma.graphToViewport({ x: (sx + tx) / 2, y: (sy + ty) / 2 });
-
-        const dx = clickX - midViewport.x;
-        const dy = clickY - midViewport.y;
-        const distSq = dx * dx + dy * dy;
-
-        if (distSq < closestDistSq) {
-          closestDistSq = distSq;
-          closestEdge = edgeKey;
-        }
-      });
-
+      const closestEdge = findEdgeLabelAt(sigma, event.event.x, event.event.y);
       if (closestEdge) {
         const attrs = graph.getEdgeAttributes(closestEdge) as ADEdgeAttributes;
         const source = graph.source(closestEdge);
@@ -599,16 +611,23 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     sigma.getCamera().disable();
   });
 
-  // Track mouse movement for dragging
+  // Track mouse movement for dragging and edge label hover
   sigma.getMouseCaptor().on("mousemovebody", (event) => {
-    if (!draggedNode) return;
+    if (draggedNode) {
+      // Convert viewport coordinates to graph coordinates
+      const pos = sigma.viewportToGraph(event);
+      graph.setNodeAttribute(draggedNode, "x", pos.x);
+      graph.setNodeAttribute(draggedNode, "y", pos.y);
+      return;
+    }
 
-    // Convert viewport coordinates to graph coordinates
-    const pos = sigma.viewportToGraph(event);
-
-    // Update node position in the graph
-    graph.setNodeAttribute(draggedNode, "x", pos.x);
-    graph.setNodeAttribute(draggedNode, "y", pos.y);
+    // Edge label hover detection
+    const edgeAtCursor = findEdgeLabelAt(sigma, event.x, event.y);
+    if (edgeAtCursor !== hoveredEdgeLabel) {
+      hoveredEdgeLabel = edgeAtCursor;
+      containerEl!.style.cursor = edgeAtCursor ? "pointer" : "";
+      sigma.refresh();
+    }
   });
 
   // End drag on mouseup
@@ -625,6 +644,11 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     if (draggedNode) {
       draggedNode = null;
       sigma.getCamera().enable();
+    }
+    if (hoveredEdgeLabel) {
+      hoveredEdgeLabel = null;
+      containerEl!.style.cursor = "";
+      sigma.refresh();
     }
   });
 
