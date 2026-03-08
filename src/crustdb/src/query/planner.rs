@@ -114,6 +114,69 @@ fn plan_create(create: &super::parser::CreateClause) -> Result<PlanOperator> {
     })
 }
 
+/// Plan a CREATE clause that follows a MATCH (MATCH...CREATE).
+///
+/// Unlike standalone CREATE, nodes here are references to already-matched
+/// variables, not new nodes to create. Only new nodes (with labels/properties
+/// not already matched) are created; the rest come from MATCH bindings.
+fn plan_create_after_match(
+    create: &super::parser::CreateClause,
+) -> Result<(Vec<CreateNode>, Vec<CreateRelationship>)> {
+    let mut nodes = Vec::new();
+    let mut relationships = Vec::new();
+    let mut prev_node_var: Option<String> = None;
+    let mut pending_rel: Option<(super::parser::RelationshipPattern, String)> = None;
+
+    for element in &create.pattern.elements {
+        match element {
+            PatternElement::Node(np) => {
+                let var = np.variable.clone().ok_or_else(|| {
+                    Error::Cypher("MATCH...CREATE nodes must have variables".into())
+                })?;
+
+                if let Some((rp, source_var)) = pending_rel.take() {
+                    let rel_type = rp.types.first().cloned().unwrap_or_default();
+                    let properties = plan_properties(&rp.properties)?;
+                    let (source, target) = match rp.direction {
+                        super::parser::Direction::Outgoing => (source_var, var.clone()),
+                        super::parser::Direction::Incoming => (var.clone(), source_var),
+                        super::parser::Direction::Both => (source_var, var.clone()),
+                    };
+                    relationships.push(CreateRelationship {
+                        variable: rp.variable.clone(),
+                        source,
+                        target,
+                        rel_type,
+                        properties,
+                    });
+                }
+
+                // Only create a new node if it has labels or properties
+                // (i.e. it's a genuinely new node, not a reference to a MATCH binding)
+                let labels: Vec<String> = np.labels.iter().flatten().cloned().collect();
+                let properties = plan_properties(&np.properties)?;
+                if !labels.is_empty() || !properties.is_empty() {
+                    nodes.push(CreateNode {
+                        variable: Some(var.clone()),
+                        labels,
+                        properties,
+                    });
+                }
+
+                prev_node_var = Some(var);
+            }
+            PatternElement::Relationship(rp) => {
+                let source_var = prev_node_var
+                    .clone()
+                    .ok_or_else(|| Error::Cypher("Relationship must follow a node".into()))?;
+                pending_rel = Some((rp.clone(), source_var));
+            }
+        }
+    }
+
+    Ok((nodes, relationships))
+}
+
 /// Plan a MATCH statement.
 fn plan_match(match_clause: &MatchClause) -> Result<PlanOperator> {
     let pattern = &match_clause.pattern;
@@ -163,6 +226,16 @@ fn plan_match(match_clause: &MatchClause) -> Result<PlanOperator> {
         };
     }
 
+    // Add CREATE clause (MATCH...CREATE)
+    if let Some(ref create_clause) = match_clause.create_clause {
+        let (nodes, relationships) = plan_create_after_match(create_clause)?;
+        plan = PlanOperator::Create {
+            source: Some(Box::new(plan)),
+            nodes,
+            relationships,
+        };
+    }
+
     // Add RETURN clause projection and pagination
     if let Some(ref return_clause) = match_clause.return_clause {
         plan = plan_return(plan, return_clause)?;
@@ -172,6 +245,9 @@ fn plan_match(match_clause: &MatchClause) -> Result<PlanOperator> {
 }
 
 /// Plan a pattern into scan/expand operators.
+///
+/// Handles comma-separated patterns (e.g. `MATCH (a), (b)`) by splitting
+/// at node-node boundaries and cross-joining the independent parts.
 fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
     if pattern.elements.is_empty() {
         return Ok(PlanOperator::Empty);
@@ -183,8 +259,58 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         return plan_shortest_path_pattern(pattern, all_paths);
     }
 
-    // Start with first node
-    let first_node = match &pattern.elements[0] {
+    // Split elements into independent pattern segments at node-node boundaries.
+    // e.g. [(a), -[:R]->,(b), (c)] splits into [(a), -[:R]->, (b)] and [(c)]
+    let segments = split_pattern_segments(&pattern.elements);
+
+    let mut plan: Option<PlanOperator> = None;
+    for (seg_idx, segment) in segments.iter().enumerate() {
+        // Only the first segment gets the path variable (path patterns can't be comma-separated)
+        let path_var = if seg_idx == 0 {
+            pattern.path_variable.clone()
+        } else {
+            None
+        };
+        let segment_plan = plan_pattern_segment(segment, path_var)?;
+        plan = Some(match plan {
+            None => segment_plan,
+            Some(left) => PlanOperator::CrossJoin {
+                left: Box::new(left),
+                right: Box::new(segment_plan),
+            },
+        });
+    }
+
+    plan.ok_or_else(|| Error::Cypher("Empty pattern".into()))
+}
+
+/// Split pattern elements into independent segments at node-node boundaries.
+fn split_pattern_segments(elements: &[PatternElement]) -> Vec<Vec<&PatternElement>> {
+    let mut segments: Vec<Vec<&PatternElement>> = Vec::new();
+    let mut current: Vec<&PatternElement> = Vec::new();
+
+    for (i, elem) in elements.iter().enumerate() {
+        if i > 0 && matches!(elem, PatternElement::Node(_)) {
+            // Check if the previous element was also a node (boundary)
+            if matches!(elements[i - 1], PatternElement::Node(_)) {
+                segments.push(current);
+                current = Vec::new();
+            }
+        }
+        current.push(elem);
+    }
+    if !current.is_empty() {
+        segments.push(current);
+    }
+    segments
+}
+
+/// Plan a single pattern segment (no node-node boundaries).
+fn plan_pattern_segment(
+    elements: &[&PatternElement],
+    path_variable: Option<String>,
+) -> Result<PlanOperator> {
+    let first_node = match elements[0] {
         PatternElement::Node(np) => np,
         _ => return Err(Error::Cypher("Pattern must start with a node".into())),
     };
@@ -211,7 +337,6 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
     // Add inline property filter if present and not already pushed down
     if let Some(ref props) = first_node.properties {
         if property_filter.is_none() {
-            // Complex properties - use Filter operator
             let predicate = plan_inline_properties(&variable, props)?;
             if !matches!(predicate, FilterPredicate::True) {
                 plan = PlanOperator::Filter {
@@ -226,9 +351,9 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
     let mut current_var = variable;
     let mut elem_idx = 1;
 
-    while elem_idx < pattern.elements.len() {
+    while elem_idx < elements.len() {
         // Expect relationship
-        let rel = match &pattern.elements[elem_idx] {
+        let rel = match elements[elem_idx] {
             PatternElement::Relationship(rp) => rp,
             _ => return Err(Error::Cypher("Expected relationship in pattern".into())),
         };
@@ -236,7 +361,7 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
         elem_idx += 1;
 
         // Expect target node
-        let target_node = match pattern.elements.get(elem_idx) {
+        let target_node = match elements.get(elem_idx) {
             Some(PatternElement::Node(np)) => np,
             _ => {
                 return Err(Error::Cypher(
@@ -264,7 +389,7 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
                 rel_variable: rel.variable.clone(),
                 target_variable: target_var.clone(),
                 target_labels: target_labels.clone(),
-                path_variable: pattern.path_variable.clone(),
+                path_variable: path_variable.clone(),
                 types: rel.types.clone(),
                 direction: rel.direction.into(),
                 min_hops,
@@ -281,7 +406,7 @@ fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
                 rel_variable: rel.variable.clone(),
                 target_variable: target_var.clone(),
                 target_labels: target_labels.clone(),
-                path_variable: pattern.path_variable.clone(),
+                path_variable: path_variable.clone(),
                 types: rel.types.clone(),
                 direction: rel.direction.into(),
             };
@@ -1331,6 +1456,11 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             source: source.map(|s| Box::new(optimize_operator(*s))),
             nodes,
             relationships,
+        },
+
+        PlanOperator::CrossJoin { left, right } => PlanOperator::CrossJoin {
+            left: Box::new(optimize_operator(*left)),
+            right: Box::new(optimize_operator(*right)),
         },
 
         // Leaf operators - no optimization needed

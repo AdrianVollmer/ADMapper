@@ -291,6 +291,19 @@ fn execute_operator(
             }
         }
 
+        PlanOperator::CrossJoin { left, right } => {
+            let left_bindings =
+                execute_operator_to_bindings(left, storage, stats, cache.as_deref_mut())?;
+            let right_bindings = execute_operator_to_bindings(right, storage, stats, cache)?;
+            let mut result = Vec::with_capacity(left_bindings.len() * right_bindings.len());
+            for lb in &left_bindings {
+                for rb in &right_bindings {
+                    result.push(lb.merge(rb));
+                }
+            }
+            Ok(ExecutionResult::Bindings(result))
+        }
+
         PlanOperator::Create {
             source,
             nodes,
@@ -1481,46 +1494,84 @@ fn execute_create(
     relationships: &[CreateRelationship],
     storage: &SqliteStorage,
     stats: &mut QueryStats,
-    _cache: Option<&mut EntityCache>,
+    cache: Option<&mut EntityCache>,
 ) -> Result<ExecutionResult> {
-    // Build nodes first, tracking variable -> id mapping
-    let mut var_to_id: HashMap<String, i64> = HashMap::new();
+    // If there's a source operator (MATCH...CREATE), execute it first
+    // to get bindings for matched variables.
+    let source_bindings = if let Some(source_op) = source {
+        let result = execute_operator(source_op, storage, stats, cache)?;
+        match result {
+            ExecutionResult::Bindings(b) => b,
+            ExecutionResult::Rows { .. } => {
+                return Err(Error::Cypher(
+                    "MATCH...CREATE source must produce bindings".into(),
+                ))
+            }
+        }
+    } else {
+        Vec::new()
+    };
 
-    for create_node in nodes {
-        let props = plan_properties_to_json(&create_node.properties)?;
-        let node_id = storage.insert_node(&create_node.labels, &props)?;
+    if source_bindings.is_empty() && source.is_some() {
+        // MATCH found no results, nothing to create
+        return Ok(ExecutionResult::Bindings(Vec::new()));
+    }
 
-        stats.nodes_created += 1;
-        stats.labels_added += create_node.labels.len();
-        stats.properties_set += create_node.properties.len();
+    // For MATCH...CREATE, execute the CREATE for each binding row
+    // For standalone CREATE, execute once with no bindings
+    let binding_sets: Vec<Option<&Binding>> = if source_bindings.is_empty() {
+        vec![None]
+    } else {
+        source_bindings.iter().map(Some).collect()
+    };
 
-        if let Some(ref var) = create_node.variable {
-            var_to_id.insert(var.clone(), node_id);
+    for binding in &binding_sets {
+        let mut var_to_id: HashMap<String, i64> = HashMap::new();
+
+        // Populate var_to_id from MATCH bindings
+        if let Some(b) = binding {
+            for (var, node) in b.nodes() {
+                var_to_id.insert(var.clone(), node.id);
+            }
+        }
+
+        // Create new nodes (only nodes not already bound from MATCH)
+        for create_node in nodes {
+            if let Some(ref var) = create_node.variable {
+                if var_to_id.contains_key(var) {
+                    continue; // Already bound from MATCH, skip creation
+                }
+            }
+
+            let props = plan_properties_to_json(&create_node.properties)?;
+            let node_id = storage.insert_node(&create_node.labels, &props)?;
+
+            stats.nodes_created += 1;
+            stats.labels_added += create_node.labels.len();
+            stats.properties_set += create_node.properties.len();
+
+            if let Some(ref var) = create_node.variable {
+                var_to_id.insert(var.clone(), node_id);
+            }
+        }
+
+        // Create relationships using variable name lookup
+        for create_rel in relationships {
+            let source_id = var_to_id.get(&create_rel.source).ok_or_else(|| {
+                Error::Cypher(format!("Unknown source variable: {}", create_rel.source))
+            })?;
+            let target_id = var_to_id.get(&create_rel.target).ok_or_else(|| {
+                Error::Cypher(format!("Unknown target variable: {}", create_rel.target))
+            })?;
+            let props = plan_properties_to_json(&create_rel.properties)?;
+
+            storage.insert_relationship(*source_id, *target_id, &create_rel.rel_type, &props)?;
+            stats.relationships_created += 1;
+            stats.properties_set += create_rel.properties.len();
         }
     }
 
-    // Create relationships using variable name lookup
-    for create_rel in relationships {
-        let source_id = var_to_id.get(&create_rel.source).ok_or_else(|| {
-            Error::Cypher(format!("Unknown source variable: {}", create_rel.source))
-        })?;
-        let target_id = var_to_id.get(&create_rel.target).ok_or_else(|| {
-            Error::Cypher(format!("Unknown target variable: {}", create_rel.target))
-        })?;
-        let props = plan_properties_to_json(&create_rel.properties)?;
-
-        storage.insert_relationship(*source_id, *target_id, &create_rel.rel_type, &props)?;
-        stats.relationships_created += 1;
-        stats.properties_set += create_rel.properties.len();
-    }
-
-    // Return empty result for CREATE
-    if source.is_some() {
-        // If there's a source (MATCH ... CREATE), pass through
-        Ok(ExecutionResult::Bindings(Vec::new()))
-    } else {
-        Ok(ExecutionResult::Bindings(Vec::new()))
-    }
+    Ok(ExecutionResult::Bindings(Vec::new()))
 }
 
 fn execute_set_properties(

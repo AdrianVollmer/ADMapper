@@ -862,6 +862,48 @@ mod tests {
     }
 
     #[test]
+    fn test_match_create_relationship_between_existing_nodes() {
+        let db = Database::in_memory().unwrap();
+
+        // Create two nodes separately
+        db.execute("CREATE (:Group {object_id: 'G1', name: 'Group1'})")
+            .unwrap();
+        db.execute("CREATE (:Group {object_id: 'G2', name: 'Group2'})")
+            .unwrap();
+
+        let stats = db.stats().unwrap();
+        assert_eq!(stats.node_count, 2);
+        assert_eq!(stats.relationship_count, 0);
+
+        // MATCH...CREATE should create a relationship between existing nodes, not new ones
+        let result = db
+            .execute(
+                "MATCH (a:Group {object_id: 'G1'}), (b:Group {object_id: 'G2'}) \
+                 CREATE (a)-[:MemberOf]->(b)",
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.stats.nodes_created, 0,
+            "MATCH...CREATE should not create new nodes"
+        );
+        assert_eq!(
+            result.stats.relationships_created, 1,
+            "MATCH...CREATE should create 1 relationship"
+        );
+
+        let stats = db.stats().unwrap();
+        assert_eq!(stats.node_count, 2, "Node count should remain 2");
+        assert_eq!(stats.relationship_count, 1, "Should have 1 relationship");
+
+        // Verify the relationship connects the right nodes
+        let verify = db
+            .execute("MATCH (a:Group {object_id: 'G1'})-[:MemberOf]->(b:Group) RETURN b.object_id")
+            .unwrap();
+        assert_eq!(verify.rows.len(), 1);
+    }
+
+    #[test]
     fn test_database_multiple_creates() {
         let db = Database::in_memory().unwrap();
 

@@ -114,6 +114,12 @@ impl Binding {
             .map(|(_, relationships)| relationships)
     }
 
+    /// Iterate over all bound node variables and their nodes.
+    #[inline]
+    pub fn nodes(&self) -> impl Iterator<Item = &(String, Node)> {
+        self.nodes.iter()
+    }
+
     /// Check if a node variable exists.
     #[inline]
     pub fn has_node(&self, name: &str) -> bool {
@@ -145,6 +151,20 @@ impl Binding {
         self.relationship_lists
             .push((var.to_string(), relationships));
         self
+    }
+
+    /// Merge two bindings together (cross join).
+    pub fn merge(&self, other: &Binding) -> Binding {
+        let mut result = self.clone();
+        result.nodes.extend(other.nodes.iter().cloned());
+        result
+            .relationships
+            .extend(other.relationships.iter().cloned());
+        result.paths.extend(other.paths.iter().cloned());
+        result
+            .relationship_lists
+            .extend(other.relationship_lists.iter().cloned());
+        result
     }
 }
 

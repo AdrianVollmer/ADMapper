@@ -30,7 +30,9 @@ impl Statement {
     /// concurrently with other read-only queries.
     pub fn is_read_only(&self) -> bool {
         match self {
-            Statement::Match(m) => m.set_clause.is_none() && m.delete_clause.is_none(),
+            Statement::Match(m) => {
+                m.set_clause.is_none() && m.delete_clause.is_none() && m.create_clause.is_none()
+            }
             Statement::Return(_) => true,
             Statement::Create(_)
             | Statement::Merge(_)
@@ -48,6 +50,7 @@ pub struct MatchClause {
     pub return_clause: Option<ReturnClause>,
     pub delete_clause: Option<DeleteClause>,
     pub set_clause: Option<SetClause>,
+    pub create_clause: Option<CreateClause>,
 }
 
 /// CREATE clause AST.

@@ -147,6 +147,12 @@ pub enum PlanOperator {
         source: Box<PlanOperator>,
         sets: Vec<SetOperation>,
     },
+    /// Cross join two independent patterns (cartesian product).
+    /// Used for comma-separated patterns like `MATCH (a), (b)`.
+    CrossJoin {
+        left: Box<PlanOperator>,
+        right: Box<PlanOperator>,
+    },
     /// Empty result (no rows).
     Empty,
     /// Produce a single empty row (for standalone CREATE).

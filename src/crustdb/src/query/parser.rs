@@ -91,20 +91,20 @@ fn build_single_part_query(pair: Pair<Rule>) -> Result<Statement> {
         }
     }
 
-    // Extract DELETE and SET clauses from updating clauses
+    // Extract DELETE, SET, and CREATE clauses from updating clauses
     let mut delete_clause = None;
     let mut set_clause = None;
+    let mut create_clause = None;
+    let mut merge_pair = None;
 
     for updating in &updating_clauses {
         for inner in updating.clone().into_inner() {
             match inner.as_rule() {
                 Rule::Create => {
-                    // Standalone CREATE without MATCH
-                    return build_create_statement(inner);
+                    create_clause = Some(inner);
                 }
                 Rule::Merge => {
-                    // Standalone MERGE
-                    return build_merge_statement(inner);
+                    merge_pair = Some(inner);
                 }
                 Rule::Delete => {
                     delete_clause = Some(build_delete_clause(inner)?);
@@ -117,14 +117,33 @@ fn build_single_part_query(pair: Pair<Rule>) -> Result<Statement> {
         }
     }
 
-    // Handle reading clauses (MATCH) with optional DELETE/SET
+    // Handle reading clauses (MATCH) with optional updating clauses
     if !reading_clauses.is_empty() {
         let first_reading = reading_clauses.into_iter().next().unwrap();
         for inner in first_reading.into_inner() {
             if inner.as_rule() == Rule::Match {
-                return build_match_statement(inner, return_clause, delete_clause, set_clause);
+                let create = create_clause
+                    .map(|pair| build_create_clause(pair))
+                    .transpose()?;
+                return build_match_statement(
+                    inner,
+                    return_clause,
+                    delete_clause,
+                    set_clause,
+                    create,
+                );
             }
         }
+    }
+
+    // Standalone CREATE without MATCH
+    if let Some(pair) = create_clause {
+        return build_create_statement(pair);
+    }
+
+    // Standalone MERGE
+    if let Some(pair) = merge_pair {
+        return build_merge_statement(pair);
     }
 
     // Standalone DELETE or SET without MATCH is not supported
@@ -140,12 +159,18 @@ fn build_single_part_query(pair: Pair<Rule>) -> Result<Statement> {
     Err(Error::Parse("Unsupported query type".into()))
 }
 
-/// Build a CREATE statement.
+/// Build a CREATE statement (standalone, not attached to MATCH).
 fn build_create_statement(pair: Pair<Rule>) -> Result<Statement> {
+    let clause = build_create_clause(pair)?;
+    Ok(Statement::Create(clause))
+}
+
+/// Build a CREATE clause (used by both standalone CREATE and MATCH...CREATE).
+fn build_create_clause(pair: Pair<Rule>) -> Result<CreateClause> {
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::Pattern {
             let pattern = build_pattern(inner)?;
-            return Ok(Statement::Create(CreateClause { pattern }));
+            return Ok(CreateClause { pattern });
         }
     }
     Err(Error::Parse("CREATE requires a pattern".into()))
@@ -157,6 +182,7 @@ fn build_match_statement(
     return_clause: Option<ReturnClause>,
     delete_clause: Option<DeleteClause>,
     set_clause: Option<SetClause>,
+    create_clause: Option<CreateClause>,
 ) -> Result<Statement> {
     let mut pattern = None;
     let mut where_clause = None;
@@ -180,6 +206,7 @@ fn build_match_statement(
         return_clause,
         delete_clause,
         set_clause,
+        create_clause,
     }))
 }
 
@@ -2361,6 +2388,18 @@ mod tests {
     fn test_is_read_only_create() {
         let stmt = parse("CREATE (n:Person {name: 'Alice'})").unwrap();
         assert!(!stmt.is_read_only());
+    }
+
+    #[test]
+    fn test_is_read_only_match_create() {
+        let stmt = parse("MATCH (a:Person), (b:Person) CREATE (a)-[:KNOWS]->(b)").unwrap();
+        assert!(!stmt.is_read_only());
+        // Should be parsed as Statement::Match with create_clause
+        if let Statement::Match(m) = &stmt {
+            assert!(m.create_clause.is_some());
+        } else {
+            panic!("Expected Statement::Match, got {:?}", stmt);
+        }
     }
 
     #[test]
