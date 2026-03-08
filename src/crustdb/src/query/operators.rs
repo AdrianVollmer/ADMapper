@@ -48,6 +48,8 @@ pub enum PlanOperator {
         path_variable: Option<String>,
         types: Vec<String>,
         direction: ExpandDirection,
+        /// Limit for early termination (pushed down from RETURN ... LIMIT).
+        limit: Option<u64>,
     },
     /// Variable-length expand (BFS).
     VariableLengthExpand {
@@ -109,6 +111,13 @@ pub enum PlanOperator {
     /// SQL pushdown for COUNT(*) or COUNT(n) without grouping.
     CountPushdown {
         label: Option<String>,
+        alias: String,
+    },
+    /// SQL pushdown for COUNT of relationships.
+    /// Much faster than expanding all relationships then counting.
+    RelationshipCountPushdown {
+        /// Optional type filter (e.g., "MemberOf").
+        rel_type: Option<String>,
         alias: String,
     },
     /// SQL pushdown for DISTINCT type(r) - returns all relationship types directly.
@@ -373,6 +382,8 @@ pub struct ExpandRequest<'a> {
     pub path_variable: Option<&'a str>,
     pub types: &'a [String],
     pub direction: ExpandDirection,
+    /// Limit for early termination.
+    pub limit: Option<u64>,
 }
 
 /// Parameters for a variable-length expand operation (BFS).

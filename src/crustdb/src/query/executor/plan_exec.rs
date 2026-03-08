@@ -147,6 +147,7 @@ fn execute_operator(
             path_variable,
             types,
             direction,
+            limit,
         } => {
             let bindings =
                 execute_operator_to_bindings(source, storage, stats, cache.as_deref_mut())?;
@@ -158,6 +159,7 @@ fn execute_operator(
                 path_variable: path_variable.as_deref(),
                 types,
                 direction: *direction,
+                limit: *limit,
             };
             execute_expand(bindings, &request, storage, cache)
         }
@@ -254,6 +256,10 @@ fn execute_operator(
 
         PlanOperator::CountPushdown { label, alias } => {
             execute_count_pushdown(label.as_deref(), alias, storage)
+        }
+
+        PlanOperator::RelationshipCountPushdown { rel_type, alias } => {
+            execute_relationship_count_pushdown(rel_type.as_deref(), alias, storage)
         }
 
         PlanOperator::RelationshipTypesScan { alias } => {
@@ -449,8 +455,9 @@ fn execute_expand(
     mut cache: Option<&mut EntityCache>,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
+    let limit = req.limit.map(|l| l as usize);
 
-    for binding in bindings {
+    'outer: for binding in bindings {
         let source_node = binding
             .get_node(req.source_variable)
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", req.source_variable)))?;
@@ -492,6 +499,13 @@ fn execute_expand(
             }
 
             result.push(new_binding);
+
+            // Early termination when limit is reached
+            if let Some(lim) = limit {
+                if result.len() >= lim {
+                    break 'outer;
+                }
+            }
         }
     }
 
@@ -1442,6 +1456,30 @@ fn execute_count_pushdown(
         storage.count_nodes_by_label(l)?
     } else {
         storage.count_nodes()?
+    };
+
+    let mut values = HashMap::new();
+    values.insert(
+        alias.to_string(),
+        ResultValue::Property(PropertyValue::Integer(count as i64)),
+    );
+
+    Ok(ExecutionResult::Rows {
+        columns: vec![alias.to_string()],
+        rows: vec![Row { values }],
+    })
+}
+
+/// Execute relationship count pushdown - uses SQL COUNT instead of expanding.
+fn execute_relationship_count_pushdown(
+    rel_type: Option<&str>,
+    alias: &str,
+    storage: &SqliteStorage,
+) -> Result<ExecutionResult> {
+    let count = if let Some(t) = rel_type {
+        storage.count_relationships_by_type(t)?
+    } else {
+        storage.count_relationships()?
     };
 
     let mut values = HashMap::new();

@@ -121,6 +121,27 @@ fn run_path_to_highvalue_query(db: &Database, source_object_id: &str) -> (bool, 
     (found, elapsed)
 }
 
+/// The exact query from `check_path_to_condition` in the backend handler.
+/// This is what the e2e "Node status API works" test exercises.
+fn run_exact_e2e_query(db: &Database, source_object_id: &str) -> (Option<i64>, u128) {
+    let query = format!(
+        "MATCH p = (a)-[*1..20]->(b) \
+         WHERE a.object_id = '{}' AND (b.is_highvalue = true) \
+         RETURN length(p) AS hops LIMIT 1",
+        source_object_id
+    );
+
+    let start = Instant::now();
+    let result = db.execute(&query).unwrap();
+    let elapsed = start.elapsed().as_millis();
+
+    let hops = result.rows.first().and_then(|row| match row.get("hops") {
+        Some(crustdb::ResultValue::Property(crustdb::PropertyValue::Integer(n))) => Some(*n),
+        _ => None,
+    });
+    (hops, elapsed)
+}
+
 #[test]
 fn test_path_to_highvalue_small_graph() {
     let db = Database::in_memory().unwrap();
@@ -254,6 +275,224 @@ fn test_path_to_highvalue_large_graph() {
         avg_elapsed < 2000,
         "Average query time too slow: {}ms",
         avg_elapsed
+    );
+}
+
+/// Test mirroring the exact e2e "Node status API works" query.
+///
+/// The e2e test runs check_path_to_condition which executes:
+///   MATCH p = (a)-[*1..20]->(b)
+///   WHERE a.object_id = '...' AND (b.is_highvalue = true)
+///   RETURN length(p) AS hops LIMIT 1
+///
+/// The e2e test failed at 16.9s against a 3s timeout with 1,480 nodes and
+/// 13,674 relationships. This integration test catches the same performance
+/// issue with a comparable graph size.
+#[test]
+fn test_exact_e2e_node_status_query() {
+    let db = Database::in_memory().unwrap();
+    db.set_entity_cache(EntityCacheConfig::with_capacity(500_000));
+
+    // Build a graph approximating the e2e dataset size (~1500 nodes, ~5000+ rels).
+    // setup_ad_like_graph creates the skeleton; we add extra cross-connections below.
+    setup_ad_like_graph(&db, 1000, 500, 10);
+
+    // Add denser group-to-group connections to approximate real AD structures.
+    // Real AD graphs have many MemberOf and other relationship types.
+    for i in 0..500 {
+        for offset in &[5, 10, 20, 50] {
+            let target = (i + offset) % 500;
+            if target != i {
+                create_relationship(
+                    &db,
+                    &format!("GROUP_{}", i),
+                    &format!("GROUP_{}", target),
+                    "MemberOf",
+                );
+            }
+        }
+    }
+    // Connect users to groups (skip USER_1 to keep it isolated for testing)
+    for i in 0..1000 {
+        if i == 1 {
+            continue;
+        }
+        let group = i % 500;
+        create_relationship(
+            &db,
+            &format!("USER_{}", i),
+            &format!("GROUP_{}", group),
+            "MemberOf",
+        );
+    }
+
+    let stats = db.stats().unwrap();
+    println!(
+        "E2e-like graph: {} nodes, {} relationships",
+        stats.node_count, stats.relationship_count
+    );
+
+    // Warm up cache (mirrors real-world: the server has been running)
+    let _ = run_exact_e2e_query(&db, "USER_0");
+
+    // Test 1: Source with a path to high-value (USER_0 -> GROUP_0 -> ... -> HV_GROUP_0)
+    let (hops, elapsed) = run_exact_e2e_query(&db, "USER_0");
+    println!("USER_0 (has path): hops={:?}, elapsed={}ms", hops, elapsed);
+    assert!(hops.is_some(), "USER_0 should have path to high-value");
+    assert!(
+        hops.unwrap() > 0,
+        "Path length should be positive, got {}",
+        hops.unwrap()
+    );
+    // The e2e test has a 3s timeout. We assert under 2s here to have margin.
+    assert!(
+        elapsed < 2000,
+        "Query with path took {}ms, exceeds 2s budget (e2e timeout is 3s)",
+        elapsed
+    );
+
+    // Test 2: Source with NO path (USER_1 is not connected to any group)
+    // This is the worst case -- must explore nothing or everything reachable.
+    let (hops, elapsed) = run_exact_e2e_query(&db, "USER_1");
+    println!("USER_1 (no path): hops={:?}, elapsed={}ms", hops, elapsed);
+    assert!(hops.is_none(), "USER_1 should have no path to high-value");
+    assert!(
+        elapsed < 2000,
+        "Query without path took {}ms, exceeds 2s budget (e2e timeout is 3s)",
+        elapsed
+    );
+
+    // Test 3: Run multiple queries in sequence (mimics multiple API calls)
+    let mut max_elapsed = 0;
+    for i in (0..100).step_by(10) {
+        let source = format!("USER_{}", i);
+        let (_hops, elapsed) = run_exact_e2e_query(&db, &source);
+        if elapsed > max_elapsed {
+            max_elapsed = elapsed;
+        }
+    }
+    println!("Max query time across 10 users: {}ms", max_elapsed);
+    assert!(
+        max_elapsed < 2000,
+        "Slowest query took {}ms, exceeds 2s budget",
+        max_elapsed
+    );
+}
+
+/// Test mirroring e2e "Query with relationship": MATCH (n)-[r]->(m) RETURN count(r) AS edges LIMIT 1
+///
+/// This was taking ~1.5s in e2e (vs ~15ms in FalkorDB) because it expanded all
+/// 13,674 relationships before counting. With RelationshipCountPushdown, this
+/// should use SQL COUNT directly.
+#[test]
+fn test_e2e_query_with_relationship_count() {
+    let db = Database::in_memory().unwrap();
+    db.set_entity_cache(EntityCacheConfig::with_capacity(500_000));
+
+    // Build a graph with many relationships
+    setup_ad_like_graph(&db, 1000, 500, 10);
+    for i in 0..500 {
+        for offset in &[5, 10, 20, 50] {
+            let target = (i + offset) % 500;
+            if target != i {
+                create_relationship(
+                    &db,
+                    &format!("GROUP_{}", i),
+                    &format!("GROUP_{}", target),
+                    "MemberOf",
+                );
+            }
+        }
+    }
+    for i in 0..1000 {
+        let group = i % 500;
+        create_relationship(
+            &db,
+            &format!("USER_{}", i),
+            &format!("GROUP_{}", group),
+            "MemberOf",
+        );
+    }
+
+    let stats = db.stats().unwrap();
+    println!(
+        "Graph: {} nodes, {} relationships",
+        stats.node_count, stats.relationship_count
+    );
+
+    // The exact e2e query
+    let start = Instant::now();
+    let result = db
+        .execute("MATCH (n)-[r]->(m) RETURN count(r) AS edges LIMIT 1")
+        .unwrap();
+    let elapsed = start.elapsed().as_millis();
+
+    println!("count(r) = {:?}, elapsed={}ms", result.rows, elapsed);
+    assert_eq!(result.rows.len(), 1, "Should return exactly 1 row");
+    assert!(
+        elapsed < 100,
+        "count(r) took {}ms, should be <100ms with SQL pushdown",
+        elapsed
+    );
+}
+
+/// Test mirroring e2e "Query with type() function": MATCH (n)-[r]->(m) RETURN type(r) AS rel_type LIMIT 5
+///
+/// This was taking ~1.6s in e2e because it expanded all relationships before
+/// applying LIMIT. With Expand limit pushdown, it should stop after 5 results.
+#[test]
+fn test_e2e_query_with_type_function_limit() {
+    let db = Database::in_memory().unwrap();
+    db.set_entity_cache(EntityCacheConfig::with_capacity(500_000));
+
+    // Build a graph with many relationships
+    setup_ad_like_graph(&db, 1000, 500, 10);
+    for i in 0..500 {
+        for offset in &[5, 10, 20, 50] {
+            let target = (i + offset) % 500;
+            if target != i {
+                create_relationship(
+                    &db,
+                    &format!("GROUP_{}", i),
+                    &format!("GROUP_{}", target),
+                    "MemberOf",
+                );
+            }
+        }
+    }
+    for i in 0..1000 {
+        let group = i % 500;
+        create_relationship(
+            &db,
+            &format!("USER_{}", i),
+            &format!("GROUP_{}", group),
+            "MemberOf",
+        );
+    }
+
+    let stats = db.stats().unwrap();
+    println!(
+        "Graph: {} nodes, {} relationships",
+        stats.node_count, stats.relationship_count
+    );
+
+    // The exact e2e query
+    let start = Instant::now();
+    let result = db
+        .execute("MATCH (n)-[r]->(m) RETURN type(r) AS rel_type LIMIT 5")
+        .unwrap();
+    let elapsed = start.elapsed().as_millis();
+
+    println!(
+        "type(r) rows = {}, elapsed={}ms",
+        result.rows.len(),
+        elapsed
+    );
+    assert_eq!(result.rows.len(), 5, "Should return exactly 5 rows");
+    assert!(
+        elapsed < 100,
+        "type(r) LIMIT 5 took {}ms, should be <100ms with Expand limit pushdown",
+        elapsed
     );
 }
 

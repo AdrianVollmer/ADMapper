@@ -409,6 +409,7 @@ fn plan_pattern_segment(
                 path_variable: path_variable.clone(),
                 types: rel.types.clone(),
                 direction: rel.direction.into(),
+                limit: None,
             };
         }
 
@@ -1036,6 +1037,46 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                             };
                         }
                     }
+
+                    // Check for COUNT(r) on Expand (relationship count pushdown)
+                    // Pattern: Aggregate(count(r)) -> Expand(types, NodeScan(no filter))
+                    if let PlanOperator::Expand {
+                        source: ref expand_source,
+                        ref types,
+                        ref target_labels,
+                        ..
+                    } = *source
+                    {
+                        // Only push down if no target label filter and source is unfiltered NodeScan
+                        if target_labels.is_empty() {
+                            if let PlanOperator::NodeScan {
+                                label_groups: ref scan_labels,
+                                limit: None,
+                                property_filter: None,
+                                ..
+                            } = **expand_source
+                            {
+                                if scan_labels.is_empty() {
+                                    let rel_type = if types.len() == 1 {
+                                        Some(types[0].clone())
+                                    } else if types.is_empty() {
+                                        None
+                                    } else {
+                                        // Multiple types - can't push down easily
+                                        return PlanOperator::Aggregate {
+                                            source: Box::new(optimize_operator(*source)),
+                                            group_by,
+                                            aggregates,
+                                        };
+                                    };
+                                    return PlanOperator::RelationshipCountPushdown {
+                                        rel_type,
+                                        alias: aggregates[0].alias.clone(),
+                                    };
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1060,6 +1101,29 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                     label_groups,
                     limit: Some(count),
                     property_filter,
+                },
+
+                // LIMIT on Expand can be pushed down for early termination
+                PlanOperator::Expand {
+                    source: inner_source,
+                    source_variable,
+                    rel_variable,
+                    target_variable,
+                    target_labels,
+                    path_variable,
+                    types,
+                    direction,
+                    limit: None,
+                } => PlanOperator::Expand {
+                    source: Box::new(optimize_operator(*inner_source)),
+                    source_variable,
+                    rel_variable,
+                    target_variable,
+                    target_labels,
+                    path_variable,
+                    types,
+                    direction,
+                    limit: Some(count),
                 },
 
                 // LIMIT on VariableLengthExpand can be pushed down for early termination
@@ -1112,6 +1176,32 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                                 label_groups,
                                 limit: Some(count),
                                 property_filter,
+                            }),
+                            columns,
+                            distinct: false,
+                        },
+                        // Push through to Expand
+                        PlanOperator::Expand {
+                            source: inner_source,
+                            source_variable,
+                            rel_variable,
+                            target_variable,
+                            target_labels,
+                            path_variable,
+                            types,
+                            direction,
+                            limit: None,
+                        } => PlanOperator::Project {
+                            source: Box::new(PlanOperator::Expand {
+                                source: Box::new(optimize_operator(*inner_source)),
+                                source_variable,
+                                rel_variable,
+                                target_variable,
+                                target_labels,
+                                path_variable,
+                                types,
+                                direction,
+                                limit: Some(count),
                             }),
                             columns,
                             distinct: false,
@@ -1293,34 +1383,48 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                         target_property_filter: Some(pushed_filter),
                     };
 
-                    // If there's remaining predicate, wrap with Filter
+                    // If there's remaining predicate, try to push source
+                    // predicates into the NodeScan before wrapping with Filter.
                     if let Some(remaining) = remaining_predicate {
-                        PlanOperator::Filter {
-                            source: Box::new(optimized_expand),
-                            predicate: remaining,
+                        let (pushed_expand, leftover) =
+                            try_push_source_filter_into_expand(remaining, optimized_expand);
+                        if let Some(leftover_pred) = leftover {
+                            PlanOperator::Filter {
+                                source: Box::new(pushed_expand),
+                                predicate: leftover_pred,
+                            }
+                        } else {
+                            pushed_expand
                         }
                     } else {
                         optimized_expand
                     }
                 } else {
-                    // Couldn't push predicate, just optimize recursively
-                    PlanOperator::Filter {
-                        source: Box::new(PlanOperator::VariableLengthExpand {
-                            source: Box::new(optimize_operator(*inner_source)),
-                            source_variable,
-                            rel_variable,
-                            target_variable,
-                            target_labels,
-                            path_variable,
-                            types,
-                            direction,
-                            min_hops,
-                            max_hops,
-                            target_ids,
-                            limit,
-                            target_property_filter: None,
-                        }),
-                        predicate,
+                    // Couldn't push target predicate, but try source pushdown
+                    let expand = PlanOperator::VariableLengthExpand {
+                        source: Box::new(optimize_operator(*inner_source)),
+                        source_variable,
+                        rel_variable,
+                        target_variable,
+                        target_labels,
+                        path_variable,
+                        types,
+                        direction,
+                        min_hops,
+                        max_hops,
+                        target_ids,
+                        limit,
+                        target_property_filter: None,
+                    };
+                    let (pushed_expand, leftover) =
+                        try_push_source_filter_into_expand(predicate, expand);
+                    if let Some(leftover_pred) = leftover {
+                        PlanOperator::Filter {
+                            source: Box::new(pushed_expand),
+                            predicate: leftover_pred,
+                        }
+                    } else {
+                        pushed_expand
                     }
                 }
             } else {
@@ -1371,6 +1475,7 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             path_variable,
             types,
             direction,
+            limit,
         } => PlanOperator::Expand {
             source: Box::new(optimize_operator(*source)),
             source_variable,
@@ -1380,6 +1485,7 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             path_variable,
             types,
             direction,
+            limit,
         },
         PlanOperator::VariableLengthExpand {
             source,
@@ -1623,6 +1729,180 @@ fn extract_target_property_filter(
     }
 }
 
+/// Extract a simple source property equality from a predicate.
+///
+/// Given `source_variable = "a"`, matches patterns like `a.prop = 'value'`
+/// and returns `(property, value, remaining_predicate)`.
+///
+/// This allows pushing source filters into the NodeScan below a
+/// VariableLengthExpand, dramatically reducing BFS work.
+fn extract_source_property_filter(
+    predicate: &FilterPredicate,
+    source_variable: &str,
+) -> Option<((String, serde_json::Value), Option<FilterPredicate>)> {
+    match predicate {
+        FilterPredicate::Eq { left, right } => {
+            if let PlanExpr::Property { variable, property } = left {
+                if variable == source_variable {
+                    let value = match right {
+                        PlanExpr::Literal(PlanLiteral::String(s)) => {
+                            Some(serde_json::Value::String(s.clone()))
+                        }
+                        PlanExpr::Literal(PlanLiteral::Int(i)) => {
+                            Some(serde_json::Value::Number((*i).into()))
+                        }
+                        PlanExpr::Literal(PlanLiteral::Bool(b)) => {
+                            Some(serde_json::Value::Bool(*b))
+                        }
+                        _ => None,
+                    };
+                    if let Some(val) = value {
+                        return Some(((property.clone(), val), None));
+                    }
+                }
+            }
+            None
+        }
+
+        FilterPredicate::And { left, right } => {
+            if let Some((filter, remaining_left)) =
+                extract_source_property_filter(left, source_variable)
+            {
+                let remaining = match remaining_left {
+                    Some(rem_left) => Some(FilterPredicate::And {
+                        left: Box::new(rem_left),
+                        right: right.clone(),
+                    }),
+                    None => Some((**right).clone()),
+                };
+                return Some((filter, remaining));
+            }
+            if let Some((filter, remaining_right)) =
+                extract_source_property_filter(right, source_variable)
+            {
+                let remaining = match remaining_right {
+                    Some(rem_right) => Some(FilterPredicate::And {
+                        left: left.clone(),
+                        right: Box::new(rem_right),
+                    }),
+                    None => Some((**left).clone()),
+                };
+                return Some((filter, remaining));
+            }
+            None
+        }
+
+        _ => None,
+    }
+}
+
+/// Try to push a source property filter from a remaining predicate into
+/// the NodeScan that feeds a VariableLengthExpand.
+///
+/// Transforms:
+///   Filter(a.prop = 'X') -> VarLenExpand(source: NodeScan(no filter))
+/// Into:
+///   VarLenExpand(source: NodeScan(property_filter: (prop, 'X')))
+///
+/// Returns the (possibly modified) expand operator and any remaining predicate.
+fn try_push_source_filter_into_expand(
+    predicate: FilterPredicate,
+    expand: PlanOperator,
+) -> (PlanOperator, Option<FilterPredicate>) {
+    // Destructure immediately to take ownership
+    if let PlanOperator::VariableLengthExpand {
+        source: inner_source,
+        source_variable,
+        rel_variable,
+        target_variable,
+        target_labels,
+        path_variable,
+        types,
+        direction,
+        min_hops,
+        max_hops,
+        target_ids,
+        limit,
+        target_property_filter,
+    } = expand
+    {
+        if let PlanOperator::NodeScan {
+            variable,
+            label_groups,
+            limit: scan_limit,
+            property_filter: None,
+        } = *inner_source
+        {
+            if let Some((prop_filter, remaining)) =
+                extract_source_property_filter(&predicate, &source_variable)
+            {
+                let new_expand = PlanOperator::VariableLengthExpand {
+                    source: Box::new(PlanOperator::NodeScan {
+                        variable,
+                        label_groups,
+                        limit: scan_limit,
+                        property_filter: Some(prop_filter),
+                    }),
+                    source_variable,
+                    rel_variable,
+                    target_variable,
+                    target_labels,
+                    path_variable,
+                    types,
+                    direction,
+                    min_hops,
+                    max_hops,
+                    target_ids,
+                    limit,
+                    target_property_filter,
+                };
+                return (new_expand, remaining);
+            }
+            // Reassemble -- couldn't push
+            let expand = PlanOperator::VariableLengthExpand {
+                source: Box::new(PlanOperator::NodeScan {
+                    variable,
+                    label_groups,
+                    limit: scan_limit,
+                    property_filter: None,
+                }),
+                source_variable,
+                rel_variable,
+                target_variable,
+                target_labels,
+                path_variable,
+                types,
+                direction,
+                min_hops,
+                max_hops,
+                target_ids,
+                limit,
+                target_property_filter,
+            };
+            return (expand, Some(predicate));
+        }
+        // Inner source isn't a bare NodeScan, reassemble
+        let expand = PlanOperator::VariableLengthExpand {
+            source: inner_source,
+            source_variable,
+            rel_variable,
+            target_variable,
+            target_labels,
+            path_variable,
+            types,
+            direction,
+            min_hops,
+            max_hops,
+            target_ids,
+            limit,
+            target_property_filter,
+        };
+        return (expand, Some(predicate));
+    }
+    // Not a VariableLengthExpand
+    (expand, Some(predicate))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1736,51 +2016,86 @@ mod tests {
 
     #[test]
     fn test_plan_variable_length_limit_through_filter() {
-        // When a Filter remains above VariableLengthExpand (e.g. source predicate
-        // that can't be pushed into the expand), LIMIT must NOT be pushed into
-        // the expand. The Filter may discard results, so early termination in the
-        // expand would produce incorrect (empty) results.
-        // Structure: Limit -> Project -> Filter -> VariableLengthExpand(limit=None)
+        // When both source and target predicates from a WHERE clause can be
+        // pushed down (source into NodeScan, target into VariableLengthExpand),
+        // the Filter is eliminated entirely and LIMIT can be pushed into the
+        // expand for early BFS termination.
+        // Structure: Project -> VariableLengthExpand(limit=1, target_filter, source: NodeScan(prop_filter))
         let plan = plan_query(
             "MATCH p = (a)-[*1..20]->(b) WHERE a.name = 'test' AND b.id ENDS WITH '-519' RETURN length(p) LIMIT 1",
         );
-        if let PlanOperator::Limit { source, count } = plan.root {
-            assert_eq!(count, 1);
-            if let PlanOperator::Project { source, .. } = *source {
-                if let PlanOperator::Filter {
-                    source: filter_source,
-                    ..
-                } = *source
+        if let PlanOperator::Project { source, .. } = plan.root {
+            if let PlanOperator::VariableLengthExpand {
+                limit,
+                target_property_filter,
+                source: inner_source,
+                ..
+            } = *source
+            {
+                assert_eq!(
+                    limit,
+                    Some(1),
+                    "LIMIT should be pushed into VariableLengthExpand when Filter is eliminated"
+                );
+                assert!(
+                    target_property_filter.is_some(),
+                    "Target property filter should be pushed"
+                );
+                if let PlanOperator::NodeScan {
+                    property_filter, ..
+                } = *inner_source
                 {
-                    if let PlanOperator::VariableLengthExpand {
-                        limit,
-                        target_property_filter,
-                        ..
-                    } = *filter_source
-                    {
-                        assert_eq!(
-                            limit, None,
-                            "LIMIT must NOT be pushed into VariableLengthExpand when Filter remains"
-                        );
-                        // Target property filter should still be pushed
-                        assert!(
-                            target_property_filter.is_some(),
-                            "Target property filter should be pushed"
-                        );
-                    } else {
-                        panic!(
-                            "Expected VariableLengthExpand under Filter, got {:?}",
-                            filter_source
-                        );
-                    }
+                    assert!(
+                        property_filter.is_some(),
+                        "Source property filter should be pushed into NodeScan"
+                    );
                 } else {
-                    panic!("Expected Filter under Project, got {:?}", source);
+                    panic!("Expected NodeScan under VariableLengthExpand");
                 }
             } else {
-                panic!("Expected Project under Limit");
+                panic!(
+                    "Expected VariableLengthExpand under Project, got {:?}",
+                    source
+                );
             }
         } else {
-            panic!("Expected Limit at root");
+            panic!("Expected Project at root, got {:?}", plan.root);
+        }
+    }
+
+    #[test]
+    fn test_plan_source_filter_pushdown_to_nodescan() {
+        // Source equality predicates from WHERE should be pushed into
+        // the NodeScan below VariableLengthExpand.
+        let plan =
+            plan_query("MATCH (a)-[*1..20]->(b) WHERE a.object_id = 'USER_0' RETURN b.object_id");
+        // Plan should be: Project -> VariableLengthExpand(source: NodeScan(prop_filter))
+        // No Filter should remain.
+        if let PlanOperator::Project { source, .. } = plan.root {
+            if let PlanOperator::VariableLengthExpand {
+                source: inner_source,
+                ..
+            } = *source
+            {
+                if let PlanOperator::NodeScan {
+                    property_filter, ..
+                } = *inner_source
+                {
+                    assert!(
+                        property_filter.is_some(),
+                        "Source predicate should be pushed into NodeScan"
+                    );
+                    let (prop, val) = property_filter.unwrap();
+                    assert_eq!(prop, "object_id");
+                    assert_eq!(val, serde_json::Value::String("USER_0".to_string()));
+                } else {
+                    panic!("Expected NodeScan under VariableLengthExpand");
+                }
+            } else {
+                panic!("Expected VariableLengthExpand under Project");
+            }
+        } else {
+            panic!("Expected Project at root");
         }
     }
 
@@ -1810,6 +2125,43 @@ mod tests {
             }
         } else {
             panic!("Expected Project");
+        }
+    }
+
+    #[test]
+    fn test_plan_relationship_count_pushdown() {
+        // MATCH (n)-[r]->(m) RETURN count(r) AS edges LIMIT 1
+        // should produce: Limit(1, RelationshipCountPushdown)
+        let plan = plan_query("MATCH (n)-[r]->(m) RETURN count(r) AS edges LIMIT 1");
+        if let PlanOperator::Limit { source, count } = plan.root {
+            assert_eq!(count, 1);
+            assert!(
+                matches!(*source, PlanOperator::RelationshipCountPushdown { .. }),
+                "Expected RelationshipCountPushdown, got {:?}",
+                source
+            );
+        } else {
+            panic!("Expected Limit at root, got {:?}", plan.root);
+        }
+    }
+
+    #[test]
+    fn test_plan_expand_limit_pushdown() {
+        // MATCH (n)-[r]->(m) RETURN type(r) AS rel_type LIMIT 5
+        // should push LIMIT into Expand
+        let plan = plan_query("MATCH (n)-[r]->(m) RETURN type(r) AS rel_type LIMIT 5");
+        if let PlanOperator::Project { source, .. } = plan.root {
+            if let PlanOperator::Expand { limit, .. } = *source {
+                assert_eq!(
+                    limit,
+                    Some(5),
+                    "LIMIT 5 should be pushed into Expand"
+                );
+            } else {
+                panic!("Expected Expand under Project, got {:?}", source);
+            }
+        } else {
+            panic!("Expected Project at root, got {:?}", plan.root);
         }
     }
 }
