@@ -17,7 +17,7 @@ use super::planner;
 use super::QueryResult;
 use crate::error::Result;
 use crate::graph::{Node, PropertyValue, Relationship};
-use crate::storage::SqliteStorage;
+use crate::storage::{EntityCache, SqliteStorage};
 use smallvec::SmallVec;
 use std::collections::HashMap;
 
@@ -202,6 +202,18 @@ impl PathConstraints {
 /// This uses the query planner to generate an execution plan,
 /// which is then interpreted by the plan executor.
 pub fn execute(statement: &Statement, storage: &SqliteStorage) -> Result<QueryResult> {
+    execute_with_cache(statement, storage, None)
+}
+
+/// Execute a parsed statement with an optional entity cache.
+///
+/// The cache improves performance for BFS/DFS traversals by avoiding repeated
+/// SQLite lookups for the same nodes and relationships.
+pub fn execute_with_cache(
+    statement: &Statement,
+    storage: &SqliteStorage,
+    cache: Option<&mut EntityCache>,
+) -> Result<QueryResult> {
     // Generate query plan from AST
     let plan = planner::plan(statement)?;
 
@@ -209,7 +221,7 @@ pub fn execute(statement: &Statement, storage: &SqliteStorage) -> Result<QueryRe
     let optimized_plan = planner::optimize(plan);
 
     // Execute the plan
-    plan_exec::execute_plan(&optimized_plan, storage)
+    plan_exec::execute_plan(&optimized_plan, storage, cache)
 }
 
 // =============================================================================

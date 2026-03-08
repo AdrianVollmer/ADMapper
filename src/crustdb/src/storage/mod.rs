@@ -9,13 +9,17 @@
 //! - `history`: Query history management
 //! - `cache`: Query cache management
 //! - `index`: Property index management
+//! - `entity_cache`: LRU cache for nodes and relationships during traversals
 
 mod cache;
 mod crud;
+pub mod entity_cache;
 mod history;
 mod index;
 mod query;
 mod schema;
+
+pub use entity_cache::{EntityCache, EntityCacheConfig, EntityCacheStats};
 
 use crate::error::{Error, Result};
 use crate::DatabaseStats;

@@ -45,6 +45,7 @@ use std::sync::Mutex;
 use storage::SqliteStorage;
 
 pub use storage::CacheStats;
+pub use storage::{EntityCache, EntityCacheConfig, EntityCacheStats};
 
 /// Default number of read connections in the pool.
 const DEFAULT_READ_POOL_SIZE: usize = 4;
@@ -68,6 +69,9 @@ pub struct Database {
     db_path: Option<PathBuf>,
     /// Whether query caching is enabled (disabled by default).
     caching_enabled: bool,
+    /// Entity cache for nodes and relationships (reduces SQLite lookups during traversals).
+    /// Protected by a Mutex for thread-safe access.
+    entity_cache: Mutex<EntityCache>,
 }
 
 impl Database {
@@ -100,6 +104,7 @@ impl Database {
             read_index: AtomicUsize::new(0),
             db_path: Some(path_buf),
             caching_enabled: false,
+            entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
         })
     }
 
@@ -115,6 +120,7 @@ impl Database {
             read_index: AtomicUsize::new(0),
             db_path: None,
             caching_enabled: false,
+            entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
         })
     }
 
@@ -161,6 +167,41 @@ impl Database {
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
         storage.cache_stats()
+    }
+
+    /// Configure the entity cache for nodes and relationships.
+    ///
+    /// The entity cache reduces SQLite lookups during graph traversals (BFS, shortest path)
+    /// by caching recently accessed nodes and relationships in memory.
+    ///
+    /// # Arguments
+    /// * `config` - Cache configuration specifying capacity for nodes and relationships.
+    ///   Use `EntityCacheConfig::disabled()` to turn off caching.
+    ///   Use `EntityCacheConfig::with_capacity(n)` for n entries each.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Enable caching with 10,000 entries each for nodes and relationships
+    /// db.set_entity_cache(EntityCacheConfig::with_capacity(10_000));
+    ///
+    /// // Disable caching
+    /// db.set_entity_cache(EntityCacheConfig::disabled());
+    /// ```
+    pub fn set_entity_cache(&self, config: EntityCacheConfig) {
+        let mut cache = self.entity_cache.lock().unwrap();
+        *cache = EntityCache::new(config);
+    }
+
+    /// Get statistics about the entity cache.
+    pub fn entity_cache_stats(&self) -> EntityCacheStats {
+        let cache = self.entity_cache.lock().unwrap();
+        cache.stats()
+    }
+
+    /// Clear the entity cache.
+    pub fn clear_entity_cache(&self) {
+        let mut cache = self.entity_cache.lock().unwrap();
+        cache.clear();
     }
 
     /// Create an index on a JSON property for faster lookups.
@@ -218,6 +259,9 @@ impl Database {
     /// Read-only queries (MATCH without SET/DELETE) are executed on a pooled
     /// read connection for better concurrency. Write queries use the primary
     /// write connection.
+    ///
+    /// If entity caching is enabled (via `set_entity_cache`), nodes and relationships
+    /// are cached during traversals to reduce SQLite lookups.
     pub fn execute(&self, query: &str) -> Result<QueryResult> {
         let statement = query::parser::parse(query)?;
 
@@ -238,8 +282,17 @@ impl Database {
                     }
                 }
 
-                // Execute on read connection
-                let result = query::executor::execute(&statement, &read_storage)?;
+                // Execute on read connection with entity cache
+                let result = {
+                    let mut entity_cache = self.entity_cache.lock().unwrap();
+                    let cache_ref =
+                        if entity_cache.nodes_enabled() || entity_cache.relationships_enabled() {
+                            Some(&mut *entity_cache)
+                        } else {
+                            None
+                        };
+                    query::executor::execute_with_cache(&statement, &read_storage, cache_ref)?
+                };
 
                 // Drop read_storage before acquiring write lock to avoid deadlock
                 // (in-memory databases use write_conn for reads since there's no pool)
@@ -254,7 +307,15 @@ impl Database {
                 }
                 Ok(result)
             } else {
-                query::executor::execute(&statement, &read_storage)
+                // Execute with entity cache (if enabled)
+                let mut entity_cache = self.entity_cache.lock().unwrap();
+                let cache_ref =
+                    if entity_cache.nodes_enabled() || entity_cache.relationships_enabled() {
+                        Some(&mut *entity_cache)
+                    } else {
+                        None
+                    };
+                query::executor::execute_with_cache(&statement, &read_storage, cache_ref)
             }
         } else {
             // Write queries use the write connection
@@ -262,7 +323,14 @@ impl Database {
                 .write_conn
                 .lock()
                 .map_err(|e| Error::Internal(e.to_string()))?;
-            query::executor::execute(&statement, &storage)
+
+            // Clear entity cache on write operations (data changed)
+            {
+                let mut entity_cache = self.entity_cache.lock().unwrap();
+                entity_cache.clear();
+            }
+
+            query::executor::execute_with_cache(&statement, &storage, None)
         }
     }
 

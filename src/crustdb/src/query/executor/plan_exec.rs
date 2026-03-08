@@ -12,20 +12,72 @@ use crate::query::planner::{
     PlanLiteral, PlanOperator, ProjectColumn, QueryPlan, SetOperation, TargetPropertyFilter,
 };
 use crate::query::{PathNode, PathRelationship, QueryResult, QueryStats, ResultValue, Row};
-use crate::storage::SqliteStorage;
+use crate::storage::{EntityCache, SqliteStorage};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+// =============================================================================
+// Cached Storage Access
+// =============================================================================
+
+/// Get a node, checking the cache first if available.
+#[inline]
+fn get_node_cached(
+    id: i64,
+    storage: &SqliteStorage,
+    cache: Option<&mut EntityCache>,
+) -> Result<Option<Node>> {
+    if let Some(c) = cache {
+        if let Some(node) = c.get_node(id) {
+            return Ok(Some(node.clone()));
+        }
+        // Cache miss - fetch from storage and cache
+        if let Some(node) = storage.get_node(id)? {
+            c.insert_node(node.clone());
+            return Ok(Some(node));
+        }
+        Ok(None)
+    } else {
+        storage.get_node(id)
+    }
+}
+
+/// Get a relationship, checking the cache first if available.
+#[inline]
+fn get_relationship_cached(
+    id: i64,
+    storage: &SqliteStorage,
+    cache: Option<&mut EntityCache>,
+) -> Result<Option<Relationship>> {
+    if let Some(c) = cache {
+        if let Some(rel) = c.get_relationship(id) {
+            return Ok(Some(rel.clone()));
+        }
+        // Cache miss - fetch from storage and cache
+        if let Some(rel) = storage.get_relationship(id)? {
+            c.insert_relationship(rel.clone());
+            return Ok(Some(rel));
+        }
+        Ok(None)
+    } else {
+        storage.get_relationship(id)
+    }
+}
 
 // =============================================================================
 // Main Entry Point
 // =============================================================================
 
-/// Execute a query plan against storage.
-pub fn execute_plan(plan: &QueryPlan, storage: &SqliteStorage) -> Result<QueryResult> {
+/// Execute a query plan against storage with an optional entity cache.
+pub fn execute_plan(
+    plan: &QueryPlan,
+    storage: &SqliteStorage,
+    cache: Option<&mut EntityCache>,
+) -> Result<QueryResult> {
     let mut stats = QueryStats::default();
     let start = std::time::Instant::now();
 
     // Execute the plan tree
-    let execution_result = execute_operator(&plan.root, storage, &mut stats)?;
+    let execution_result = execute_operator(&plan.root, storage, &mut stats, cache)?;
 
     // Convert to QueryResult
     let result = match execution_result {
@@ -66,6 +118,7 @@ fn execute_operator(
     op: &PlanOperator,
     storage: &SqliteStorage,
     stats: &mut QueryStats,
+    mut cache: Option<&mut EntityCache>,
 ) -> Result<ExecutionResult> {
     match op {
         PlanOperator::Empty => Ok(ExecutionResult::Bindings(Vec::new())),
@@ -95,7 +148,8 @@ fn execute_operator(
             types,
             direction,
         } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let bindings =
+                execute_operator_to_bindings(source, storage, stats, cache.as_deref_mut())?;
             let request = ExpandRequest {
                 source_variable,
                 rel_variable: rel_variable.as_deref(),
@@ -105,7 +159,7 @@ fn execute_operator(
                 types,
                 direction: *direction,
             };
-            execute_expand(bindings, &request, storage)
+            execute_expand(bindings, &request, storage, cache)
         }
 
         PlanOperator::VariableLengthExpand {
@@ -123,7 +177,8 @@ fn execute_operator(
             limit,
             target_property_filter,
         } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let bindings =
+                execute_operator_to_bindings(source, storage, stats, cache.as_deref_mut())?;
             let request = VariableLengthExpandRequest {
                 source_variable,
                 rel_variable: rel_variable.as_deref(),
@@ -138,7 +193,7 @@ fn execute_operator(
                 limit: *limit,
                 target_property_filter: target_property_filter.as_ref(),
             };
-            execute_variable_length_expand(bindings, &request, storage)
+            execute_variable_length_expand(bindings, &request, storage, cache)
         }
 
         PlanOperator::ShortestPath {
@@ -154,7 +209,8 @@ fn execute_operator(
             k,
             target_property_filter,
         } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let bindings =
+                execute_operator_to_bindings(source, storage, stats, cache.as_deref_mut())?;
             execute_shortest_path(
                 bindings,
                 source_variable,
@@ -168,11 +224,12 @@ fn execute_operator(
                 *k,
                 target_property_filter.clone(),
                 storage,
+                cache,
             )
         }
 
         PlanOperator::Filter { source, predicate } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
             let filtered = filter_bindings(bindings, predicate)?;
             Ok(ExecutionResult::Bindings(filtered))
         }
@@ -182,7 +239,7 @@ fn execute_operator(
             columns,
             distinct,
         } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
             execute_project(bindings, columns, *distinct, storage)
         }
 
@@ -191,7 +248,7 @@ fn execute_operator(
             group_by,
             aggregates,
         } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
             execute_aggregate(bindings, group_by, aggregates, storage)
         }
 
@@ -205,7 +262,7 @@ fn execute_operator(
 
         PlanOperator::Limit { source, count } => {
             // Limit can work on either Bindings or Rows
-            match execute_operator(source, storage, stats)? {
+            match execute_operator(source, storage, stats, cache)? {
                 ExecutionResult::Bindings(mut bindings) => {
                     bindings.truncate(*count as usize);
                     Ok(ExecutionResult::Bindings(bindings))
@@ -219,7 +276,7 @@ fn execute_operator(
 
         PlanOperator::Skip { source, count } => {
             // Skip can work on either Bindings or Rows
-            match execute_operator(source, storage, stats)? {
+            match execute_operator(source, storage, stats, cache)? {
                 ExecutionResult::Bindings(bindings) => {
                     let skipped: Vec<_> = bindings.into_iter().skip(*count as usize).collect();
                     Ok(ExecutionResult::Bindings(skipped))
@@ -238,10 +295,17 @@ fn execute_operator(
             source,
             nodes,
             relationships,
-        } => execute_create(source.as_deref(), nodes, relationships, storage, stats),
+        } => execute_create(
+            source.as_deref(),
+            nodes,
+            relationships,
+            storage,
+            stats,
+            cache,
+        ),
 
         PlanOperator::SetProperties { source, sets } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
             execute_set_properties(&bindings, sets, storage, stats)?;
             Ok(ExecutionResult::Bindings(bindings))
         }
@@ -251,14 +315,14 @@ fn execute_operator(
             variables,
             detach,
         } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
             execute_delete(&bindings, variables, *detach, storage, stats)?;
             Ok(ExecutionResult::Bindings(Vec::new()))
         }
 
         PlanOperator::Sort { source, keys: _ } => {
             // TODO: Implement sorting
-            let bindings = execute_operator_to_bindings(source, storage, stats)?;
+            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
             Ok(ExecutionResult::Bindings(bindings))
         }
 
@@ -273,8 +337,9 @@ fn execute_operator_to_bindings(
     op: &PlanOperator,
     storage: &SqliteStorage,
     stats: &mut QueryStats,
+    cache: Option<&mut EntityCache>,
 ) -> Result<Vec<Binding>> {
-    match execute_operator(op, storage, stats)? {
+    match execute_operator(op, storage, stats, cache)? {
         ExecutionResult::Bindings(b) => Ok(b),
         ExecutionResult::Rows { .. } => {
             // This shouldn't happen in a well-formed plan
@@ -368,6 +433,7 @@ fn execute_expand(
     bindings: Vec<Binding>,
     req: &ExpandRequest<'_>,
     storage: &SqliteStorage,
+    mut cache: Option<&mut EntityCache>,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
 
@@ -381,7 +447,7 @@ fn execute_expand(
 
         for relationship in relationships {
             let target_id = get_target_id(&relationship, source_node.id, req.direction);
-            let target_node = match storage.get_node(target_id)? {
+            let target_node = match get_node_cached(target_id, storage, cache.as_deref_mut())? {
                 Some(n) => n,
                 None => continue,
             };
@@ -447,6 +513,7 @@ fn execute_variable_length_expand(
     bindings: Vec<Binding>,
     req: &VariableLengthExpandRequest<'_>,
     storage: &SqliteStorage,
+    mut cache: Option<&mut EntityCache>,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
 
@@ -517,7 +584,9 @@ fn execute_variable_length_expand(
                 };
 
                 if matches_target_ids {
-                    if let Some(target_node) = storage.get_node(current_id)? {
+                    if let Some(target_node) =
+                        get_node_cached(current_id, storage, cache.as_deref_mut())?
+                    {
                         // Check target labels
                         let matches_labels = req.target_labels.is_empty()
                             || req.target_labels.iter().any(|l| target_node.has_label(l));
@@ -530,7 +599,9 @@ fn execute_variable_length_expand(
                                 // Build full path
                                 let mut nodes = Vec::new();
                                 for &nid in &path_nodes {
-                                    if let Some(n) = storage.get_node(nid)? {
+                                    if let Some(n) =
+                                        get_node_cached(nid, storage, cache.as_deref_mut())?
+                                    {
                                         nodes.push(n);
                                     }
                                 }
@@ -607,6 +678,7 @@ fn execute_shortest_path(
     _k: u32,
     target_property_filter: Option<(String, serde_json::Value)>,
     storage: &SqliteStorage,
+    mut cache: Option<&mut EntityCache>,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
 
@@ -676,7 +748,9 @@ fn execute_shortest_path(
                 };
 
                 if is_target {
-                    if let Some(target_node) = storage.get_node(current_id)? {
+                    if let Some(target_node) =
+                        get_node_cached(current_id, storage, cache.as_deref_mut())?
+                    {
                         found_paths.push((target_node, path_nodes.clone(), path_rel_ids.clone()));
                         // If we have a specific target, we found it - can terminate early
                         if specific_target_id.is_some() {
@@ -722,13 +796,13 @@ fn execute_shortest_path(
             if let Some(pv) = path_variable {
                 let mut nodes = Vec::new();
                 for &nid in &path_node_ids {
-                    if let Some(n) = storage.get_node(nid)? {
+                    if let Some(n) = get_node_cached(nid, storage, cache.as_deref_mut())? {
                         nodes.push(n);
                     }
                 }
                 let mut relationships = Vec::new();
                 for &eid in &path_rel_ids {
-                    if let Some(e) = storage.get_relationship(eid)? {
+                    if let Some(e) = get_relationship_cached(eid, storage, cache.as_deref_mut())? {
                         relationships.push(e);
                     }
                 }
@@ -1407,6 +1481,7 @@ fn execute_create(
     relationships: &[CreateRelationship],
     storage: &SqliteStorage,
     stats: &mut QueryStats,
+    _cache: Option<&mut EntityCache>,
 ) -> Result<ExecutionResult> {
     // Build nodes first, tracking variable -> id mapping
     let mut var_to_id: HashMap<String, i64> = HashMap::new();
