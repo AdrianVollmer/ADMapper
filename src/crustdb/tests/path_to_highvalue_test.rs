@@ -105,14 +105,7 @@ fn setup_ad_like_graph(db: &Database, num_users: usize, num_groups: usize, chain
 }
 
 /// The slow query from node_status: find path to high-value node
-///
-/// Note: Using inline property matching instead of WHERE clause because CrustDB's
-/// WHERE clause predicate pushdown for variable-length paths has limitations.
 fn run_path_to_highvalue_query(db: &Database, source_object_id: &str) -> (bool, u128) {
-    // NOTE: CrustDB has bugs with:
-    // 1. Combining inline property filter on source with WHERE clause boolean filter on target
-    // 2. LIMIT clause with variable-length paths and WHERE clause filters
-    // Workaround: Put both filters in WHERE clause, no LIMIT (we just check if any result exists)
     let query = format!(
         "MATCH (a)-[*1..20]->(b) \
          WHERE a.object_id = '{}' AND b.is_highvalue = true \
@@ -261,6 +254,77 @@ fn test_path_to_highvalue_large_graph() {
         avg_elapsed < 2000,
         "Average query time too slow: {}ms",
         avg_elapsed
+    );
+}
+
+/// Test that LIMIT works correctly with variable-length paths and WHERE clause filters.
+///
+/// This is a regression test for the bug where adding LIMIT to a query with WHERE
+/// filters on variable-length paths returns empty results.
+#[test]
+fn test_limit_with_varlen_path_and_where_clause() {
+    let db = Database::in_memory().unwrap();
+    db.set_entity_cache(EntityCacheConfig::with_capacity(10_000));
+
+    // Small graph: USER_0 -> GROUP_0 -> GROUP_1 -> ... -> GROUP_4 -> HV_GROUP_0
+    setup_ad_like_graph(&db, 100, 20, 5);
+
+    // Sanity: the query without LIMIT works
+    let without_limit = db
+        .execute(
+            "MATCH (a)-[*1..20]->(b) \
+             WHERE a.object_id = 'USER_0' AND b.is_highvalue = true \
+             RETURN b.object_id",
+        )
+        .unwrap();
+    assert!(
+        !without_limit.rows.is_empty(),
+        "Query without LIMIT should return results"
+    );
+
+    // The same query with LIMIT 1 must also return results
+    let with_limit = db
+        .execute(
+            "MATCH (a)-[*1..20]->(b) \
+             WHERE a.object_id = 'USER_0' AND b.is_highvalue = true \
+             RETURN b.object_id LIMIT 1",
+        )
+        .unwrap();
+    assert_eq!(
+        with_limit.rows.len(),
+        1,
+        "LIMIT 1 should return exactly 1 result, got {}",
+        with_limit.rows.len()
+    );
+
+    // Also test LIMIT with a higher count
+    let with_limit_10 = db
+        .execute(
+            "MATCH (a)-[*1..20]->(b) \
+             WHERE a.object_id = 'USER_0' AND b.is_highvalue = true \
+             RETURN b.object_id LIMIT 10",
+        )
+        .unwrap();
+    assert!(
+        !with_limit_10.rows.is_empty(),
+        "LIMIT 10 should also return results"
+    );
+    assert!(
+        with_limit_10.rows.len() <= 10,
+        "LIMIT 10 should return at most 10 results"
+    );
+
+    // Test LIMIT with a user that has no path - should still return empty
+    let no_path = db
+        .execute(
+            "MATCH (a)-[*1..20]->(b) \
+             WHERE a.object_id = 'USER_1' AND b.is_highvalue = true \
+             RETURN b.object_id LIMIT 1",
+        )
+        .unwrap();
+    assert!(
+        no_path.rows.is_empty(),
+        "USER_1 has no path, LIMIT 1 should return empty"
     );
 }
 

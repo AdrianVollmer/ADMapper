@@ -1046,59 +1046,22 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                                     source: opt_filter_source,
                                     predicate: opt_predicate,
                                 } => {
-                                    if let PlanOperator::VariableLengthExpand {
-                                        source: inner_source,
-                                        source_variable,
-                                        rel_variable,
-                                        target_variable,
-                                        target_labels,
-                                        path_variable,
-                                        types,
-                                        direction,
-                                        min_hops,
-                                        max_hops,
-                                        target_ids,
-                                        limit: None,
-                                        target_property_filter,
-                                    } = *opt_filter_source
-                                    {
-                                        PlanOperator::Project {
+                                    // A Filter remains above the expand, meaning
+                                    // some predicates could not be pushed down.
+                                    // We must NOT push LIMIT into the expand because
+                                    // the Filter may discard results, causing the
+                                    // expand to terminate early with too few results.
+                                    // Keep LIMIT on top instead.
+                                    PlanOperator::Limit {
+                                        source: Box::new(PlanOperator::Project {
                                             source: Box::new(PlanOperator::Filter {
-                                                source: Box::new(
-                                                    PlanOperator::VariableLengthExpand {
-                                                        source: inner_source,
-                                                        source_variable,
-                                                        rel_variable,
-                                                        target_variable,
-                                                        target_labels,
-                                                        path_variable,
-                                                        types,
-                                                        direction,
-                                                        min_hops,
-                                                        max_hops,
-                                                        target_ids,
-                                                        limit: Some(count),
-                                                        target_property_filter,
-                                                    },
-                                                ),
+                                                source: opt_filter_source,
                                                 predicate: opt_predicate,
                                             }),
                                             columns,
                                             distinct: false,
-                                        }
-                                    } else {
-                                        // Can't push further, keep LIMIT on top
-                                        PlanOperator::Limit {
-                                            source: Box::new(PlanOperator::Project {
-                                                source: Box::new(PlanOperator::Filter {
-                                                    source: opt_filter_source,
-                                                    predicate: opt_predicate,
-                                                }),
-                                                columns,
-                                                distinct: false,
-                                            }),
-                                            count,
-                                        }
+                                        }),
+                                        count,
                                     }
                                 }
                                 // Filter was optimized away (predicate fully pushed),
@@ -1634,45 +1597,51 @@ mod tests {
 
     #[test]
     fn test_plan_variable_length_limit_through_filter() {
-        // This pattern is used by node_status: MATCH path with WHERE and LIMIT 1
+        // When a Filter remains above VariableLengthExpand (e.g. source predicate
+        // that can't be pushed into the expand), LIMIT must NOT be pushed into
+        // the expand. The Filter may discard results, so early termination in the
+        // expand would produce incorrect (empty) results.
+        // Structure: Limit -> Project -> Filter -> VariableLengthExpand(limit=None)
         let plan = plan_query(
             "MATCH p = (a)-[*1..20]->(b) WHERE a.name = 'test' AND b.id ENDS WITH '-519' RETURN length(p) LIMIT 1",
         );
-        // Should have limit pushed into VariableLengthExpand even through Filter
-        // Structure: Project -> Filter -> VariableLengthExpand(limit=1)
-        if let PlanOperator::Project { source, .. } = plan.root {
-            if let PlanOperator::Filter {
-                source: filter_source,
-                ..
-            } = *source
-            {
-                if let PlanOperator::VariableLengthExpand {
-                    limit,
-                    target_property_filter,
+        if let PlanOperator::Limit { source, count } = plan.root {
+            assert_eq!(count, 1);
+            if let PlanOperator::Project { source, .. } = *source {
+                if let PlanOperator::Filter {
+                    source: filter_source,
                     ..
-                } = *filter_source
+                } = *source
                 {
-                    assert_eq!(
+                    if let PlanOperator::VariableLengthExpand {
                         limit,
-                        Some(1),
-                        "LIMIT should be pushed into VariableLengthExpand through Filter"
-                    );
-                    // Also verify target property filter was pushed
-                    assert!(
-                        target_property_filter.is_some(),
-                        "Target property filter should be pushed"
-                    );
+                        target_property_filter,
+                        ..
+                    } = *filter_source
+                    {
+                        assert_eq!(
+                            limit, None,
+                            "LIMIT must NOT be pushed into VariableLengthExpand when Filter remains"
+                        );
+                        // Target property filter should still be pushed
+                        assert!(
+                            target_property_filter.is_some(),
+                            "Target property filter should be pushed"
+                        );
+                    } else {
+                        panic!(
+                            "Expected VariableLengthExpand under Filter, got {:?}",
+                            filter_source
+                        );
+                    }
                 } else {
-                    panic!(
-                        "Expected VariableLengthExpand under Filter, got {:?}",
-                        filter_source
-                    );
+                    panic!("Expected Filter under Project, got {:?}", source);
                 }
             } else {
-                panic!("Expected Filter under Project, got {:?}", source);
+                panic!("Expected Project under Limit");
             }
         } else {
-            panic!("Expected Project");
+            panic!("Expected Limit at root");
         }
     }
 }
