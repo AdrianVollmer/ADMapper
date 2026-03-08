@@ -1393,6 +1393,15 @@ fn extract_target_property_filter(
                             None,
                         ));
                     }
+                    if let PlanExpr::Literal(PlanLiteral::Bool(b)) = right {
+                        return Some((
+                            TargetPropertyFilter::Eq {
+                                property: property.clone(),
+                                value: serde_json::Value::Bool(*b),
+                            },
+                            None,
+                        ));
+                    }
                 }
             }
             None
@@ -1642,6 +1651,35 @@ mod tests {
             }
         } else {
             panic!("Expected Limit at root");
+        }
+    }
+
+    #[test]
+    fn test_plan_boolean_target_filter_pushdown() {
+        // Boolean target property filters should be pushed into VariableLengthExpand
+        let plan =
+            plan_query("MATCH (a)-[*1..20]->(b) WHERE b.is_highvalue = true RETURN b.object_id");
+        if let PlanOperator::Project { source, .. } = plan.root {
+            if let PlanOperator::VariableLengthExpand {
+                target_property_filter,
+                ..
+            } = *source
+            {
+                assert!(
+                    target_property_filter.is_some(),
+                    "Boolean target property filter should be pushed into VariableLengthExpand"
+                );
+                if let Some(TargetPropertyFilter::Eq { property, value }) = target_property_filter {
+                    assert_eq!(property, "is_highvalue");
+                    assert_eq!(value, serde_json::Value::Bool(true));
+                } else {
+                    panic!("Expected Eq filter");
+                }
+            } else {
+                panic!("Expected VariableLengthExpand, got {:?}", source);
+            }
+        } else {
+            panic!("Expected Project");
         }
     }
 }

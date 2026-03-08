@@ -328,6 +328,123 @@ fn test_limit_with_varlen_path_and_where_clause() {
     );
 }
 
+/// Test that inline source property filter + WHERE target filter works correctly.
+///
+/// Regression test for the bug where combining inline source properties with
+/// WHERE clause boolean target filters returns empty results.
+#[test]
+fn test_inline_source_filter_with_where_target_filter() {
+    let db = Database::in_memory().unwrap();
+    db.set_entity_cache(EntityCacheConfig::with_capacity(10_000));
+
+    // Minimal graph matching the exact issue reproduction
+    db.execute("CREATE (:Group {object_id: 'HV_GROUP', is_highvalue: true})")
+        .unwrap();
+    db.execute("CREATE (:Group {object_id: 'GROUP_0'})")
+        .unwrap();
+    db.execute("CREATE (:User {object_id: 'USER_0'})").unwrap();
+
+    let user_id = db
+        .find_node_by_property("object_id", "USER_0")
+        .unwrap()
+        .unwrap();
+    let group_id = db
+        .find_node_by_property("object_id", "GROUP_0")
+        .unwrap()
+        .unwrap();
+    let hv_id = db
+        .find_node_by_property("object_id", "HV_GROUP")
+        .unwrap()
+        .unwrap();
+
+    db.insert_relationships_batch(&[
+        (
+            user_id,
+            group_id,
+            "MemberOf".to_string(),
+            serde_json::json!({}),
+        ),
+        (
+            group_id,
+            hv_id,
+            "MemberOf".to_string(),
+            serde_json::json!({}),
+        ),
+    ])
+    .unwrap();
+
+    // Baseline: both filters in WHERE clause (known to work)
+    let baseline = db
+        .execute(
+            "MATCH (a)-[*1..20]->(b) \
+             WHERE a.object_id = 'USER_0' AND b.is_highvalue = true \
+             RETURN b.object_id",
+        )
+        .unwrap();
+    assert!(
+        !baseline.rows.is_empty(),
+        "Baseline query should return results"
+    );
+
+    // Bug case: inline source filter + WHERE target filter
+    let inline_source = db
+        .execute(
+            "MATCH (a {object_id: 'USER_0'})-[*1..20]->(b) \
+             WHERE b.is_highvalue = true \
+             RETURN b.object_id",
+        )
+        .unwrap();
+    assert!(
+        !inline_source.rows.is_empty(),
+        "Inline source filter + WHERE target filter should return results"
+    );
+    assert_eq!(
+        baseline.rows.len(),
+        inline_source.rows.len(),
+        "Both query forms should return the same number of results"
+    );
+
+    // Also test: inline source filter WITH label + WHERE target filter (reported as working)
+    let with_label = db
+        .execute(
+            "MATCH (a:User {object_id: 'USER_0'})-[*1..20]->(b) \
+             WHERE b.is_highvalue = true \
+             RETURN b.object_id",
+        )
+        .unwrap();
+    assert_eq!(
+        baseline.rows.len(),
+        with_label.rows.len(),
+        "With-label variant should return same results"
+    );
+
+    // And: inline filters on both source and target
+    let inline_both = db
+        .execute(
+            "MATCH (a {object_id: 'USER_0'})-[*1..20]->(b {is_highvalue: true}) \
+             RETURN b.object_id",
+        )
+        .unwrap();
+    assert!(
+        !inline_both.rows.is_empty(),
+        "Inline filters on both should return results"
+    );
+
+    // Inline source + WHERE target + LIMIT (combines both bugs)
+    let inline_with_limit = db
+        .execute(
+            "MATCH (a {object_id: 'USER_0'})-[*1..20]->(b) \
+             WHERE b.is_highvalue = true \
+             RETURN b.object_id LIMIT 1",
+        )
+        .unwrap();
+    assert_eq!(
+        inline_with_limit.rows.len(),
+        1,
+        "Inline source + WHERE target + LIMIT should return 1 result"
+    );
+}
+
 /// Test the worst case: no path exists, must explore entire reachable graph
 #[test]
 fn test_path_to_highvalue_no_path_worst_case() {
