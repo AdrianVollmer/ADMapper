@@ -5,7 +5,15 @@
  */
 
 import Graph from "graphology";
-import type { ADNodeAttributes, ADEdgeAttributes, RawADGraph, RawADNode, RawADEdge, ADNodeType } from "./types";
+import type {
+  ADNodeAttributes,
+  ADEdgeAttributes,
+  ADEdgeType,
+  RawADGraph,
+  RawADNode,
+  RawADEdge,
+  ADNodeType,
+} from "./types";
 import { NODE_COLORS, DEFAULT_EDGE_SIZE, DEFAULT_EDGE_COLOR } from "./theme";
 import { getNodeIcon, getNodeTypeColor, NODE_SIZE } from "./icons";
 
@@ -84,10 +92,46 @@ export function loadGraph(data: RawADGraph): ADGraphType {
     }
   }
 
-  // Assign curvature to parallel relationships (multiple relationships between same node pair)
+  // Collapse parallel edges: merge multiple edges between same (source, target) into one
+  collapseParallelEdges(graph);
+
+  // Assign curvature to remaining edges (at most 2 per node pair: one per direction)
   assignEdgeCurvatures(graph);
 
   return graph;
+}
+
+/** Collapse parallel edges between the same (source, target) into a single representative edge.
+ *  Preserves direction: A->B and B->A are separate groups, yielding at most 2 edges per node pair. */
+function collapseParallelEdges(graph: ADGraphType): void {
+  // Group edges by directed pair (source, target)
+  const directedGroups = new Map<string, Array<{ key: string; type: ADEdgeType }>>();
+
+  graph.forEachEdge((edgeKey, attrs, source, target) => {
+    const dirKey = `${source}\0${target}`;
+    const group = directedGroups.get(dirKey) ?? [];
+    group.push({ key: edgeKey, type: attrs.edgeType });
+    directedGroups.set(dirKey, group);
+  });
+
+  for (const edges of directedGroups.values()) {
+    if (edges.length <= 1) continue;
+
+    // Keep the first edge as representative, drop the rest
+    const representative = edges[0]!;
+    const types = edges.map((e) => e.type);
+
+    // Build a compact label: single type, or "Type +N"
+    const label = types.length === 1 ? types[0]! : `${types[0]} +${types.length - 1}`;
+
+    graph.setEdgeAttribute(representative.key, "collapsedTypes", types);
+    graph.setEdgeAttribute(representative.key, "label", label);
+
+    // Drop all other edges from the graph (they're still in the backend)
+    for (let i = 1; i < edges.length; i++) {
+      graph.dropEdge(edges[i]!.key);
+    }
+  }
 }
 
 /** Assign curvature values to relationships to spread out parallel relationships */

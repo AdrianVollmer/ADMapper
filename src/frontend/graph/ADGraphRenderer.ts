@@ -17,14 +17,7 @@ import {
   LABEL_COLOR,
   DEFAULT_EDGE_COLOR,
 } from "./theme";
-import {
-  isNodeCollapsed,
-  getHiddenChildCount,
-  getHiddenNodeIds,
-  toggleNodeCollapse,
-  isEdgeHidden,
-  getCollapsedEdgeInfo,
-} from "./collapse";
+import { isNodeCollapsed, getHiddenChildCount, getHiddenNodeIds, toggleNodeCollapse } from "./collapse";
 import { getLabelParts } from "./label-visibility";
 import { getFixedNodeSizes, setFixedNodeSizesCallback } from "../components/settings";
 
@@ -393,17 +386,9 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
         return res;
       }
 
-      // Hide relationships that are part of collapsed groups (except the first)
-      if (isEdgeHidden(relationship, edgeSource, edgeTarget)) {
-        res.hidden = true;
-        return res;
-      }
-
-      // Check if this relationship is the visible one in a collapsed group
-      const collapsedInfo = getCollapsedEdgeInfo(edgeSource, edgeTarget);
-      if (collapsedInfo && collapsedInfo.edgeCount > 1) {
-        // Show count in label
-        res.label = `${collapsedInfo.edgeCount} relationships`;
+      // Force label for collapsed (multi-type) edges so they're always visible
+      const edgeAttrs = data as ADEdgeAttributes;
+      if (edgeAttrs.collapsedTypes && edgeAttrs.collapsedTypes.length > 1) {
         res.forceLabel = true;
       }
 
@@ -560,7 +545,48 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     }
   });
 
-  sigma.on("clickStage", () => {
+  sigma.on("clickStage", (event) => {
+    // Check if an edge label was clicked (labels are hard to hit on the edge line itself)
+    if (onEdgeClick) {
+      const clickX = event.event.x;
+      const clickY = event.event.y;
+      const LABEL_HIT_RADIUS = 30; // pixels
+      const LABEL_HIT_RADIUS_SQ = LABEL_HIT_RADIUS * LABEL_HIT_RADIUS;
+
+      let closestEdge: string | null = null;
+      let closestDistSq = LABEL_HIT_RADIUS_SQ;
+
+      graph.forEachEdge((edgeKey, _attrs, source, target) => {
+        // Skip hidden edges
+        const displayData = sigma.getEdgeDisplayData(edgeKey);
+        if (!displayData || displayData.hidden) return;
+
+        // Label position is at the midpoint between source and target (in graph coords)
+        const sx = graph.getNodeAttribute(source, "x");
+        const sy = graph.getNodeAttribute(source, "y");
+        const tx = graph.getNodeAttribute(target, "x");
+        const ty = graph.getNodeAttribute(target, "y");
+        const midViewport = sigma.graphToViewport({ x: (sx + tx) / 2, y: (sy + ty) / 2 });
+
+        const dx = clickX - midViewport.x;
+        const dy = clickY - midViewport.y;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq < closestDistSq) {
+          closestDistSq = distSq;
+          closestEdge = edgeKey;
+        }
+      });
+
+      if (closestEdge) {
+        const attrs = graph.getEdgeAttributes(closestEdge) as ADEdgeAttributes;
+        const source = graph.source(closestEdge);
+        const target = graph.target(closestEdge);
+        onEdgeClick(closestEdge, attrs, source, target);
+        return;
+      }
+    }
+
     if (onBackgroundClick) {
       onBackgroundClick();
     }

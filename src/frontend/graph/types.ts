@@ -94,6 +94,8 @@ export interface ADEdgeAttributes {
   type?: "tapered" | "curvedArrow";
   /** Curvature for curved relationships (0 = straight, positive = curve one way, negative = other) */
   curvature?: number;
+  /** When multiple relationships between same nodes are collapsed, stores all edge types */
+  collapsedTypes?: ADEdgeType[];
 }
 
 /** Raw node data as received from server */

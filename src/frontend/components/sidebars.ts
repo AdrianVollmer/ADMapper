@@ -474,12 +474,39 @@ async function handleEdgeAction(
           await api.delete(
             `/api/graph/relationships/${encodeURIComponent(sourceId)}/${encodeURIComponent(targetId)}/${encodeURIComponent(edgeType)}`
           );
-          // Remove from graph view
+
           if (graph?.hasEdge(edgeId)) {
-            graph.dropEdge(edgeId);
+            const attrs = graph.getEdgeAttributes(edgeId) as ADEdgeAttributes;
+            const collapsed = attrs.collapsedTypes;
+
+            if (collapsed && collapsed.length > 1) {
+              // Remove this type from the collapsed group
+              const remaining = collapsed.filter((t) => t !== edgeType);
+              graph.setEdgeAttribute(edgeId, "collapsedTypes", remaining);
+
+              if (remaining.length === 1) {
+                // Revert to single edge
+                graph.setEdgeAttribute(edgeId, "label", remaining[0]!);
+                graph.setEdgeAttribute(edgeId, "edgeType", remaining[0]!);
+              } else {
+                graph.setEdgeAttribute(edgeId, "label", `${remaining[0]} +${remaining.length - 1}`);
+              }
+
+              // Refresh sidebar to show updated list
+              const sourceLabel = graph.getNodeAttribute(sourceId, "label") || sourceId;
+              const targetLabel = graph.getNodeAttribute(targetId, "label") || targetId;
+              const updatedAttrs = graph.getEdgeAttributes(edgeId) as ADEdgeAttributes;
+              updateDetailPanelForEdge(edgeId, updatedAttrs, sourceId, targetId, sourceLabel, targetLabel);
+            } else {
+              // Single edge or last type: drop entirely
+              graph.dropEdge(edgeId);
+              updateDetailPanel(null, null);
+            }
+
+            renderer?.refresh();
+          } else {
+            updateDetailPanel(null, null);
           }
-          // Clear detail panel
-          updateDetailPanel(null, null);
         } catch (err) {
           console.error("Failed to delete relationship:", err);
           showError("Failed to delete relationship");
@@ -956,11 +983,16 @@ export function updateDetailPanelForEdge(
   appState.selectedNodeId = null;
   appState.selectedEdgeId = edgeId;
 
-  const edgeType = attrs.edgeType || "Unknown";
-  const edgeColor = EDGE_COLORS[edgeType] || "#6c757d";
+  const types = attrs.collapsedTypes && attrs.collapsedTypes.length > 0 ? attrs.collapsedTypes : [attrs.edgeType];
+  const isMulti = types.length > 1;
 
-  // Build properties list
-  let propsHtml = `
+  // Header: show count for multi, type name for single
+  const headerType = isMulti ? `${types.length} Relationships` : types[0] || "Unknown";
+  const headerColor = isMulti ? "#6c757d" : EDGE_COLORS[types[0]!] || "#6c757d";
+  const badgeLabel = isMulti ? "Relationships" : "Relationship";
+
+  // Endpoints section
+  const endpointsHtml = `
     <div class="detail-prop">
       <span class="detail-prop-label">Source</span>
       <span class="detail-prop-value" data-value="${escapeHtml(sourceId)}" title="Click to copy">
@@ -975,40 +1007,25 @@ export function updateDetailPanelForEdge(
     </div>
   `;
 
-  // Add any additional relationship attributes (excluding internal sigma attributes)
-  const excludeKeys = new Set(["label", "edgeType", "color", "size", "highlighted", "type", "curvature"]);
-  for (const [key, value] of Object.entries(attrs)) {
-    if (!excludeKeys.has(key) && value !== undefined && value !== null) {
-      const formatted = typeof value === "boolean" ? (value ? "Yes" : "No") : String(value);
-      propsHtml += `
-        <div class="detail-prop">
-          <span class="detail-prop-label">${escapeHtml(getPrettyLabel(key))}</span>
-          <span class="detail-prop-value" data-value="${escapeHtml(String(value))}" title="Click to copy">
-            ${escapeHtml(formatted)}
-          </span>
-        </div>
-      `;
-    }
-  }
-
-  content.innerHTML = `
-    <div class="detail-header">
-      <div class="detail-header-top">
-        <span class="detail-node-type relationship-badge" style="background-color: ${edgeColor}">
-          Relationship
+  // Relationship types list with individual delete buttons
+  const typesHtml = types
+    .map((type) => {
+      const color = EDGE_COLORS[type] || "#6c757d";
+      return `
+      <div class="detail-prop" style="display:flex; align-items:center; justify-content:space-between; gap:8px">
+        <span class="detail-node-type relationship-badge" style="background-color: ${color}; font-size: 0.75rem">
+          ${escapeHtml(type)}
         </span>
-      </div>
-      <h2 class="detail-node-name">${escapeHtml(edgeType)}</h2>
-      <div class="detail-actions">
         <button
           class="detail-action-btn danger"
           data-action="delete-relationship"
           data-relationship-id="${escapeHtml(edgeId)}"
           data-source-id="${escapeHtml(sourceId)}"
           data-target-id="${escapeHtml(targetId)}"
-          data-relationship-type="${escapeHtml(edgeType)}"
-          title="Delete Relationship"
-          aria-label="Delete Relationship"
+          data-relationship-type="${escapeHtml(type)}"
+          title="Delete ${escapeHtml(type)}"
+          aria-label="Delete ${escapeHtml(type)}"
+          style="flex-shrink:0; width:28px; height:28px; padding:4px"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/>
@@ -1016,12 +1033,31 @@ export function updateDetailPanelForEdge(
           </svg>
         </button>
       </div>
+    `;
+    })
+    .join("");
+
+  content.innerHTML = `
+    <div class="detail-header">
+      <div class="detail-header-top">
+        <span class="detail-node-type relationship-badge" style="background-color: ${headerColor}">
+          ${badgeLabel}
+        </span>
+      </div>
+      <h2 class="detail-node-name">${escapeHtml(headerType)}</h2>
     </div>
 
     <div class="detail-section">
-      <h3 class="detail-section-title">Properties</h3>
+      <h3 class="detail-section-title">Endpoints</h3>
       <div class="detail-props">
-        ${propsHtml}
+        ${endpointsHtml}
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <h3 class="detail-section-title">${isMulti ? "Relationship Types" : "Type"}</h3>
+      <div class="detail-props">
+        ${typesHtml}
       </div>
     </div>
   `;
