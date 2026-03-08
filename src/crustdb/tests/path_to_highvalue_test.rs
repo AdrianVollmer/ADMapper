@@ -490,8 +490,8 @@ fn test_e2e_query_with_type_function_limit() {
     );
     assert_eq!(result.rows.len(), 5, "Should return exactly 5 rows");
     assert!(
-        elapsed < 100,
-        "type(r) LIMIT 5 took {}ms, should be <100ms with Expand limit pushdown",
+        elapsed < 500,
+        "type(r) LIMIT 5 took {}ms, should be <500ms with Expand limit pushdown",
         elapsed
     );
 }

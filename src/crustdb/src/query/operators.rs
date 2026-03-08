@@ -180,6 +180,34 @@ pub enum PlanOperator {
     ProduceRow,
 }
 
+impl PlanOperator {
+    /// Return a short name for the operator variant (for logging/diagnostics).
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Self::NodeScan { .. } => "NodeScan",
+            Self::RelationshipScan { .. } => "RelationshipScan",
+            Self::Expand(_) => "Expand",
+            Self::VariableLengthExpand(_) => "VariableLengthExpand",
+            Self::ShortestPath(_) => "ShortestPath",
+            Self::Filter { .. } => "Filter",
+            Self::Project { .. } => "Project",
+            Self::Aggregate { .. } => "Aggregate",
+            Self::CountPushdown { .. } => "CountPushdown",
+            Self::RelationshipCountPushdown { .. } => "RelationshipCountPushdown",
+            Self::RelationshipTypesScan { .. } => "RelationshipTypesScan",
+            Self::Sort { .. } => "Sort",
+            Self::Limit { .. } => "Limit",
+            Self::Skip { .. } => "Skip",
+            Self::Create { .. } => "Create",
+            Self::Delete { .. } => "Delete",
+            Self::SetProperties { .. } => "SetProperties",
+            Self::CrossJoin { .. } => "CrossJoin",
+            Self::Empty => "Empty",
+            Self::ProduceRow => "ProduceRow",
+        }
+    }
+}
+
 /// Expand direction for traversal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExpandDirection {

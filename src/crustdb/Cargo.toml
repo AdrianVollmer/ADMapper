@@ -70,3 +70,7 @@ path = "examples/test_grid.rs"
 [[example]]
 name = "profile_bottlenecks"
 path = "examples/profile_bottlenecks.rs"
+
+[[example]]
+name = "profile_e2e_queries"
+path = "examples/profile_e2e_queries.rs"

@@ -20,6 +20,7 @@ use crate::graph::{Node, PropertyValue, Relationship};
 use crate::storage::{EntityCache, SqliteStorage};
 use smallvec::SmallVec;
 use std::collections::HashMap;
+use tracing::{debug, trace};
 
 // Re-exports for submodules (some kept for backwards compatibility)
 #[allow(unused_imports)]
@@ -234,14 +235,38 @@ pub fn execute_with_cache(
     storage: &SqliteStorage,
     cache: Option<&mut EntityCache>,
 ) -> Result<QueryResult> {
+    let t0 = std::time::Instant::now();
+
     // Generate query plan from AST
     let plan = planner::plan(statement)?;
+    let plan_ms = t0.elapsed().as_micros();
 
     // Apply optimization passes
     let optimized_plan = planner::optimize(plan);
+    let opt_ms = t0.elapsed().as_micros();
+
+    debug!(
+        "query plan: {:?} (plan: {}us, optimize: {}us)",
+        optimized_plan.root.variant_name(),
+        plan_ms,
+        opt_ms - plan_ms
+    );
+    trace!("full plan: {:?}", optimized_plan.root);
 
     // Execute the plan
-    plan_exec::execute_plan(&optimized_plan, storage, cache)
+    let result = plan_exec::execute_plan(&optimized_plan, storage, cache)?;
+    let exec_ms = t0.elapsed().as_micros();
+
+    debug!(
+        "query executed: {} rows in {}us (plan: {}us, opt: {}us, exec: {}us)",
+        result.rows.len(),
+        exec_ms,
+        plan_ms,
+        opt_ms - plan_ms,
+        exec_ms - opt_ms
+    );
+
+    Ok(result)
 }
 
 // =============================================================================

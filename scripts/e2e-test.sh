@@ -189,6 +189,15 @@ check_binary() {
 
 	export ADMAPPER_BIN="$binary"
 	echo -e "${BLUE}Using binary: $ADMAPPER_BIN${NC}"
+
+	# Warn if the binary is older than any source files
+	local newest_src
+	newest_src=$(find "$SCRIPT_DIR"/../src -name '*.rs' -newer "$binary" 2>/dev/null | head -1)
+	if [ -n "$newest_src" ]; then
+		echo -e "${YELLOW}WARNING: Binary is older than source files. Consider rebuilding with --build${NC}"
+		echo -e "${YELLOW}  Binary: $(stat -c '%y' "$binary" 2>/dev/null || stat -f '%Sm' "$binary" 2>/dev/null)${NC}"
+		echo -e "${YELLOW}  Newer:  $newest_src${NC}"
+	fi
 }
 
 # Run tests
