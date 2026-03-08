@@ -313,7 +313,7 @@ pub fn node_get(db: &dyn DatabaseBackend, node_id: &str) -> Result<DbNode, Strin
 /// Get node connection counts.
 pub fn node_counts(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeCounts, String> {
     let (incoming, outgoing, admin_to, member_of, members) = db
-        .get_node_edge_counts(node_id)
+        .get_node_relationship_counts(node_id)
         .map_err(|e| e.to_string())?;
     Ok(NodeCounts {
         incoming,

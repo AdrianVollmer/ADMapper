@@ -920,7 +920,7 @@ impl KuzuDatabase {
     }
 
     /// Get relationship counts for a node efficiently using targeted queries.
-    pub fn get_node_edge_counts(
+    pub fn get_node_relationship_counts(
         &self,
         node_id: &str,
     ) -> Result<(usize, usize, usize, usize, usize)> {
@@ -1333,8 +1333,11 @@ impl DatabaseBackend for KuzuDatabase {
         KuzuDatabase::get_node_connections(self, node_id, direction)
     }
 
-    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
-        KuzuDatabase::get_node_edge_counts(self, node_id)
+    fn get_node_relationship_counts(
+        &self,
+        node_id: &str,
+    ) -> Result<(usize, usize, usize, usize, usize)> {
+        KuzuDatabase::get_node_relationship_counts(self, node_id)
     }
 
     fn find_membership_by_sid_suffix(

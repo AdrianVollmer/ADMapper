@@ -152,12 +152,15 @@ pub trait DatabaseBackend: Send + Sync {
     /// The default implementation loads ALL relationships into memory and scans them linearly.
     /// For large graphs (100k+ relationships), this is severely inefficient.
     /// All backends should override this method with an efficient indexed query.
-    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+    fn get_node_relationship_counts(
+        &self,
+        node_id: &str,
+    ) -> Result<(usize, usize, usize, usize, usize)> {
         // WARNING: This default implementation is O(n) where n = total relationships.
         // Backends should override with efficient indexed queries.
         tracing::warn!(
             node_id = %node_id,
-            "Using inefficient default get_node_edge_counts - backend should override"
+            "Using inefficient default get_node_relationship_counts - backend should override"
         );
         let all_edges = self.get_all_edges()?;
 

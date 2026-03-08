@@ -904,7 +904,10 @@ impl DatabaseBackend for FalkorDbDatabase {
         Ok((nodes, relationships))
     }
 
-    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+    fn get_node_relationship_counts(
+        &self,
+        node_id: &str,
+    ) -> Result<(usize, usize, usize, usize, usize)> {
         let id_escaped = node_id.replace('\'', "\\'");
 
         // Use WITH to chain counts and avoid Cartesian product explosion

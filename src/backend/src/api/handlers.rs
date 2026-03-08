@@ -577,8 +577,10 @@ pub async fn node_counts(
 ) -> Result<Json<NodeCounts>, ApiError> {
     let db = state.require_db()?;
     let node_id_clone = node_id.clone();
-    let (incoming, outgoing, admin_to, member_of, members) =
-        run_db(db, move |db| db.get_node_edge_counts(&node_id_clone)).await?;
+    let (incoming, outgoing, admin_to, member_of, members) = run_db(db, move |db| {
+        db.get_node_relationship_counts(&node_id_clone)
+    })
+    .await?;
 
     debug!(
         node_id = %node_id,
@@ -797,14 +799,9 @@ pub async fn node_status(
 
     // === Step 5: Check path to any high-value target ===
     // Uses is_highvalue property set at import time for all privileged groups and domains
-    let path_to_hv = check_path_to_condition(
-        &state,
-        &db,
-        &node_id,
-        "b.is_highvalue = true",
-        "high-value",
-    )
-    .await?;
+    let path_to_hv =
+        check_path_to_condition(&state, &db, &node_id, "b.is_highvalue = true", "high-value")
+            .await?;
     if let Some(hops) = path_to_hv {
         return Ok(Json(NodeStatus {
             owned,

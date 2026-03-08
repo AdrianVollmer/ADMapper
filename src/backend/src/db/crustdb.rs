@@ -351,7 +351,7 @@ impl CrustDatabase {
             return Ok(0);
         }
 
-        match self.db.insert_edges_batch(&batch) {
+        match self.db.insert_relationships_batch(&batch) {
             Ok(ids) => {
                 debug!(
                     "Batch inserted {} relationships (skipped {})",
@@ -410,7 +410,7 @@ impl CrustDatabase {
             .db
             .stats()
             .map_err(|e| DbError::Database(e.to_string()))?;
-        Ok((stats.node_count, stats.edge_count))
+        Ok((stats.node_count, stats.relationship_count))
     }
 
     /// Extract count from a query result.
@@ -458,7 +458,7 @@ impl CrustDatabase {
 
         Ok(DetailedStats {
             total_nodes: stats.node_count,
-            total_edges: stats.edge_count,
+            total_edges: stats.relationship_count,
             users: label_counts.get("User").copied().unwrap_or(0),
             computers: label_counts.get("Computer").copied().unwrap_or(0),
             groups: label_counts.get("Group").copied().unwrap_or(0),
@@ -613,7 +613,7 @@ impl CrustDatabase {
         // Use the optimized storage method that queries rel_types table directly
         // This is O(distinct_types) instead of O(edges)
         self.db
-            .get_all_edge_types()
+            .get_all_relationship_types()
             .map_err(|e| DbError::Database(e.to_string()))
     }
 
@@ -726,7 +726,7 @@ impl CrustDatabase {
             // Query neighbors on-demand instead of preloading entire graph
             let edges = self
                 .db
-                .find_outgoing_edges_by_object_id(&current)
+                .find_outgoing_relationships_by_object_id(&current)
                 .map_err(|e| DbError::Database(e.to_string()))?;
 
             for (neighbor, rel_type) in edges {
@@ -1145,7 +1145,7 @@ impl CrustDatabase {
     pub fn get_node_edges(&self, node_id: &str) -> Result<Vec<DbEdge>> {
         let raw_edges = self
             .db
-            .get_node_edges_by_object_id(node_id)
+            .get_node_relationships_by_object_id(node_id)
             .map_err(|e| DbError::Database(e.to_string()))?;
 
         let relationships = raw_edges
@@ -1427,10 +1427,10 @@ impl CrustDatabase {
         // Use directed=true since AD permissions are directional
         let result = self
             .db
-            .edge_betweenness_centrality(None, true)
+            .relationship_betweenness_centrality(None, true)
             .map_err(|e| DbError::Database(e.to_string()))?;
 
-        let total_edges = result.edges_count;
+        let total_edges = result.relationships_count;
         let total_nodes = result.nodes_processed;
 
         // Get top k relationships by betweenness
@@ -1442,7 +1442,7 @@ impl CrustDatabase {
             // Get the relationship
             let relationship = match self
                 .db
-                .get_edge(rel_id)
+                .get_relationship(rel_id)
                 .map_err(|e| DbError::Database(e.to_string()))?
             {
                 Some(e) => e,
@@ -1640,7 +1640,10 @@ impl DatabaseBackend for CrustDatabase {
         CrustDatabase::get_node_connections(self, node_id, direction)
     }
 
-    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+    fn get_node_relationship_counts(
+        &self,
+        node_id: &str,
+    ) -> Result<(usize, usize, usize, usize, usize)> {
         // Get all relationships for this node efficiently
         let relationships = CrustDatabase::get_node_edges(self, node_id)?;
 

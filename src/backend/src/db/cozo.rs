@@ -817,7 +817,7 @@ impl GraphDatabase {
 
     /// Get relationship counts for a node efficiently using targeted queries.
     /// Counts unique connected NODES, not relationships (a node with multiple relationships counts as 1).
-    pub fn get_node_edge_counts(
+    pub fn get_node_relationship_counts(
         &self,
         node_id: &str,
     ) -> Result<(usize, usize, usize, usize, usize)> {
@@ -1048,8 +1048,11 @@ impl DatabaseBackend for GraphDatabase {
         GraphDatabase::get_node_connections(self, node_id, direction)
     }
 
-    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
-        GraphDatabase::get_node_edge_counts(self, node_id)
+    fn get_node_relationship_counts(
+        &self,
+        node_id: &str,
+    ) -> Result<(usize, usize, usize, usize, usize)> {
+        GraphDatabase::get_node_relationship_counts(self, node_id)
     }
 
     fn find_membership_by_sid_suffix(

@@ -776,7 +776,10 @@ impl DatabaseBackend for Neo4jDatabase {
         Ok((nodes, relationships))
     }
 
-    fn get_node_edge_counts(&self, node_id: &str) -> Result<(usize, usize, usize, usize, usize)> {
+    fn get_node_relationship_counts(
+        &self,
+        node_id: &str,
+    ) -> Result<(usize, usize, usize, usize, usize)> {
         // Use separate CALL subqueries to avoid Cartesian product explosion
         // Each count is independent and efficient
         let q = query(
