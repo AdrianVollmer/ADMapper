@@ -7,6 +7,7 @@
 //! - Neo4j (Cypher-based, network) - use `--features neo4j`
 //! - FalkorDB (Cypher-based, Redis) - use `--features falkordb`
 
+pub mod algorithms;
 pub mod backend;
 #[cfg(feature = "cozo")]
 pub mod cozo;

@@ -87,13 +87,14 @@ pub trait DatabaseBackend: Send + Sync {
     /// Returns the top relationships through which the most shortest paths pass.
     /// These are critical relationships whose removal would disrupt the most attack paths.
     ///
-    /// Default implementation returns an empty result for backends that don't support it.
-    fn get_choke_points(&self, _top_k: usize) -> Result<ChokePointsResponse> {
-        Ok(ChokePointsResponse {
-            choke_points: Vec::new(),
-            total_edges: 0,
-            total_nodes: 0,
-        })
+    /// Default implementation fetches all nodes/edges and runs Brandes' algorithm.
+    /// Backends with native graph analytics can override for better performance.
+    fn get_choke_points(&self, top_k: usize) -> Result<ChokePointsResponse> {
+        let nodes = self.get_all_nodes()?;
+        let edges = self.get_all_edges()?;
+        Ok(super::algorithms::relationship_betweenness_centrality(
+            &nodes, &edges, true, top_k,
+        ))
     }
 
     // ========================================================================
