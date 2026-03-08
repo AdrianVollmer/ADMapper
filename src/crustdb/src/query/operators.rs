@@ -16,6 +16,62 @@ pub struct QueryPlan {
     pub root: PlanOperator,
 }
 
+/// Parameters for expanding from a node along relationships.
+#[derive(Debug, Clone)]
+pub struct ExpandParams {
+    pub source: Box<PlanOperator>,
+    pub source_variable: String,
+    pub rel_variable: Option<String>,
+    pub target_variable: String,
+    pub target_labels: Vec<String>,
+    pub path_variable: Option<String>,
+    pub types: Vec<String>,
+    pub direction: ExpandDirection,
+    /// Limit for early termination (pushed down from RETURN ... LIMIT).
+    pub limit: Option<u64>,
+}
+
+/// Parameters for variable-length expand (BFS).
+#[derive(Debug, Clone)]
+pub struct VarLenExpandParams {
+    pub source: Box<PlanOperator>,
+    pub source_variable: String,
+    pub rel_variable: Option<String>,
+    pub target_variable: String,
+    pub target_labels: Vec<String>,
+    pub path_variable: Option<String>,
+    pub types: Vec<String>,
+    pub direction: ExpandDirection,
+    pub min_hops: u32,
+    pub max_hops: u32,
+    /// Pre-resolved target node IDs for early termination.
+    /// When set, BFS only reports paths to these specific nodes.
+    pub target_ids: Option<Vec<i64>>,
+    /// Limit for early termination (pushed down from RETURN ... LIMIT).
+    pub limit: Option<u64>,
+    /// Target property filter for early termination (e.g., object_id ENDS WITH '-519').
+    /// Format: (property_name, operator, value) where operator is "=", "ENDS WITH", etc.
+    pub target_property_filter: Option<TargetPropertyFilter>,
+}
+
+/// Parameters for shortest path search (BFS with k paths).
+#[derive(Debug, Clone)]
+pub struct ShortestPathParams {
+    pub source: Box<PlanOperator>,
+    pub source_variable: String,
+    pub target_variable: String,
+    pub target_labels: Vec<String>,
+    pub path_variable: Option<String>,
+    pub types: Vec<String>,
+    pub direction: ExpandDirection,
+    pub min_hops: u32,
+    pub max_hops: u32,
+    pub k: u32,
+    /// Target property filter for early termination (e.g., {id: 99}).
+    /// When set, BFS can terminate as soon as the specific target is found.
+    pub target_property_filter: Option<(String, serde_json::Value)>,
+}
+
 /// Plan operators form a tree representing the execution strategy.
 #[derive(Debug, Clone)]
 pub enum PlanOperator {
@@ -39,55 +95,11 @@ pub enum PlanOperator {
         types: Vec<String>,
     },
     /// Expand from a node along relationships.
-    Expand {
-        source: Box<PlanOperator>,
-        source_variable: String,
-        rel_variable: Option<String>,
-        target_variable: String,
-        target_labels: Vec<String>,
-        path_variable: Option<String>,
-        types: Vec<String>,
-        direction: ExpandDirection,
-        /// Limit for early termination (pushed down from RETURN ... LIMIT).
-        limit: Option<u64>,
-    },
+    Expand(ExpandParams),
     /// Variable-length expand (BFS).
-    VariableLengthExpand {
-        source: Box<PlanOperator>,
-        source_variable: String,
-        rel_variable: Option<String>,
-        target_variable: String,
-        target_labels: Vec<String>,
-        path_variable: Option<String>,
-        types: Vec<String>,
-        direction: ExpandDirection,
-        min_hops: u32,
-        max_hops: u32,
-        /// Pre-resolved target node IDs for early termination.
-        /// When set, BFS only reports paths to these specific nodes.
-        target_ids: Option<Vec<i64>>,
-        /// Limit for early termination (pushed down from RETURN ... LIMIT).
-        limit: Option<u64>,
-        /// Target property filter for early termination (e.g., object_id ENDS WITH '-519').
-        /// Format: (property_name, operator, value) where operator is "=", "ENDS WITH", etc.
-        target_property_filter: Option<TargetPropertyFilter>,
-    },
+    VariableLengthExpand(VarLenExpandParams),
     /// Shortest path search (BFS with k paths).
-    ShortestPath {
-        source: Box<PlanOperator>,
-        source_variable: String,
-        target_variable: String,
-        target_labels: Vec<String>,
-        path_variable: Option<String>,
-        types: Vec<String>,
-        direction: ExpandDirection,
-        min_hops: u32,
-        max_hops: u32,
-        k: u32,
-        /// Target property filter for early termination (e.g., {id: 99}).
-        /// When set, BFS can terminate as soon as the specific target is found.
-        target_property_filter: Option<(String, serde_json::Value)>,
-    },
+    ShortestPath(ShortestPathParams),
     /// Filter rows by predicate.
     Filter {
         source: Box<PlanOperator>,

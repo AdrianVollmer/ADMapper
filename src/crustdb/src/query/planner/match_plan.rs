@@ -2,8 +2,9 @@
 
 use super::{
     extract_simple_property_filter, plan_create_after_match, plan_expression_as_predicate,
-    plan_inline_properties, plan_return, plan_set_clause, Error, Expression, FilterPredicate,
-    MatchClause, Pattern, PatternElement, PlanOperator, Result,
+    plan_inline_properties, plan_return, plan_set_clause, Error, ExpandParams, Expression,
+    FilterPredicate, MatchClause, Pattern, PatternElement, PlanOperator, Result,
+    ShortestPathParams, VarLenExpandParams,
 };
 
 /// Plan a MATCH statement.
@@ -212,7 +213,7 @@ pub(super) fn plan_pattern_segment(
             let min_hops = length.min.unwrap_or(1);
             let max_hops = length.max.unwrap_or(100); // Reasonable default
 
-            plan = PlanOperator::VariableLengthExpand {
+            plan = PlanOperator::VariableLengthExpand(VarLenExpandParams {
                 source: Box::new(plan),
                 source_variable: current_var.clone(),
                 rel_variable: rel.variable.clone(),
@@ -226,10 +227,10 @@ pub(super) fn plan_pattern_segment(
                 target_ids: None,
                 limit: None,
                 target_property_filter: None, // Will be populated by predicate pushdown
-            };
+            });
         } else {
             // Single-hop expand
-            plan = PlanOperator::Expand {
+            plan = PlanOperator::Expand(ExpandParams {
                 source: Box::new(plan),
                 source_variable: current_var.clone(),
                 rel_variable: rel.variable.clone(),
@@ -239,7 +240,7 @@ pub(super) fn plan_pattern_segment(
                 types: rel.types.clone(),
                 direction: rel.direction.into(),
                 limit: None,
-            };
+            });
         }
 
         // Add inline property filter for target node
@@ -338,7 +339,7 @@ pub fn plan_shortest_path_pattern(pattern: &Pattern, all_paths: bool) -> Result<
     // k=1 for shortestPath(), k=MAX for allShortestPaths() (all paths of shortest length)
     let k = if all_paths { u32::MAX } else { 1 };
 
-    plan = PlanOperator::ShortestPath {
+    plan = PlanOperator::ShortestPath(ShortestPathParams {
         source: Box::new(plan),
         source_variable: source_var,
         target_variable: target_var.clone(),
@@ -350,7 +351,7 @@ pub fn plan_shortest_path_pattern(pattern: &Pattern, all_paths: bool) -> Result<
         max_hops,
         k,
         target_property_filter: target_property_filter.clone(),
-    };
+    });
 
     // Add inline property filter for target if not pushed down (complex expressions)
     if let Some(ref props) = target_node.properties {

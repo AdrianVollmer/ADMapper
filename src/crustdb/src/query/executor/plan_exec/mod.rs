@@ -150,93 +150,57 @@ fn execute_operator(
             storage,
         ),
 
-        PlanOperator::Expand {
-            source,
-            source_variable,
-            rel_variable,
-            target_variable,
-            target_labels,
-            path_variable,
-            types,
-            direction,
-            limit,
-        } => {
+        PlanOperator::Expand(ref p) => {
             let bindings =
-                execute_operator_to_bindings(source, storage, stats, cache.as_deref_mut())?;
+                execute_operator_to_bindings(&p.source, storage, stats, cache.as_deref_mut())?;
             let request = ExpandRequest {
-                source_variable,
-                rel_variable: rel_variable.as_deref(),
-                target_variable,
-                target_labels,
-                path_variable: path_variable.as_deref(),
-                types,
-                direction: *direction,
-                limit: *limit,
+                source_variable: &p.source_variable,
+                rel_variable: p.rel_variable.as_deref(),
+                target_variable: &p.target_variable,
+                target_labels: &p.target_labels,
+                path_variable: p.path_variable.as_deref(),
+                types: &p.types,
+                direction: p.direction,
+                limit: p.limit,
             };
             execute_expand(bindings, &request, storage, cache)
         }
 
-        PlanOperator::VariableLengthExpand {
-            source,
-            source_variable,
-            rel_variable,
-            target_variable,
-            target_labels,
-            path_variable,
-            types,
-            direction,
-            min_hops,
-            max_hops,
-            target_ids,
-            limit,
-            target_property_filter,
-        } => {
+        PlanOperator::VariableLengthExpand(ref p) => {
             let bindings =
-                execute_operator_to_bindings(source, storage, stats, cache.as_deref_mut())?;
+                execute_operator_to_bindings(&p.source, storage, stats, cache.as_deref_mut())?;
             let request = VariableLengthExpandRequest {
-                source_variable,
-                rel_variable: rel_variable.as_deref(),
-                target_variable,
-                target_labels,
-                path_variable: path_variable.as_deref(),
-                types,
-                direction: *direction,
-                min_hops: *min_hops,
-                max_hops: *max_hops,
-                target_ids: target_ids.as_deref(),
-                limit: *limit,
-                target_property_filter: target_property_filter.as_ref(),
+                source_variable: &p.source_variable,
+                rel_variable: p.rel_variable.as_deref(),
+                target_variable: &p.target_variable,
+                target_labels: &p.target_labels,
+                path_variable: p.path_variable.as_deref(),
+                types: &p.types,
+                direction: p.direction,
+                min_hops: p.min_hops,
+                max_hops: p.max_hops,
+                target_ids: p.target_ids.as_deref(),
+                limit: p.limit,
+                target_property_filter: p.target_property_filter.as_ref(),
             };
             execute_variable_length_expand(bindings, &request, storage, cache)
         }
 
-        PlanOperator::ShortestPath {
-            source,
-            source_variable,
-            target_variable,
-            target_labels,
-            path_variable,
-            types,
-            direction,
-            min_hops,
-            max_hops,
-            k,
-            target_property_filter,
-        } => {
+        PlanOperator::ShortestPath(ref p) => {
             let bindings =
-                execute_operator_to_bindings(source, storage, stats, cache.as_deref_mut())?;
+                execute_operator_to_bindings(&p.source, storage, stats, cache.as_deref_mut())?;
             execute_shortest_path(
                 bindings,
-                source_variable,
-                target_variable,
-                target_labels,
-                path_variable.as_deref(),
-                types,
-                *direction,
-                *min_hops,
-                *max_hops,
-                *k,
-                target_property_filter.clone(),
+                &p.source_variable,
+                &p.target_variable,
+                &p.target_labels,
+                p.path_variable.as_deref(),
+                &p.types,
+                p.direction,
+                p.min_hops,
+                p.max_hops,
+                p.k,
+                p.target_property_filter.clone(),
                 storage,
                 cache,
             )
