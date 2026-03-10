@@ -59,7 +59,7 @@ fn build_ast(pairs: Pairs<Rule>) -> Result<Statement> {
                 return build_ast(pair.into_inner());
             }
             Rule::RegularQuery => {
-                return build_ast(pair.into_inner());
+                return build_regular_query(pair);
             }
             Rule::SingleQuery => {
                 return build_ast(pair.into_inner());
@@ -75,6 +75,46 @@ fn build_ast(pairs: Pairs<Rule>) -> Result<Statement> {
         }
     }
     Err(Error::Parse("Empty query".into()))
+}
+
+/// Build AST from a RegularQuery, which may contain UNION ALL clauses.
+fn build_regular_query(pair: Pair<Rule>) -> Result<Statement> {
+    let mut queries: Vec<Statement> = Vec::new();
+    let mut all_unions = true;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::SingleQuery => {
+                queries.push(build_ast(inner.into_inner())?);
+            }
+            Rule::Union => {
+                // Check if this is UNION ALL (not plain UNION)
+                let inner_str = inner.as_str().to_uppercase();
+                let is_all = inner_str.contains("ALL");
+                if !is_all {
+                    all_unions = false;
+                }
+                // Extract the SingleQuery from the Union rule
+                for union_inner in inner.into_inner() {
+                    if union_inner.as_rule() == Rule::SingleQuery {
+                        queries.push(build_ast(union_inner.into_inner())?);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if queries.len() == 1 {
+        // No UNION, just a single query
+        Ok(queries.into_iter().next().unwrap())
+    } else if all_unions {
+        Ok(Statement::UnionAll(queries))
+    } else {
+        Err(Error::Parse(
+            "UNION without ALL is not yet supported; use UNION ALL".into(),
+        ))
+    }
 }
 
 /// Build AST from a SinglePartQuery.

@@ -19,6 +19,7 @@ CrustDB implements a subset of [openCypher 9](https://s3.amazonaws.com/artifacts
 | `LIMIT` | Limit result count |
 | `SKIP` | Skip first N results |
 | `DISTINCT` | Remove duplicate rows |
+| `UNION ALL` | Concatenate results from multiple queries |
 
 ### Pattern Matching
 
@@ -80,7 +81,7 @@ CrustDB implements a subset of [openCypher 9](https://s3.amazonaws.com/artifacts
 | `OPTIONAL MATCH` | Left outer join semantics |
 | `WITH` | Query chaining and aggregation scoping |
 | `UNWIND` | List expansion |
-| `UNION` | Combine query results |
+| `UNION` | Deduplicated combine (`UNION ALL` is supported, `UNION` dedup is not) |
 | `CALL` | Procedure calls |
 | `FOREACH` | Iterative updates |
 | `LOAD CSV` | CSV import |

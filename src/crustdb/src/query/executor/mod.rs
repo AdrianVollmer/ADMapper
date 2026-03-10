@@ -14,8 +14,8 @@ mod result;
 
 use super::parser::Statement;
 use super::planner;
-use super::QueryResult;
-use crate::error::Result;
+use super::{QueryResult, QueryStats, Row};
+use crate::error::{Error, Result};
 use crate::graph::{Node, PropertyValue, Relationship};
 use crate::storage::{EntityCache, SqliteStorage};
 use smallvec::SmallVec;
@@ -235,6 +235,11 @@ pub fn execute_with_cache(
     storage: &SqliteStorage,
     cache: Option<&mut EntityCache>,
 ) -> Result<QueryResult> {
+    // Handle UNION ALL at the statement level: execute each branch and concatenate
+    if let Statement::UnionAll(queries) = statement {
+        return execute_union_all(queries, storage, cache);
+    }
+
     let t0 = std::time::Instant::now();
 
     // Generate query plan from AST
@@ -267,6 +272,92 @@ pub fn execute_with_cache(
     );
 
     Ok(result)
+}
+
+/// Execute a UNION ALL query: run each branch and concatenate the results.
+fn execute_union_all(
+    queries: &[Statement],
+    storage: &SqliteStorage,
+    mut cache: Option<&mut EntityCache>,
+) -> Result<QueryResult> {
+    let t0 = std::time::Instant::now();
+    let mut combined_columns: Option<Vec<String>> = None;
+    let mut combined_rows: Vec<Row> = Vec::new();
+    let mut combined_stats = QueryStats::default();
+
+    for query in queries {
+        let result = execute_with_cache(query, storage, cache.as_deref_mut())?;
+
+        match &combined_columns {
+            None => {
+                combined_columns = Some(result.columns.clone());
+            }
+            Some(cols) => {
+                if cols.len() != result.columns.len() {
+                    return Err(Error::Cypher(format!(
+                        "UNION ALL branches must return the same number of columns (expected {}, got {})",
+                        cols.len(),
+                        result.columns.len()
+                    )));
+                }
+            }
+        }
+
+        // Remap column names in rows from subsequent branches to match
+        // the first branch's column names. Per SQL/Cypher semantics, UNION ALL
+        // uses the column names from the first branch.
+        if let Some(cols) = &combined_columns {
+            if cols != &result.columns {
+                let col_mapping: Vec<(&str, &str)> = result
+                    .columns
+                    .iter()
+                    .zip(cols.iter())
+                    .filter(|(src, dst)| src != dst)
+                    .map(|(src, dst)| (src.as_str(), dst.as_str()))
+                    .collect();
+
+                if !col_mapping.is_empty() {
+                    for row in &result.rows {
+                        let mut new_values = HashMap::new();
+                        for (key, value) in &row.values {
+                            let new_key = col_mapping
+                                .iter()
+                                .find(|(src, _)| src == key)
+                                .map(|(_, dst)| dst.to_string())
+                                .unwrap_or_else(|| key.clone());
+                            new_values.insert(new_key, value.clone());
+                        }
+                        combined_rows.push(Row { values: new_values });
+                    }
+                } else {
+                    combined_rows.extend(result.rows);
+                }
+            } else {
+                combined_rows.extend(result.rows);
+            }
+        } else {
+            combined_rows.extend(result.rows);
+        }
+        combined_stats.nodes_created += result.stats.nodes_created;
+        combined_stats.nodes_deleted += result.stats.nodes_deleted;
+        combined_stats.relationships_created += result.stats.relationships_created;
+        combined_stats.relationships_deleted += result.stats.relationships_deleted;
+        combined_stats.properties_set += result.stats.properties_set;
+        combined_stats.labels_added += result.stats.labels_added;
+    }
+
+    debug!(
+        "UNION ALL executed: {} branches, {} total rows in {}us",
+        queries.len(),
+        combined_rows.len(),
+        t0.elapsed().as_micros()
+    );
+
+    Ok(QueryResult {
+        columns: combined_columns.unwrap_or_default(),
+        rows: combined_rows,
+        stats: combined_stats,
+    })
 }
 
 // =============================================================================
