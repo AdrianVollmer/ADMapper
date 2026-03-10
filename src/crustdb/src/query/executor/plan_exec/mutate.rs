@@ -1,6 +1,6 @@
 use super::{
     eval_to_property_value, evaluate_expr, execute_operator, plan_properties_to_json, Binding,
-    ExecutionResult,
+    ExecutionContext, ExecutionResult,
 };
 use crate::error::{Error, Result};
 use crate::query::planner::{CreateNode, CreateRelationship, PlanOperator, SetOperation};
@@ -13,13 +13,13 @@ pub(super) fn execute_create(
     nodes: &[CreateNode],
     relationships: &[CreateRelationship],
     storage: &SqliteStorage,
-    stats: &mut QueryStats,
     cache: Option<&mut EntityCache>,
+    ctx: &mut ExecutionContext,
 ) -> Result<ExecutionResult> {
     // If there's a source operator (MATCH...CREATE), execute it first
     // to get bindings for matched variables.
     let source_bindings = if let Some(source_op) = source {
-        let result = execute_operator(source_op, storage, stats, cache)?;
+        let result = execute_operator(source_op, storage, ctx, cache)?;
         match result {
             ExecutionResult::Bindings(b) => b,
             ExecutionResult::Rows { .. } => {
@@ -66,9 +66,9 @@ pub(super) fn execute_create(
             let props = plan_properties_to_json(&create_node.properties)?;
             let node_id = storage.insert_node(&create_node.labels, &props)?;
 
-            stats.nodes_created += 1;
-            stats.labels_added += create_node.labels.len();
-            stats.properties_set += create_node.properties.len();
+            ctx.stats.nodes_created += 1;
+            ctx.stats.labels_added += create_node.labels.len();
+            ctx.stats.properties_set += create_node.properties.len();
 
             if let Some(ref var) = create_node.variable {
                 var_to_id.insert(var.clone(), node_id);
@@ -86,8 +86,8 @@ pub(super) fn execute_create(
             let props = plan_properties_to_json(&create_rel.properties)?;
 
             storage.insert_relationship(*source_id, *target_id, &create_rel.rel_type, &props)?;
-            stats.relationships_created += 1;
-            stats.properties_set += create_rel.properties.len();
+            ctx.stats.relationships_created += 1;
+            ctx.stats.properties_set += create_rel.properties.len();
         }
     }
 

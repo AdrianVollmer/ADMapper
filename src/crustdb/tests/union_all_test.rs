@@ -86,9 +86,8 @@ fn test_union_all_column_count_mismatch() {
     db.execute("CREATE (:User {objectid: 'U1', name: 'Alice'})")
         .unwrap();
 
-    let result = db.execute(
-        "MATCH (u:User) RETURN u.name, u.objectid UNION ALL MATCH (u:User) RETURN u.name",
-    );
+    let result = db
+        .execute("MATCH (u:User) RETURN u.name, u.objectid UNION ALL MATCH (u:User) RETURN u.name");
     assert!(result.is_err(), "Should reject mismatched column counts");
 }
 

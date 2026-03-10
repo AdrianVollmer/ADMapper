@@ -40,6 +40,9 @@ pub struct Database {
     /// Entity cache for nodes and relationships (reduces SQLite lookups during traversals).
     /// Protected by a Mutex for thread-safe access.
     pub(crate) entity_cache: Mutex<EntityCache>,
+    /// Maximum intermediate bindings allowed per query (memory safeguard).
+    /// None means unlimited. Set via `set_max_intermediate_bindings`.
+    pub(crate) max_intermediate_bindings: Option<usize>,
 }
 
 impl Database {
@@ -73,6 +76,7 @@ impl Database {
             db_path: Some(path_buf),
             caching_enabled: false,
             entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
+            max_intermediate_bindings: None,
         })
     }
 
@@ -89,6 +93,7 @@ impl Database {
             db_path: None,
             caching_enabled: false,
             entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
+            max_intermediate_bindings: None,
         })
     }
 
@@ -158,6 +163,18 @@ impl Database {
     pub fn set_entity_cache(&self, config: EntityCacheConfig) {
         let mut cache = self.entity_cache.lock().unwrap();
         *cache = EntityCache::new(config);
+    }
+
+    /// Set the maximum number of intermediate bindings allowed per query.
+    ///
+    /// This acts as a circuit breaker to prevent out-of-memory conditions on
+    /// queries that produce explosive intermediate results (cross joins, deep
+    /// variable-length path traversals, etc.).
+    ///
+    /// `None` means unlimited (default). A reasonable starting point for
+    /// production use is 1_000_000.
+    pub fn set_max_intermediate_bindings(&mut self, limit: Option<usize>) {
+        self.max_intermediate_bindings = limit;
     }
 
     /// Get statistics about the entity cache.
@@ -259,7 +276,12 @@ impl Database {
                         } else {
                             None
                         };
-                    query::executor::execute_with_cache(&statement, &read_storage, cache_ref)?
+                    query::executor::execute_with_cache(
+                        &statement,
+                        &read_storage,
+                        cache_ref,
+                        self.max_intermediate_bindings,
+                    )?
                 };
 
                 // Drop read_storage before acquiring write lock to avoid deadlock
@@ -283,7 +305,12 @@ impl Database {
                     } else {
                         None
                     };
-                query::executor::execute_with_cache(&statement, &read_storage, cache_ref)
+                query::executor::execute_with_cache(
+                    &statement,
+                    &read_storage,
+                    cache_ref,
+                    self.max_intermediate_bindings,
+                )
             }
         } else {
             // Write queries use the write connection
@@ -298,7 +325,12 @@ impl Database {
                 entity_cache.clear();
             }
 
-            query::executor::execute_with_cache(&statement, &storage, None)
+            query::executor::execute_with_cache(
+                &statement,
+                &storage,
+                None,
+                self.max_intermediate_bindings,
+            )
         }
     }
 

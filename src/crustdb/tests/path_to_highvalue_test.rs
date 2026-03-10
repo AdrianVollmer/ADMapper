@@ -579,8 +579,7 @@ fn test_inline_source_filter_with_where_target_filter() {
     // Minimal graph matching the exact issue reproduction
     db.execute("CREATE (:Group {objectid: 'HV_GROUP', is_highvalue: true})")
         .unwrap();
-    db.execute("CREATE (:Group {objectid: 'GROUP_0'})")
-        .unwrap();
+    db.execute("CREATE (:Group {objectid: 'GROUP_0'})").unwrap();
     db.execute("CREATE (:User {objectid: 'USER_0'})").unwrap();
 
     let user_id = db
@@ -704,11 +703,8 @@ fn test_path_to_highvalue_no_path_worst_case() {
 
     // Create a dense connected component with no path to high-value
     for i in 0..500 {
-        db.execute(&format!(
-            "CREATE (u:User {{objectid: 'DENSE_USER_{}'}})",
-            i
-        ))
-        .unwrap();
+        db.execute(&format!("CREATE (u:User {{objectid: 'DENSE_USER_{}'}})", i))
+            .unwrap();
     }
 
     for i in 0..100 {

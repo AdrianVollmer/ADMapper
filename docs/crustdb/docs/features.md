@@ -113,6 +113,12 @@ CrustDB implements a subset of [openCypher 9](https://s3.amazonaws.com/artifacts
 | Temporal functions | `date()`, `datetime()`, `duration()` |
 | Spatial functions | `point()`, `distance()` |
 
+### Resource Limits
+
+| Feature | Notes |
+|---------|-------|
+| `set_max_intermediate_bindings` | Caps the number of intermediate bindings during query execution to prevent OOM from explosive cross joins or deep variable-length traversals. Set via the Rust API. `None` (default) means unlimited. |
+
 ### Other
 
 | Feature | Notes |

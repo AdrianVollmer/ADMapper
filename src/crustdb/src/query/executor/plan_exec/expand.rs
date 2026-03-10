@@ -1,4 +1,6 @@
-use super::{get_node_cached, get_relationship_cached, Binding, ExecutionResult, Path};
+use super::{
+    get_node_cached, get_relationship_cached, Binding, ExecutionContext, ExecutionResult, Path,
+};
 use crate::error::{Error, Result};
 use crate::graph::{Node, Relationship};
 use crate::query::operators::{ExpandRequest, VariableLengthExpandRequest};
@@ -11,6 +13,7 @@ pub(super) fn execute_expand(
     req: &ExpandRequest<'_>,
     storage: &SqliteStorage,
     mut cache: Option<&mut EntityCache>,
+    ctx: &mut ExecutionContext,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
     let limit = req.limit.map(|l| l as usize);
@@ -57,6 +60,7 @@ pub(super) fn execute_expand(
             }
 
             result.push(new_binding);
+            ctx.track_bindings(1)?;
 
             // Early termination when limit is reached
             if let Some(lim) = limit {
@@ -99,6 +103,7 @@ pub(super) fn execute_variable_length_expand(
     req: &VariableLengthExpandRequest<'_>,
     storage: &SqliteStorage,
     mut cache: Option<&mut EntityCache>,
+    ctx: &mut ExecutionContext,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
 
@@ -205,6 +210,7 @@ pub(super) fn execute_variable_length_expand(
                             }
 
                             result.push(new_binding);
+                            ctx.track_bindings(1)?;
 
                             // Early termination after finding a match if limit is 1
                             if let Some(lim) = limit {
@@ -264,6 +270,7 @@ pub(super) fn execute_shortest_path(
     target_property_filter: Option<(String, serde_json::Value)>,
     storage: &SqliteStorage,
     mut cache: Option<&mut EntityCache>,
+    ctx: &mut ExecutionContext,
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
 
@@ -401,6 +408,7 @@ pub(super) fn execute_shortest_path(
             }
 
             result.push(new_binding);
+            ctx.track_bindings(1)?;
         }
     }
 

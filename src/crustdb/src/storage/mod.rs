@@ -430,9 +430,7 @@ mod tests {
         storage.insert_node(&["Test".to_string()], &props).unwrap();
 
         // Valid property names should work
-        assert!(storage
-            .find_node_by_property("objectid", "test123")
-            .is_ok());
+        assert!(storage.find_node_by_property("objectid", "test123").is_ok());
         assert!(storage.find_node_by_property("valid_name", "value").is_ok());
         assert!(storage.find_node_by_property("name123", "value").is_ok());
 

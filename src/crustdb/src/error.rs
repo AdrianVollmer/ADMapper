@@ -44,6 +44,10 @@ pub enum Error {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
+    /// Query exceeded a resource limit (e.g., intermediate binding count).
+    #[error("Resource limit exceeded: {0}")]
+    ResourceLimit(String),
+
     /// Internal error (e.g., lock poisoned).
     #[error("Internal error: {0}")]
     Internal(String),

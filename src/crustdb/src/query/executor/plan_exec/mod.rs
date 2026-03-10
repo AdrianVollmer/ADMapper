@@ -28,6 +28,50 @@ use crate::query::{QueryResult, QueryStats, Row};
 use crate::storage::{EntityCache, SqliteStorage};
 
 // =============================================================================
+// Execution Context
+// =============================================================================
+
+/// Execution context threaded through all operators during query execution.
+///
+/// Carries mutable query statistics and resource limits. The `max_bindings`
+/// limit acts as a circuit breaker to prevent out-of-memory conditions on
+/// queries that produce explosive intermediate results (e.g., large cross
+/// joins or deep variable-length path traversals).
+pub(crate) struct ExecutionContext {
+    pub stats: QueryStats,
+    /// Maximum number of intermediate bindings allowed. None = unlimited.
+    max_bindings: Option<usize>,
+    /// Running count of bindings produced so far.
+    bindings_produced: usize,
+}
+
+impl ExecutionContext {
+    pub fn new(max_bindings: Option<usize>) -> Self {
+        Self {
+            stats: QueryStats::default(),
+            max_bindings,
+            bindings_produced: 0,
+        }
+    }
+
+    /// Record newly produced bindings and check the limit.
+    /// Call after pushing to a result vec.
+    pub fn track_bindings(&mut self, count: usize) -> Result<()> {
+        self.bindings_produced += count;
+        if let Some(max) = self.max_bindings {
+            if self.bindings_produced > max {
+                return Err(Error::ResourceLimit(format!(
+                    "query produced more than {} intermediate results; \
+                     simplify the query or increase the limit",
+                    max
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
 // Cached Storage Access
 // =============================================================================
 
@@ -84,31 +128,31 @@ pub fn execute_plan(
     plan: &QueryPlan,
     storage: &SqliteStorage,
     cache: Option<&mut EntityCache>,
+    max_bindings: Option<usize>,
 ) -> Result<QueryResult> {
-    let mut stats = QueryStats::default();
+    let mut ctx = ExecutionContext::new(max_bindings);
     let start = std::time::Instant::now();
 
     // Execute the plan tree
-    let execution_result = execute_operator(&plan.root, storage, &mut stats, cache)?;
+    let execution_result = execute_operator(&plan.root, storage, &mut ctx, cache)?;
 
     // Convert to QueryResult
-    let result = match execution_result {
+    let mut result = match execution_result {
         ExecutionResult::Bindings(_bindings) => {
             // No RETURN clause - empty result
             QueryResult {
                 columns: Vec::new(),
                 rows: Vec::new(),
-                stats,
+                stats: ctx.stats,
             }
         }
         ExecutionResult::Rows { columns, rows } => QueryResult {
             columns,
             rows,
-            stats,
+            stats: ctx.stats,
         },
     };
 
-    let mut result = result;
     result.stats.execution_time_ms = start.elapsed().as_millis() as u64;
     Ok(result)
 }
@@ -129,7 +173,7 @@ enum ExecutionResult {
 fn execute_operator(
     op: &PlanOperator,
     storage: &SqliteStorage,
-    stats: &mut QueryStats,
+    ctx: &mut ExecutionContext,
     mut cache: Option<&mut EntityCache>,
 ) -> Result<ExecutionResult> {
     match op {
@@ -152,7 +196,7 @@ fn execute_operator(
 
         PlanOperator::Expand(ref p) => {
             let bindings =
-                execute_operator_to_bindings(&p.source, storage, stats, cache.as_deref_mut())?;
+                execute_operator_to_bindings(&p.source, storage, ctx, cache.as_deref_mut())?;
             let request = ExpandRequest {
                 source_variable: &p.source_variable,
                 rel_variable: p.rel_variable.as_deref(),
@@ -163,12 +207,12 @@ fn execute_operator(
                 direction: p.direction,
                 limit: p.limit,
             };
-            execute_expand(bindings, &request, storage, cache)
+            execute_expand(bindings, &request, storage, cache, ctx)
         }
 
         PlanOperator::VariableLengthExpand(ref p) => {
             let bindings =
-                execute_operator_to_bindings(&p.source, storage, stats, cache.as_deref_mut())?;
+                execute_operator_to_bindings(&p.source, storage, ctx, cache.as_deref_mut())?;
             let request = VariableLengthExpandRequest {
                 source_variable: &p.source_variable,
                 rel_variable: p.rel_variable.as_deref(),
@@ -183,12 +227,12 @@ fn execute_operator(
                 limit: p.limit,
                 target_property_filter: p.target_property_filter.as_ref(),
             };
-            execute_variable_length_expand(bindings, &request, storage, cache)
+            execute_variable_length_expand(bindings, &request, storage, cache, ctx)
         }
 
         PlanOperator::ShortestPath(ref p) => {
             let bindings =
-                execute_operator_to_bindings(&p.source, storage, stats, cache.as_deref_mut())?;
+                execute_operator_to_bindings(&p.source, storage, ctx, cache.as_deref_mut())?;
             execute_shortest_path(
                 bindings,
                 &p.source_variable,
@@ -203,11 +247,12 @@ fn execute_operator(
                 p.target_property_filter.clone(),
                 storage,
                 cache,
+                ctx,
             )
         }
 
         PlanOperator::Filter { source, predicate } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
+            let bindings = execute_operator_to_bindings(source, storage, ctx, cache)?;
             let filtered = filter_bindings(bindings, predicate)?;
             Ok(ExecutionResult::Bindings(filtered))
         }
@@ -217,7 +262,7 @@ fn execute_operator(
             columns,
             distinct,
         } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
+            let bindings = execute_operator_to_bindings(source, storage, ctx, cache)?;
             execute_project(bindings, columns, *distinct, storage)
         }
 
@@ -226,7 +271,7 @@ fn execute_operator(
             group_by,
             aggregates,
         } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
+            let bindings = execute_operator_to_bindings(source, storage, ctx, cache)?;
             execute_aggregate(bindings, group_by, aggregates, storage)
         }
 
@@ -244,7 +289,7 @@ fn execute_operator(
 
         PlanOperator::Limit { source, count } => {
             // Limit can work on either Bindings or Rows
-            match execute_operator(source, storage, stats, cache)? {
+            match execute_operator(source, storage, ctx, cache)? {
                 ExecutionResult::Bindings(mut bindings) => {
                     bindings.truncate(*count as usize);
                     Ok(ExecutionResult::Bindings(bindings))
@@ -258,7 +303,7 @@ fn execute_operator(
 
         PlanOperator::Skip { source, count } => {
             // Skip can work on either Bindings or Rows
-            match execute_operator(source, storage, stats, cache)? {
+            match execute_operator(source, storage, ctx, cache)? {
                 ExecutionResult::Bindings(bindings) => {
                     let skipped: Vec<_> = bindings.into_iter().skip(*count as usize).collect();
                     Ok(ExecutionResult::Bindings(skipped))
@@ -275,9 +320,11 @@ fn execute_operator(
 
         PlanOperator::CrossJoin { left, right } => {
             let left_bindings =
-                execute_operator_to_bindings(left, storage, stats, cache.as_deref_mut())?;
-            let right_bindings = execute_operator_to_bindings(right, storage, stats, cache)?;
-            let mut result = Vec::with_capacity(left_bindings.len() * right_bindings.len());
+                execute_operator_to_bindings(left, storage, ctx, cache.as_deref_mut())?;
+            let right_bindings = execute_operator_to_bindings(right, storage, ctx, cache)?;
+            let product_size = left_bindings.len() * right_bindings.len();
+            ctx.track_bindings(product_size)?;
+            let mut result = Vec::with_capacity(product_size);
             for lb in &left_bindings {
                 for rb in &right_bindings {
                     result.push(lb.merge(rb));
@@ -290,18 +337,11 @@ fn execute_operator(
             source,
             nodes,
             relationships,
-        } => execute_create(
-            source.as_deref(),
-            nodes,
-            relationships,
-            storage,
-            stats,
-            cache,
-        ),
+        } => execute_create(source.as_deref(), nodes, relationships, storage, cache, ctx),
 
         PlanOperator::SetProperties { source, sets } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
-            execute_set_properties(&bindings, sets, storage, stats)?;
+            let bindings = execute_operator_to_bindings(source, storage, ctx, cache)?;
+            execute_set_properties(&bindings, sets, storage, &mut ctx.stats)?;
             Ok(ExecutionResult::Bindings(bindings))
         }
 
@@ -310,14 +350,14 @@ fn execute_operator(
             variables,
             detach,
         } => {
-            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
-            execute_delete(&bindings, variables, *detach, storage, stats)?;
+            let bindings = execute_operator_to_bindings(source, storage, ctx, cache)?;
+            execute_delete(&bindings, variables, *detach, storage, &mut ctx.stats)?;
             Ok(ExecutionResult::Bindings(Vec::new()))
         }
 
         PlanOperator::Sort { source, keys: _ } => {
             // TODO: Implement sorting
-            let bindings = execute_operator_to_bindings(source, storage, stats, cache)?;
+            let bindings = execute_operator_to_bindings(source, storage, ctx, cache)?;
             Ok(ExecutionResult::Bindings(bindings))
         }
 
@@ -331,10 +371,10 @@ fn execute_operator(
 fn execute_operator_to_bindings(
     op: &PlanOperator,
     storage: &SqliteStorage,
-    stats: &mut QueryStats,
+    ctx: &mut ExecutionContext,
     cache: Option<&mut EntityCache>,
 ) -> Result<Vec<Binding>> {
-    match execute_operator(op, storage, stats, cache)? {
+    match execute_operator(op, storage, ctx, cache)? {
         ExecutionResult::Bindings(b) => Ok(b),
         ExecutionResult::Rows { .. } => {
             // This shouldn't happen in a well-formed plan

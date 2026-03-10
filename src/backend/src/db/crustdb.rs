@@ -57,6 +57,8 @@ impl CrustDatabase {
         db.set_caching(enable_caching);
         // Enable entity cache for faster BFS/shortest path traversals
         db.set_entity_cache(EntityCacheConfig::with_capacity(500_000));
+        // Cap intermediate bindings to prevent OOM on explosive queries
+        db.set_max_intermediate_bindings(Some(5_000_000));
 
         let instance = Self { db: Arc::new(db) };
         instance.init_schema()?;
@@ -71,6 +73,8 @@ impl CrustDatabase {
         db.set_caching(true); // Enable caching by default for tests too
                               // Enable entity cache for faster BFS/shortest path traversals
         db.set_entity_cache(EntityCacheConfig::with_capacity(500_000));
+        // Cap intermediate bindings to prevent OOM on explosive queries
+        db.set_max_intermediate_bindings(Some(5_000_000));
 
         let instance = Self { db: Arc::new(db) };
         instance.init_schema()?;
@@ -322,9 +326,7 @@ impl CrustDatabase {
             }
 
             // Rebuild index after creating placeholders
-            self.db
-                .build_property_index("objectid")
-                .unwrap_or_default()
+            self.db.build_property_index("objectid").unwrap_or_default()
         } else {
             node_index
         };

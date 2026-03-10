@@ -223,21 +223,26 @@ impl PathConstraints {
 /// This uses the query planner to generate an execution plan,
 /// which is then interpreted by the plan executor.
 pub fn execute(statement: &Statement, storage: &SqliteStorage) -> Result<QueryResult> {
-    execute_with_cache(statement, storage, None)
+    execute_with_cache(statement, storage, None, None)
 }
 
-/// Execute a parsed statement with an optional entity cache.
+/// Execute a parsed statement with an optional entity cache and binding limit.
 ///
 /// The cache improves performance for BFS/DFS traversals by avoiding repeated
 /// SQLite lookups for the same nodes and relationships.
+///
+/// `max_bindings` limits the number of intermediate bindings to prevent OOM
+/// on queries that produce explosive results (cross joins, deep BFS, etc.).
+/// `None` means unlimited.
 pub fn execute_with_cache(
     statement: &Statement,
     storage: &SqliteStorage,
     cache: Option<&mut EntityCache>,
+    max_bindings: Option<usize>,
 ) -> Result<QueryResult> {
     // Handle UNION ALL at the statement level: execute each branch and concatenate
     if let Statement::UnionAll(queries) = statement {
-        return execute_union_all(queries, storage, cache);
+        return execute_union_all(queries, storage, cache, max_bindings);
     }
 
     let t0 = std::time::Instant::now();
@@ -259,7 +264,7 @@ pub fn execute_with_cache(
     trace!("full plan: {:?}", optimized_plan.root);
 
     // Execute the plan
-    let result = plan_exec::execute_plan(&optimized_plan, storage, cache)?;
+    let result = plan_exec::execute_plan(&optimized_plan, storage, cache, max_bindings)?;
     let exec_ms = t0.elapsed().as_micros();
 
     debug!(
@@ -279,6 +284,7 @@ fn execute_union_all(
     queries: &[Statement],
     storage: &SqliteStorage,
     mut cache: Option<&mut EntityCache>,
+    max_bindings: Option<usize>,
 ) -> Result<QueryResult> {
     let t0 = std::time::Instant::now();
     let mut combined_columns: Option<Vec<String>> = None;
@@ -286,7 +292,7 @@ fn execute_union_all(
     let mut combined_stats = QueryStats::default();
 
     for query in queries {
-        let result = execute_with_cache(query, storage, cache.as_deref_mut())?;
+        let result = execute_with_cache(query, storage, cache.as_deref_mut(), max_bindings)?;
 
         match &combined_columns {
             None => {
