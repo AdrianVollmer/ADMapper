@@ -148,7 +148,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     let closestEdge: string | null = null;
     let closestDistSq = LABEL_HIT_RADIUS_SQ;
 
-    graph.forEachEdge((edgeKey, _attrs, source, target) => {
+    graph.forEachEdge((edgeKey, attrs, source, target) => {
       const displayData = sigmaInstance.getEdgeDisplayData(edgeKey);
       if (!displayData || displayData.hidden) return;
 
@@ -156,7 +156,26 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       const sy = graph.getNodeAttribute(source, "y");
       const tx = graph.getNodeAttribute(target, "x");
       const ty = graph.getNodeAttribute(target, "y");
-      const mid = sigmaInstance.graphToViewport({ x: (sx + tx) / 2, y: (sy + ty) / 2 });
+
+      let midX = (sx + tx) / 2;
+      let midY = (sy + ty) / 2;
+
+      // For curved edges, offset the midpoint to match the visual curve.
+      // The bezier control point is offset perpendicular to the edge by
+      // (curvature * edgeLength), and the curve midpoint at t=0.5 is halfway
+      // between the straight-line center and the control point. We use the
+      // raw source->target direction (matching the shader), NOT the
+      // ltr-adjusted label anchor logic, so that edges in opposite directions
+      // resolve to distinct midpoints.
+      const curvature = (attrs as ADEdgeAttributes).curvature;
+      if (curvature) {
+        const diffX = tx - sx;
+        const diffY = ty - sy;
+        midX -= (diffY * curvature) / 2;
+        midY += (diffX * curvature) / 2;
+      }
+
+      const mid = sigmaInstance.graphToViewport({ x: midX, y: midY });
 
       const dx = viewportX - mid.x;
       const dy = viewportY - mid.y;
