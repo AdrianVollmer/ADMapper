@@ -313,9 +313,9 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     allowInvalidContainer: false,
     renderLabels: true,
     renderEdgeLabels: true,
-    labelDensity: 0.08,
-    labelGridCellSize: 80,
-    labelRenderedSizeThreshold: 5,
+    labelDensity: 1,
+    labelGridCellSize: 50,
+    labelRenderedSizeThreshold: 2,
     zIndex: true,
     defaultNodeColor: "#adb5bd",
     defaultEdgeColor: "#6c757d",
@@ -366,9 +366,10 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
         res.highlighted = true;
       }
 
-      // Bring hovered node to front
+      // Bring hovered node to front and always show its label
       if (nodeId === hoveredNode) {
         res.zIndex = 3;
+        res.forceLabel = true;
       }
 
       // Collapsed nodes get highlighted to indicate they can be expanded
