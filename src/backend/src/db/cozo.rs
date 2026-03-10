@@ -47,10 +47,10 @@ impl GraphDatabase {
         debug!("Initializing database schema");
 
         // Create nodes relation
-        // object_id is the primary key, stores name (display), label (Cypher label), and JSON properties
+        // objectid is the primary key, stores name (display), label (Cypher label), and JSON properties
         let create_nodes = r#"
             :create nodes {
-                object_id: String
+                objectid: String
                 =>
                 name: String,
                 label: String,
@@ -114,7 +114,7 @@ impl GraphDatabase {
         info!("Clearing all data from database");
         // Delete all nodes and relationships
         self.db.run_script(
-            "?[object_id] := *nodes{object_id} :delete nodes {object_id}",
+            "?[objectid] := *nodes{objectid} :delete nodes {objectid}",
             Default::default(),
             ScriptMutability::Mutable,
         )?;
@@ -201,7 +201,7 @@ impl GraphDatabase {
 
         let params = NamedRows {
             headers: vec![
-                "object_id".to_string(),
+                "objectid".to_string(),
                 "name".to_string(),
                 "label".to_string(),
                 "properties".to_string(),
@@ -255,7 +255,7 @@ impl GraphDatabase {
     /// Get node and relationship counts.
     pub fn get_stats(&self) -> Result<(usize, usize)> {
         let node_result = self.db.run_script(
-            "?[count(object_id)] := *nodes{object_id}",
+            "?[count(objectid)] := *nodes{objectid}",
             Default::default(),
             ScriptMutability::Immutable,
         )?;
@@ -287,7 +287,7 @@ impl GraphDatabase {
 
         // Get counts by node label
         let type_result = self.db.run_script(
-            "?[label, count(object_id)] := *nodes{object_id, label}",
+            "?[label, count(objectid)] := *nodes{objectid, label}",
             Default::default(),
             ScriptMutability::Immutable,
         )?;
@@ -472,7 +472,7 @@ impl GraphDatabase {
     /// Get all nodes (for graph rendering).
     pub fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
         self.query_rows(
-            "?[object_id, name, label, properties] := *nodes{object_id, name, label, properties}",
+            "?[objectid, name, label, properties] := *nodes{objectid, name, label, properties}",
             Self::parse_node_row,
         )
     }
@@ -565,7 +565,7 @@ impl GraphDatabase {
         // For large datasets, consider adding a full-text search index
         let nodes: Vec<DbNode> = self
             .query_rows(
-                "?[object_id, name, label, properties] := *nodes{object_id, name, label, properties}",
+                "?[objectid, name, label, properties] := *nodes{objectid, name, label, properties}",
                 Self::parse_node_row,
             )?
             .into_iter()
@@ -1508,7 +1508,7 @@ mod tests {
         let db = setup_test_db();
 
         let result = db
-            .run_custom_query("?[object_id] := *nodes{object_id}")
+            .run_custom_query("?[objectid] := *nodes{objectid}")
             .unwrap();
 
         assert!(result.get("rows").is_some());
@@ -1522,7 +1522,7 @@ mod tests {
 
         // Filter by label (CozoDB schema uses 'label' not 'node_type')
         let result = db
-            .run_custom_query("?[object_id, label] := *nodes{object_id, label}, label = 'User'")
+            .run_custom_query("?[objectid, label] := *nodes{objectid, label}, label = 'User'")
             .unwrap();
 
         let rows = result["rows"].as_array().unwrap();

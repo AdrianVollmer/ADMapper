@@ -14,7 +14,7 @@ Root cause: The commit changed `node_status_quick` to `node_status_full`, which 
 runs expensive variable-length path queries like:
 
 ```cypher
-MATCH p = (a)-[*1..20]->(b) WHERE a.object_id = '...' AND b.object_id ENDS WITH '-519'
+MATCH p = (a)-[*1..20]->(b) WHERE a.objectid = '...' AND b.objectid ENDS WITH '-519'
 RETURN length(p) LIMIT 1
 ```
 

@@ -110,8 +110,8 @@ pub fn extract_graph_from_results(
     let mut nodes: Vec<GraphNode> = Vec::new();
     let mut raw_edges: Vec<JsonValue> = Vec::new();
     let mut node_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // Map internal database IDs to object_ids for relationship resolution
-    let mut id_to_object_id: std::collections::HashMap<i64, String> =
+    // Map internal database IDs to objectids for relationship resolution
+    let mut id_to_objectid: std::collections::HashMap<i64, String> =
         std::collections::HashMap::new();
 
     // Scan all values in all rows for node/relationship objects
@@ -130,7 +130,7 @@ pub fn extract_graph_from_results(
                 if let Some(node) = extract_node_from_json(value) {
                     // Build ID mapping for relationship resolution
                     if let Some(internal_id) = value.get("id").and_then(|v| v.as_i64()) {
-                        id_to_object_id.insert(internal_id, node.id.clone());
+                        id_to_objectid.insert(internal_id, node.id.clone());
                     }
                     if node_ids.insert(node.id.clone()) {
                         nodes.push(node);
@@ -150,7 +150,7 @@ pub fn extract_graph_from_results(
                             // Build ID mapping for relationship resolution
                             if let Some(internal_id) = path_node.get("id").and_then(|v| v.as_i64())
                             {
-                                id_to_object_id.insert(internal_id, node.id.clone());
+                                id_to_objectid.insert(internal_id, node.id.clone());
                             }
                             if node_ids.insert(node.id.clone()) {
                                 nodes.push(node);
@@ -165,7 +165,7 @@ pub fn extract_graph_from_results(
                     }
                 }
             }
-            // Try to extract object_id from string values
+            // Try to extract objectid from string values
             else if let Some(id) = value.as_str() {
                 if !id.is_empty() {
                     node_ids.insert(id.to_string());
@@ -174,11 +174,11 @@ pub fn extract_graph_from_results(
         }
     }
 
-    // Process relationships, mapping internal IDs to object_ids and deduplicating
+    // Process relationships, mapping internal IDs to objectids and deduplicating
     // Multiple paths can share the same relationship, so we need to deduplicate
     let relationships: Vec<GraphEdge> = raw_edges
         .iter()
-        .filter_map(|value| extract_edge_from_json(value, &id_to_object_id))
+        .filter_map(|value| extract_edge_from_json(value, &id_to_objectid))
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
@@ -222,15 +222,15 @@ pub fn extract_graph_from_results(
 /// Only extracts the minimal fields needed for graph visualization (id, name, type).
 /// Full properties are not included to keep response sizes small.
 fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
-    let object_id = value
-        .get("object_id")
+    let objectid = value
+        .get("objectid")
         .and_then(|v| v.as_str())
         .map(String::from)
         .or_else(|| {
             // Try getting from properties
             value
                 .get("properties")
-                .and_then(|p| p.get("object_id"))
+                .and_then(|p| p.get("objectid"))
                 .and_then(|v| v.as_str())
                 .map(String::from)
         })
@@ -267,10 +267,10 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
         .and_then(|p| p.get("name").or_else(|| p.get("label")))
         .and_then(|l| l.as_str())
         .map(String::from)
-        .unwrap_or_else(|| object_id.clone());
+        .unwrap_or_else(|| objectid.clone());
 
     Some(GraphNode {
-        id: object_id,
+        id: objectid,
         name,
         node_type,
     })
@@ -278,7 +278,7 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
 
 /// Extract a GraphEdge from a JSON relationship object.
 ///
-/// Uses the id_map to convert internal database IDs to object_ids.
+/// Uses the id_map to convert internal database IDs to objectids.
 fn extract_edge_from_json(
     value: &JsonValue,
     id_map: &std::collections::HashMap<i64, String>,

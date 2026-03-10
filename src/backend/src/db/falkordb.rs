@@ -141,9 +141,9 @@ impl FalkorDbDatabase {
         let mut props = Map::new();
 
         // Add core identifiers - include both objectid (BloodHound standard) and
-        // object_id (internal standard) for query compatibility across all backends
+        // objectid (internal standard) for query compatibility across all backends
         props.insert("objectid".to_string(), json!(node.id));
-        props.insert("object_id".to_string(), json!(node.id));
+        props.insert("objectid".to_string(), json!(node.id));
         props.insert("name".to_string(), json!(node.name));
 
         // Flatten BloodHound properties into top-level fields
@@ -232,11 +232,11 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
             JsonValue::Object(obj)
         }
         falkordb::FalkorValue::Node(node) => {
-            // Get object_id from properties if available
-            let object_id = node
+            // Get objectid from properties if available
+            let objectid = node
                 .properties
                 .get("objectid")
-                .or_else(|| node.properties.get("object_id"))
+                .or_else(|| node.properties.get("objectid"))
                 .and_then(|v| {
                     if let falkordb::FalkorValue::String(s) = v {
                         Some(s.clone())
@@ -253,7 +253,7 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
             json!({
                 "_type": "node",
                 "id": node.entity_id,
-                "object_id": object_id,
+                "objectid": objectid,
                 "labels": node.labels,
                 "properties": props
             })

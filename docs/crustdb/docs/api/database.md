@@ -229,7 +229,7 @@ let ids = db.insert_nodes_batch(&nodes)?;
 
 ### `Database::upsert_nodes_batch`
 
-Insert or update nodes by `object_id` property.
+Insert or update nodes by `objectid` property.
 
 ```rust
 pub fn upsert_nodes_batch(
@@ -242,11 +242,11 @@ pub fn upsert_nodes_batch(
 
 | Name | Type | Description |
 |------|------|-------------|
-| `nodes` | `&[(Vec<String>, Value)]` | Vector of (labels, properties) tuples. Each must have an `object_id` property. |
+| `nodes` | `&[(Vec<String>, Value)]` | Vector of (labels, properties) tuples. Each must have an `objectid` property. |
 
 **Returns:** `Result<Vec<i64>>` - Vector of node IDs (created or existing).
 
-If a node with the same `object_id` exists, properties are merged (new properties added, existing updated). Labels are also merged.
+If a node with the same `objectid` exists, properties are merged (new properties added, existing updated). Labels are also merged.
 
 **Example:**
 
@@ -255,12 +255,12 @@ use serde_json::json;
 
 // First upsert creates node
 let ids1 = db.upsert_nodes_batch(&[
-    (vec!["Person".into()], json!({"object_id": "alice", "name": "Alice"})),
+    (vec!["Person".into()], json!({"objectid": "alice", "name": "Alice"})),
 ])?;
 
 // Second upsert updates existing node
 let ids2 = db.upsert_nodes_batch(&[
-    (vec!["Person".into()], json!({"object_id": "alice", "age": 30})),
+    (vec!["Person".into()], json!({"objectid": "alice", "age": 30})),
 ])?;
 
 assert_eq!(ids1[0], ids2[0]); // Same node ID
@@ -304,19 +304,19 @@ let edge_ids = db.insert_edges_batch(&[
 
 ---
 
-### `Database::get_or_create_node_by_object_id`
+### `Database::get_or_create_node_by_objectid`
 
-Get an existing node by `object_id`, or create a placeholder if it doesn't exist.
+Get an existing node by `objectid`, or create a placeholder if it doesn't exist.
 
 ```rust
-pub fn get_or_create_node_by_object_id(&self, object_id: &str, label: &str) -> Result<i64>
+pub fn get_or_create_node_by_objectid(&self, objectid: &str, label: &str) -> Result<i64>
 ```
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
-| `object_id` | `&str` | The object_id to look up |
+| `objectid` | `&str` | The objectid to look up |
 | `label` | `&str` | Label to use if creating a new node |
 
 **Returns:** `Result<i64>` - The node ID.
@@ -325,10 +325,10 @@ pub fn get_or_create_node_by_object_id(&self, object_id: &str, label: &str) -> R
 
 ```rust
 // Creates placeholder node
-let id1 = db.get_or_create_node_by_object_id("alice", "Person")?;
+let id1 = db.get_or_create_node_by_objectid("alice", "Person")?;
 
 // Returns same ID
-let id2 = db.get_or_create_node_by_object_id("alice", "Person")?;
+let id2 = db.get_or_create_node_by_objectid("alice", "Person")?;
 assert_eq!(id1, id2);
 ```
 
@@ -385,20 +385,20 @@ Useful for batch relationship insertion when relationships reference nodes by a 
 **Example:**
 
 ```rust
-let index = db.build_property_index("object_id")?;
+let index = db.build_property_index("objectid")?;
 let alice_id = index.get("alice").copied();
 ```
 
 ---
 
-### `Database::get_incoming_connections_by_object_id`
+### `Database::get_incoming_connections_by_objectid`
 
 Get all nodes and relationships pointing to a node.
 
 ```rust
-pub fn get_incoming_connections_by_object_id(
+pub fn get_incoming_connections_by_objectid(
     &self,
-    object_id: &str,
+    objectid: &str,
 ) -> Result<(Vec<Node>, Vec<Relationship>)>
 ```
 
@@ -406,7 +406,7 @@ pub fn get_incoming_connections_by_object_id(
 
 | Name | Type | Description |
 |------|------|-------------|
-| `object_id` | `&str` | The target node's object_id |
+| `objectid` | `&str` | The target node's objectid |
 
 **Returns:** `Result<(Vec<Node>, Vec<Relationship>)>` - Source nodes and their relationships to the target.
 
@@ -414,25 +414,25 @@ pub fn get_incoming_connections_by_object_id(
 
 ```rust
 db.execute("
-    CREATE (a:Person {object_id: 'alice', name: 'Alice'})
-    CREATE (b:Person {object_id: 'bob', name: 'Bob'})
+    CREATE (a:Person {objectid: 'alice', name: 'Alice'})
+    CREATE (b:Person {objectid: 'bob', name: 'Bob'})
     CREATE (a)-[:KNOWS]->(b)
 ")?;
 
-let (nodes, relationships) = db.get_incoming_connections_by_object_id("bob")?;
+let (nodes, relationships) = db.get_incoming_connections_by_objectid("bob")?;
 // nodes contains Alice, relationships contains the KNOWS relationship
 ```
 
 ---
 
-### `Database::get_outgoing_connections_by_object_id`
+### `Database::get_outgoing_connections_by_objectid`
 
 Get all nodes and relationships originating from a node.
 
 ```rust
-pub fn get_outgoing_connections_by_object_id(
+pub fn get_outgoing_connections_by_objectid(
     &self,
-    object_id: &str,
+    objectid: &str,
 ) -> Result<(Vec<Node>, Vec<Relationship>)>
 ```
 
@@ -440,26 +440,26 @@ pub fn get_outgoing_connections_by_object_id(
 
 | Name | Type | Description |
 |------|------|-------------|
-| `object_id` | `&str` | The source node's object_id |
+| `objectid` | `&str` | The source node's objectid |
 
 **Returns:** `Result<(Vec<Node>, Vec<Relationship>)>` - Target nodes and relationships from the source.
 
 **Example:**
 
 ```rust
-let (nodes, relationships) = db.get_outgoing_connections_by_object_id("alice")?;
+let (nodes, relationships) = db.get_outgoing_connections_by_objectid("alice")?;
 ```
 
 ---
 
-### `Database::get_node_edges_by_object_id`
+### `Database::get_node_edges_by_objectid`
 
 Get all relationships connected to a node (both directions).
 
 ```rust
-pub fn get_node_edges_by_object_id(
+pub fn get_node_edges_by_objectid(
     &self,
-    object_id: &str,
+    objectid: &str,
 ) -> Result<Vec<(String, String, String)>>
 ```
 
@@ -467,14 +467,14 @@ pub fn get_node_edges_by_object_id(
 
 | Name | Type | Description |
 |------|------|-------------|
-| `object_id` | `&str` | The node's object_id |
+| `objectid` | `&str` | The node's objectid |
 
-**Returns:** `Result<Vec<(String, String, String)>>` - Tuples of (source_object_id, target_object_id, rel_type).
+**Returns:** `Result<Vec<(String, String, String)>>` - Tuples of (source_objectid, target_objectid, rel_type).
 
 **Example:**
 
 ```rust
-let relationships = db.get_node_edges_by_object_id("alice")?;
+let relationships = db.get_node_edges_by_objectid("alice")?;
 for (src, tgt, rel_type) in relationships {
     println!("{} -[{}]-> {}", src, rel_type, tgt);
 }
@@ -579,10 +579,10 @@ Speeds up queries that filter by this property.
 **Example:**
 
 ```rust
-db.create_property_index("object_id")?;
+db.create_property_index("objectid")?;
 
 // Now queries like this use the index:
-db.execute("MATCH (n {object_id: 'alice'}) RETURN n")?;
+db.execute("MATCH (n {objectid: 'alice'}) RETURN n")?;
 ```
 
 ---
@@ -606,7 +606,7 @@ pub fn drop_property_index(&self, property: &str) -> Result<bool>
 **Example:**
 
 ```rust
-let existed = db.drop_property_index("object_id")?;
+let existed = db.drop_property_index("objectid")?;
 ```
 
 ---
@@ -651,8 +651,8 @@ pub fn has_property_index(&self, property: &str) -> Result<bool>
 **Example:**
 
 ```rust
-if db.has_property_index("object_id")? {
-    println!("object_id is indexed");
+if db.has_property_index("objectid")? {
+    println!("objectid is indexed");
 }
 ```
 

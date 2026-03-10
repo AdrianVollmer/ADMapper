@@ -53,7 +53,7 @@ The code appears written by someone who understands Rust, database internals, an
 
 ~~Database errors are silently converted to 0, masking potential issues like schema corruption or connection problems.~~
 
-**Fixed:** Changed `count_incoming_edges_by_object_id` and `count_outgoing_edges_by_object_id` to properly propagate database errors using `?` instead of `unwrap_or(0)`.
+**Fixed:** Changed `count_incoming_edges_by_objectid` and `count_outgoing_edges_by_objectid` to properly propagate database errors using `?` instead of `unwrap_or(0)`.
 
 Note: The `unwrap_or(0)` in `get_schema_version()` (line 63) is intentional - it handles the case where the schema doesn't exist yet during database initialization.
 

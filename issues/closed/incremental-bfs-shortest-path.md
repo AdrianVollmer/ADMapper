@@ -27,7 +27,7 @@ while let Some(current) = queue.pop_front() {
     if current == target { return path; }
 
     // Query neighbors on-demand instead of preloading
-    let edges = self.db.find_outgoing_edges_by_object_id(&current)?;
+    let edges = self.db.find_outgoing_edges_by_objectid(&current)?;
     for edge in edges {
         if !visited.contains(&edge.target) {
             // ...
@@ -37,13 +37,13 @@ while let Some(current) = queue.pop_front() {
 ```
 
 The storage layer already has `find_outgoing_edges()` and indexed lookups
-via `object_id`. This changes complexity from O(E) preload + O(V+E) BFS
+via `objectid`. This changes complexity from O(E) preload + O(V+E) BFS
 to O(visited * avg_degree) which is much better when the path is short.
 
 ## Complexity
 
 **Implementation: Medium**
-- Need to add `find_outgoing_edges_by_object_id()` to storage layer
+- Need to add `find_outgoing_edges_by_objectid()` to storage layer
 - Refactor BFS to use incremental queries
 - ~100-150 lines of code
 
@@ -62,6 +62,6 @@ to O(visited * avg_degree) which is much better when the path is short.
 
 ## Files to Modify
 
-- `src/crustdb/src/storage/query.rs` - Add indexed edge lookup by object_id
+- `src/crustdb/src/storage/query.rs` - Add indexed edge lookup by objectid
 - `src/backend/src/db/crustdb.rs` - Refactor `shortest_path()` to use incremental BFS
 - `src/crustdb/src/lib.rs` - Expose new storage method

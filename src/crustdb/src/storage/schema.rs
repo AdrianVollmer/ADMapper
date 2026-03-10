@@ -74,10 +74,10 @@ impl SqliteStorage {
             );
 
             -- Nodes table
-            -- Note: UNIQUE constraint on object_id automatically creates an index
+            -- Note: UNIQUE constraint on objectid automatically creates an index
             CREATE TABLE nodes (
                 id INTEGER PRIMARY KEY,
-                object_id TEXT UNIQUE,
+                objectid TEXT UNIQUE,
                 properties TEXT NOT NULL DEFAULT '{}'
             );
 
@@ -287,31 +287,31 @@ impl SqliteStorage {
         Ok(())
     }
 
-    /// Migration from v5 to v6: Add dedicated object_id column to nodes table.
+    /// Migration from v5 to v6: Add dedicated objectid column to nodes table.
     ///
     /// This provides a proper indexed column for node identity lookups instead of
-    /// relying on JSON property extraction. The UNIQUE constraint on object_id
+    /// relying on JSON property extraction. The UNIQUE constraint on objectid
     /// automatically creates an index, so no explicit index is needed.
     fn migrate_v5_to_v6(&self) -> Result<()> {
-        // Check if object_id column already exists
-        let has_object_id: bool = self
+        // Check if objectid column already exists
+        let has_objectid: bool = self
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('nodes') WHERE name = 'object_id'",
+                "SELECT COUNT(*) FROM pragma_table_info('nodes') WHERE name = 'objectid'",
                 [],
                 |row| row.get::<_, i32>(0),
             )
             .map(|c| c > 0)
             .unwrap_or(false);
 
-        if !has_object_id {
-            // Add the object_id column
+        if !has_objectid {
+            // Add the objectid column
             self.conn
-                .execute("ALTER TABLE nodes ADD COLUMN object_id TEXT UNIQUE", [])?;
+                .execute("ALTER TABLE nodes ADD COLUMN objectid TEXT UNIQUE", [])?;
 
             // Populate from existing JSON properties
             self.conn.execute(
-                "UPDATE nodes SET object_id = json_extract(properties, '$.object_id') WHERE object_id IS NULL",
+                "UPDATE nodes SET objectid = json_extract(properties, '$.objectid') WHERE objectid IS NULL",
                 [],
             )?;
         }
@@ -319,7 +319,7 @@ impl SqliteStorage {
         // Drop the redundant explicit index if it exists
         // (UNIQUE constraint already provides an index)
         self.conn
-            .execute_batch("DROP INDEX IF EXISTS idx_nodes_object_id;")?;
+            .execute_batch("DROP INDEX IF EXISTS idx_nodes_objectid;")?;
 
         self.conn.execute(
             "UPDATE meta SET value = '6' WHERE key = 'schema_version'",

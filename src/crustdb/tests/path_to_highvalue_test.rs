@@ -7,7 +7,7 @@
 //! The query pattern is:
 //! ```cypher
 //! MATCH p = (a)-[*1..20]->(b)
-//! WHERE a.object_id = '...' AND b.is_highvalue = true
+//! WHERE a.objectid = '...' AND b.is_highvalue = true
 //! RETURN length(p) AS hops
 //! LIMIT 1
 //! ```
@@ -15,14 +15,14 @@
 use crustdb::{Database, EntityCacheConfig};
 use std::time::Instant;
 
-/// Helper to create a relationship between two nodes by their object_ids.
+/// Helper to create a relationship between two nodes by their objectids.
 fn create_relationship(db: &Database, source_oid: &str, target_oid: &str, rel_type: &str) {
     let source_id = db
-        .find_node_by_property("object_id", source_oid)
+        .find_node_by_property("objectid", source_oid)
         .unwrap()
         .unwrap_or_else(|| panic!("Source node {} not found", source_oid));
     let target_id = db
-        .find_node_by_property("object_id", target_oid)
+        .find_node_by_property("objectid", target_oid)
         .unwrap()
         .unwrap_or_else(|| panic!("Target node {} not found", target_oid));
 
@@ -43,7 +43,7 @@ fn setup_ad_like_graph(db: &Database, num_users: usize, num_groups: usize, chain
     // Create high-value groups (Domain Admins, Enterprise Admins, etc.)
     for i in 0..3 {
         db.execute(&format!(
-            "CREATE (:Group {{object_id: 'HV_GROUP_{}', name: 'HighValueGroup{}', is_highvalue: true}})",
+            "CREATE (:Group {{objectid: 'HV_GROUP_{}', name: 'HighValueGroup{}', is_highvalue: true}})",
             i, i
         ))
         .unwrap();
@@ -52,7 +52,7 @@ fn setup_ad_like_graph(db: &Database, num_users: usize, num_groups: usize, chain
     // Create regular groups
     for i in 0..num_groups {
         db.execute(&format!(
-            "CREATE (:Group {{object_id: 'GROUP_{}', name: 'Group{}'}})",
+            "CREATE (:Group {{objectid: 'GROUP_{}', name: 'Group{}'}})",
             i, i
         ))
         .unwrap();
@@ -61,7 +61,7 @@ fn setup_ad_like_graph(db: &Database, num_users: usize, num_groups: usize, chain
     // Create users
     for i in 0..num_users {
         db.execute(&format!(
-            "CREATE (:User {{object_id: 'USER_{}', name: 'User{}'}})",
+            "CREATE (:User {{objectid: 'USER_{}', name: 'User{}'}})",
             i, i
         ))
         .unwrap();
@@ -105,12 +105,12 @@ fn setup_ad_like_graph(db: &Database, num_users: usize, num_groups: usize, chain
 }
 
 /// The slow query from node_status: find path to high-value node
-fn run_path_to_highvalue_query(db: &Database, source_object_id: &str) -> (bool, u128) {
+fn run_path_to_highvalue_query(db: &Database, source_objectid: &str) -> (bool, u128) {
     let query = format!(
         "MATCH (a)-[*1..20]->(b) \
-         WHERE a.object_id = '{}' AND b.is_highvalue = true \
-         RETURN b.object_id",
-        source_object_id
+         WHERE a.objectid = '{}' AND b.is_highvalue = true \
+         RETURN b.objectid",
+        source_objectid
     );
 
     let start = Instant::now();
@@ -123,12 +123,12 @@ fn run_path_to_highvalue_query(db: &Database, source_object_id: &str) -> (bool, 
 
 /// The exact query from `check_path_to_condition` in the backend handler.
 /// This is what the e2e "Node status API works" test exercises.
-fn run_exact_e2e_query(db: &Database, source_object_id: &str) -> (Option<i64>, u128) {
+fn run_exact_e2e_query(db: &Database, source_objectid: &str) -> (Option<i64>, u128) {
     let query = format!(
         "MATCH p = (a)-[*1..20]->(b) \
-         WHERE a.object_id = '{}' AND (b.is_highvalue = true) \
+         WHERE a.objectid = '{}' AND (b.is_highvalue = true) \
          RETURN length(p) AS hops LIMIT 1",
-        source_object_id
+        source_objectid
     );
 
     let start = Instant::now();
@@ -158,17 +158,17 @@ fn test_path_to_highvalue_small_graph() {
 
     // Debug: verify the chain exists
     let chain_check = db
-        .execute("MATCH (a:Group {object_id: 'GROUP_0'})-[:MemberOf]->(b) RETURN b.object_id")
+        .execute("MATCH (a:Group {objectid: 'GROUP_0'})-[:MemberOf]->(b) RETURN b.objectid")
         .unwrap();
     println!("GROUP_0 connects to: {:?}", chain_check.rows);
 
     let hv_check = db
-        .execute("MATCH (a:Group {is_highvalue: true}) RETURN a.object_id")
+        .execute("MATCH (a:Group {is_highvalue: true}) RETURN a.objectid")
         .unwrap();
     println!("High-value groups: {:?}", hv_check.rows);
 
     let user0_check = db
-        .execute("MATCH (u:User {object_id: 'USER_0'})-[:MemberOf]->(g) RETURN g.object_id")
+        .execute("MATCH (u:User {objectid: 'USER_0'})-[:MemberOf]->(g) RETURN g.objectid")
         .unwrap();
     println!("USER_0 is member of: {:?}", user0_check.rows);
 
@@ -282,7 +282,7 @@ fn test_path_to_highvalue_large_graph() {
 ///
 /// The e2e test runs check_path_to_condition which executes:
 ///   MATCH p = (a)-[*1..20]->(b)
-///   WHERE a.object_id = '...' AND (b.is_highvalue = true)
+///   WHERE a.objectid = '...' AND (b.is_highvalue = true)
 ///   RETURN length(p) AS hops LIMIT 1
 ///
 /// The e2e test failed at 16.9s against a 3s timeout with 1,480 nodes and
@@ -512,8 +512,8 @@ fn test_limit_with_varlen_path_and_where_clause() {
     let without_limit = db
         .execute(
             "MATCH (a)-[*1..20]->(b) \
-             WHERE a.object_id = 'USER_0' AND b.is_highvalue = true \
-             RETURN b.object_id",
+             WHERE a.objectid = 'USER_0' AND b.is_highvalue = true \
+             RETURN b.objectid",
         )
         .unwrap();
     assert!(
@@ -525,8 +525,8 @@ fn test_limit_with_varlen_path_and_where_clause() {
     let with_limit = db
         .execute(
             "MATCH (a)-[*1..20]->(b) \
-             WHERE a.object_id = 'USER_0' AND b.is_highvalue = true \
-             RETURN b.object_id LIMIT 1",
+             WHERE a.objectid = 'USER_0' AND b.is_highvalue = true \
+             RETURN b.objectid LIMIT 1",
         )
         .unwrap();
     assert_eq!(
@@ -540,8 +540,8 @@ fn test_limit_with_varlen_path_and_where_clause() {
     let with_limit_10 = db
         .execute(
             "MATCH (a)-[*1..20]->(b) \
-             WHERE a.object_id = 'USER_0' AND b.is_highvalue = true \
-             RETURN b.object_id LIMIT 10",
+             WHERE a.objectid = 'USER_0' AND b.is_highvalue = true \
+             RETURN b.objectid LIMIT 10",
         )
         .unwrap();
     assert!(
@@ -557,8 +557,8 @@ fn test_limit_with_varlen_path_and_where_clause() {
     let no_path = db
         .execute(
             "MATCH (a)-[*1..20]->(b) \
-             WHERE a.object_id = 'USER_1' AND b.is_highvalue = true \
-             RETURN b.object_id LIMIT 1",
+             WHERE a.objectid = 'USER_1' AND b.is_highvalue = true \
+             RETURN b.objectid LIMIT 1",
         )
         .unwrap();
     assert!(
@@ -577,22 +577,22 @@ fn test_inline_source_filter_with_where_target_filter() {
     db.set_entity_cache(EntityCacheConfig::with_capacity(10_000));
 
     // Minimal graph matching the exact issue reproduction
-    db.execute("CREATE (:Group {object_id: 'HV_GROUP', is_highvalue: true})")
+    db.execute("CREATE (:Group {objectid: 'HV_GROUP', is_highvalue: true})")
         .unwrap();
-    db.execute("CREATE (:Group {object_id: 'GROUP_0'})")
+    db.execute("CREATE (:Group {objectid: 'GROUP_0'})")
         .unwrap();
-    db.execute("CREATE (:User {object_id: 'USER_0'})").unwrap();
+    db.execute("CREATE (:User {objectid: 'USER_0'})").unwrap();
 
     let user_id = db
-        .find_node_by_property("object_id", "USER_0")
+        .find_node_by_property("objectid", "USER_0")
         .unwrap()
         .unwrap();
     let group_id = db
-        .find_node_by_property("object_id", "GROUP_0")
+        .find_node_by_property("objectid", "GROUP_0")
         .unwrap()
         .unwrap();
     let hv_id = db
-        .find_node_by_property("object_id", "HV_GROUP")
+        .find_node_by_property("objectid", "HV_GROUP")
         .unwrap()
         .unwrap();
 
@@ -616,8 +616,8 @@ fn test_inline_source_filter_with_where_target_filter() {
     let baseline = db
         .execute(
             "MATCH (a)-[*1..20]->(b) \
-             WHERE a.object_id = 'USER_0' AND b.is_highvalue = true \
-             RETURN b.object_id",
+             WHERE a.objectid = 'USER_0' AND b.is_highvalue = true \
+             RETURN b.objectid",
         )
         .unwrap();
     assert!(
@@ -628,9 +628,9 @@ fn test_inline_source_filter_with_where_target_filter() {
     // Bug case: inline source filter + WHERE target filter
     let inline_source = db
         .execute(
-            "MATCH (a {object_id: 'USER_0'})-[*1..20]->(b) \
+            "MATCH (a {objectid: 'USER_0'})-[*1..20]->(b) \
              WHERE b.is_highvalue = true \
-             RETURN b.object_id",
+             RETURN b.objectid",
         )
         .unwrap();
     assert!(
@@ -646,9 +646,9 @@ fn test_inline_source_filter_with_where_target_filter() {
     // Also test: inline source filter WITH label + WHERE target filter (reported as working)
     let with_label = db
         .execute(
-            "MATCH (a:User {object_id: 'USER_0'})-[*1..20]->(b) \
+            "MATCH (a:User {objectid: 'USER_0'})-[*1..20]->(b) \
              WHERE b.is_highvalue = true \
-             RETURN b.object_id",
+             RETURN b.objectid",
         )
         .unwrap();
     assert_eq!(
@@ -660,8 +660,8 @@ fn test_inline_source_filter_with_where_target_filter() {
     // And: inline filters on both source and target
     let inline_both = db
         .execute(
-            "MATCH (a {object_id: 'USER_0'})-[*1..20]->(b {is_highvalue: true}) \
-             RETURN b.object_id",
+            "MATCH (a {objectid: 'USER_0'})-[*1..20]->(b {is_highvalue: true}) \
+             RETURN b.objectid",
         )
         .unwrap();
     assert!(
@@ -672,9 +672,9 @@ fn test_inline_source_filter_with_where_target_filter() {
     // Inline source + WHERE target + LIMIT (combines both bugs)
     let inline_with_limit = db
         .execute(
-            "MATCH (a {object_id: 'USER_0'})-[*1..20]->(b) \
+            "MATCH (a {objectid: 'USER_0'})-[*1..20]->(b) \
              WHERE b.is_highvalue = true \
-             RETURN b.object_id LIMIT 1",
+             RETURN b.objectid LIMIT 1",
         )
         .unwrap();
     assert_eq!(
@@ -696,7 +696,7 @@ fn test_path_to_highvalue_no_path_worst_case() {
     // Create isolated high-value groups (not connected to anything)
     for i in 0..3 {
         db.execute(&format!(
-            "CREATE (g:Group {{object_id: 'ISOLATED_HV_{}', is_highvalue: true}})",
+            "CREATE (g:Group {{objectid: 'ISOLATED_HV_{}', is_highvalue: true}})",
             i
         ))
         .unwrap();
@@ -705,7 +705,7 @@ fn test_path_to_highvalue_no_path_worst_case() {
     // Create a dense connected component with no path to high-value
     for i in 0..500 {
         db.execute(&format!(
-            "CREATE (u:User {{object_id: 'DENSE_USER_{}'}})",
+            "CREATE (u:User {{objectid: 'DENSE_USER_{}'}})",
             i
         ))
         .unwrap();
@@ -713,7 +713,7 @@ fn test_path_to_highvalue_no_path_worst_case() {
 
     for i in 0..100 {
         db.execute(&format!(
-            "CREATE (g:Group {{object_id: 'DENSE_GROUP_{}'}})",
+            "CREATE (g:Group {{objectid: 'DENSE_GROUP_{}'}})",
             i
         ))
         .unwrap();

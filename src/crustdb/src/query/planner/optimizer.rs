@@ -813,7 +813,7 @@ mod tests {
         // Source equality predicates from WHERE should be pushed into
         // the NodeScan below VariableLengthExpand.
         let plan =
-            plan_query("MATCH (a)-[*1..20]->(b) WHERE a.object_id = 'USER_0' RETURN b.object_id");
+            plan_query("MATCH (a)-[*1..20]->(b) WHERE a.objectid = 'USER_0' RETURN b.objectid");
         // Plan should be: Project -> VariableLengthExpand(source: NodeScan(prop_filter))
         // No Filter should remain.
         if let PlanOperator::Project { source, .. } = plan.root {
@@ -828,7 +828,7 @@ mod tests {
                         "Source predicate should be pushed into NodeScan"
                     );
                     let (ref prop, ref val) = property_filter.as_ref().unwrap();
-                    assert_eq!(prop, "object_id");
+                    assert_eq!(prop, "objectid");
                     assert_eq!(*val, serde_json::Value::String("USER_0".to_string()));
                 } else {
                     panic!("Expected NodeScan under VariableLengthExpand");
@@ -845,7 +845,7 @@ mod tests {
     fn test_plan_boolean_target_filter_pushdown() {
         // Boolean target property filters should be pushed into VariableLengthExpand
         let plan =
-            plan_query("MATCH (a)-[*1..20]->(b) WHERE b.is_highvalue = true RETURN b.object_id");
+            plan_query("MATCH (a)-[*1..20]->(b) WHERE b.is_highvalue = true RETURN b.objectid");
         if let PlanOperator::Project { source, .. } = plan.root {
             if let PlanOperator::VariableLengthExpand(ref p) = *source {
                 assert!(

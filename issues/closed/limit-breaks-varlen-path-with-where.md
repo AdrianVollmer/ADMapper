@@ -12,14 +12,14 @@ Adding a `LIMIT` clause to a variable-length path query with WHERE clause filter
 
 -- This query WORKS (returns results):
 MATCH (a)-[*1..20]->(b)
-WHERE a.object_id = 'USER_0' AND b.is_highvalue = true
-RETURN b.object_id
+WHERE a.objectid = 'USER_0' AND b.is_highvalue = true
+RETURN b.objectid
 -- Returns: [HV_GROUP]
 
 -- Adding LIMIT 1 BREAKS it (returns empty):
 MATCH (a)-[*1..20]->(b)
-WHERE a.object_id = 'USER_0' AND b.is_highvalue = true
-RETURN b.object_id LIMIT 1
+WHERE a.objectid = 'USER_0' AND b.is_highvalue = true
+RETURN b.objectid LIMIT 1
 -- Returns: []
 ```
 
@@ -44,7 +44,7 @@ The LIMIT pushdown optimization may be incorrectly interacting with the variable
 Remove the LIMIT clause and handle limiting in application code:
 
 ```rust
-let result = db.execute("MATCH (a)-[*1..20]->(b) WHERE a.object_id = 'USER_0' AND b.is_highvalue = true RETURN b.object_id").unwrap();
+let result = db.execute("MATCH (a)-[*1..20]->(b) WHERE a.objectid = 'USER_0' AND b.is_highvalue = true RETURN b.objectid").unwrap();
 let found = !result.rows.is_empty();
 // If you need just first result:
 let first = result.rows.first();

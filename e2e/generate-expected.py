@@ -25,7 +25,7 @@ def parse_bloodhound_json(data: dict) -> tuple[str, list[dict]]:
     return node_type, items
 
 
-def get_object_identifier(item: dict) -> str | None:
+def get_objectidentifier(item: dict) -> str | None:
     """Extract the unique identifier from a BloodHound item."""
     # Check common identifier fields
     if "ObjectIdentifier" in item:
@@ -75,7 +75,7 @@ def count_unique_objects(data_dir: Path) -> dict:
         normalized_type = type_map.get(node_type, node_type.title())
 
         for item in items:
-            obj_id = get_object_identifier(item)
+            obj_id = get_objectidentifier(item)
             if obj_id:
                 unique_objects[normalized_type].add(obj_id)
 

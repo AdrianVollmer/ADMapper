@@ -847,7 +847,7 @@ async fn check_path_to_condition(
     // Use standard Cypher variable-length path syntax (1 to 20 hops)
     // -[*1..20]-> is supported by all backends (CrustDB, Neo4j, FalkorDB)
     let query_text = format!(
-        "MATCH p = (a)-[*1..20]->(b) WHERE a.object_id = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
+        "MATCH p = (a)-[*1..20]->(b) WHERE a.objectid = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
         escaped_id, condition
     );
 
@@ -940,7 +940,7 @@ pub async fn node_set_owned(
     // Escape the node_id for use in Cypher query
     let escaped_id = node_id.replace('\'', "\\'");
     let query = format!(
-        "MATCH (n {{object_id: '{}'}}) SET n.owned = {}",
+        "MATCH (n {{objectid: '{}'}}) SET n.owned = {}",
         escaped_id, body.owned
     );
 
@@ -993,7 +993,7 @@ pub async fn graph_path(
     let escaped_to = to_id.replace('\'', "\\'");
     let query_name = format!("Path: {} → {}", params.from, params.to);
     let query_text = format!(
-        "MATCH p = SHORTEST 1 (a)-[*1..]->(b) WHERE a.object_id = '{}' AND b.object_id = '{}' RETURN p",
+        "MATCH p = SHORTEST 1 (a)-[*1..]->(b) WHERE a.objectid = '{}' AND b.objectid = '{}' RETURN p",
         escaped_from, escaped_to
     );
 

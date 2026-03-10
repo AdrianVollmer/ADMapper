@@ -83,15 +83,15 @@ impl CrustDatabase {
         // CrustDB auto-creates nodes/relationships on first use
 
         // Create property indexes for commonly queried fields
-        // These significantly speed up node lookups by object_id and name
+        // These significantly speed up node lookups by objectid and name
         self.db
-            .create_property_index("object_id")
+            .create_property_index("objectid")
             .map_err(|e| DbError::Database(e.to_string()))?;
         self.db
             .create_property_index("name")
             .map_err(|e| DbError::Database(e.to_string()))?;
 
-        debug!("Property indexes created for object_id and name");
+        debug!("Property indexes created for objectid and name");
         Ok(())
     }
 
@@ -117,7 +117,7 @@ impl CrustDatabase {
     /// This uses CrustDB's native batch upsert which wraps all upserts
     /// in a single transaction with prepared statements.
     ///
-    /// If a node with the same object_id already exists (e.g., an orphan placeholder
+    /// If a node with the same objectid already exists (e.g., an orphan placeholder
     /// created during relationship insertion), its properties are **merged** rather than
     /// replaced. This enables streaming relationship import.
     pub fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
@@ -179,7 +179,7 @@ impl CrustDatabase {
         let mut props = serde_json::Map::new();
 
         // Add core identifiers
-        props.insert("object_id".to_string(), serde_json::json!(node.id));
+        props.insert("objectid".to_string(), serde_json::json!(node.id));
         props.insert("name".to_string(), serde_json::json!(node.name));
         props.insert("label".to_string(), serde_json::json!(node.label));
 
@@ -196,7 +196,7 @@ impl CrustDatabase {
                     }
                 }
                 // Don't overwrite core fields
-                if key != "object_id" && key != "name" && key != "label" {
+                if key != "objectid" && key != "name" && key != "label" {
                     props.insert(key.clone(), value.clone());
                 }
             }
@@ -244,15 +244,15 @@ impl CrustDatabase {
 
     /// Insert a batch of relationships using efficient batch insert.
     ///
-    /// This builds an index of object_id -> node_id for efficient lookups,
+    /// This builds an index of objectid -> node_id for efficient lookups,
     /// then uses CrustDB's native batch insert.
     pub fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
         if relationships.is_empty() {
             return Ok(0);
         }
 
-        // Build index of object_id -> node_id for efficient lookups
-        let node_index = match self.db.build_property_index("object_id") {
+        // Build index of objectid -> node_id for efficient lookups
+        let node_index = match self.db.build_property_index("objectid") {
             Ok(index) => index,
             Err(e) => {
                 debug!("Failed to build property index, falling back: {}", e);
@@ -300,11 +300,11 @@ impl CrustDatabase {
             // Convert to batch format: (labels, properties)
             let placeholder_batch: Vec<(Vec<String>, serde_json::Value)> = placeholder_set
                 .iter()
-                .map(|(object_id, node_type)| {
+                .map(|(objectid, node_type)| {
                     let labels = vec![node_type.clone()];
                     let props = serde_json::json!({
-                        "object_id": object_id,
-                        "name": object_id,  // Use object_id as name for placeholder
+                        "objectid": objectid,
+                        "name": objectid,  // Use objectid as name for placeholder
                         "placeholder": true,
                         "node_type": node_type,
                     });
@@ -323,7 +323,7 @@ impl CrustDatabase {
 
             // Rebuild index after creating placeholders
             self.db
-                .build_property_index("object_id")
+                .build_property_index("objectid")
                 .unwrap_or_default()
         } else {
             node_index
@@ -382,7 +382,7 @@ impl CrustDatabase {
             let props_escaped = props_str.replace('\'', "''");
 
             let query = format!(
-                "MATCH (a {{object_id: '{}'}}), (b {{object_id: '{}'}}) \
+                "MATCH (a {{objectid: '{}'}}), (b {{objectid: '{}'}}) \
                  CREATE (a)-[:{}  {{properties: '{}'}}]->(b)",
                 source, target, rel_type, props_escaped
             );
@@ -502,8 +502,8 @@ impl CrustDatabase {
                 labels,
                 properties,
             } => {
-                let object_id = properties
-                    .get("object_id")
+                let objectid = properties
+                    .get("objectid")
                     .and_then(|v| {
                         if let crustdb::PropertyValue::String(s) = v {
                             Some(s.clone())
@@ -522,7 +522,7 @@ impl CrustDatabase {
                             None
                         }
                     })
-                    .unwrap_or_else(|| object_id.clone());
+                    .unwrap_or_else(|| objectid.clone());
 
                 // Get node type: prefer Cypher labels, then node_type property
                 let label = labels
@@ -543,7 +543,7 @@ impl CrustDatabase {
                 let props_json = Self::properties_to_json(properties);
 
                 Some(DbNode {
-                    id: object_id,
+                    id: objectid,
                     name,
                     label,
                     properties: props_json,
@@ -567,12 +567,12 @@ impl CrustDatabase {
     /// Get all relationships.
     pub fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
         let result = self
-            .execute("MATCH (a)-[r]->(b) RETURN a.object_id, b.object_id, type(r), r.properties")?;
+            .execute("MATCH (a)-[r]->(b) RETURN a.objectid, b.objectid, type(r), r.properties")?;
 
         let mut relationships = Vec::new();
         for row in &result.rows {
-            let source = self.get_string_value(&row.values, "a.object_id");
-            let target = self.get_string_value(&row.values, "b.object_id");
+            let source = self.get_string_value(&row.values, "a.objectid");
+            let target = self.get_string_value(&row.values, "b.objectid");
             let rel_type = self.get_string_value(&row.values, "type(r)");
             let props_str = self.get_string_value(&row.values, "r.properties");
 
@@ -639,9 +639,9 @@ impl CrustDatabase {
 
         // CrustDB supports CONTAINS for string matching
         // Use toLower() for case-insensitive search
-        // Search both n.name (BloodHound property) and n.object_id
+        // Search both n.name (BloodHound property) and n.objectid
         let query = format!(
-            "MATCH (n) WHERE toLower(n.name) CONTAINS '{}' OR toLower(n.object_id) CONTAINS '{}' \
+            "MATCH (n) WHERE toLower(n.name) CONTAINS '{}' OR toLower(n.objectid) CONTAINS '{}' \
              RETURN n LIMIT {}",
             query_escaped, query_escaped, limit
         );
@@ -663,28 +663,28 @@ impl CrustDatabase {
     pub fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {
         let id_escaped = identifier.replace('\'', "''");
 
-        // Try exact object_id match
+        // Try exact objectid match
         let query = format!(
-            "MATCH (n {{object_id: '{}'}}) RETURN n.object_id LIMIT 1",
+            "MATCH (n {{objectid: '{}'}}) RETURN n.objectid LIMIT 1",
             id_escaped
         );
         if let Ok(result) = self.execute(&query) {
             if !result.rows.is_empty() {
                 return Ok(Some(
-                    self.get_string_value(&result.rows[0].values, "n.object_id"),
+                    self.get_string_value(&result.rows[0].values, "n.objectid"),
                 ));
             }
         }
 
         // Try name match
         let query = format!(
-            "MATCH (n) WHERE n.name = '{}' RETURN n.object_id LIMIT 1",
+            "MATCH (n) WHERE n.name = '{}' RETURN n.objectid LIMIT 1",
             id_escaped
         );
         if let Ok(result) = self.execute(&query) {
             if !result.rows.is_empty() {
                 return Ok(Some(
-                    self.get_string_value(&result.rows[0].values, "n.object_id"),
+                    self.get_string_value(&result.rows[0].values, "n.objectid"),
                 ));
             }
         }
@@ -730,7 +730,7 @@ impl CrustDatabase {
             // Query neighbors on-demand instead of preloading entire graph
             let edges = self
                 .db
-                .find_outgoing_relationships_by_object_id(&current)
+                .find_outgoing_relationships_by_objectid(&current)
                 .map_err(|e| DbError::Database(e.to_string()))?;
 
             for (neighbor, rel_type) in edges {
@@ -841,7 +841,7 @@ impl CrustDatabase {
 
         // Return full node to get all flattened properties
         let query = format!(
-            "MATCH (n) WHERE n.object_id IN [{}] RETURN n",
+            "MATCH (n) WHERE n.objectid IN [{}] RETURN n",
             id_list.join(", ")
         );
 
@@ -871,8 +871,8 @@ impl CrustDatabase {
 
         let query = format!(
             "MATCH (a)-[r]->(b) \
-             WHERE a.object_id IN [{}] AND b.object_id IN [{}] \
-             RETURN a.object_id, b.object_id, type(r), r.properties",
+             WHERE a.objectid IN [{}] AND b.objectid IN [{}] \
+             RETURN a.objectid, b.objectid, type(r), r.properties",
             id_set, id_set
         );
 
@@ -880,8 +880,8 @@ impl CrustDatabase {
 
         let mut relationships = Vec::new();
         for row in &result.rows {
-            let source = self.get_string_value(&row.values, "a.object_id");
-            let target = self.get_string_value(&row.values, "b.object_id");
+            let source = self.get_string_value(&row.values, "a.objectid");
+            let target = self.get_string_value(&row.values, "b.objectid");
             let rel_type = self.get_string_value(&row.values, "type(r)");
             let props_str = self.get_string_value(&row.values, "r.properties");
 
@@ -901,7 +901,7 @@ impl CrustDatabase {
     /// Get node connections in a direction.
     ///
     /// For "incoming" and "outgoing" directions, uses direct SQL queries
-    /// with the object_id index for O(degree) performance instead of O(N)
+    /// with the objectid index for O(degree) performance instead of O(N)
     /// full node scans. Other directions use Cypher queries.
     pub fn get_node_connections(
         &self,
@@ -925,27 +925,27 @@ impl CrustDatabase {
         let escaped_id = node_id.replace('\'', "\\'");
         let query = match direction {
             "admin" => format!(
-                "MATCH (a {{object_id: '{}'}})-[r]->(b) \
+                "MATCH (a {{objectid: '{}'}})-[r]->(b) \
                  WHERE type(r) = 'AdminTo' OR type(r) = 'GenericAll' OR type(r) = 'GenericWrite' \
                  OR type(r) = 'Owns' OR type(r) = 'WriteDacl' OR type(r) = 'WriteOwner' \
                  OR type(r) = 'AllExtendedRights' OR type(r) = 'ForceChangePassword' \
                  OR type(r) = 'AddMember' \
-                 RETURN a.object_id, b.object_id, type(r), a, b",
+                 RETURN a.objectid, b.objectid, type(r), a, b",
                 escaped_id
             ),
             "memberof" => format!(
-                "MATCH (a {{object_id: '{}'}})-[r:MemberOf]->(b) \
-                 RETURN a.object_id, b.object_id, type(r), a, b",
+                "MATCH (a {{objectid: '{}'}})-[r:MemberOf]->(b) \
+                 RETURN a.objectid, b.objectid, type(r), a, b",
                 escaped_id
             ),
             "members" => format!(
-                "MATCH (a)-[r:MemberOf]->(b {{object_id: '{}'}}) \
-                 RETURN a.object_id, b.object_id, type(r), a, b",
+                "MATCH (a)-[r:MemberOf]->(b {{objectid: '{}'}}) \
+                 RETURN a.objectid, b.objectid, type(r), a, b",
                 escaped_id
             ),
             _ => format!(
-                "MATCH (a)-[r]-(b {{object_id: '{}'}}) \
-                 RETURN a.object_id, b.object_id, type(r), a, b",
+                "MATCH (a)-[r]-(b {{objectid: '{}'}}) \
+                 RETURN a.objectid, b.objectid, type(r), a, b",
                 escaped_id
             ),
         };
@@ -964,25 +964,25 @@ impl CrustDatabase {
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
         let (crust_nodes, crust_edges) = if incoming {
             self.db
-                .get_incoming_connections_by_object_id(node_id)
+                .get_incoming_connections_by_objectid(node_id)
                 .map_err(|e| DbError::Database(e.to_string()))?
         } else {
             self.db
-                .get_outgoing_connections_by_object_id(node_id)
+                .get_outgoing_connections_by_objectid(node_id)
                 .map_err(|e| DbError::Database(e.to_string()))?
         };
 
-        // Build map from internal node ID to object_id for relationship conversion
-        let mut internal_to_object_id: std::collections::HashMap<i64, String> =
+        // Build map from internal node ID to objectid for relationship conversion
+        let mut internal_to_objectid: std::collections::HashMap<i64, String> =
             std::collections::HashMap::new();
 
         // Convert crustdb::Node to DbNode and build ID map
         let nodes: Vec<DbNode> = crust_nodes
             .into_iter()
             .map(|n| {
-                let object_id = n
+                let objectid = n
                     .properties
-                    .get("object_id")
+                    .get("objectid")
                     .and_then(|v| {
                         if let crustdb::PropertyValue::String(s) = v {
                             Some(s.clone())
@@ -992,8 +992,8 @@ impl CrustDatabase {
                     })
                     .unwrap_or_else(|| n.id.to_string());
 
-                // Store mapping from internal ID to object_id
-                internal_to_object_id.insert(n.id, object_id.clone());
+                // Store mapping from internal ID to objectid
+                internal_to_objectid.insert(n.id, objectid.clone());
 
                 let name = n
                     .properties
@@ -1005,7 +1005,7 @@ impl CrustDatabase {
                             None
                         }
                     })
-                    .unwrap_or_else(|| object_id.clone());
+                    .unwrap_or_else(|| objectid.clone());
 
                 let label = n
                     .labels
@@ -1015,7 +1015,7 @@ impl CrustDatabase {
                 let properties = Self::properties_to_json(&n.properties);
 
                 DbNode {
-                    id: object_id,
+                    id: objectid,
                     name,
                     label,
                     properties,
@@ -1027,9 +1027,9 @@ impl CrustDatabase {
         let relationships: Vec<DbEdge> = crust_edges
             .into_iter()
             .filter_map(|e| {
-                // Map internal IDs to object_ids
-                let source_obj_id = internal_to_object_id.get(&e.source)?;
-                let target_obj_id = internal_to_object_id.get(&e.target)?;
+                // Map internal IDs to objectids
+                let source_obj_id = internal_to_objectid.get(&e.source)?;
+                let target_obj_id = internal_to_objectid.get(&e.target)?;
 
                 Some(DbEdge {
                     source: source_obj_id.clone(),
@@ -1057,8 +1057,8 @@ impl CrustDatabase {
             std::collections::HashMap::new();
 
         for row in &result.rows {
-            let source = self.get_string_value(&row.values, "a.object_id");
-            let target = self.get_string_value(&row.values, "b.object_id");
+            let source = self.get_string_value(&row.values, "a.objectid");
+            let target = self.get_string_value(&row.values, "b.objectid");
             let rel_type = self.get_string_value(&row.values, "type(r)");
 
             relationships.push(DbEdge {
@@ -1149,7 +1149,7 @@ impl CrustDatabase {
     pub fn get_node_edges(&self, node_id: &str) -> Result<Vec<DbEdge>> {
         let raw_edges = self
             .db
-            .get_node_relationships_by_object_id(node_id)
+            .get_node_relationships_by_objectid(node_id)
             .map_err(|e| DbError::Database(e.to_string()))?;
 
         let relationships = raw_edges
@@ -1177,9 +1177,9 @@ impl CrustDatabase {
 
         // Use variable-length path to find transitive MemberOf membership
         let query = format!(
-            "MATCH (n {{object_id: '{}'}})-[:MemberOf*1..20]->(g) \
-             WHERE g.object_id ENDS WITH '{}' \
-             RETURN g.object_id LIMIT 1",
+            "MATCH (n {{objectid: '{}'}})-[:MemberOf*1..20]->(g) \
+             WHERE g.objectid ENDS WITH '{}' \
+             RETURN g.objectid LIMIT 1",
             id_escaped, suffix_escaped
         );
 
@@ -1188,7 +1188,7 @@ impl CrustDatabase {
         if let Some(crustdb::ResultValue::Property(crustdb::PropertyValue::String(s))) = result
             .rows
             .first()
-            .and_then(|row| row.values.get("g.object_id"))
+            .and_then(|row| row.values.get("g.objectid"))
         {
             return Ok(Some(s.clone()));
         }
@@ -1238,9 +1238,9 @@ impl CrustDatabase {
                     .iter()
                     .map(|(k, pv)| (k.clone(), Self::property_value_to_json(pv)))
                     .collect();
-                // Get object_id from properties if available
-                let object_id = properties
-                    .get("object_id")
+                // Get objectid from properties if available
+                let objectid = properties
+                    .get("objectid")
                     .and_then(|v| {
                         if let crustdb::PropertyValue::String(s) = v {
                             Some(s.clone())
@@ -1252,7 +1252,7 @@ impl CrustDatabase {
                 serde_json::json!({
                     "_type": "node",
                     "id": id,
-                    "object_id": object_id,
+                    "objectid": objectid,
                     "labels": labels,
                     "properties": props
                 })
@@ -1488,14 +1488,14 @@ impl CrustDatabase {
         })
     }
 
-    /// Helper to get node info (object_id, name, label) by internal database ID.
+    /// Helper to get node info (objectid, name, label) by internal database ID.
     fn get_node_info_by_internal_id(
         &self,
         internal_id: i64,
     ) -> Result<Option<(String, String, String)>> {
         // Query for node by internal ID
         let query = format!(
-            "MATCH (n) WHERE id(n) = {} RETURN n.object_id, n.name, labels(n)",
+            "MATCH (n) WHERE id(n) = {} RETURN n.objectid, n.name, labels(n)",
             internal_id
         );
         let result = self.execute(&query)?;
@@ -1506,9 +1506,9 @@ impl CrustDatabase {
 
         let row = &result.rows[0];
 
-        let object_id = row
+        let objectid = row
             .values
-            .get("n.object_id")
+            .get("n.objectid")
             .and_then(|v| match v {
                 crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => {
                     Some(s.clone())
@@ -1542,7 +1542,7 @@ impl CrustDatabase {
             })
             .unwrap_or_else(|| "Base".to_string());
 
-        Ok(Some((object_id, name, label)))
+        Ok(Some((objectid, name, label)))
     }
 }
 

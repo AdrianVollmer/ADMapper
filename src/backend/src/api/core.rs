@@ -507,7 +507,7 @@ fn check_path_to_condition(
     let escaped_id = node_id.replace('\'', "\\'");
     // Use variable-length path syntax (1 to 20 hops)
     let query_text = format!(
-        "MATCH p = (a)-[*1..20]->(b) WHERE a.object_id = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
+        "MATCH p = (a)-[*1..20]->(b) WHERE a.objectid = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
         escaped_id, condition
     );
 
@@ -528,7 +528,7 @@ fn check_path_to_condition(
 pub fn node_set_owned(db: &dyn DatabaseBackend, node_id: &str, owned: bool) -> Result<(), String> {
     let escaped_id = node_id.replace('\'', "\\'");
     let query = format!(
-        "MATCH (n {{object_id: '{}'}}) SET n.owned = {}",
+        "MATCH (n {{objectid: '{}'}}) SET n.owned = {}",
         escaped_id, owned
     );
     db.run_custom_query(&query).map_err(|e| e.to_string())?;

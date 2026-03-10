@@ -23,32 +23,32 @@ fn build_e2e_scale_graph(db: &Database) -> (usize, usize) {
 
     for i in 0..user_count {
         db.execute(&format!(
-            "CREATE (:User {{object_id: 'U_{i}', name: 'User{i}', enabled: true}})"
+            "CREATE (:User {{objectid: 'U_{i}', name: 'User{i}', enabled: true}})"
         ))
         .unwrap();
     }
     for i in 0..group_count {
         let hv = if i < 5 { ", is_highvalue: true" } else { "" };
         db.execute(&format!(
-            "CREATE (:Group {{object_id: 'G_{i}', name: 'Group{i}'{hv}}})"
+            "CREATE (:Group {{objectid: 'G_{i}', name: 'Group{i}'{hv}}})"
         ))
         .unwrap();
     }
     for i in 0..computer_count {
         db.execute(&format!(
-            "CREATE (:Computer {{object_id: 'C_{i}', name: 'Computer{i}'}})"
+            "CREATE (:Computer {{objectid: 'C_{i}', name: 'Computer{i}'}})"
         ))
         .unwrap();
     }
     for i in 0..ou_count {
         db.execute(&format!(
-            "CREATE (:OU {{object_id: 'OU_{i}', name: 'OrgUnit{i}'}})"
+            "CREATE (:OU {{objectid: 'OU_{i}', name: 'OrgUnit{i}'}})"
         ))
         .unwrap();
     }
     for i in 0..domain_count {
         db.execute(&format!(
-            "CREATE (:Domain {{object_id: 'D_{i}', name: 'Domain{i}'}})"
+            "CREATE (:Domain {{objectid: 'D_{i}', name: 'Domain{i}'}})"
         ))
         .unwrap();
     }
@@ -128,11 +128,11 @@ fn build_e2e_scale_graph(db: &Database) -> (usize, usize) {
 
 fn insert_rel(db: &Database, source_oid: &str, target_oid: &str, rel_type: &str) {
     let source_id = db
-        .find_node_by_property("object_id", source_oid)
+        .find_node_by_property("objectid", source_oid)
         .unwrap()
         .unwrap_or_else(|| panic!("Node {} not found", source_oid));
     let target_id = db
-        .find_node_by_property("object_id", target_oid)
+        .find_node_by_property("objectid", target_oid)
         .unwrap()
         .unwrap_or_else(|| panic!("Node {} not found", target_oid));
     db.insert_relationships_batch(&[(

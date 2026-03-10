@@ -114,7 +114,7 @@ For large graphs (100k+ edges), this is a severe performance problem.
 - **neo4j**: Single Cypher query with `OPTIONAL MATCH` and `count(DISTINCT)` for all 5 counts
 - **falkordb**: Same single-query approach as neo4j
 - **cozo**: Datalog queries with `count()` aggregation for each edge category
-- **crustdb**: Already had efficient implementation using `get_node_edges_by_object_id`
+- **crustdb**: Already had efficient implementation using `get_node_edges_by_objectid`
 
 Added warning log to the default trait implementation to flag when it's being used,
 encouraging backend implementers to override it.

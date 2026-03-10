@@ -89,7 +89,7 @@ impl Neo4jDatabase {
     fn neo4j_node_to_db_node(node: &Neo4jNode) -> DbNode {
         let id = node
             .get::<String>("objectid")
-            .or_else(|_| node.get::<String>("object_id"))
+            .or_else(|_| node.get::<String>("objectid"))
             .or_else(|_| node.get::<i64>("id").map(|id| id.to_string()))
             .unwrap_or_else(|_| format!("node_{}", node.id()));
 
@@ -180,9 +180,9 @@ impl Neo4jDatabase {
         let mut props = Map::new();
 
         // Add core identifiers - include both objectid (BloodHound standard) and
-        // object_id (internal standard) for query compatibility across all backends
+        // objectid (internal standard) for query compatibility across all backends
         props.insert("objectid".to_string(), json!(node.id));
-        props.insert("object_id".to_string(), json!(node.id));
+        props.insert("objectid".to_string(), json!(node.id));
         props.insert("name".to_string(), json!(node.name));
 
         // Flatten BloodHound properties into top-level fields
@@ -973,7 +973,7 @@ impl DatabaseBackend for Neo4jDatabase {
                         Some(json!({
                             "_type": "node",
                             "id": node.id(),
-                            "object_id": db_node.id,
+                            "objectid": db_node.id,
                             "labels": node.labels(),
                             "properties": db_node.properties,
                         }))
@@ -1008,7 +1008,7 @@ impl DatabaseBackend for Neo4jDatabase {
                                 json!({
                                     "_type": "node",
                                     "id": node.id(),
-                                    "object_id": db_node.id,
+                                    "objectid": db_node.id,
                                     "labels": node.labels(),
                                     "properties": db_node.properties,
                                 })

@@ -67,7 +67,7 @@ curl http://localhost:9191/api/import/progress/abc123
 
 ### Node Handling
 
-- Nodes are identified by their `object_id` property
+- Nodes are identified by their `objectid` property
 - Duplicate imports update existing nodes rather than creating duplicates
 - Properties are merged on re-import
 

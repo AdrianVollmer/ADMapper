@@ -49,7 +49,7 @@ pub struct VarLenExpandParams {
     pub target_ids: Option<Vec<i64>>,
     /// Limit for early termination (pushed down from RETURN ... LIMIT).
     pub limit: Option<u64>,
-    /// Target property filter for early termination (e.g., object_id ENDS WITH '-519').
+    /// Target property filter for early termination (e.g., objectid ENDS WITH '-519').
     /// Format: (property_name, operator, value) where operator is "=", "ENDS WITH", etc.
     pub target_property_filter: Option<TargetPropertyFilter>,
 }

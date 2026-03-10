@@ -868,7 +868,7 @@ class TestRunner:
             items = response.body
             if not items or not isinstance(items, list) or len(items) == 0:
                 # Fall back to querying for any user
-                response = self.api.query("MATCH (u:User) RETURN u.object_id AS id LIMIT 1")
+                response = self.api.query("MATCH (u:User) RETURN u.objectid AS id LIMIT 1")
                 if not response.ok:
                     return False, f"Query failed: {response.body}", proof
                 result_data = self._body_get(response.body, "results", {})
@@ -882,7 +882,7 @@ class TestRunner:
                     return False, "No nodes found for connections test", proof
             else:
                 # Use the first search result
-                test_node_id = items[0].get("id", items[0].get("object_id", ""))
+                test_node_id = items[0].get("id", items[0].get("objectid", ""))
             self.logger.info(f"Using node {test_node_id} for connections tests")
             return True, "", proof
 
@@ -1018,10 +1018,10 @@ class TestRunner:
                 return False, f"Search failed: {response.body}", proof
             items = response.body
             if items and isinstance(items, list) and len(items) > 0:
-                test_node_id = items[0].get("id", items[0].get("object_id", ""))
+                test_node_id = items[0].get("id", items[0].get("objectid", ""))
             if not test_node_id:
                 # Fallback: query for any user
-                response = self.api.query("MATCH (u:User) RETURN u.object_id AS id LIMIT 1")
+                response = self.api.query("MATCH (u:User) RETURN u.objectid AS id LIMIT 1")
                 if response.ok:
                     result_data = self._body_get(response.body, "results", {})
                     if isinstance(result_data, list) and result_data:

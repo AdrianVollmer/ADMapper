@@ -3,41 +3,41 @@
 ## Summary
 
 Variable-length path queries fail to return results when combining:
-1. Inline property filter on the source node: `(a {object_id: 'USER_0'})`
+1. Inline property filter on the source node: `(a {objectid: 'USER_0'})`
 2. WHERE clause boolean filter on the target node: `WHERE b.is_highvalue = true`
 
 ## Reproduction
 
 ```cypher
 -- Setup: Create a path USER_0 -> GROUP_0 -> HV_GROUP (is_highvalue: true)
-CREATE (:Group {object_id: 'HV_GROUP', is_highvalue: true})
-CREATE (:Group {object_id: 'GROUP_0'})
-CREATE (:User {object_id: 'USER_0'})
+CREATE (:Group {objectid: 'HV_GROUP', is_highvalue: true})
+CREATE (:Group {objectid: 'GROUP_0'})
+CREATE (:User {objectid: 'USER_0'})
 -- (create relationships via API due to MATCH...CREATE bug)
 
 -- This query returns EMPTY (BUG):
-MATCH (a {object_id: 'USER_0'})-[*1..20]->(b)
+MATCH (a {objectid: 'USER_0'})-[*1..20]->(b)
 WHERE b.is_highvalue = true
-RETURN b.object_id
+RETURN b.objectid
 -- Returns: []
 
 -- But these equivalent queries WORK:
 
 -- 1. Both filters in WHERE clause:
 MATCH (a)-[*1..20]->(b)
-WHERE a.object_id = 'USER_0' AND b.is_highvalue = true
-RETURN b.object_id
+WHERE a.objectid = 'USER_0' AND b.is_highvalue = true
+RETURN b.objectid
 -- Returns: [HV_GROUP]
 
 -- 2. Label + inline source filter:
-MATCH (a:User {object_id: 'USER_0'})-[*1..20]->(b)
+MATCH (a:User {objectid: 'USER_0'})-[*1..20]->(b)
 WHERE b.is_highvalue = true
-RETURN b.object_id
+RETURN b.objectid
 -- Returns: [HV_GROUP]
 
 -- 3. Inline filters on both (non-boolean):
-MATCH (a {object_id: 'USER_0'})-[*1..20]->(b {object_id: 'HV_GROUP'})
-RETURN b.object_id
+MATCH (a {objectid: 'USER_0'})-[*1..20]->(b {objectid: 'HV_GROUP'})
+RETURN b.objectid
 -- Returns: [HV_GROUP]
 ```
 
@@ -67,8 +67,8 @@ Put both filters in the WHERE clause:
 
 ```cypher
 MATCH (a)-[*1..20]->(b)
-WHERE a.object_id = 'USER_0' AND b.is_highvalue = true
-RETURN b.object_id
+WHERE a.objectid = 'USER_0' AND b.is_highvalue = true
+RETURN b.objectid
 ```
 
 ## Impact

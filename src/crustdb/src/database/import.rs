@@ -27,13 +27,13 @@ impl super::Database {
     /// Returns a vector of the node IDs (either created or existing) in the same order as input.
     ///
     /// **Key difference from insert_nodes_batch**:
-    /// - If a node with the same object_id already exists, its properties are **merged**
+    /// - If a node with the same objectid already exists, its properties are **merged**
     ///   using json_patch (new properties are added, existing are updated) rather than
     ///   replaced entirely.
     /// - Labels are also merged (added if not present).
     ///
     /// This enables streaming relationship import: when an relationship references a node that doesn't
-    /// exist yet, an orphan node can be created with just the object_id. When the full
+    /// exist yet, an orphan node can be created with just the objectid. When the full
     /// node data arrives later, upsert_nodes_batch merges in the complete properties.
     pub fn upsert_nodes_batch(
         &self,
@@ -46,20 +46,20 @@ impl super::Database {
         storage.upsert_nodes_batch(nodes)
     }
 
-    /// Get or create a node by object_id, returning its internal ID.
+    /// Get or create a node by objectid, returning its internal ID.
     ///
     /// If the node exists, returns its ID without modifying it.
-    /// If it doesn't exist, creates an orphan node with just the object_id
+    /// If it doesn't exist, creates an orphan node with just the objectid
     /// and the specified label, ready to be upserted later with full properties.
     ///
     /// This is useful for streaming relationship import where relationships may reference
     /// nodes that haven't been imported yet.
-    pub fn get_or_create_node_by_object_id(&self, object_id: &str, label: &str) -> Result<i64> {
+    pub fn get_or_create_node_by_objectid(&self, objectid: &str, label: &str) -> Result<i64> {
         let storage = self
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.get_or_create_node_by_object_id(object_id, label)
+        storage.get_or_create_node_by_objectid(objectid, label)
     }
 
     /// Insert multiple relationships in a single transaction.
@@ -93,7 +93,7 @@ impl super::Database {
     /// Build an index of property values to node IDs for efficient batch lookups.
     ///
     /// This is useful when inserting relationships that reference nodes by a property value
-    /// (like object_id) rather than by database ID.
+    /// (like objectid) rather than by database ID.
     pub fn build_property_index(&self, property: &str) -> Result<HashMap<String, i64>> {
         let storage = self
             .write_conn
@@ -102,51 +102,51 @@ impl super::Database {
         storage.build_property_index(property)
     }
 
-    /// Get all relationships for a node by object_id (both incoming and outgoing).
+    /// Get all relationships for a node by objectid (both incoming and outgoing).
     ///
-    /// Returns (source_object_id, target_object_id, rel_type) tuples.
+    /// Returns (source_objectid, target_objectid, rel_type) tuples.
     /// This is more efficient than using Cypher queries for relationship retrieval.
-    pub fn get_node_relationships_by_object_id(
+    pub fn get_node_relationships_by_objectid(
         &self,
-        object_id: &str,
+        objectid: &str,
     ) -> Result<Vec<(String, String, String)>> {
         let storage = self
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.get_node_relationships_by_object_id(object_id)
+        storage.get_node_relationships_by_objectid(objectid)
     }
 
-    /// Get incoming connections to a node by object_id.
+    /// Get incoming connections to a node by objectid.
     ///
     /// Returns all nodes that have relationships pointing TO the specified node,
-    /// along with those relationships. Uses direct SQL with the object_id index
+    /// along with those relationships. Uses direct SQL with the objectid index
     /// for optimal performance O(degree) instead of O(N) for full scans.
     ///
     /// Returns `(Vec<Node>, Vec<Relationship>)` where nodes include both the target node
     /// and all source nodes of incoming relationships.
-    pub fn get_incoming_connections_by_object_id(
+    pub fn get_incoming_connections_by_objectid(
         &self,
-        object_id: &str,
+        objectid: &str,
     ) -> Result<(Vec<Node>, Vec<Relationship>)> {
         let storage = self.get_read_storage();
-        storage.get_incoming_connections_by_object_id(object_id)
+        storage.get_incoming_connections_by_objectid(objectid)
     }
 
-    /// Get outgoing connections from a node by object_id.
+    /// Get outgoing connections from a node by objectid.
     ///
     /// Returns all nodes that the specified node has relationships pointing TO,
-    /// along with those relationships. Uses direct SQL with the object_id index
+    /// along with those relationships. Uses direct SQL with the objectid index
     /// for optimal performance O(degree) instead of O(N) for full scans.
     ///
     /// Returns `(Vec<Node>, Vec<Relationship>)` where nodes include both the source node
     /// and all target nodes of outgoing relationships.
-    pub fn get_outgoing_connections_by_object_id(
+    pub fn get_outgoing_connections_by_objectid(
         &self,
-        object_id: &str,
+        objectid: &str,
     ) -> Result<(Vec<Node>, Vec<Relationship>)> {
         let storage = self.get_read_storage();
-        storage.get_outgoing_connections_by_object_id(object_id)
+        storage.get_outgoing_connections_by_objectid(objectid)
     }
 
     /// Get counts for all node labels in a single efficient query.
@@ -161,19 +161,19 @@ impl super::Database {
         storage.get_label_counts()
     }
 
-    /// Find outgoing relationships from a node by object_id.
+    /// Find outgoing relationships from a node by objectid.
     ///
-    /// Returns `(target_object_id, rel_type)` tuples for all outgoing relationships.
+    /// Returns `(target_objectid, rel_type)` tuples for all outgoing relationships.
     /// This is optimized for BFS traversal where we only need neighbor identifiers,
     /// not full node/relationship objects.
     ///
-    /// Uses the dedicated object_id column index for O(1) node lookup,
+    /// Uses the dedicated objectid column index for O(1) node lookup,
     /// then O(degree) for relationship retrieval.
-    pub fn find_outgoing_relationships_by_object_id(
+    pub fn find_outgoing_relationships_by_objectid(
         &self,
-        object_id: &str,
+        objectid: &str,
     ) -> Result<Vec<(String, String)>> {
         let storage = self.get_read_storage();
-        storage.find_outgoing_relationships_by_object_id(object_id)
+        storage.find_outgoing_relationships_by_objectid(objectid)
     }
 }

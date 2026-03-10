@@ -8,15 +8,15 @@ When using `MATCH...CREATE` to create relationships between existing nodes, Crus
 
 ```cypher
 -- Create two nodes
-CREATE (:Group {object_id: 'G1', name: 'Group1'})
-CREATE (:Group {object_id: 'G2', name: 'Group2'})
+CREATE (:Group {objectid: 'G1', name: 'Group1'})
+CREATE (:Group {objectid: 'G2', name: 'Group2'})
 
 -- Verify they exist (works)
-MATCH (g:Group {object_id: 'G1'}) RETURN g.object_id
+MATCH (g:Group {objectid: 'G1'}) RETURN g.objectid
 -- Returns: G1
 
 -- Try to create relationship between them
-MATCH (a:Group {object_id: 'G1'}), (b:Group {object_id: 'G2'})
+MATCH (a:Group {objectid: 'G1'}), (b:Group {objectid: 'G2'})
 CREATE (a)-[:MemberOf]->(b)
 ```
 
@@ -52,8 +52,8 @@ The planner also appears to treat CREATE after MATCH as a standalone statement r
 Use the direct relationship creation API instead of Cypher:
 
 ```rust
-let source_id = db.find_node_by_property("object_id", "G1").unwrap().unwrap();
-let target_id = db.find_node_by_property("object_id", "G2").unwrap().unwrap();
+let source_id = db.find_node_by_property("objectid", "G1").unwrap().unwrap();
+let target_id = db.find_node_by_property("objectid", "G2").unwrap().unwrap();
 db.insert_relationships_batch(&[(source_id, target_id, "MemberOf".to_string(), json!({}))]).unwrap();
 ```
 

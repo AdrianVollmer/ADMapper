@@ -159,9 +159,9 @@ use serde_json::json;
 
 // Batch insert nodes
 let nodes = vec![
-    (vec!["Person".to_string()], json!({"name": "Alice", "object_id": "alice-1"})),
-    (vec!["Person".to_string()], json!({"name": "Bob", "object_id": "bob-2"})),
-    (vec!["Company".to_string()], json!({"name": "Acme", "object_id": "acme-3"})),
+    (vec!["Person".to_string()], json!({"name": "Alice", "objectid": "alice-1"})),
+    (vec!["Person".to_string()], json!({"name": "Bob", "objectid": "bob-2"})),
+    (vec!["Company".to_string()], json!({"name": "Acme", "objectid": "acme-3"})),
 ];
 
 let node_ids = db.insert_nodes_batch(&nodes)?;
@@ -180,17 +180,17 @@ let edge_ids = db.insert_edges_batch(&relationships)?;
 Create indexes on frequently queried properties for better performance.
 
 ```rust
-// Create an index on object_id
-db.create_property_index("object_id")?;
+// Create an index on objectid
+db.create_property_index("objectid")?;
 
 // Queries using indexed properties are faster
-let result = db.execute("MATCH (n {object_id: 'alice-1'}) RETURN n")?;
+let result = db.execute("MATCH (n {objectid: 'alice-1'}) RETURN n")?;
 
 // List current indexes
 let indexes = db.list_property_indexes()?;
 
 // Remove an index
-db.drop_property_index("object_id")?;
+db.drop_property_index("objectid")?;
 ```
 
 ## Database Statistics

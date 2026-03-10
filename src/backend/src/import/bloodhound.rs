@@ -522,7 +522,7 @@ impl BloodHoundImporter {
 
     /// Mark high-value objects based on their SID.
     /// Sets is_highvalue=true for objects with well-known privileged RIDs.
-    fn mark_high_value(props: &mut serde_json::Map<String, JsonValue>, object_id: &str) {
+    fn mark_high_value(props: &mut serde_json::Map<String, JsonValue>, objectid: &str) {
         // Skip if already marked
         if props.contains_key("is_highvalue") {
             return;
@@ -531,7 +531,7 @@ impl BloodHoundImporter {
         // Check if the object's SID ends with a high-value RID
         let is_high_value = high_value_rids::ALL
             .iter()
-            .any(|rid| object_id.ends_with(rid));
+            .any(|rid| objectid.ends_with(rid));
 
         if is_high_value {
             props.insert("is_highvalue".to_string(), JsonValue::Bool(true));
@@ -540,7 +540,7 @@ impl BloodHoundImporter {
 
     /// Extract relationships from a BloodHound entity.
     fn extract_edges(&mut self, data_type: &str, entity: &JsonValue) -> Vec<DbEdge> {
-        let object_id = match entity.get("ObjectIdentifier").and_then(|v| v.as_str()) {
+        let objectid = match entity.get("ObjectIdentifier").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
             None => return Vec::new(),
         };
@@ -549,14 +549,14 @@ impl BloodHoundImporter {
         let node_type = self.normalize_type(data_type);
 
         let mut relationships = Vec::new();
-        self.extract_member_edges(entity, &object_id, &node_type, &mut relationships);
-        self.extract_session_edges(entity, &object_id, &node_type, &mut relationships);
-        self.extract_local_group_edges(entity, &object_id, &node_type, &mut relationships);
-        self.extract_ace_edges(entity, &object_id, &node_type, &mut relationships);
-        self.extract_containment_edges(entity, &object_id, &node_type, &mut relationships);
-        self.extract_delegation_edges(entity, &object_id, &node_type, &mut relationships);
-        self.extract_gpo_link_edges(entity, &object_id, &node_type, &mut relationships);
-        self.extract_trust_edges(entity, &object_id, &mut relationships);
+        self.extract_member_edges(entity, &objectid, &node_type, &mut relationships);
+        self.extract_session_edges(entity, &objectid, &node_type, &mut relationships);
+        self.extract_local_group_edges(entity, &objectid, &node_type, &mut relationships);
+        self.extract_ace_edges(entity, &objectid, &node_type, &mut relationships);
+        self.extract_containment_edges(entity, &objectid, &node_type, &mut relationships);
+        self.extract_delegation_edges(entity, &objectid, &node_type, &mut relationships);
+        self.extract_gpo_link_edges(entity, &objectid, &node_type, &mut relationships);
+        self.extract_trust_edges(entity, &objectid, &mut relationships);
         relationships
     }
 
@@ -564,7 +564,7 @@ impl BloodHoundImporter {
     fn extract_member_edges(
         &self,
         entity: &JsonValue,
-        object_id: &str,
+        objectid: &str,
         target_type: &str,
         relationships: &mut Vec<DbEdge>,
     ) {
@@ -576,7 +576,7 @@ impl BloodHoundImporter {
                 let member_type = member.get("ObjectType").and_then(|v| v.as_str());
                 relationships.push(DbEdge {
                     source: member_id.to_string(),
-                    target: object_id.to_string(),
+                    target: objectid.to_string(),
                     rel_type: "MemberOf".to_string(),
                     properties: JsonValue::Null,
                     source_type: member_type.map(String::from),
@@ -590,7 +590,7 @@ impl BloodHoundImporter {
     fn extract_session_edges(
         &self,
         entity: &JsonValue,
-        object_id: &str,
+        objectid: &str,
         target_type: &str,
         relationships: &mut Vec<DbEdge>,
     ) {
@@ -606,7 +606,7 @@ impl BloodHoundImporter {
                 if let Some(user_sid) = session.get("UserSID").and_then(|v| v.as_str()) {
                     relationships.push(DbEdge {
                         source: user_sid.to_string(),
-                        target: object_id.to_string(),
+                        target: objectid.to_string(),
                         rel_type: "HasSession".to_string(),
                         properties: JsonValue::Null,
                         source_type: Some("User".to_string()),
@@ -621,7 +621,7 @@ impl BloodHoundImporter {
     fn extract_local_group_edges(
         &self,
         entity: &JsonValue,
-        object_id: &str,
+        objectid: &str,
         target_type: &str,
         relationships: &mut Vec<DbEdge>,
     ) {
@@ -640,7 +640,7 @@ impl BloodHoundImporter {
                     let member_type = member.get("ObjectType").and_then(|v| v.as_str());
                     relationships.push(DbEdge {
                         source: member_id.to_string(),
-                        target: object_id.to_string(),
+                        target: objectid.to_string(),
                         rel_type: rel_type.to_string(),
                         properties: JsonValue::Null,
                         source_type: member_type.map(String::from),
@@ -655,7 +655,7 @@ impl BloodHoundImporter {
     fn extract_ace_edges(
         &self,
         entity: &JsonValue,
-        object_id: &str,
+        objectid: &str,
         target_type: &str,
         relationships: &mut Vec<DbEdge>,
     ) {
@@ -678,7 +678,7 @@ impl BloodHoundImporter {
 
             relationships.push(DbEdge {
                 source: principal_sid.to_string(),
-                target: object_id.to_string(),
+                target: objectid.to_string(),
                 rel_type: rel_type.to_string(),
                 properties: serde_json::json!({"inherited": is_inherited}),
                 source_type: principal_type.map(String::from),
@@ -691,7 +691,7 @@ impl BloodHoundImporter {
     fn extract_containment_edges(
         &self,
         entity: &JsonValue,
-        object_id: &str,
+        objectid: &str,
         target_type: &str,
         relationships: &mut Vec<DbEdge>,
     ) {
@@ -704,7 +704,7 @@ impl BloodHoundImporter {
                 let container_type = contained_by.get("ObjectType").and_then(|v| v.as_str());
                 relationships.push(DbEdge {
                     source: container_id.to_string(),
-                    target: object_id.to_string(),
+                    target: objectid.to_string(),
                     rel_type: "Contains".to_string(),
                     properties: JsonValue::Null,
                     source_type: container_type.map(String::from),
@@ -718,7 +718,7 @@ impl BloodHoundImporter {
     fn extract_delegation_edges(
         &self,
         entity: &JsonValue,
-        object_id: &str,
+        objectid: &str,
         source_type: &str,
         relationships: &mut Vec<DbEdge>,
     ) {
@@ -728,7 +728,7 @@ impl BloodHoundImporter {
                 if let Some(target_id) = delegate.get("ObjectIdentifier").and_then(|v| v.as_str()) {
                     let target_type = delegate.get("ObjectType").and_then(|v| v.as_str());
                     relationships.push(DbEdge {
-                        source: object_id.to_string(),
+                        source: objectid.to_string(),
                         target: target_id.to_string(),
                         rel_type: "AllowedToDelegate".to_string(),
                         properties: JsonValue::Null,
@@ -746,7 +746,7 @@ impl BloodHoundImporter {
                     let actor_type = actor.get("ObjectType").and_then(|v| v.as_str());
                     relationships.push(DbEdge {
                         source: actor_id.to_string(),
-                        target: object_id.to_string(),
+                        target: objectid.to_string(),
                         rel_type: "AllowedToAct".to_string(),
                         properties: JsonValue::Null,
                         source_type: actor_type.map(String::from),
@@ -761,7 +761,7 @@ impl BloodHoundImporter {
     fn extract_gpo_link_edges(
         &self,
         entity: &JsonValue,
-        object_id: &str,
+        objectid: &str,
         source_type: &str,
         relationships: &mut Vec<DbEdge>,
     ) {
@@ -771,7 +771,7 @@ impl BloodHoundImporter {
         for link in links {
             if let Some(gpo_id) = link.get("GUID").and_then(|v| v.as_str()) {
                 relationships.push(DbEdge {
-                    source: object_id.to_string(),
+                    source: objectid.to_string(),
                     target: gpo_id.to_string(),
                     rel_type: "GPLink".to_string(),
                     properties: JsonValue::Null,
@@ -786,7 +786,7 @@ impl BloodHoundImporter {
     fn extract_trust_edges(
         &mut self,
         entity: &JsonValue,
-        object_id: &str,
+        objectid: &str,
         relationships: &mut Vec<DbEdge>,
     ) {
         let Some(trusts) = entity.get("Trusts").and_then(|v| v.as_array()) else {
@@ -831,7 +831,7 @@ impl BloodHoundImporter {
             if trust_direction == 2 || trust_direction == 3 {
                 relationships.push(DbEdge {
                     source: target_sid.to_string(),
-                    target: object_id.to_string(),
+                    target: objectid.to_string(),
                     rel_type: "TrustedBy".to_string(),
                     properties: serde_json::json!({"direction": trust_direction}),
                     source_type: Some("Domain".to_string()),
@@ -841,7 +841,7 @@ impl BloodHoundImporter {
             // Bidirectional or inbound trust
             if trust_direction == 1 || trust_direction == 3 {
                 relationships.push(DbEdge {
-                    source: object_id.to_string(),
+                    source: objectid.to_string(),
                     target: target_sid.to_string(),
                     rel_type: "TrustedBy".to_string(),
                     properties: serde_json::json!({"direction": trust_direction}),

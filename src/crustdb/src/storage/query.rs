@@ -11,13 +11,13 @@ impl SqliteStorage {
     ///
     /// Searches for nodes where the JSON properties contain the specified key-value pair.
     /// Property names must contain only alphanumeric characters and underscores.
-    /// Optimized path for object_id which uses a dedicated indexed column.
+    /// Optimized path for objectid which uses a dedicated indexed column.
     pub fn find_node_by_property(&self, property: &str, value: &str) -> Result<Option<i64>> {
         validate_property_name(property)?;
 
-        // Use the dedicated object_id column for faster lookups
-        let query = if property == "object_id" {
-            "SELECT id FROM nodes WHERE object_id = ?1 LIMIT 1".to_string()
+        // Use the dedicated objectid column for faster lookups
+        let query = if property == "objectid" {
+            "SELECT id FROM nodes WHERE objectid = ?1 LIMIT 1".to_string()
         } else {
             format!(
                 "SELECT id FROM nodes WHERE json_extract(properties, '$.{}') = ?1 LIMIT 1",
@@ -119,7 +119,7 @@ impl SqliteStorage {
     }
 
     /// Find nodes where a property ends with a given suffix.
-    /// Used for pattern matching like `object_id ENDS WITH '-519'`.
+    /// Used for pattern matching like `objectid ENDS WITH '-519'`.
     pub fn find_nodes_by_property_suffix(
         &self,
         property: &str,
@@ -130,7 +130,7 @@ impl SqliteStorage {
     }
 
     /// Find nodes where a property starts with a given prefix.
-    /// Used for pattern matching like `object_id STARTS WITH 'S-1-5'`.
+    /// Used for pattern matching like `objectid STARTS WITH 'S-1-5'`.
     pub fn find_nodes_by_property_prefix(
         &self,
         property: &str,
@@ -211,16 +211,16 @@ impl SqliteStorage {
     ///
     /// Returns a HashMap from property value to node ID.
     /// Property names must contain only alphanumeric characters and underscores.
-    /// Optimized path for object_id which uses a dedicated indexed column.
+    /// Optimized path for objectid which uses a dedicated indexed column.
     pub fn build_property_index(
         &self,
         property: &str,
     ) -> Result<std::collections::HashMap<String, i64>> {
         validate_property_name(property)?;
 
-        // Use the dedicated object_id column for faster lookups
-        let query = if property == "object_id" {
-            "SELECT id, object_id FROM nodes WHERE object_id IS NOT NULL".to_string()
+        // Use the dedicated objectid column for faster lookups
+        let query = if property == "objectid" {
+            "SELECT id, objectid FROM nodes WHERE objectid IS NOT NULL".to_string()
         } else {
             format!(
                 "SELECT id, json_extract(properties, '$.{}') FROM nodes WHERE json_extract(properties, '$.{}') IS NOT NULL",
@@ -495,56 +495,56 @@ impl SqliteStorage {
         Ok(count as usize)
     }
 
-    /// Count incoming relationships to a node by object_id.
-    /// Uses the dedicated object_id column for efficient indexed lookup.
-    pub fn count_incoming_relationships_by_object_id(&self, object_id: &str) -> Result<usize> {
+    /// Count incoming relationships to a node by objectid.
+    /// Uses the dedicated objectid column for efficient indexed lookup.
+    pub fn count_incoming_relationships_by_objectid(&self, objectid: &str) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM relationships r \
              JOIN nodes n ON r.target_id = n.id \
-             WHERE n.object_id = ?1",
-            params![object_id],
+             WHERE n.objectid = ?1",
+            params![objectid],
             |row| row.get(0),
         )?;
         Ok(count as usize)
     }
 
-    /// Count outgoing relationships from a node by object_id.
-    /// Uses the dedicated object_id column for efficient indexed lookup.
-    pub fn count_outgoing_relationships_by_object_id(&self, object_id: &str) -> Result<usize> {
+    /// Count outgoing relationships from a node by objectid.
+    /// Uses the dedicated objectid column for efficient indexed lookup.
+    pub fn count_outgoing_relationships_by_objectid(&self, objectid: &str) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM relationships r \
              JOIN nodes n ON r.source_id = n.id \
-             WHERE n.object_id = ?1",
-            params![object_id],
+             WHERE n.objectid = ?1",
+            params![objectid],
             |row| row.get(0),
         )?;
         Ok(count as usize)
     }
 
-    /// Get all relationships for a node by object_id (both incoming and outgoing).
-    /// Returns (source_object_id, target_object_id, rel_type) tuples.
-    /// Uses the dedicated object_id column for efficient indexed lookup.
-    pub fn get_node_relationships_by_object_id(
+    /// Get all relationships for a node by objectid (both incoming and outgoing).
+    /// Returns (source_objectid, target_objectid, rel_type) tuples.
+    /// Uses the dedicated objectid column for efficient indexed lookup.
+    pub fn get_node_relationships_by_objectid(
         &self,
-        object_id: &str,
+        objectid: &str,
     ) -> Result<Vec<(String, String, String)>> {
         let mut relationships = Vec::new();
 
-        // Query for relationships where node is source or target, using dedicated object_id column
+        // Query for relationships where node is source or target, using dedicated objectid column
         let mut stmt = self.conn.prepare_cached(
             "SELECT
-                src.object_id AS src_id,
-                tgt.object_id AS tgt_id,
+                src.objectid AS src_id,
+                tgt.objectid AS tgt_id,
                 et.name AS rel_type
              FROM relationships e
              JOIN nodes src ON e.source_id = src.id
              JOIN nodes tgt ON e.target_id = tgt.id
              JOIN rel_types et ON e.type_id = et.id
-             WHERE src.object_id = ?1
-                OR tgt.object_id = ?1",
+             WHERE src.objectid = ?1
+                OR tgt.objectid = ?1",
         )?;
 
-        let rows = stmt.query_map(params![object_id], |row| {
+        let rows = stmt.query_map(params![objectid], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -559,26 +559,26 @@ impl SqliteStorage {
         Ok(relationships)
     }
 
-    /// Get incoming connections to a node by object_id.
+    /// Get incoming connections to a node by objectid.
     ///
     /// Returns all nodes that have relationships pointing TO the specified node,
-    /// along with those relationships. This uses direct SQL with the object_id index
+    /// along with those relationships. This uses direct SQL with the objectid index
     /// for optimal performance, avoiding full node scans.
     ///
     /// Returns (Vec<Node>, Vec<Relationship>) where nodes are the source nodes of
     /// incoming relationships, and relationships are the relationships.
-    pub fn get_incoming_connections_by_object_id(
+    pub fn get_incoming_connections_by_objectid(
         &self,
-        object_id: &str,
+        objectid: &str,
     ) -> Result<(Vec<Node>, Vec<Relationship>)> {
         use rusqlite::OptionalExtension;
 
-        // First find the target node's internal ID using the dedicated object_id column
+        // First find the target node's internal ID using the dedicated objectid column
         let target_id: Option<i64> = self
             .conn
             .query_row(
-                "SELECT id FROM nodes WHERE object_id = ?1",
-                params![object_id],
+                "SELECT id FROM nodes WHERE objectid = ?1",
+                params![objectid],
                 |row| row.get(0),
             )
             .optional()?;
@@ -669,26 +669,26 @@ impl SqliteStorage {
         Ok((nodes_map.into_values().collect(), relationships))
     }
 
-    /// Get outgoing connections from a node by object_id.
+    /// Get outgoing connections from a node by objectid.
     ///
     /// Returns all nodes that the specified node has relationships pointing TO,
-    /// along with those relationships. This uses direct SQL with the object_id index
+    /// along with those relationships. This uses direct SQL with the objectid index
     /// for optimal performance.
     ///
     /// Returns (Vec<Node>, Vec<Relationship>) where nodes are the target nodes of
     /// outgoing relationships, and relationships are the relationships.
-    pub fn get_outgoing_connections_by_object_id(
+    pub fn get_outgoing_connections_by_objectid(
         &self,
-        object_id: &str,
+        objectid: &str,
     ) -> Result<(Vec<Node>, Vec<Relationship>)> {
         use rusqlite::OptionalExtension;
 
-        // First find the source node's internal ID using the dedicated object_id column
+        // First find the source node's internal ID using the dedicated objectid column
         let source_id: Option<i64> = self
             .conn
             .query_row(
-                "SELECT id FROM nodes WHERE object_id = ?1",
-                params![object_id],
+                "SELECT id FROM nodes WHERE objectid = ?1",
+                params![objectid],
                 |row| row.get(0),
             )
             .optional()?;
@@ -801,28 +801,28 @@ impl SqliteStorage {
         Ok(types)
     }
 
-    /// Find outgoing relationships from a node by object_id.
+    /// Find outgoing relationships from a node by objectid.
     ///
-    /// Returns `(target_object_id, rel_type)` tuples for all outgoing relationships.
+    /// Returns `(target_objectid, rel_type)` tuples for all outgoing relationships.
     /// This is optimized for BFS traversal where we only need neighbor identifiers,
     /// not full node/relationship objects.
     ///
-    /// Uses the dedicated object_id column index for O(1) node lookup,
+    /// Uses the dedicated objectid column index for O(1) node lookup,
     /// then O(degree) for relationship retrieval.
-    pub fn find_outgoing_relationships_by_object_id(
+    pub fn find_outgoing_relationships_by_objectid(
         &self,
-        object_id: &str,
+        objectid: &str,
     ) -> Result<Vec<(String, String)>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT tgt.object_id, rt.name
+            "SELECT tgt.objectid, rt.name
              FROM relationships r
              JOIN nodes src ON r.source_id = src.id
              JOIN nodes tgt ON r.target_id = tgt.id
              JOIN rel_types rt ON r.type_id = rt.id
-             WHERE src.object_id = ?1",
+             WHERE src.objectid = ?1",
         )?;
 
-        let rows = stmt.query_map(params![object_id], |row| {
+        let rows = stmt.query_map(params![objectid], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
 

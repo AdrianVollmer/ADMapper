@@ -7,7 +7,7 @@ with property filters but no label filters.
 
 ## Problem
 
-Currently, when executing a pattern like `MATCH (a)-[r]->(b {object_id: '...'})`:
+Currently, when executing a pattern like `MATCH (a)-[r]->(b {objectid: '...'})`:
 
 1. The executor correctly flips traversal to start from the filtered target `b`
 2. But `scan_nodes()` in `pattern.rs` falls back to `scan_all_nodes()` because
@@ -75,7 +75,7 @@ Modify `scan_nodes()` to detect when:
 ### Benefits
 
 - General solution that improves ALL Cypher queries with indexed property filters
-- Works for any indexed property, not just `object_id`
+- Works for any indexed property, not just `objectid`
 - Maintains Cypher semantics while optimizing execution
 
 ### Complexity

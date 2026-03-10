@@ -79,7 +79,7 @@ impl KuzuDatabase {
         for node_type in Self::NODE_TYPES {
             let create_table = format!(
                 r#"CREATE NODE TABLE IF NOT EXISTS {}(
-                    object_id STRING PRIMARY KEY,
+                    objectid STRING PRIMARY KEY,
                     label STRING,
                     name STRING,
                     domain STRING,
@@ -194,7 +194,7 @@ impl KuzuDatabase {
             let table_name = Self::normalize_node_type(&node.label);
 
             // Extract common properties for dedicated columns
-            let object_id = Self::escape_string(&node.id);
+            let objectid = Self::escape_string(&node.id);
             let label = Self::escape_string(&node.name);
             let name = Self::extract_property_string(&node.properties, "name")
                 .map(|s| Self::escape_string(&s))
@@ -222,11 +222,11 @@ impl KuzuDatabase {
             let props_escaped = Self::escape_string(&props_str);
 
             let query = format!(
-                "CREATE (n:{} {{object_id: '{}', label: '{}', name: '{}', domain: '{}', \
+                "CREATE (n:{} {{objectid: '{}', label: '{}', name: '{}', domain: '{}', \
                  distinguishedname: '{}', enabled: {}, admincount: {}, samaccountname: '{}', \
                  description: '{}', operatingsystem: '{}', properties: '{}'}})",
                 table_name,
-                object_id,
+                objectid,
                 label,
                 name,
                 domain,
@@ -243,13 +243,13 @@ impl KuzuDatabase {
                 // Node might already exist, try merge instead
                 trace!("Create failed, trying merge: {}", e);
                 let merge_query = format!(
-                    "MERGE (n:{} {{object_id: '{}'}}) \
+                    "MERGE (n:{} {{objectid: '{}'}}) \
                      SET n.label = '{}', n.name = '{}', n.domain = '{}', \
                      n.distinguishedname = '{}', n.enabled = {}, n.admincount = {}, \
                      n.samaccountname = '{}', n.description = '{}', n.operatingsystem = '{}', \
                      n.properties = '{}'",
                     table_name,
-                    object_id,
+                    objectid,
                     label,
                     name,
                     domain,
@@ -268,12 +268,12 @@ impl KuzuDatabase {
         Ok(nodes.len())
     }
 
-    /// Find which table contains a node with the given object_id
-    fn find_node_type(&self, conn: &Connection<'_>, object_id: &str) -> Option<&'static str> {
-        let escaped_id = object_id.replace('\'', "''");
+    /// Find which table contains a node with the given objectid
+    fn find_node_type(&self, conn: &Connection<'_>, objectid: &str) -> Option<&'static str> {
+        let escaped_id = objectid.replace('\'', "''");
         for node_type in Self::NODE_TYPES {
             let query = format!(
-                "MATCH (n:{} {{object_id: '{}'}}) RETURN n.object_id LIMIT 1",
+                "MATCH (n:{} {{objectid: '{}'}}) RETURN n.objectid LIMIT 1",
                 node_type, escaped_id
             );
             if let Ok(result) = conn.query(&query) {
@@ -329,7 +329,7 @@ impl KuzuDatabase {
             };
 
             let query = format!(
-                "MATCH (a:{} {{object_id: '{}'}}), (b:{} {{object_id: '{}'}}) \
+                "MATCH (a:{} {{objectid: '{}'}}), (b:{} {{objectid: '{}'}}) \
                  CREATE (a)-[:Relationship {{rel_type: '{}', properties: '{}'}}]->(b)",
                 src_type, source, tgt_type, target, rel_type, props_escaped
             );
@@ -429,7 +429,7 @@ impl KuzuDatabase {
         // Query each node table
         for node_type in Self::NODE_TYPES {
             let query = format!(
-                "MATCH (n:{}) RETURN n.object_id, n.label, n.properties",
+                "MATCH (n:{}) RETURN n.objectid, n.label, n.properties",
                 node_type
             );
             if let Ok(result) = conn.query(&query) {
@@ -461,7 +461,7 @@ impl KuzuDatabase {
         for src_type in Self::NODE_TYPES {
             for tgt_type in Self::NODE_TYPES {
                 let query = format!(
-                    "MATCH (a:{})-[e:Relationship]->(b:{}) RETURN a.object_id, b.object_id, e.rel_type, e.properties",
+                    "MATCH (a:{})-[e:Relationship]->(b:{}) RETURN a.objectid, b.objectid, e.rel_type, e.properties",
                     src_type, tgt_type
                 );
                 if let Ok(result) = conn.query(&query) {
@@ -535,9 +535,9 @@ impl KuzuDatabase {
 
             let remaining = limit - nodes.len();
             let query = format!(
-                "MATCH (n:{}) WHERE lower(n.label) CONTAINS '{}' OR lower(n.object_id) CONTAINS '{}' \
+                "MATCH (n:{}) WHERE lower(n.label) CONTAINS '{}' OR lower(n.objectid) CONTAINS '{}' \
                  OR lower(n.name) CONTAINS '{}' \
-                 RETURN n.object_id, n.label, n.properties LIMIT {}",
+                 RETURN n.objectid, n.label, n.properties LIMIT {}",
                 node_type, query_escaped, query_escaped, query_escaped, remaining
             );
 
@@ -568,10 +568,10 @@ impl KuzuDatabase {
         let id_escaped = identifier.replace('\'', "''");
         let id_lower = id_escaped.to_lowercase();
 
-        // First try exact object_id match across all tables
+        // First try exact objectid match across all tables
         for node_type in Self::NODE_TYPES {
             let query = format!(
-                "MATCH (n:{}) WHERE n.object_id = '{}' RETURN n.object_id LIMIT 1",
+                "MATCH (n:{}) WHERE n.objectid = '{}' RETURN n.objectid LIMIT 1",
                 node_type, id_escaped
             );
             if let Ok(result) = conn.query(&query) {
@@ -588,7 +588,7 @@ impl KuzuDatabase {
         // Then try label match (case-insensitive) across all tables
         for node_type in Self::NODE_TYPES {
             let query = format!(
-                "MATCH (n:{}) WHERE lower(n.label) = '{}' RETURN n.object_id LIMIT 1",
+                "MATCH (n:{}) WHERE lower(n.label) = '{}' RETURN n.objectid LIMIT 1",
                 node_type, id_lower
             );
             if let Ok(result) = conn.query(&query) {
@@ -629,7 +629,7 @@ impl KuzuDatabase {
 
             // Use Cypher shortest path with typed nodes
             let query = format!(
-                "MATCH p = (a:{} {{object_id: '{}'}})-[e:Relationship* SHORTEST 1..20]->(b:{} {{object_id: '{}'}}) \
+                "MATCH p = (a:{} {{objectid: '{}'}})-[e:Relationship* SHORTEST 1..20]->(b:{} {{objectid: '{}'}}) \
                  RETURN nodes(p), relationships(p)",
                 from_type, from_escaped, to_type, to_escaped
             );
@@ -742,8 +742,8 @@ impl KuzuDatabase {
         // DA groups are in the Group table
         let query = format!(
             "MATCH p = (u:User)-[:Relationship*1..10]->(da:Group) \
-             WHERE da.object_id ENDS WITH '-512' {} \
-             RETURN u.object_id, u.label, length(p) as hops \
+             WHERE da.objectid ENDS WITH '-512' {} \
+             RETURN u.objectid, u.label, length(p) as hops \
              ORDER BY hops, u.label",
             exclude_clause
         );
@@ -792,8 +792,8 @@ impl KuzuDatabase {
         // Query each node table for the requested IDs
         for node_type in Self::NODE_TYPES {
             let query = format!(
-                "MATCH (n:{}) WHERE n.object_id IN [{}] \
-                 RETURN n.object_id, n.label, n.properties",
+                "MATCH (n:{}) WHERE n.objectid IN [{}] \
+                 RETURN n.objectid, n.label, n.properties",
                 node_type, id_set
             );
 
@@ -837,8 +837,8 @@ impl KuzuDatabase {
             for tgt_type in Self::NODE_TYPES {
                 let query = format!(
                     "MATCH (a:{})-[e:Relationship]->(b:{}) \
-                     WHERE a.object_id IN [{}] AND b.object_id IN [{}] \
-                     RETURN a.object_id, b.object_id, e.rel_type, e.properties",
+                     WHERE a.objectid IN [{}] AND b.objectid IN [{}] \
+                     RETURN a.objectid, b.objectid, e.rel_type, e.properties",
                     src_type, tgt_type, id_set, id_set
                 );
 
@@ -941,7 +941,7 @@ impl KuzuDatabase {
 
         for node_type in &node_types {
             let check_query = format!(
-                "MATCH (n:{} {{object_id: '{}'}}) RETURN n.object_id LIMIT 1",
+                "MATCH (n:{} {{objectid: '{}'}}) RETURN n.objectid LIMIT 1",
                 node_type, id_escaped
             );
             let result = conn.query(&check_query)?;
@@ -965,14 +965,14 @@ impl KuzuDatabase {
 
         // Count unique incoming NODES (not relationships - a node with multiple relationships to us counts as 1)
         let incoming_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})<-[:Relationship]-(other) RETURN count(DISTINCT other)",
+            "MATCH (n:{} {{objectid: '{}'}})<-[:Relationship]-(other) RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let incoming = self.extract_count(&conn.query(&incoming_query)?);
 
         // Count unique outgoing NODES
         let outgoing_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[:Relationship]->(other) RETURN count(DISTINCT other)",
+            "MATCH (n:{} {{objectid: '{}'}})-[:Relationship]->(other) RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let outgoing = self.extract_count(&conn.query(&outgoing_query)?);
@@ -980,21 +980,21 @@ impl KuzuDatabase {
         // Count unique admin_to NODES (outgoing admin relationships)
         let admin_types = "'AdminTo','GenericAll','GenericWrite','Owns','WriteDacl','WriteOwner','AllExtendedRights','ForceChangePassword','AddMember'";
         let admin_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[e:Relationship]->(other) WHERE e.rel_type IN [{}] RETURN count(DISTINCT other)",
+            "MATCH (n:{} {{objectid: '{}'}})-[e:Relationship]->(other) WHERE e.rel_type IN [{}] RETURN count(DISTINCT other)",
             node_type, id_escaped, admin_types
         );
         let admin_to = self.extract_count(&conn.query(&admin_query)?);
 
         // Count unique member_of NODES (outgoing MemberOf relationships)
         let memberof_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[e:Relationship]->(other) WHERE e.rel_type = 'MemberOf' RETURN count(DISTINCT other)",
+            "MATCH (n:{} {{objectid: '{}'}})-[e:Relationship]->(other) WHERE e.rel_type = 'MemberOf' RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let member_of = self.extract_count(&conn.query(&memberof_query)?);
 
         // Count unique member NODES (incoming MemberOf relationships)
         let members_query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})<-[e:Relationship]-(other) WHERE e.rel_type = 'MemberOf' RETURN count(DISTINCT other)",
+            "MATCH (n:{} {{objectid: '{}'}})<-[e:Relationship]-(other) WHERE e.rel_type = 'MemberOf' RETURN count(DISTINCT other)",
             node_type, id_escaped
         );
         let members = self.extract_count(&conn.query(&members_query)?);
@@ -1026,7 +1026,7 @@ impl KuzuDatabase {
 
         for node_type in &node_types {
             let check_query = format!(
-                "MATCH (n:{} {{object_id: '{}'}}) RETURN n.object_id LIMIT 1",
+                "MATCH (n:{} {{objectid: '{}'}}) RETURN n.objectid LIMIT 1",
                 node_type, id_escaped
             );
             let result = conn.query(&check_query)?;
@@ -1044,10 +1044,10 @@ impl KuzuDatabase {
         // Use variable-length path to find transitive membership
         // KuzuDB uses Relationship with rel_type property for relationships
         let query = format!(
-            "MATCH (n:{} {{object_id: '{}'}})-[e:Relationship* 1..20]->(g:Group) \
+            "MATCH (n:{} {{objectid: '{}'}})-[e:Relationship* 1..20]->(g:Group) \
              WHERE ALL(rel IN e WHERE rel.rel_type = 'MemberOf') \
-             AND g.object_id ENDS WITH '{}' \
-             RETURN g.object_id LIMIT 1",
+             AND g.objectid ENDS WITH '{}' \
+             RETURN g.objectid LIMIT 1",
             source_type, id_escaped, suffix_escaped
         );
 
@@ -1114,9 +1114,9 @@ impl KuzuDatabase {
         // Using typed tables: User -> Group path with MemberOf relationships
         let real_da_query = format!(
             "MATCH p = (u:User)-[:Relationship*1..10]->(da:Group) \
-             WHERE da.object_id ENDS WITH '{}' \
+             WHERE da.objectid ENDS WITH '{}' \
              AND ALL(e IN relationships(p) WHERE e.rel_type = 'MemberOf') \
-             RETURN DISTINCT u.object_id, u.label",
+             RETURN DISTINCT u.objectid, u.label",
             DOMAIN_ADMIN_SID_SUFFIX
         );
         let real_da_result = conn.query(&real_da_query)?;
@@ -1125,8 +1125,8 @@ impl KuzuDatabase {
         // Find "effective" DAs - users with any path to DA group
         let effective_da_query = format!(
             "MATCH p = (u:User)-[:Relationship*1..10]->(da:Group) \
-             WHERE da.object_id ENDS WITH '{}' \
-             RETURN DISTINCT u.object_id, u.label, min(length(p)) as hops",
+             WHERE da.objectid ENDS WITH '{}' \
+             RETURN DISTINCT u.objectid, u.label, min(length(p)) as hops",
             DOMAIN_ADMIN_SID_SUFFIX
         );
         let effective_result = conn.query(&effective_da_query)?;
@@ -1139,9 +1139,9 @@ impl KuzuDatabase {
             let (principal_id, reachable_count) = if id_pattern.starts_with('-') {
                 // Suffix match - these are domain-relative SIDs (Groups)
                 let query = format!(
-                    "MATCH (p:Group) WHERE p.object_id ENDS WITH '{}' \
+                    "MATCH (p:Group) WHERE p.objectid ENDS WITH '{}' \
                      OPTIONAL MATCH (p)-[:Relationship*1..5]->(target) \
-                     RETURN p.object_id, count(DISTINCT target)",
+                     RETURN p.objectid, count(DISTINCT target)",
                     id_pattern
                 );
                 match conn.query(&query) {
@@ -1164,9 +1164,9 @@ impl KuzuDatabase {
             } else {
                 // Exact SID match - well-known SIDs (Groups)
                 let query = format!(
-                    "MATCH (p:Group {{object_id: '{}'}}) \
+                    "MATCH (p:Group {{objectid: '{}'}}) \
                      OPTIONAL MATCH (p)-[:Relationship*1..5]->(target) \
-                     RETURN p.object_id, count(DISTINCT target)",
+                     RETURN p.objectid, count(DISTINCT target)",
                     id_pattern
                 );
                 match conn.query(&query) {

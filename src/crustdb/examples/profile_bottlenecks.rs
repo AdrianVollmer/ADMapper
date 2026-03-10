@@ -205,7 +205,7 @@ fn build_ad_like_graph(db: &Database, node_count: usize, edges_per_node: usize) 
         nodes.push((
             vec!["User".to_string()],
             serde_json::json!({
-                "object_id": format!("S-1-5-21-{}-{}", i / 1000, i),
+                "objectid": format!("S-1-5-21-{}-{}", i / 1000, i),
                 "name": format!("user{}@corp.local", i),
                 "enabled": i % 10 != 0,
                 "value": i % 1000,
@@ -217,7 +217,7 @@ fn build_ad_like_graph(db: &Database, node_count: usize, edges_per_node: usize) 
         nodes.push((
             vec!["Computer".to_string()],
             serde_json::json!({
-                "object_id": format!("S-1-5-21-{}-C{}", i / 1000, i),
+                "objectid": format!("S-1-5-21-{}-C{}", i / 1000, i),
                 "name": format!("COMP{}$", i),
                 "operatingsystem": "Windows Server 2019",
                 "value": i % 1000,
@@ -231,7 +231,7 @@ fn build_ad_like_graph(db: &Database, node_count: usize, edges_per_node: usize) 
         nodes.push((
             vec!["Group".to_string()],
             serde_json::json!({
-                "object_id": if is_da { "S-1-5-21-1234-512".to_string() } else { format!("S-1-5-21-{}-G{}", i / 1000, i) },
+                "objectid": if is_da { "S-1-5-21-1234-512".to_string() } else { format!("S-1-5-21-{}-G{}", i / 1000, i) },
                 "name": if is_da { "DOMAIN ADMINS@CORP.LOCAL".to_string() } else { format!("Group{}@corp.local", i) },
                 "value": i % 1000,
             }),
@@ -242,7 +242,7 @@ fn build_ad_like_graph(db: &Database, node_count: usize, edges_per_node: usize) 
         nodes.push((
             vec!["Domain".to_string()],
             serde_json::json!({
-                "object_id": format!("S-1-5-21-{}-D", i),
+                "objectid": format!("S-1-5-21-{}-D", i),
                 "name": format!("CORP{}.LOCAL", i),
                 "value": i % 1000,
             }),

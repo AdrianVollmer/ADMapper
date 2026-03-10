@@ -177,12 +177,12 @@ impl Database {
     /// This creates a SQLite expression index on `json_extract(properties, '$.property')`,
     /// which significantly speeds up queries that filter nodes by this property.
     ///
-    /// Common properties to index: `object_id`, `name`, etc.
+    /// Common properties to index: `objectid`, `name`, etc.
     ///
     /// # Example
     /// ```ignore
-    /// db.create_property_index("object_id")?;
-    /// // Now queries like MATCH (n {object_id: '...'}) will use the index
+    /// db.create_property_index("objectid")?;
+    /// // Now queries like MATCH (n {objectid: '...'}) will use the index
     /// ```
     pub fn create_property_index(&self, property: &str) -> Result<()> {
         let storage = self
@@ -563,9 +563,9 @@ mod tests {
         let db = Database::in_memory().unwrap();
 
         // Create two nodes separately
-        db.execute("CREATE (:Group {object_id: 'G1', name: 'Group1'})")
+        db.execute("CREATE (:Group {objectid: 'G1', name: 'Group1'})")
             .unwrap();
-        db.execute("CREATE (:Group {object_id: 'G2', name: 'Group2'})")
+        db.execute("CREATE (:Group {objectid: 'G2', name: 'Group2'})")
             .unwrap();
 
         let stats = db.stats().unwrap();
@@ -575,7 +575,7 @@ mod tests {
         // MATCH...CREATE should create a relationship between existing nodes, not new ones
         let result = db
             .execute(
-                "MATCH (a:Group {object_id: 'G1'}), (b:Group {object_id: 'G2'}) \
+                "MATCH (a:Group {objectid: 'G1'}), (b:Group {objectid: 'G2'}) \
                  CREATE (a)-[:MemberOf]->(b)",
             )
             .unwrap();
@@ -595,7 +595,7 @@ mod tests {
 
         // Verify the relationship connects the right nodes
         let verify = db
-            .execute("MATCH (a:Group {object_id: 'G1'})-[:MemberOf]->(b:Group) RETURN b.object_id")
+            .execute("MATCH (a:Group {objectid: 'G1'})-[:MemberOf]->(b:Group) RETURN b.objectid")
             .unwrap();
         assert_eq!(verify.rows.len(), 1);
     }
@@ -645,15 +645,15 @@ mod tests {
         let nodes = vec![
             (
                 vec!["Person".to_string()],
-                serde_json::json!({"name": "Alice", "object_id": "alice-1"}),
+                serde_json::json!({"name": "Alice", "objectid": "alice-1"}),
             ),
             (
                 vec!["Person".to_string()],
-                serde_json::json!({"name": "Bob", "object_id": "bob-2"}),
+                serde_json::json!({"name": "Bob", "objectid": "bob-2"}),
             ),
             (
                 vec!["Company".to_string()],
-                serde_json::json!({"name": "Acme", "object_id": "acme-3"}),
+                serde_json::json!({"name": "Acme", "objectid": "acme-3"}),
             ),
         ];
 
@@ -673,15 +673,15 @@ mod tests {
         let nodes = vec![
             (
                 vec!["Person".to_string()],
-                serde_json::json!({"name": "Alice", "object_id": "alice-1"}),
+                serde_json::json!({"name": "Alice", "objectid": "alice-1"}),
             ),
             (
                 vec!["Person".to_string()],
-                serde_json::json!({"name": "Bob", "object_id": "bob-2"}),
+                serde_json::json!({"name": "Bob", "objectid": "bob-2"}),
             ),
             (
                 vec!["Company".to_string()],
-                serde_json::json!({"name": "Acme", "object_id": "acme-3"}),
+                serde_json::json!({"name": "Acme", "objectid": "acme-3"}),
             ),
         ];
 
@@ -717,31 +717,31 @@ mod tests {
     fn test_property_index() {
         let db = Database::in_memory().unwrap();
 
-        // Create nodes with object_id property
+        // Create nodes with objectid property
         let nodes = vec![
             (
                 vec!["Person".to_string()],
-                serde_json::json!({"name": "Alice", "object_id": "alice-1"}),
+                serde_json::json!({"name": "Alice", "objectid": "alice-1"}),
             ),
             (
                 vec!["Person".to_string()],
-                serde_json::json!({"name": "Bob", "object_id": "bob-2"}),
+                serde_json::json!({"name": "Bob", "objectid": "bob-2"}),
             ),
         ];
 
         let node_ids = db.insert_nodes_batch(&nodes).unwrap();
 
         // Build property index
-        let index = db.build_property_index("object_id").unwrap();
+        let index = db.build_property_index("objectid").unwrap();
         assert_eq!(index.len(), 2);
         assert_eq!(index.get("alice-1"), Some(&node_ids[0]));
         assert_eq!(index.get("bob-2"), Some(&node_ids[1]));
 
         // Find node by property
-        let found = db.find_node_by_property("object_id", "alice-1").unwrap();
+        let found = db.find_node_by_property("objectid", "alice-1").unwrap();
         assert_eq!(found, Some(node_ids[0]));
 
-        let not_found = db.find_node_by_property("object_id", "nobody").unwrap();
+        let not_found = db.find_node_by_property("objectid", "nobody").unwrap();
         assert!(not_found.is_none());
     }
 
@@ -750,35 +750,35 @@ mod tests {
         let db = Database::in_memory().unwrap();
 
         // Create nodes first
-        db.execute("CREATE (n:Person {object_id: 'p1', name: 'Alice'})")
+        db.execute("CREATE (n:Person {objectid: 'p1', name: 'Alice'})")
             .unwrap();
-        db.execute("CREATE (n:Person {object_id: 'p2', name: 'Bob'})")
+        db.execute("CREATE (n:Person {objectid: 'p2', name: 'Bob'})")
             .unwrap();
 
         // Initially no property indexes
         assert!(db.list_property_indexes().unwrap().is_empty());
 
-        // Create index on object_id
-        db.create_property_index("object_id").unwrap();
-        assert!(db.has_property_index("object_id").unwrap());
+        // Create index on objectid
+        db.create_property_index("objectid").unwrap();
+        assert!(db.has_property_index("objectid").unwrap());
 
         // Index should be listed
         let indexes = db.list_property_indexes().unwrap();
-        assert_eq!(indexes, vec!["object_id"]);
+        assert_eq!(indexes, vec!["objectid"]);
 
         // Queries using the indexed property should still work correctly
         let result = db
-            .execute("MATCH (n {object_id: 'p1'}) RETURN n.name")
+            .execute("MATCH (n {objectid: 'p1'}) RETURN n.name")
             .unwrap();
         assert_eq!(result.rows.len(), 1);
 
         // Drop the index
-        assert!(db.drop_property_index("object_id").unwrap());
-        assert!(!db.has_property_index("object_id").unwrap());
+        assert!(db.drop_property_index("objectid").unwrap());
+        assert!(!db.has_property_index("objectid").unwrap());
 
         // Query still works after dropping index
         let result = db
-            .execute("MATCH (n {object_id: 'p2'}) RETURN n.name")
+            .execute("MATCH (n {objectid: 'p2'}) RETURN n.name")
             .unwrap();
         assert_eq!(result.rows.len(), 1);
     }
@@ -792,7 +792,7 @@ mod tests {
             .map(|i| {
                 (
                     vec!["TestNode".to_string()],
-                    serde_json::json!({"id": i, "object_id": format!("node-{}", i)}),
+                    serde_json::json!({"id": i, "objectid": format!("node-{}", i)}),
                 )
             })
             .collect();
@@ -812,7 +812,7 @@ mod tests {
         let placeholder = vec![(
             vec!["Base".to_string()],
             serde_json::json!({
-                "object_id": "test-user-1",
+                "objectid": "test-user-1",
                 "name": "test-user-1",
                 "placeholder": true
             }),
@@ -824,7 +824,7 @@ mod tests {
         let full_data = vec![(
             vec!["User".to_string()],
             serde_json::json!({
-                "object_id": "test-user-1",
+                "objectid": "test-user-1",
                 "name": "alice@corp.local",
                 "enabled": true,
                 "department": "Engineering"
@@ -842,30 +842,30 @@ mod tests {
 
         // Verify via Cypher query that properties were merged
         let result = db
-            .execute("MATCH (n {object_id: 'test-user-1'}) RETURN n.name, n.enabled, n.department")
+            .execute("MATCH (n {objectid: 'test-user-1'}) RETURN n.name, n.enabled, n.department")
             .unwrap();
         assert_eq!(result.rows.len(), 1);
     }
 
     #[test]
-    fn test_get_or_create_node_by_object_id() {
+    fn test_get_or_create_node_by_objectid() {
         let db = Database::in_memory().unwrap();
 
         // Create an orphan node
         let id1 = db
-            .get_or_create_node_by_object_id("orphan-1", "User")
+            .get_or_create_node_by_objectid("orphan-1", "User")
             .unwrap();
         assert!(id1 > 0);
 
-        // Same object_id should return same ID
+        // Same objectid should return same ID
         let id2 = db
-            .get_or_create_node_by_object_id("orphan-1", "Computer")
+            .get_or_create_node_by_objectid("orphan-1", "Computer")
             .unwrap();
         assert_eq!(id1, id2);
 
-        // Different object_id should create new node
+        // Different objectid should create new node
         let id3 = db
-            .get_or_create_node_by_object_id("orphan-2", "User")
+            .get_or_create_node_by_objectid("orphan-2", "User")
             .unwrap();
         assert_ne!(id1, id3);
 

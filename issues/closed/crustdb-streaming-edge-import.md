@@ -31,7 +31,7 @@ This allows edges to be inserted immediately:
 ### Challenge: Abstraction
 
 The unique key is domain-specific:
-- BloodHound uses `ObjectIdentifier` (stored as `object_id`)
+- BloodHound uses `ObjectIdentifier` (stored as `objectid`)
 - Other applications may use different properties
 
 CrustDB should remain a general-purpose Cypher database, not tied to BloodHound.
@@ -53,7 +53,7 @@ fn upsert_nodes(&self, nodes: &[DbNode], key_property: &str) -> Result<usize>;
 - Simpler API, but requires data transformation
 
 **Option C: Dedicated column**
-- Add an `object_id` column to the nodes table (schema v2)
+- Add an `objectid` column to the nodes table (schema v2)
 - Simple and fast, but BloodHound-specific
 - Not recommended for general-purpose database
 

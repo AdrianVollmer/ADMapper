@@ -86,7 +86,7 @@ fn build_e2e_graph(db: &Database) -> (usize, usize) {
         nodes.push((
             vec!["User".to_string()],
             serde_json::json!({
-                "object_id": format!("U_{}", i),
+                "objectid": format!("U_{}", i),
                 "name": format!("User{}", i),
                 "enabled": true,
             }),
@@ -94,7 +94,7 @@ fn build_e2e_graph(db: &Database) -> (usize, usize) {
     }
     for i in 0..group_count {
         let mut props = serde_json::json!({
-            "object_id": format!("G_{}", i),
+            "objectid": format!("G_{}", i),
             "name": format!("Group{}", i),
         });
         if i < 5 {
@@ -106,7 +106,7 @@ fn build_e2e_graph(db: &Database) -> (usize, usize) {
         nodes.push((
             vec!["Computer".to_string()],
             serde_json::json!({
-                "object_id": format!("C_{}", i),
+                "objectid": format!("C_{}", i),
                 "name": format!("Computer{}", i),
             }),
         ));
@@ -115,7 +115,7 @@ fn build_e2e_graph(db: &Database) -> (usize, usize) {
         nodes.push((
             vec!["OU".to_string()],
             serde_json::json!({
-                "object_id": format!("OU_{}", i),
+                "objectid": format!("OU_{}", i),
                 "name": format!("OrgUnit{}", i),
             }),
         ));
@@ -124,7 +124,7 @@ fn build_e2e_graph(db: &Database) -> (usize, usize) {
         nodes.push((
             vec!["Domain".to_string()],
             serde_json::json!({
-                "object_id": format!("D_{}", i),
+                "objectid": format!("D_{}", i),
                 "name": format!("Domain{}", i),
             }),
         ));
@@ -139,11 +139,11 @@ fn build_e2e_graph(db: &Database) -> (usize, usize) {
         start.elapsed()
     );
 
-    // Build lookup by object_id
+    // Build lookup by objectid
     let mut oid_to_id: std::collections::HashMap<String, i64> =
         std::collections::HashMap::with_capacity(node_ids.len());
     for (i, (_, props)) in nodes.iter().enumerate() {
-        if let Some(oid) = props.get("object_id").and_then(|v| v.as_str()) {
+        if let Some(oid) = props.get("objectid").and_then(|v| v.as_str()) {
             oid_to_id.insert(oid.to_string(), node_ids[i]);
         }
     }

@@ -256,7 +256,7 @@ pub trait DatabaseBackend: Send + Sync {
     }
 
     /// Find the first group matching a SID suffix that the node is a member of.
-    /// Returns the group's object_id if found.
+    /// Returns the group's objectid if found.
     ///
     /// # Performance Warning
     /// The default implementation loads ALL nodes and ALL relationships into memory.

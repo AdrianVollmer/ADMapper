@@ -54,14 +54,14 @@ impl SqliteStorage {
     /// Insert a node into the database.
     pub fn insert_node(&self, labels: &[String], properties: &serde_json::Value) -> Result<i64> {
         let props_json = serde_json::to_string(properties)?;
-        // Extract object_id from properties for the dedicated column
-        let object_id = properties
-            .get("object_id")
+        // Extract objectid from properties for the dedicated column
+        let objectid = properties
+            .get("objectid")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         self.conn.execute(
-            "INSERT INTO nodes (object_id, properties) VALUES (?1, jsonb(?2))",
-            params![object_id, props_json],
+            "INSERT INTO nodes (objectid, properties) VALUES (?1, jsonb(?2))",
+            params![objectid, props_json],
         )?;
         let node_id = self.conn.last_insert_rowid();
 
@@ -138,18 +138,18 @@ impl SqliteStorage {
         // Insert nodes using prepared statement
         {
             let mut node_stmt =
-                tx.prepare("INSERT INTO nodes (object_id, properties) VALUES (?1, jsonb(?2))")?;
+                tx.prepare("INSERT INTO nodes (objectid, properties) VALUES (?1, jsonb(?2))")?;
             let mut label_stmt =
                 tx.prepare("INSERT INTO node_label_map (node_id, label_id) VALUES (?1, ?2)")?;
 
             for (labels, properties) in nodes {
                 let props_json = serde_json::to_string(properties)?;
-                // Extract object_id from properties for the dedicated column
-                let object_id = properties
-                    .get("object_id")
+                // Extract objectid from properties for the dedicated column
+                let objectid = properties
+                    .get("objectid")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
-                node_stmt.execute(params![object_id, props_json])?;
+                node_stmt.execute(params![objectid, props_json])?;
                 let node_id = tx.last_insert_rowid();
                 node_ids.push(node_id);
 
@@ -167,7 +167,7 @@ impl SqliteStorage {
 
     /// Upsert multiple nodes in a single transaction.
     ///
-    /// If a node with the same object_id already exists, its properties are merged
+    /// If a node with the same objectid already exists, its properties are merged
     /// (new properties are added, existing properties are updated) rather than
     /// replaced entirely. Labels are also merged.
     ///
@@ -216,27 +216,27 @@ impl SqliteStorage {
         // If incoming data is not a placeholder, remove the placeholder property from existing node
         {
             let mut upsert_stmt = tx.prepare(
-                "INSERT INTO nodes (object_id, properties) VALUES (?1, jsonb(?2))
-                 ON CONFLICT(object_id) DO UPDATE SET
+                "INSERT INTO nodes (objectid, properties) VALUES (?1, jsonb(?2))
+                 ON CONFLICT(objectid) DO UPDATE SET
                    properties = CASE
                      WHEN json_extract(?2, '$.placeholder') = 1 THEN jsonb(json_patch(json(properties), json(?2)))
                      ELSE jsonb(json_remove(json_patch(json(properties), json(?2)), '$.placeholder'))
                    END",
             )?;
-            let mut get_id_stmt = tx.prepare("SELECT id FROM nodes WHERE object_id = ?1")?;
+            let mut get_id_stmt = tx.prepare("SELECT id FROM nodes WHERE objectid = ?1")?;
             let mut label_stmt = tx.prepare(
                 "INSERT OR IGNORE INTO node_label_map (node_id, label_id) VALUES (?1, ?2)",
             )?;
 
             for (labels, properties) in nodes {
                 let props_json = serde_json::to_string(properties)?;
-                // Extract object_id from properties for the dedicated column
-                let object_id = properties
-                    .get("object_id")
+                // Extract objectid from properties for the dedicated column
+                let objectid = properties
+                    .get("objectid")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                if let Some(ref oid) = object_id {
+                if let Some(ref oid) = objectid {
                     upsert_stmt.execute(params![oid, props_json])?;
                     // Get the node ID (either newly inserted or existing)
                     let node_id: i64 = get_id_stmt.query_row(params![oid], |row| row.get(0))?;
@@ -249,9 +249,9 @@ impl SqliteStorage {
                         }
                     }
                 } else {
-                    // No object_id, fall back to regular insert
+                    // No objectid, fall back to regular insert
                     tx.execute(
-                        "INSERT INTO nodes (object_id, properties) VALUES (NULL, jsonb(?1))",
+                        "INSERT INTO nodes (objectid, properties) VALUES (NULL, jsonb(?1))",
                         params![props_json],
                     )?;
                     let node_id = tx.last_insert_rowid();
@@ -270,18 +270,18 @@ impl SqliteStorage {
         Ok(node_ids)
     }
 
-    /// Get or create a node by object_id, returning its internal ID.
+    /// Get or create a node by objectid, returning its internal ID.
     ///
     /// If the node exists, returns its ID without modifying it.
-    /// If it doesn't exist, creates an orphan node with just the object_id
+    /// If it doesn't exist, creates an orphan node with just the objectid
     /// and the specified label, ready to be upserted later with full properties.
-    pub fn get_or_create_node_by_object_id(&self, object_id: &str, label: &str) -> Result<i64> {
+    pub fn get_or_create_node_by_objectid(&self, objectid: &str, label: &str) -> Result<i64> {
         // Try to find existing node
         if let Some(id) = self
             .conn
             .query_row(
-                "SELECT id FROM nodes WHERE object_id = ?1",
-                params![object_id],
+                "SELECT id FROM nodes WHERE objectid = ?1",
+                params![objectid],
                 |row| row.get(0),
             )
             .optional()?
@@ -291,15 +291,15 @@ impl SqliteStorage {
 
         // Create orphan node with minimal properties
         let props = serde_json::json!({
-            "object_id": object_id,
-            "name": object_id,
+            "objectid": objectid,
+            "name": objectid,
             "placeholder": true
         });
         let props_json = serde_json::to_string(&props)?;
 
         self.conn.execute(
-            "INSERT INTO nodes (object_id, properties) VALUES (?1, jsonb(?2))",
-            params![object_id, props_json],
+            "INSERT INTO nodes (objectid, properties) VALUES (?1, jsonb(?2))",
+            params![objectid, props_json],
         )?;
         let node_id = self.conn.last_insert_rowid();
 

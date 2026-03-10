@@ -426,12 +426,12 @@ mod tests {
         let storage = SqliteStorage::in_memory().unwrap();
 
         // Create a node with a valid property
-        let props = serde_json::json!({"object_id": "test123"});
+        let props = serde_json::json!({"objectid": "test123"});
         storage.insert_node(&["Test".to_string()], &props).unwrap();
 
         // Valid property names should work
         assert!(storage
-            .find_node_by_property("object_id", "test123")
+            .find_node_by_property("objectid", "test123")
             .is_ok());
         assert!(storage.find_node_by_property("valid_name", "value").is_ok());
         assert!(storage.find_node_by_property("name123", "value").is_ok());
@@ -447,7 +447,7 @@ mod tests {
             .is_err());
 
         // Same validation for build_property_index
-        assert!(storage.build_property_index("object_id").is_ok());
+        assert!(storage.build_property_index("objectid").is_ok());
         assert!(storage.build_property_index("").is_err());
         assert!(storage.build_property_index("name'--").is_err());
     }
@@ -461,15 +461,15 @@ mod tests {
         assert!(indexes.is_empty());
 
         // Create an index
-        storage.create_property_index("object_id").unwrap();
-        assert!(storage.has_property_index("object_id").unwrap());
+        storage.create_property_index("objectid").unwrap();
+        assert!(storage.has_property_index("objectid").unwrap());
 
         // List should show it
         let indexes = storage.list_property_indexes().unwrap();
-        assert_eq!(indexes, vec!["object_id"]);
+        assert_eq!(indexes, vec!["objectid"]);
 
         // Creating same index again is a no-op
-        storage.create_property_index("object_id").unwrap();
+        storage.create_property_index("objectid").unwrap();
         let indexes = storage.list_property_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
 
@@ -477,15 +477,15 @@ mod tests {
         storage.create_property_index("name").unwrap();
         let indexes = storage.list_property_indexes().unwrap();
         assert_eq!(indexes.len(), 2);
-        assert!(indexes.contains(&"object_id".to_string()));
+        assert!(indexes.contains(&"objectid".to_string()));
         assert!(indexes.contains(&"name".to_string()));
 
         // Drop an index
-        assert!(storage.drop_property_index("object_id").unwrap());
-        assert!(!storage.has_property_index("object_id").unwrap());
+        assert!(storage.drop_property_index("objectid").unwrap());
+        assert!(!storage.has_property_index("objectid").unwrap());
 
         // Drop non-existent index returns false
-        assert!(!storage.drop_property_index("object_id").unwrap());
+        assert!(!storage.drop_property_index("objectid").unwrap());
 
         // Invalid property names should be rejected
         assert!(storage.create_property_index("").is_err());
@@ -500,7 +500,7 @@ mod tests {
         let orphans = vec![(
             vec!["Base".to_string()],
             serde_json::json!({
-                "object_id": "S-1-5-21-TEST",
+                "objectid": "S-1-5-21-TEST",
                 "name": "S-1-5-21-TEST",
                 "placeholder": true
             }),
@@ -520,7 +520,7 @@ mod tests {
         let full_nodes = vec![(
             vec!["User".to_string()],
             serde_json::json!({
-                "object_id": "S-1-5-21-TEST",
+                "objectid": "S-1-5-21-TEST",
                 "name": "Full User Name",
                 "displayname": "Test User"
             }),
@@ -554,7 +554,7 @@ mod tests {
         let first = vec![(
             vec!["Base".to_string()],
             serde_json::json!({
-                "object_id": "PLACEHOLDER-TEST",
+                "objectid": "PLACEHOLDER-TEST",
                 "name": "First Name",
                 "placeholder": true
             }),
@@ -565,7 +565,7 @@ mod tests {
         let second = vec![(
             vec!["Other".to_string()],
             serde_json::json!({
-                "object_id": "PLACEHOLDER-TEST",
+                "objectid": "PLACEHOLDER-TEST",
                 "displayname": "Display",
                 "placeholder": true
             }),
@@ -586,26 +586,26 @@ mod tests {
     }
 
     #[test]
-    fn test_find_outgoing_relationships_by_object_id() {
+    fn test_find_outgoing_relationships_by_objectid() {
         let storage = SqliteStorage::in_memory().unwrap();
 
-        // Create nodes with object_id
+        // Create nodes with objectid
         let alice_id = storage
             .insert_node(
                 &["Person".to_string()],
-                &serde_json::json!({"object_id": "alice-1", "name": "Alice"}),
+                &serde_json::json!({"objectid": "alice-1", "name": "Alice"}),
             )
             .unwrap();
         let bob_id = storage
             .insert_node(
                 &["Person".to_string()],
-                &serde_json::json!({"object_id": "bob-2", "name": "Bob"}),
+                &serde_json::json!({"objectid": "bob-2", "name": "Bob"}),
             )
             .unwrap();
         let charlie_id = storage
             .insert_node(
                 &["Person".to_string()],
-                &serde_json::json!({"object_id": "charlie-3", "name": "Charlie"}),
+                &serde_json::json!({"objectid": "charlie-3", "name": "Charlie"}),
             )
             .unwrap();
 
@@ -623,7 +623,7 @@ mod tests {
 
         // Find outgoing relationships from alice
         let alice_rels = storage
-            .find_outgoing_relationships_by_object_id("alice-1")
+            .find_outgoing_relationships_by_objectid("alice-1")
             .unwrap();
         assert_eq!(alice_rels.len(), 2);
 
@@ -634,20 +634,20 @@ mod tests {
 
         // Find outgoing relationships from bob
         let bob_rels = storage
-            .find_outgoing_relationships_by_object_id("bob-2")
+            .find_outgoing_relationships_by_objectid("bob-2")
             .unwrap();
         assert_eq!(bob_rels.len(), 1);
         assert_eq!(bob_rels[0], ("charlie-3".to_string(), "KNOWS".to_string()));
 
         // Find outgoing relationships from charlie (none)
         let charlie_rels = storage
-            .find_outgoing_relationships_by_object_id("charlie-3")
+            .find_outgoing_relationships_by_objectid("charlie-3")
             .unwrap();
         assert!(charlie_rels.is_empty());
 
         // Non-existent node returns empty
         let nobody_rels = storage
-            .find_outgoing_relationships_by_object_id("nobody")
+            .find_outgoing_relationships_by_objectid("nobody")
             .unwrap();
         assert!(nobody_rels.is_empty());
     }
