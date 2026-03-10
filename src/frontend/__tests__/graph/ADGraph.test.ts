@@ -176,7 +176,7 @@ describe("relationship curvatures", () => {
     expect(curvatures[1]).toBe(0.2);
   });
 
-  it("distributes curvatures evenly for multiple parallel relationships", () => {
+  it("collapses multiple parallel relationships into one representative edge", () => {
     const data: RawADGraph = {
       nodes: [
         { id: "a", name: "A", type: "User" },
@@ -191,15 +191,18 @@ describe("relationship curvatures", () => {
 
     const graph = loadGraph(data);
     const relationships = graph.edges();
-    expect(relationships).toHaveLength(3);
+    // Parallel edges in the same direction are collapsed into one
+    expect(relationships).toHaveLength(1);
 
-    const curvatures = relationships.map((e) => graph.getEdgeAttribute(e, "curvature"));
-    // All should be different
-    expect(new Set(curvatures).size).toBe(3);
-    // All should use curvedArrow type
-    for (const e of relationships) {
-      expect(graph.getEdgeAttribute(e, "type")).toBe("curvedArrow");
-    }
+    const edge = relationships[0]!;
+    // Representative edge carries all collapsed types
+    const collapsedTypes = graph.getEdgeAttribute(edge, "collapsedTypes") as string[];
+    expect(collapsedTypes).toHaveLength(3);
+    expect(collapsedTypes).toContain("MemberOf");
+    expect(collapsedTypes).toContain("GenericAll");
+    expect(collapsedTypes).toContain("WriteDacl");
+    // Label shows "+N" suffix
+    expect(graph.getEdgeAttribute(edge, "label")).toBe("MemberOf +2");
   });
 
   it("handles self-loops", () => {
