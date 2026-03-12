@@ -13,6 +13,7 @@
 import { escapeHtml } from "../utils/html";
 import { executeQuery, getQueryErrorMessage, QueryAbortedError } from "../utils/query";
 import { loadGraphData } from "./graph-view";
+import { api } from "../api/client";
 import type { RawADGraph } from "../graph/types";
 
 /** Tab identifiers */
@@ -537,12 +538,7 @@ async function loadChokePoints(): Promise<void> {
   renderModal();
 
   try {
-    const response = await fetch("/api/graph/choke-points");
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ message: response.statusText }));
-      throw new Error(errorData.message || `HTTP ${response.status}`);
-    }
-    const data = (await response.json()) as ChokePointsData;
+    const data = await api.get<ChokePointsData>("/api/graph/choke-points");
     chokePointsState = { loading: false, error: null, data };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load choke points";

@@ -397,15 +397,8 @@ async function loadDirectory(path?: string): Promise<void> {
   listEl.innerHTML = '<div class="text-center py-4 text-gray-400">Loading...</div>';
 
   try {
-    const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : "/api/browse";
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || "Failed to browse directory");
-    }
-
-    const data: BrowseResponse = await response.json();
+    const browseUrl = path ? `/api/browse?path=${encodeURIComponent(path)}` : "/api/browse";
+    const data = await api.get<BrowseResponse>(browseUrl);
     currentBrowsePath = data.current;
     currentParentPath = data.parent;
 

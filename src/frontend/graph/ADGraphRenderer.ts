@@ -21,24 +21,6 @@ import { isNodeCollapsed, getHiddenChildCount, getHiddenNodeIds, toggleNodeColla
 import { getLabelParts } from "./label-visibility";
 import { getFixedNodeSizes, setFixedNodeSizesCallback } from "../components/settings";
 
-/**
- * Check if canvas blur filter is supported.
- * Some webviews (e.g., Tauri on certain platforms) don't support it properly.
- */
-const isBlurFilterSupported = (() => {
-  try {
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return false;
-
-    // Try to set a blur filter
-    ctx.filter = "blur(1px)";
-    // Check if it was actually set (unsupported browsers may ignore it or set it to "none")
-    return ctx.filter === "blur(1px)";
-  } catch {
-    return false;
-  }
-})();
 
 export interface RendererOptions {
   /** Container element or selector */
@@ -215,28 +197,21 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
     // Calculate total width for centering
     const clearWidth = parts.clear ? context.measureText(parts.clear).width : 0;
-    const blurredText = parts.blurred ? (isBlurFilterSupported ? parts.blurred : "#".repeat(parts.blurred.length)) : "";
-    const blurredWidth = blurredText ? context.measureText(blurredText).width : 0;
+    const blurredWidth = parts.blurred ? context.measureText(parts.blurred).width : 0;
     const totalWidth = clearWidth + blurredWidth;
     let x = data.x - totalWidth / 2;
 
-    // Draw clear part (no blur)
+    // Draw clear part
     if (parts.clear) {
       context.textAlign = "left";
       context.fillText(parts.clear, x, y);
       x += clearWidth;
     }
 
-    // Draw blurred part with blur filter (or '#' fallback for Tauri)
+    // Draw masked part (already '#' characters from getLabelParts)
     if (parts.blurred) {
-      context.save();
-      if (isBlurFilterSupported) {
-        context.filter = "blur(3px)";
-      }
       context.textAlign = "left";
-      const text = blurredText;
-      context.fillText(text, x, y);
-      context.restore();
+      context.fillText(parts.blurred, x, y);
     }
 
     // Draw collapse badge if node is collapsed
