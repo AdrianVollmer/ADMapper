@@ -34,6 +34,7 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import FrameType
+from typing import Any
 
 # Add lib directory to path
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -124,6 +125,8 @@ class TestSuite:
 
     backend: str
     results: list[TestResult] = field(default_factory=list)
+    # Query counts from consistency tests, keyed by query ID
+    query_counts: dict[str, int] = field(default_factory=dict)
 
     @property
     def total(self) -> int:
@@ -271,6 +274,7 @@ class E2ETestRunner:
             ("Choke Points", runner.test_choke_points),
             ("Shortest Path", runner.test_shortest_path),
             ("Cache and Settings", runner.test_cache_and_settings),
+            ("Query Consistency", runner.test_query_consistency),
             ("Performance", runner.test_performance),
         ]
 
@@ -292,6 +296,9 @@ class E2ETestRunner:
                     duration_ms=0,
                     message=str(e),
                 ))
+
+        # Store query consistency counts
+        suite.query_counts = runner.query_counts
 
         # Stop server
         stop_server(self.server_process, self.logger)
@@ -577,13 +584,16 @@ proof::before {
                     "passed": result.passed,
                     "duration_ms": result.duration_ms,
                 }
-            current_summary["backends"][suite.backend] = {
+            backend_data: dict[str, Any] = {
                 "total": suite.total,
                 "passed": suite.passed,
                 "failed": suite.failed,
                 "duration_ms": suite.total_duration_ms,
                 "tests": tests,
             }
+            if suite.query_counts:
+                backend_data["query_counts"] = suite.query_counts
+            current_summary["backends"][suite.backend] = backend_data
 
         # Save JSON summary for future comparisons
         summary_file = self.report_dir / "summary.json"
@@ -954,6 +964,76 @@ proof::before {
 </body>
 </html>'''
 
+    def _compare_query_counts(self, suites: list[TestSuite]) -> list[TestResult]:
+        """Compare query counts across backends.
+
+        Every query that succeeded on multiple backends must return the same
+        count. Mismatches indicate a backend-specific bug.
+        """
+        results: list[TestResult] = []
+
+        # Collect all query IDs across backends
+        all_query_ids: set[str] = set()
+        for suite in suites:
+            all_query_ids.update(suite.query_counts.keys())
+
+        if not all_query_ids:
+            self.logger.info("No query consistency data to compare")
+            return results
+
+        self.logger.info("=" * 42)
+        self.logger.info("Cross-backend query consistency")
+        self.logger.info("=" * 42)
+
+        # Suites that have consistency data
+        suites_with_data = [s for s in suites if s.query_counts]
+        if len(suites_with_data) < 2:
+            self.logger.info("Need at least 2 backends with data for comparison")
+            return results
+
+        mismatches = 0
+        matches = 0
+
+        for query_id in sorted(all_query_ids):
+            # Collect counts from each backend that ran this query
+            counts: dict[str, int] = {}
+            for suite in suites_with_data:
+                if query_id in suite.query_counts:
+                    counts[suite.backend] = suite.query_counts[query_id]
+
+            if len(counts) < 2:
+                # Only one backend ran this query, skip comparison
+                continue
+
+            values = list(counts.values())
+            all_equal = all(v == values[0] for v in values)
+
+            counts_str = ", ".join(f"{b}={c}" for b, c in counts.items())
+
+            if all_equal:
+                matches += 1
+                log_pass(self.logger, f"  {query_id}: {counts_str}")
+                results.append(TestResult(
+                    name=f"Cross-backend: {query_id}",
+                    passed=True,
+                    duration_ms=0,
+                    message="",
+                    proof=counts_str,
+                ))
+            else:
+                mismatches += 1
+                log_fail(self.logger, f"  {query_id}: MISMATCH {counts_str}")
+                results.append(TestResult(
+                    name=f"Cross-backend: {query_id}",
+                    passed=False,
+                    duration_ms=0,
+                    message=f"Count mismatch: {counts_str}",
+                    proof=counts_str,
+                ))
+
+        self.logger.info(f"Cross-backend: {matches} matched, {mismatches} mismatched")
+        return results
+
     def run(self, backends: list[str]) -> int:
         """Run tests for specified backends."""
         self.logger.info("ADMapper E2E Test Suite")
@@ -974,6 +1054,17 @@ proof::before {
             suites.append(suite)
             if suite.failed > 0:
                 overall_failed = True
+
+        # Cross-backend query consistency comparison
+        if len(suites) > 1:
+            comparison_results = self._compare_query_counts(suites)
+            if comparison_results:
+                # Add comparison results to a virtual "cross-backend" suite
+                comparison_suite = TestSuite(backend="cross-backend")
+                comparison_suite.results = comparison_results
+                suites.append(comparison_suite)
+                if comparison_suite.failed > 0:
+                    overall_failed = True
 
         # Generate summary report
         self._generate_summary_report(suites)

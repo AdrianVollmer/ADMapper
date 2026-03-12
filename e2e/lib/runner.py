@@ -43,6 +43,8 @@ class TestRunner:
         self.logger = logger
         self.backend = backend
         self._expected_stats: dict[str, Any] | None = None
+        # Populated by test_query_consistency() for cross-backend comparison
+        self.query_counts: dict[str, int] = {}
 
     @property
     def expected_stats(self) -> dict[str, Any]:
@@ -1337,5 +1339,119 @@ class TestRunner:
             return True, "", proof
 
         results.append(self._run_test("Settings API works", check_settings))
+
+        return results
+
+    # =========================================================================
+    # Query Consistency Tests (cross-backend comparison)
+    # =========================================================================
+
+    # Additional queries not in builtin-queries.ts (from insights.ts and
+    # high-value path analysis). These are the only queries defined here;
+    # all built-in queries are parsed from the frontend source files.
+    EXTRA_CONSISTENCY_QUERIES: list[tuple[str, str]] = [
+        (
+            "insights/effective-domain-admins",
+            "MATCH (u:User)-[*1..10]->(g:Group) "
+            "WHERE g.objectid ENDS WITH '-512' "
+            "RETURN DISTINCT u",
+        ),
+        (
+            "insights/real-domain-admins",
+            "MATCH (u:User)-[:MemberOf*1..10]->(g:Group) "
+            "WHERE g.objectid ENDS WITH '-512' "
+            "RETURN DISTINCT u",
+        ),
+    ]
+
+    @staticmethod
+    def _parse_builtin_queries(project_root: Path) -> list[tuple[str, str]]:
+        """Parse queries from the frontend builtin-queries.ts source file.
+
+        This ensures the e2e test always uses the same queries as the UI,
+        with no duplication.
+        """
+        import re
+
+        queries_file = project_root / "src" / "frontend" / "components" / "queries" / "builtin-queries.ts"
+        content = queries_file.read_text()
+
+        results: list[tuple[str, str]] = []
+
+        # Extract query objects: { id: "...", ... query: `...` }
+        # Match id-to-query spans that do NOT contain another "id:" in between
+        # (which would indicate crossing into a different object).
+        pattern = re.compile(
+            r'id:\s*"([^"]+)"'     # capture the query id
+            r'(?:(?!id:\s*").)*?'   # skip fields, but stop if another id: appears
+            r'query:\s*`([^`]+)`',  # capture the query string
+            re.DOTALL,
+        )
+
+        for match in pattern.finditer(content):
+            query_id = match.group(1)
+            query = match.group(2).strip()
+            # Normalize whitespace (template literals may have newlines)
+            query = re.sub(r'\s+', ' ', query)
+            results.append((f"builtin/{query_id}", query))
+
+        return results
+
+    def test_query_consistency(self) -> list[TestResult]:
+        """Run all built-in and high-value path queries, recording result counts.
+
+        Queries are parsed from the frontend source files to maintain a single
+        source of truth. The counts are stored in self.query_counts for
+        cross-backend comparison by the E2E runner after all backends complete.
+        """
+        results = []
+        max_time_ms = 30000  # 30s per query (variable-length paths can be slow)
+
+        # Find project root (e2e/lib/runner.py -> project root)
+        project_root = Path(__file__).resolve().parent.parent.parent
+
+        # Parse queries from the frontend source
+        consistency_queries = self._parse_builtin_queries(project_root)
+        if not consistency_queries:
+            results.append(self._run_test(
+                "Parse builtin queries",
+                lambda: (False, "No queries parsed from builtin-queries.ts", ""),
+            ))
+            return results
+
+        self.logger.info(f"Parsed {len(consistency_queries)} queries from builtin-queries.ts")
+
+        # Add extra queries (insights, etc.)
+        consistency_queries.extend(self.EXTRA_CONSISTENCY_QUERIES)
+
+        for query_id, cypher in consistency_queries:
+            def make_check(qid: str, q: str):
+                def check():
+                    start = time.time()
+                    response = self.api.query(q, timeout=60)
+                    elapsed_ms = (time.time() - start) * 1000
+                    proof = self._to_proof(response.body)
+                    if not response.ok:
+                        return False, f"Query failed: {response.body}", proof
+                    if elapsed_ms > max_time_ms:
+                        return False, f"Too slow: {elapsed_ms:.0f}ms", proof
+
+                    count = self._body_get(response.body, "result_count", None)
+                    if count is None:
+                        # Try extracting from results
+                        result_data = self._body_get(response.body, "results", {})
+                        count = self._extract_count(result_data, "cnt")
+                    if count is None:
+                        return False, "Could not extract count from results", proof
+
+                    self.query_counts[qid] = count
+                    self.logger.info(f"  {qid}: {count} ({elapsed_ms:.0f}ms)")
+                    return True, "", proof
+                return check
+
+            results.append(self._run_test(
+                f"Consistency: {query_id}",
+                make_check(query_id, cypher),
+            ))
 
         return results
