@@ -350,10 +350,18 @@ class ServerProcess:
         self.logger = logger
         self._stop_event = threading.Event()
         self._log_thread: threading.Thread | None = None
+        self._log_lines: list[str] = []
+        self._log_lock = threading.Lock()
 
     @property
     def pid(self) -> int:
         return self.process.pid
+
+    @property
+    def collected_logs(self) -> str:
+        """Return all collected server log lines as a single string."""
+        with self._log_lock:
+            return "\n".join(self._log_lines)
 
     def start_log_streaming(self) -> None:
         """Start background thread to stream server logs."""
@@ -373,6 +381,8 @@ class ServerProcess:
                 break
             line = line.rstrip()
             if line:
+                with self._log_lock:
+                    self._log_lines.append(line)
                 self.logger.info(f"[server] {line}")
 
     def stop(self) -> None:

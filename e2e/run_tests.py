@@ -80,14 +80,22 @@ class ColoredFormatter(logging.Formatter):
         return super().format(record)
 
 
-def setup_logging(debug: bool = False) -> logging.Logger:
-    """Set up logging with colored output."""
+def setup_logging(debug: bool = False, log_file: Path | None = None) -> logging.Logger:
+    """Set up logging with colored output and optional file logging."""
     logger = logging.getLogger("e2e")
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
 
     handler = logging.StreamHandler()
     handler.setFormatter(ColoredFormatter("%(levelname)s %(message)s"))
     logger.addHandler(handler)
+
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+        )
+        logger.addHandler(file_handler)
 
     return logger
 
@@ -159,7 +167,7 @@ class E2ETestRunner:
         self.admapper_bin = admapper_bin
         self.report_dir = report_dir
         self.debug = debug
-        self.logger = setup_logging(debug)
+        self.logger = setup_logging(debug, log_file=report_dir / "e2e.log")
         self.server_process: ServerProcess | None = None
         self.temp_db_dir: Path | None = None
         self.golden_file = Path("/tmp/golden/expected_stats.json")
@@ -299,6 +307,12 @@ class E2ETestRunner:
 
         # Store query consistency counts
         suite.query_counts = runner.query_counts
+
+        # Save server logs to report directory
+        if self.server_process:
+            log_file = self.report_dir / f"server-{backend}.log"
+            log_file.write_text(self.server_process.collected_logs)
+            self.logger.info(f"Saved server logs: {log_file}")
 
         # Stop server
         stop_server(self.server_process, self.logger)
