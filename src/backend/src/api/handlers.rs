@@ -642,16 +642,18 @@ pub async fn node_status(
     let db = state.require_db()?;
     info!(node_id = %node_id, "Checking node security status");
 
-    // Well-known high-value RIDs (excluding -512 DA and -519 EA which are checked separately):
+    // Well-known high-value SID suffixes (excluding -512 DA and -519 EA which are checked separately):
     //   -518: Schema Admins
     //   -516: Domain Controllers
     //   -498: Enterprise Read-Only Domain Controllers
+    //   -S-1-5-9: Enterprise Domain Controllers
     //   -544: Administrators (local)
     //   -548: Account Operators
     //   -549: Server Operators
     //   -551: Backup Operators
-    const OTHER_HIGH_VALUE_RIDS: &[&str] =
-        &["-518", "-516", "-498", "-544", "-548", "-549", "-551"];
+    const OTHER_HIGH_VALUE_RIDS: &[&str] = &[
+        "-518", "-516", "-498", "-S-1-5-9", "-544", "-548", "-549", "-551",
+    ];
 
     // === Step 1: Get node type and independent properties (owned, disabled) ===
     let node_id_clone = node_id.clone();

@@ -333,6 +333,25 @@ impl Generator {
             }
         }
 
+        // Enterprise Domain Controllers (well-known SID S-1-5-9, not domain-relative)
+        // Only create once (in root domain) since it's forest-wide
+        if domain.is_root {
+            let edc_sid = format!("{}-S-1-5-9", domain_sid);
+            self.nodes.push(DbNode {
+                id: edc_sid.clone(),
+                name: format!("ENTERPRISE DOMAIN CONTROLLERS@{}", domain_name),
+                label: "Group".to_string(),
+                properties: json!({
+                    "objectid": edc_sid,
+                    "name": format!("ENTERPRISE DOMAIN CONTROLLERS@{}", domain_name),
+                    "domain": domain_name,
+                    "highvalue": true,
+                    "is_highvalue": true,
+                    "admincount": true,
+                }),
+            });
+        }
+
         // Create custom groups
         self.create_custom_groups(domain_sid, domain_idx);
     }

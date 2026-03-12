@@ -20,8 +20,9 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
       {
         id: "all-dcs",
         name: "Domain Controllers",
-        description: "All domain controller computers (RID 516, 498, 521)",
-        query: `MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE g.objectid ENDS WITH '-516' OR g.objectid ENDS WITH '-498' OR g.objectid ENDS WITH '-521' RETURN p`,
+        description:
+          "All domain controller computers (RID 516, 498, 521, SID S-1-5-9)",
+        query: `MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE g.objectid ENDS WITH '-516' OR g.objectid ENDS WITH '-498' OR g.objectid ENDS WITH '-521' OR g.objectid ENDS WITH '-S-1-5-9' RETURN p`,
       },
       {
         id: "domain-trusts",
@@ -160,19 +161,19 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
         id: "high-value-groups",
         name: "High Value Groups",
         description: "Privileged groups by well-known SID",
-        query: `MATCH (g:Group) WHERE g.objectid ENDS WITH '-512' OR g.objectid ENDS WITH '-519' OR g.objectid ENDS WITH '-518' OR g.objectid ENDS WITH '-516' OR g.objectid ENDS WITH '-498' OR g.objectid ENDS WITH '-544' OR g.objectid ENDS WITH '-548' OR g.objectid ENDS WITH '-549' OR g.objectid ENDS WITH '-551' RETURN g`,
+        query: `MATCH (g:Group) WHERE g.objectid ENDS WITH '-512' OR g.objectid ENDS WITH '-519' OR g.objectid ENDS WITH '-518' OR g.objectid ENDS WITH '-516' OR g.objectid ENDS WITH '-498' OR g.objectid ENDS WITH '-S-1-5-9' OR g.objectid ENDS WITH '-544' OR g.objectid ENDS WITH '-548' OR g.objectid ENDS WITH '-549' OR g.objectid ENDS WITH '-551' RETURN g`,
       },
       {
         id: "high-value-users",
         name: "High Value Users",
         description: "Users who are members of high-value groups",
-        query: `MATCH p = (u:User)-[:MemberOf]->(g:Group) WHERE g.objectid ENDS WITH '-512' OR g.objectid ENDS WITH '-519' OR g.objectid ENDS WITH '-518' OR g.objectid ENDS WITH '-544' OR g.objectid ENDS WITH '-548' OR g.objectid ENDS WITH '-549' OR g.objectid ENDS WITH '-551' RETURN p`,
+        query: `MATCH p = (u:User)-[:MemberOf]->(g:Group) WHERE g.objectid ENDS WITH '-512' OR g.objectid ENDS WITH '-519' OR g.objectid ENDS WITH '-518' OR g.objectid ENDS WITH '-S-1-5-9' OR g.objectid ENDS WITH '-544' OR g.objectid ENDS WITH '-548' OR g.objectid ENDS WITH '-549' OR g.objectid ENDS WITH '-551' RETURN p`,
       },
       {
         id: "high-value-computers",
         name: "High Value Computers",
         description: "Computers who are members of high-value groups (e.g., Domain Controllers)",
-        query: `MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE g.objectid ENDS WITH '-516' OR g.objectid ENDS WITH '-498' OR g.objectid ENDS WITH '-521' RETURN p`,
+        query: `MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE g.objectid ENDS WITH '-516' OR g.objectid ENDS WITH '-498' OR g.objectid ENDS WITH '-521' OR g.objectid ENDS WITH '-S-1-5-9' RETURN p`,
       },
     ],
   },

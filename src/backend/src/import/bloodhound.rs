@@ -40,9 +40,14 @@ mod high_value_rids {
     pub const BACKUP_OPERATORS: &str = "-551";
 
     // Enterprise-wide RIDs
-    pub const ENTERPRISE_DOMAIN_CONTROLLERS: &str = "-498";
+    pub const ENTERPRISE_READONLY_DOMAIN_CONTROLLERS: &str = "-498";
 
-    /// All high-value RID suffixes
+    // Well-known SIDs (not domain-relative RIDs)
+    // See: https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
+    pub const ENTERPRISE_DOMAIN_CONTROLLERS: &str = "-S-1-5-9";
+
+    /// All high-value SID suffixes (works via ends_with matching).
+    /// Includes both domain-relative RIDs (e.g. "-512") and well-known SIDs (e.g. "S-1-5-9").
     pub const ALL: &[&str] = &[
         DOMAIN_ADMINS,
         DOMAIN_CONTROLLERS,
@@ -59,6 +64,7 @@ mod high_value_rids {
         SERVER_OPERATORS,
         PRINT_OPERATORS,
         BACKUP_OPERATORS,
+        ENTERPRISE_READONLY_DOMAIN_CONTROLLERS,
         ENTERPRISE_DOMAIN_CONTROLLERS,
     ];
 }
@@ -1274,6 +1280,22 @@ mod tests {
             "ObjectIdentifier": "S-1-5-32-544",
             "Properties": {
                 "name": "ADMINISTRATORS@CORP.LOCAL"
+            }
+        });
+
+        let node = importer.extract_node("groups", &entity).unwrap();
+        assert_eq!(node.properties["is_highvalue"], true);
+    }
+
+    #[test]
+    fn test_extract_node_marks_enterprise_domain_controllers_high_value() {
+        let mut importer = test_importer();
+
+        // Enterprise Domain Controllers (SID ends with -S-1-5-9)
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234567890-S-1-5-9",
+            "Properties": {
+                "name": "ENTERPRISE DOMAIN CONTROLLERS@CORP.LOCAL"
             }
         });
 
