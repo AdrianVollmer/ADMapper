@@ -326,8 +326,13 @@ pub fn graph_choke_points(
 // Query Commands
 // ============================================================================
 
-/// Execute a query asynchronously with progress events.
-/// Returns a query_id immediately. Progress is emitted via Tauri events.
+/// Execute a query synchronously via Tauri IPC.
+///
+/// Unlike the HTTP handler which supports async mode with SSE progress events,
+/// Tauri commands execute the query inline and return results directly. This
+/// avoids a race condition where the query completes and emits a Tauri event
+/// before the frontend has registered its event listener (late subscriber
+/// problem). Since Tauri commands run on a thread pool, blocking is fine.
 #[tauri::command]
 pub fn graph_query(
     state: State<'_, AppState>,
@@ -336,12 +341,11 @@ pub fn graph_query(
     extract_graph: Option<bool>,
     background: Option<bool>,
 ) -> Result<crate::api::types::QueryStartResponse, String> {
-    use crate::api::types::{QueryProgress, QueryStatus};
     use crate::db::NewQueryHistoryEntry;
 
     let db = state.db().ok_or("Not connected to database")?;
     let history = state.history();
-    info!(query = %query, "Starting async query (IPC)");
+    info!(query = %query, "Executing query (IPC)");
 
     let query_id = uuid::Uuid::new_v4().to_string();
     let extract_graph = extract_graph.unwrap_or(true);
@@ -352,19 +356,6 @@ pub fn graph_query(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
-
-    // Emit initial "running" status
-    let initial_progress = QueryProgress {
-        query_id: query_id.clone(),
-        status: QueryStatus::Running,
-        started_at: started_at_unix,
-        duration_ms: None,
-        result_count: None,
-        error: None,
-        results: None,
-        graph: None,
-    };
-    state.emit_query_progress(&initial_progress);
 
     // Add query to history with "running" status
     if let Some(ref h) = history {
@@ -384,79 +375,47 @@ pub fn graph_query(
         }
     }
 
-    // Clone what we need for the background thread
-    let query_id_clone = query_id.clone();
-    let query_text = query.clone();
-    let language = language.clone();
-    let state_clone = state.inner().clone();
-    let db_clone = db.clone();
+    // Execute query synchronously
+    let result = core::execute_query(db, &query, language.as_deref(), extract_graph);
 
-    // Spawn background execution
-    std::thread::spawn(move || {
-        let update_history = |status: &str,
-                              duration_ms: Option<u64>,
-                              result_count: Option<i64>,
-                              error: Option<&str>| {
+    let duration_ms = started_at.elapsed().as_millis() as u64;
+
+    match result {
+        Ok(query_result) => {
+            // Update history with completed status
             if let Some(ref h) = history {
-                if let Err(e) =
-                    h.update_status(&query_id_clone, status, duration_ms, result_count, error)
-                {
-                    debug!(error = %e, "Failed to update query history status");
-                }
-            }
-        };
-
-        // Execute query
-        let result = core::execute_query(
-            db_clone.clone(),
-            &query_text,
-            language.as_deref(),
-            extract_graph,
-        );
-
-        let duration_ms = started_at.elapsed().as_millis() as u64;
-
-        match result {
-            Ok(query_result) => {
-                update_history(
+                if let Err(e) = h.update_status(
+                    &query_id,
                     "completed",
                     Some(duration_ms),
                     query_result.result_count,
                     None,
-                );
-
-                let progress = QueryProgress {
-                    query_id: query_id_clone.clone(),
-                    status: QueryStatus::Completed,
-                    started_at: started_at_unix,
-                    duration_ms: Some(duration_ms),
-                    result_count: query_result.result_count,
-                    error: None,
-                    results: query_result.results,
-                    graph: query_result.graph,
-                };
-                state_clone.emit_query_progress(&progress);
+                ) {
+                    debug!(error = %e, "Failed to update query history status");
+                }
             }
-            Err(e) => {
-                update_history("failed", Some(duration_ms), None, Some(&e));
 
-                let progress = QueryProgress {
-                    query_id: query_id_clone.clone(),
-                    status: QueryStatus::Failed,
-                    started_at: started_at_unix,
-                    duration_ms: Some(duration_ms),
-                    result_count: None,
-                    error: Some(e),
-                    results: None,
-                    graph: None,
-                };
-                state_clone.emit_query_progress(&progress);
-            }
+            Ok(crate::api::types::QueryStartResponse::Sync {
+                query_id,
+                duration_ms,
+                result_count: query_result.result_count,
+                results: query_result.results,
+                graph: query_result.graph,
+            })
         }
-    });
+        Err(e) => {
+            // Update history with failed status
+            if let Some(ref h) = history {
+                if let Err(e2) =
+                    h.update_status(&query_id, "failed", Some(duration_ms), None, Some(&e))
+                {
+                    debug!(error = %e2, "Failed to update query history status");
+                }
+            }
 
-    // Tauri commands always use async mode (IPC is fast enough)
-    Ok(crate::api::types::QueryStartResponse::Async { query_id })
+            Err(e)
+        }
+    }
 }
 
 // ============================================================================
