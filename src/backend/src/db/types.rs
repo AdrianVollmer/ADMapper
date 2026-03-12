@@ -212,20 +212,6 @@ pub enum DbError {
     Serialization(#[from] serde_json::Error),
 }
 
-#[cfg(feature = "cozo")]
-impl From<cozo::Error> for DbError {
-    fn from(e: cozo::Error) -> Self {
-        DbError::Database(e.to_string())
-    }
-}
-
-#[cfg(feature = "kuzu")]
-impl From<kuzu::Error> for DbError {
-    fn from(e: kuzu::Error) -> Self {
-        DbError::Database(e.to_string())
-    }
-}
-
 #[cfg(feature = "crustdb")]
 impl From<crustdb::Error> for DbError {
     fn from(e: crustdb::Error) -> Self {

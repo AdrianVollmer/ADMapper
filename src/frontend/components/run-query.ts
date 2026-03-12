@@ -2,11 +2,10 @@
  * Run Query Modal
  *
  * Provides a modal for entering and executing database queries.
- * Supports both Cypher (for KuzuDB, Neo4j, FalkorDB) and Datalog (for CozoDB).
+ * Supports Cypher queries (CrustDB, Neo4j, FalkorDB).
  * Queries run asynchronously with progress tracking and abort support.
  */
 
-import { appState } from "../main";
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import type { QueryHistoryResponse, QueryStartResponse, QueryProgressEvent } from "../api/types";
@@ -139,21 +138,8 @@ export function closeRunQuery(): void {
   modalEl.setAttribute("hidden", "");
 }
 
-/** Determine if the current database uses Cypher or Datalog */
-function getQueryLanguage(): "cypher" | "datalog" {
-  const dbType = appState.databaseType?.toLowerCase() ?? "";
-  if (dbType.includes("cozo")) {
-    return "datalog";
-  }
-  return "cypher";
-}
-
-/** Get the documentation URL for the query language */
+/** Get the documentation URL for Cypher */
 function getDocsUrl(): string {
-  const lang = getQueryLanguage();
-  if (lang === "datalog") {
-    return "https://docs.cozodb.org/en/latest/";
-  }
   return "https://neo4j.com/docs/cypher-manual/current/";
 }
 
@@ -176,32 +162,17 @@ function renderModal(): void {
   const footer = document.getElementById("run-query-footer");
   if (!body || !footer) return;
 
-  const lang = getQueryLanguage();
-  const isDatalog = lang === "datalog";
   const docsUrl = getDocsUrl();
 
   body.innerHTML = `
     <div class="run-query-content">
-      ${
-        isDatalog
-          ? `
-        <div class="query-hint query-hint-warning">
-          <svg class="hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-          </svg>
-          <span>CozoDB uses <strong>Datalog</strong> query language. Cypher queries are not supported.</span>
-        </div>
-      `
-          : ""
-      }
-
       <div class="query-language-info">
-        <span class="language-badge">${isDatalog ? "Datalog" : "Cypher"}</span>
+        <span class="language-badge">Cypher</span>
         <a href="${docsUrl}" target="_blank" rel="noopener noreferrer" class="docs-link">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="docs-icon">
             <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
           </svg>
-          View ${isDatalog ? "Datalog" : "Cypher"} Documentation
+          View Cypher Documentation
         </a>
       </div>
 
@@ -211,7 +182,7 @@ function renderModal(): void {
           id="query-input"
           class="form-textarea query-textarea"
           rows="12"
-          placeholder="${isDatalog ? "?[name] := *user{name}" : "MATCH (n:User) RETURN n LIMIT 10"}"
+          placeholder="MATCH (n:User) RETURN n LIMIT 10"
           spellcheck="false"
           ${isExecuting ? "disabled" : ""}
         >${escapeHtml(queryText)}</textarea>

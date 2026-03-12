@@ -12,10 +12,8 @@ use super::types::{
 /// Query language supported by a database backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueryLanguage {
-    /// Cypher query language (Neo4j, KuzuDB, FalkorDB)
+    /// Cypher query language (CrustDB, Neo4j, FalkorDB)
     Cypher,
-    /// Datalog query language (CozoDB)
-    Datalog,
 }
 
 impl FromStr for QueryLanguage {
@@ -24,7 +22,6 @@ impl FromStr for QueryLanguage {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "cypher" => Ok(QueryLanguage::Cypher),
-            "datalog" => Ok(QueryLanguage::Datalog),
             other => Err(format!("Unknown query language: {}", other)),
         }
     }
@@ -33,7 +30,7 @@ impl FromStr for QueryLanguage {
 /// Trait defining the common interface for all database backends.
 ///
 /// This allows the application to work with multiple database backends
-/// (Neo4j, FalkorDB, CozoDB, KuzuDB) through a unified interface.
+/// (CrustDB, Neo4j, FalkorDB) through a unified interface.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub trait DatabaseBackend: Send + Sync {
     /// Get the name of this database backend.

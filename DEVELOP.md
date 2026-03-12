@@ -70,7 +70,7 @@ Use `scripts/test.sh` to run tests:
 
 E2E tests verify the full import and query workflow against real database backends.
 
-#### Embedded Backends (kuzu, crustdb)
+#### Embedded Backends (crustdb)
 
 For testing embedded databases, use the standalone Docker image:
 
@@ -84,7 +84,7 @@ docker run --rm -v $(pwd):/workspace admapper-e2e \
 
 # Test a specific backend
 docker run --rm -v $(pwd):/workspace admapper-e2e \
-    ./e2e/run-tests.sh /path/to/test_data.zip kuzu
+    ./e2e/run-tests.sh /path/to/test_data.zip crustdb
 ```
 
 #### Network Backends (Neo4j, FalkorDB)
@@ -114,8 +114,8 @@ connect to these services.
 #### Test Data
 
 The first argument to `run-tests.sh` is the path to a BloodHound data zip
-file. The optional second argument specifies which backend to test (`kuzu`,
-`crustdb`, or `all`).
+file. The optional second argument specifies which backend to test (`crustdb`,
+`neo4j`, `falkordb`, or `all`).
 
 #### Test Reports
 
@@ -154,33 +154,30 @@ ADMapper supports multiple graph database backends via Cargo features:
 
 | Backend   | Feature    | Description                          |
 |-----------|------------|--------------------------------------|
-| KuzuDB    | `kuzu`     | Embedded, file-based (default)       |
-| CrustDB   | `crustdb`  | Embedded, SQLite-based               |
-| CozoDB    | `cozo`     | Embedded, Datalog queries            |
+| CrustDB   | `crustdb`  | Embedded, SQLite-based (default)     |
 | Neo4j     | `neo4j`    | Network, Bolt protocol               |
 | FalkorDB  | `falkordb` | Network, Redis-based                 |
 
 Build with specific features:
 
 ```bash
-cargo build --release -p admapper --features kuzu,crustdb
+cargo build --release -p admapper --features crustdb,neo4j,falkordb
 ```
 
 ## Running the Server
 
 ```bash
-# Run with default backend (kuzu)
+# Run with default backend (crustdb)
 ./target/release/admapper
 
 # Run headless (no browser)
 ./target/release/admapper --headless
 
 # Specify database URL
-./target/release/admapper --db kuzu:///path/to/db
+./target/release/admapper crustdb:///path/to/file.db
 ```
 
 Database URL formats:
-- `kuzu:///path/to/directory`
 - `crustdb:///path/to/file.db`
 - `neo4j://user:pass@host:7687`
 - `falkordb://host:6379`

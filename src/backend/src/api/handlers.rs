@@ -94,20 +94,6 @@ pub async fn database_status(State(state): State<AppState>) -> Json<DatabaseStat
 pub async fn database_supported() -> Json<Vec<SupportedDatabase>> {
     let mut supported = Vec::new();
 
-    #[cfg(feature = "kuzu")]
-    supported.push(SupportedDatabase {
-        id: "kuzu",
-        name: "KuzuDB",
-        connection_type: "file",
-    });
-
-    #[cfg(feature = "cozo")]
-    supported.push(SupportedDatabase {
-        id: "cozo",
-        name: "CozoDB",
-        connection_type: "file",
-    });
-
     #[cfg(feature = "crustdb")]
     supported.push(SupportedDatabase {
         id: "crustdb",

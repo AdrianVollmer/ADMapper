@@ -8,7 +8,7 @@
 #   ./e2e-test.sh <test_data.zip> [options]
 #
 # Options:
-#   --backend <name>   Test specific backend: kuzu, crustdb, or all (default: all)
+#   --backend <name>   Test specific backend: crustdb, neo4j, falkordb, or all (default: all)
 #   --build            Build the admapper binary before testing
 #   --no-cleanup       Don't remove containers after tests
 #   --help             Show this help message
@@ -77,7 +77,7 @@ show_usage() {
 	echo "  test_data.zip      Path to BloodHound data zip file (required)"
 	echo ""
 	echo "Options:"
-	echo "  --backend <name>   Test specific backend: cozo, crustdb, neo4j, falkordb, or all (default: all)"
+	echo "  --backend <name>   Test specific backend: crustdb, neo4j, falkordb, or all (default: all)"
 	echo "  --build            Build the admapper binary before testing"
 	echo "  --no-cleanup       Don't remove containers after tests"
 	echo "  --help             Show this help message"
@@ -149,10 +149,10 @@ parse_args() {
 
 	# Validate backend
 	case "$BACKEND" in
-	all | cozo | crustdb | neo4j | falkordb) ;;
+	all | crustdb | neo4j | falkordb) ;;
 	*)
 		echo -e "${RED}Error: Invalid backend: $BACKEND${NC}"
-		echo "Valid backends: cozo, crustdb, neo4j, falkordb, all"
+		echo "Valid backends: crustdb, neo4j, falkordb, all"
 		exit 1
 		;;
 	esac
@@ -164,8 +164,7 @@ build_admapper() {
 
 	cd "$SCRIPT_DIR/../src/backend"
 
-	# Build with all backends except kuzu (slow to compile)
-	cargo build --release --no-default-features --features cozo,crustdb,neo4j,falkordb
+	cargo build --release --no-default-features --features crustdb,neo4j,falkordb
 
 	cd "$SCRIPT_DIR"
 

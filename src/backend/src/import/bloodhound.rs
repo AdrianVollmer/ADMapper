@@ -1017,14 +1017,14 @@ impl BloodHoundImporter {
     }
 }
 
-#[cfg(all(test, feature = "cozo"))]
+#[cfg(all(test, feature = "crustdb"))]
 mod tests {
     use super::*;
-    use crate::db::cozo::GraphDatabase;
+    use crate::db::crustdb::CrustDatabase;
 
     #[test]
     fn test_ace_to_edge_type() {
-        let db = Arc::new(GraphDatabase::in_memory().unwrap());
+        let db = Arc::new(CrustDatabase::in_memory().unwrap());
         let (tx, _) = broadcast::channel(1);
         let importer = BloodHoundImporter::new(db, tx);
 
@@ -1035,7 +1035,7 @@ mod tests {
 
     #[test]
     fn test_local_group_to_edge_type() {
-        let db = Arc::new(GraphDatabase::in_memory().unwrap());
+        let db = Arc::new(CrustDatabase::in_memory().unwrap());
         let (tx, _) = broadcast::channel(1);
         let importer = BloodHoundImporter::new(db, tx);
 
@@ -1051,7 +1051,7 @@ mod tests {
 
     /// Helper to create an importer for testing
     fn test_importer() -> BloodHoundImporter {
-        let db = Arc::new(GraphDatabase::in_memory().unwrap());
+        let db = Arc::new(CrustDatabase::in_memory().unwrap());
         let (tx, _) = broadcast::channel(100);
         BloodHoundImporter::new(db, tx)
     }

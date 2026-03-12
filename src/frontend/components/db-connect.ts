@@ -2,8 +2,7 @@
  * Database Connection Modal
  *
  * Provides a UI for connecting to different database backends:
- * - KuzuDB (file-based, Cypher)
- * - CozoDB (file-based, Datalog)
+ * - CrustDB (file-based, Cypher)
  * - Neo4j (network, Cypher)
  * - FalkorDB (network, Cypher)
  */
@@ -81,14 +80,6 @@ function buildConnectionUrl(): string {
   if (!form) return "";
 
   switch (selectedDbType) {
-    case "kuzu": {
-      const path = (form.querySelector("#db-path") as HTMLInputElement)?.value || "";
-      return `kuzu://${path}`;
-    }
-    case "cozo": {
-      const path = (form.querySelector("#db-path") as HTMLInputElement)?.value || "";
-      return `cozodb://${path}`;
-    }
     case "crustdb": {
       const path = (form.querySelector("#db-path") as HTMLInputElement)?.value || "";
       return `crustdb://${path}`;
@@ -138,11 +129,10 @@ function updateFormFields(): void {
   const networkFields = document.getElementById("db-network-fields");
   const dbNameField = document.getElementById("db-name-group");
   const sslField = document.getElementById("db-ssl-group");
-  const cozoWarning = document.getElementById("db-cozo-warning");
 
   if (!fileFields || !networkFields) return;
 
-  const isFile = selectedDbType === "kuzu" || selectedDbType === "cozo" || selectedDbType === "crustdb";
+  const isFile = selectedDbType === "crustdb";
 
   fileFields.hidden = !isFile;
   networkFields.hidden = isFile;
@@ -153,11 +143,6 @@ function updateFormFields(): void {
   }
   if (sslField) {
     sslField.hidden = selectedDbType !== "neo4j";
-  }
-
-  // Show CozoDB warning about Cypher
-  if (cozoWarning) {
-    cozoWarning.hidden = selectedDbType !== "cozo";
   }
 
   // Update default port
@@ -301,17 +286,12 @@ async function browseForPath(): Promise<void> {
   // In Tauri mode, use native file dialog via plugin
   if (isRunningInTauri() && window.__TAURI_PLUGIN_DIALOG__) {
     try {
-      // KuzuDB uses a directory, CozoDB/CrustDB use a file
-      const isDirectory = selectedDbType === "kuzu";
-
       const options: Parameters<typeof window.__TAURI_PLUGIN_DIALOG__.open>[0] = {
-        directory: isDirectory,
+        directory: false,
         multiple: false,
-        title: isDirectory ? "Select Database Directory" : "Select Database File",
+        title: "Select Database File",
+        filters: [{ name: "Database Files", extensions: ["db", "sqlite", "sqlite3"] }],
       };
-      if (!isDirectory) {
-        options.filters = [{ name: "Database Files", extensions: ["db", "sqlite", "sqlite3"] }];
-      }
       const selected = await window.__TAURI_PLUGIN_DIALOG__.open(options);
 
       if (selected && typeof selected === "string") {
@@ -354,8 +334,7 @@ function createFileBrowserModal(): HTMLElement {
   modal.className = "modal-overlay";
   modal.hidden = true;
 
-  const isDirectory = selectedDbType === "kuzu";
-  const title = isDirectory ? "Select Database Directory" : "Select Database File";
+  const title = "Select Database File";
 
   modal.innerHTML = `
     <div class="modal-content modal-lg">
@@ -446,7 +425,7 @@ async function loadDirectory(path?: string): Promise<void> {
       return;
     }
 
-    const isDirectory = selectedDbType === "kuzu";
+    const isDirectory = false;
     listEl.innerHTML = data.entries
       .map((entry) => {
         const icon = entry.is_dir
@@ -583,14 +562,7 @@ function createModal(): HTMLElement {
                        placeholder="/path/to/database" required>
                 <button type="button" id="db-path-browse" class="btn btn-secondary">Browse...</button>
               </div>
-              <p class="form-help">Path to the database file or directory</p>
-            </div>
-            <!-- CozoDB warning -->
-            <div id="db-cozo-warning" class="form-warning" hidden>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="warning-icon">
-                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-              </svg>
-              <span>CozoDB uses Datalog query language. Cypher queries are not supported.</span>
+              <p class="form-help">Path to the database file</p>
             </div>
           </div>
 
@@ -665,8 +637,6 @@ function createModal(): HTMLElement {
       supportedDatabases.length > 0
         ? supportedDatabases
         : [
-            { id: "kuzu" as DatabaseType, name: "KuzuDB", connection_type: "file" as const },
-            { id: "cozo" as DatabaseType, name: "CozoDB", connection_type: "file" as const },
             { id: "crustdb" as DatabaseType, name: "CrustDB", connection_type: "file" as const },
             { id: "neo4j" as DatabaseType, name: "Neo4j", connection_type: "network" as const },
             { id: "falkordb" as DatabaseType, name: "FalkorDB", connection_type: "network" as const },
@@ -719,8 +689,6 @@ async function fetchSupportedDatabases(): Promise<void> {
     console.error("Failed to fetch supported databases:", error);
     // Fall back to showing all types
     supportedDatabases = [
-      { id: "kuzu", name: "KuzuDB", connection_type: "file" },
-      { id: "cozo", name: "CozoDB", connection_type: "file" },
       { id: "crustdb", name: "CrustDB", connection_type: "file" },
       { id: "neo4j", name: "Neo4j", connection_type: "network" },
       { id: "falkordb", name: "FalkorDB", connection_type: "network" },

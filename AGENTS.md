@@ -9,7 +9,7 @@ so never worry about backwards compatibility.
 ## Tech Stack and Philosophy
 
 - Written in Rust
-- CozoDB/SQLite DB backend
+- CrustDB/SQLite DB backend
 - Vanilla TypeScript for the frontend
 - Tailwind CSS
 - Modern, intuitive and beautiful UI

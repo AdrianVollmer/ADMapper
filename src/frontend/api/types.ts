@@ -177,7 +177,7 @@ export interface DatabaseStatusResponse {
 }
 
 /** Database type identifiers */
-export type DatabaseType = "kuzu" | "cozo" | "crustdb" | "neo4j" | "falkordb";
+export type DatabaseType = "crustdb" | "neo4j" | "falkordb";
 
 /** Supported database info */
 export interface SupportedDatabaseInfo {

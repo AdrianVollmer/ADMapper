@@ -9,8 +9,7 @@ struct Args {
     /// Database URL to connect to on startup
     ///
     /// Supported formats:
-    /// - kuzu:///path/to/directory (KuzuDB, file-based)
-    /// - cozodb:///path/to/file.db (CozoDB, file-based)
+    /// - crustdb:///path/to/file.db (CrustDB, file-based)
     /// - neo4j://[user:pass@]host[:port] (Neo4j, network)
     /// - bolt://[user:pass@]host[:port] (Neo4j, network)
     /// - falkordb://[user:pass@]host[:port] (FalkorDB, network)

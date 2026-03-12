@@ -19,14 +19,10 @@ use serde::Serialize;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Emitter};
 
-#[cfg(feature = "cozo")]
-use crate::db::CozoDatabase;
 #[cfg(feature = "crustdb")]
 use crate::db::CrustDatabase;
 #[cfg(feature = "falkordb")]
 use crate::db::FalkorDbDatabase;
-#[cfg(feature = "kuzu")]
-use crate::db::KuzuDatabase;
 #[cfg(feature = "neo4j")]
 use crate::db::Neo4jDatabase;
 
@@ -65,7 +61,7 @@ pub struct ImportJob {
 struct DatabaseConnection {
     backend: Arc<dyn DatabaseBackend>,
     db_type: DatabaseType,
-    /// Database path (for file-based backends like CrustDB, KuzuDB, CozoDB).
+    /// Database path (for file-based backends like CrustDB).
     #[allow(dead_code)]
     db_path: Option<PathBuf>,
 }
@@ -144,15 +140,9 @@ impl AppState {
     ) -> QueryHistoryService {
         match db_type {
             // File-based backends: use SQLite storage in the same directory
-            DatabaseType::CrustDB | DatabaseType::KuzuDB | DatabaseType::CozoDB => {
+            DatabaseType::CrustDB => {
                 if let Some(path) = db_path {
-                    // For CrustDB, use the same .db file
-                    // For KuzuDB/CozoDB, create a separate history.db in the same directory
-                    let history_path = if db_type == DatabaseType::CrustDB {
-                        path.to_path_buf()
-                    } else {
-                        path.join("history.db")
-                    };
+                    let history_path = path.to_path_buf();
                     match QueryHistoryService::new_sqlite(&history_path) {
                         Ok(service) => return service,
                         Err(e) => {
@@ -320,28 +310,6 @@ impl AppState {
         let mut db_path: Option<PathBuf> = None;
 
         let backend: Arc<dyn DatabaseBackend> = match parsed.db_type {
-            #[cfg(feature = "kuzu")]
-            DatabaseType::KuzuDB => {
-                let path = parsed.path.ok_or("Missing path for KuzuDB")?;
-                db_path = Some(PathBuf::from(&path));
-                let db = KuzuDatabase::new(&path).map_err(|e| e.to_string())?;
-                Arc::new(db)
-            }
-            #[cfg(not(feature = "kuzu"))]
-            DatabaseType::KuzuDB => {
-                return Err("KuzuDB support not compiled in.".to_string());
-            }
-            #[cfg(feature = "cozo")]
-            DatabaseType::CozoDB => {
-                let path = parsed.path.ok_or("Missing path for CozoDB")?;
-                db_path = Some(PathBuf::from(&path));
-                let db = CozoDatabase::new(&path).map_err(|e| e.to_string())?;
-                Arc::new(db)
-            }
-            #[cfg(not(feature = "cozo"))]
-            DatabaseType::CozoDB => {
-                return Err("CozoDB support not compiled in.".to_string());
-            }
             #[cfg(feature = "neo4j")]
             DatabaseType::Neo4j => {
                 let host = parsed.host.ok_or("Missing host for Neo4j")?;

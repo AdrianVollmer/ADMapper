@@ -3,8 +3,7 @@
 //! Supports parsing URLs for different database backends:
 //! - Neo4j: `neo4j://user:pass@host:7687` or `bolt://...`
 //! - FalkorDB: `falkordb://user:pass@host:6379`
-//! - CozoDB: `cozodb:///path/to/file.db`
-//! - KuzuDB: `kuzu:///path/to/directory`
+//! - CrustDB: `crustdb:///path/to/file.db`
 
 use std::path::PathBuf;
 use thiserror::Error;
@@ -16,10 +15,6 @@ pub enum DatabaseType {
     Neo4j,
     /// FalkorDB (Redis-based graph, network)
     FalkorDB,
-    /// CozoDB (file-based, Datalog)
-    CozoDB,
-    /// KuzuDB (file-based, Cypher)
-    KuzuDB,
     /// CrustDB (file-based, Cypher)
     CrustDB,
 }
@@ -30,8 +25,6 @@ impl DatabaseType {
         match self {
             DatabaseType::Neo4j => "Neo4j",
             DatabaseType::FalkorDB => "FalkorDB",
-            DatabaseType::CozoDB => "CozoDB",
-            DatabaseType::KuzuDB => "KuzuDB",
             DatabaseType::CrustDB => "CrustDB",
         }
     }
@@ -43,10 +36,7 @@ impl DatabaseType {
 
     /// Check if this database type uses file storage.
     pub fn is_file(&self) -> bool {
-        matches!(
-            self,
-            DatabaseType::CozoDB | DatabaseType::KuzuDB | DatabaseType::CrustDB
-        )
+        matches!(self, DatabaseType::CrustDB)
     }
 
     /// Get the default port for network databases.
@@ -54,7 +44,7 @@ impl DatabaseType {
         match self {
             DatabaseType::Neo4j => Some(7687),
             DatabaseType::FalkorDB => Some(6379),
-            DatabaseType::CozoDB | DatabaseType::KuzuDB | DatabaseType::CrustDB => None,
+            DatabaseType::CrustDB => None,
         }
     }
 }
@@ -104,8 +94,7 @@ impl DatabaseUrl {
     /// - `neo4j://[user:pass@]host[:port][/database]`
     /// - `bolt://[user:pass@]host[:port][/database]`
     /// - `falkordb://[user:pass@]host[:port]`
-    /// - `cozodb:///path/to/file.db` or `cozodb://path/to/file.db`
-    /// - `kuzu:///path/to/directory` or `kuzu://path/to/directory`
+    /// - `crustdb:///path/to/file.db`
     pub fn parse(url: &str) -> Result<Self, ParseError> {
         // Extract scheme
         let (scheme, rest) = url
@@ -122,15 +111,12 @@ impl DatabaseUrl {
                 DatabaseType::Neo4j
             }
             "falkordb" | "redis" => DatabaseType::FalkorDB,
-            "cozodb" | "cozo" => DatabaseType::CozoDB,
-            "kuzu" | "kuzudb" => DatabaseType::KuzuDB,
             "crustdb" | "crust" => DatabaseType::CrustDB,
             other => return Err(ParseError::UnknownScheme(other.to_string())),
         };
 
         if db_type.is_file() {
             // File-based database: extract path
-            // Handle both cozodb:///path and cozodb://path formats
             let path_str = rest.trim_start_matches('/');
             if path_str.is_empty() {
                 return Err(ParseError::MissingPath);
@@ -240,25 +226,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_kuzu_url() {
-        let url = DatabaseUrl::parse("kuzu:///path/to/db").unwrap();
-        assert_eq!(url.db_type, DatabaseType::KuzuDB);
-        assert_eq!(url.path, Some(PathBuf::from("/path/to/db")));
+    fn test_parse_crustdb_url() {
+        let url = DatabaseUrl::parse("crustdb:///path/to/db.sqlite").unwrap();
+        assert_eq!(url.db_type, DatabaseType::CrustDB);
+        assert_eq!(url.path, Some(PathBuf::from("/path/to/db.sqlite")));
         assert!(url.host.is_none());
-    }
-
-    #[test]
-    fn test_parse_kuzu_relative_path() {
-        let url = DatabaseUrl::parse("kuzu://./data/test").unwrap();
-        assert_eq!(url.db_type, DatabaseType::KuzuDB);
-        assert_eq!(url.path, Some(PathBuf::from("./data/test")));
-    }
-
-    #[test]
-    fn test_parse_cozo_url() {
-        let url = DatabaseUrl::parse("cozodb:///var/db/cozo.db").unwrap();
-        assert_eq!(url.db_type, DatabaseType::CozoDB);
-        assert_eq!(url.path, Some(PathBuf::from("/var/db/cozo.db")));
     }
 
     #[test]
@@ -318,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_parse_missing_path() {
-        let result = DatabaseUrl::parse("kuzu://");
+        let result = DatabaseUrl::parse("crustdb://");
         assert!(matches!(result, Err(ParseError::MissingPath)));
     }
 
@@ -326,12 +298,11 @@ mod tests {
     fn test_database_type_properties() {
         assert!(DatabaseType::Neo4j.is_network());
         assert!(DatabaseType::FalkorDB.is_network());
-        assert!(DatabaseType::CozoDB.is_file());
-        assert!(DatabaseType::KuzuDB.is_file());
+        assert!(DatabaseType::CrustDB.is_file());
 
         assert_eq!(DatabaseType::Neo4j.default_port(), Some(7687));
         assert_eq!(DatabaseType::FalkorDB.default_port(), Some(6379));
-        assert_eq!(DatabaseType::CozoDB.default_port(), None);
+        assert_eq!(DatabaseType::CrustDB.default_port(), None);
     }
 
     #[test]

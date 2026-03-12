@@ -9,7 +9,7 @@ Usage:
 
 Arguments:
     test_data.zip - Path to BloodHound data zip file (required)
-    backend       - Backend to test: cozo, crustdb, neo4j, falkordb, or all (default: all)
+    backend       - Backend to test: crustdb, neo4j, falkordb, or all (default: all)
 
 Environment variables:
     ADMAPPER_BIN  - Path to admapper binary (default: target/release/admapper)
@@ -42,7 +42,6 @@ sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 from api import APIClient, ServerProcess, start_server, stop_server, wait_for_server  # noqa: E402  # type: ignore[import-not-found]
 from runner import TestRunner, TestResult  # noqa: E402  # type: ignore[import-not-found]
 
-# Available backends (cozo disabled - not working)
 BACKENDS = ["crustdb", "neo4j", "falkordb"]
 
 
@@ -310,9 +309,7 @@ class E2ETestRunner:
 
     def _get_db_url(self, backend: str, db_dir: Path, port: int) -> str | None:
         """Get database URL for a backend."""
-        if backend == "cozo":
-            return f"cozo://{db_dir}"
-        elif backend == "crustdb":
+        if backend == "crustdb":
             return f"crustdb://{db_dir}/test.db"
         elif backend == "neo4j":
             host = os.environ.get("NEO4J_HOST", "localhost")
@@ -1014,7 +1011,6 @@ def main() -> int:
         epilog="""
 Backends:
   all      - Test all backends
-  cozo     - Test CozoDB backend only
   crustdb  - Test CrustDB backend only
   neo4j    - Test Neo4j backend only
   falkordb - Test FalkorDB backend only

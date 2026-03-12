@@ -343,26 +343,6 @@ pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
             }
         }
         state
-    } else if let Ok(db_path) = std::env::var("ADMAPPER_DB_PATH") {
-        // Legacy: support ADMAPPER_DB_PATH environment variable
-        let url = format!("kuzu://{}", db_path);
-        info!(path = %db_path, "Opening KuzuDB database from environment");
-        let state = AppState::new_disconnected();
-        match state.connect(&url) {
-            Ok(_) => {
-                let db = state.db().unwrap();
-                let (nodes, relationships) = db.get_stats().unwrap_or((0, 0));
-                info!(
-                    nodes = nodes,
-                    relationships = relationships,
-                    "Database loaded"
-                );
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to open database");
-            }
-        }
-        state
     } else {
         info!("Starting without database connection");
         AppState::new_disconnected()

@@ -5,8 +5,6 @@ _*
 *.db
 *.db-shm
 *.db-wal
-*_kuzu
-*_kuzu.wal
 
 # Dependencies
 node_modules/

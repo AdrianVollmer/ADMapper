@@ -62,7 +62,7 @@ describe("redactUrlCredentials", () => {
   });
 
   it("leaves URL without credentials unchanged", () => {
-    expect(redactUrlCredentials("kuzu:///path/to/db")).toBe("kuzu:///path/to/db");
+    expect(redactUrlCredentials("crustdb:///path/to/db")).toBe("crustdb:///path/to/db");
   });
 
   it("leaves URL with only username unchanged", () => {

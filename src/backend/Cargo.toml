@@ -25,10 +25,6 @@ rust-embed = { version = "8", features = ["debug-embed"] }
 mime_guess = "2"
 
 # Database backends (all optional)
-# Note: cozo uses storage-sled (pure Rust) instead of storage-sqlite to avoid
-# native library linking conflicts with crustdb's rusqlite. Both can now coexist.
-cozo = { version = "0.7", default-features = false, features = ["storage-sled", "graph-algo"], optional = true }
-kuzu = { version = "0.11.2", optional = true }
 crustdb = { path = "../crustdb", optional = true }
 neo4rs = { version = "0.8", optional = true }
 falkordb = { version = "0.1", optional = true }
@@ -56,10 +52,6 @@ tauri-plugin-dialog = { version = "2", optional = true }
 [features]
 default = ["desktop", "crustdb", "neo4j", "falkordb"]
 desktop = ["tauri", "tauri-plugin-shell", "tauri-plugin-dialog", "tauri-build"]
-# KuzuDB backend - Cypher-based, file storage.
-kuzu = ["dep:kuzu"]
-# CozoDB backend - Datalog-based, uses sled storage.
-cozo = ["dep:cozo"]
 # CrustDB backend (default) - Cypher-based, SQLite storage.
 crustdb = ["dep:crustdb"]
 # Neo4j backend (default) - Cypher-based, network.

@@ -6,7 +6,7 @@
 # Usage with docker-compose (recommended):
 #   docker compose -f e2e/docker-compose.yml run --rm tests ./e2e/run-tests.sh <data.zip>
 #
-# Standalone usage (kuzu/crustdb only, no external databases):
+# Standalone usage (crustdb only, no external databases):
 #   docker build -t admapper-e2e -f e2e/Dockerfile .
 #   docker run --rm -v $(pwd):/workspace admapper-e2e ./e2e/run-tests.sh <data.zip>
 
