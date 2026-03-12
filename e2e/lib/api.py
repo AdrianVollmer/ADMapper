@@ -282,9 +282,10 @@ class APIClient:
 
     def query(self, cypher: str, timeout: int = 60) -> APIResponse:
         """
-        Execute a Cypher query (async with SSE progress).
+        Execute a Cypher query.
 
-        Returns the query results when complete.
+        Handles both sync mode (results inline) and async mode (poll for
+        completion via query history).
         """
         # Start the query
         response = self.post("/api/graph/query", {"query": cypher})
@@ -294,14 +295,21 @@ class APIClient:
         if not isinstance(response.body, dict):
             return APIResponse.from_error(500, "Unexpected response format")
 
+        # Sync mode: results are inline
+        mode = response.body.get("mode")
+        if mode == "sync":
+            return APIResponse(status_code=200, body=response.body, ok=True)
+
         query_id = response.body.get("query_id")
         if not query_id:
             return APIResponse.from_error(500, "No query_id in response")
 
-        # Wait for completion via SSE
+        # Async mode: poll query history for completion
         elapsed = 0.0
         poll_interval = 0.5
         while elapsed < timeout:
+            time.sleep(poll_interval)
+            elapsed += poll_interval
             progress = self._get_query_progress(query_id)
             if progress:
                 status = progress.get("status")
@@ -313,23 +321,18 @@ class APIClient:
                         body=progress,
                         ok=False,
                     )
-            time.sleep(poll_interval)
-            elapsed += poll_interval
 
         return APIResponse.from_error(504, f"Query timeout after {timeout}s")
 
     def _get_query_progress(self, query_id: str) -> dict[str, Any] | None:
-        """Get query progress via SSE endpoint."""
-        url = f"{self.base_url}/api/query/progress/{query_id}"
+        """Get query progress via query history endpoint."""
         try:
-            with urlopen(url, timeout=5) as response:
-                for line in response:
-                    line = line.decode("utf-8").strip()
-                    if line.startswith("data: "):
-                        try:
-                            return json.loads(line[6:])
-                        except json.JSONDecodeError:
-                            pass
+            resp = self.get(f"/api/query-history?page=1&per_page=50")
+            if not resp.ok or not isinstance(resp.body, dict):
+                return None
+            for entry in resp.body.get("entries", []):
+                if entry.get("id") == query_id:
+                    return entry
         except Exception:
             pass
         return None
