@@ -110,7 +110,7 @@ async function triggerTauriImport(): Promise<void> {
     // Subscribe to progress events using the real job ID
     unsubscribe = subscribe(
       IMPORT_PROGRESS_CHANNEL,
-      { jobId: response.job_id },
+      { jobId: response.job_id, job_id: response.job_id },
       (progress: ImportProgressEvent) => {
         updateProgressUI(progress);
         if (progress.status === "completed") {
@@ -185,7 +185,7 @@ function subscribeToProgressUpdates(jobId: string): void {
 
   unsubscribe = subscribe(
     IMPORT_PROGRESS_CHANNEL,
-    { jobId },
+    { jobId, job_id: jobId },
     (progress: ImportProgressEvent) => {
       updateProgressUI(progress);
 

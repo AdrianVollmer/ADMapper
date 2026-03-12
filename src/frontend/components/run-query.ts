@@ -313,7 +313,7 @@ async function executeQuery(): Promise<void> {
     // Subscribe to progress events
     unsubscribeProgress = subscribe(
       QUERY_PROGRESS_CHANNEL,
-      { queryId: currentQueryId },
+      { queryId: currentQueryId, query_id: currentQueryId },
       (progress) => {
         // Ignore events if we've been aborted
         if (currentAbortController?.signal.aborted) {

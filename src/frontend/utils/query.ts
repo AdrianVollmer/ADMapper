@@ -238,7 +238,7 @@ export async function executeQuery(query: string, options: QueryExecutionOptions
 
     unsubscribe = subscribe(
       QUERY_PROGRESS_CHANNEL,
-      { queryId },
+      { queryId, query_id: queryId },
       (progress) => {
         // Ignore events if already resolved or aborted
         if (resolved || abortController.signal.aborted) {

@@ -84,6 +84,72 @@ describe("Tauri API compatibility", () => {
     }
   });
 
+  it("subscribe() calls include filterKey in params", () => {
+    // When a channel has a filterKey (e.g., "query_id"), the params passed to
+    // subscribe() must include that key. Otherwise, Tauri event filtering silently
+    // fails and all events are delivered to all listeners, causing data corruption
+    // when multiple subscriptions run in parallel.
+    const transportPath = join(frontendDir, "api/transport.ts");
+    const transportContent = readFileSync(transportPath, "utf-8");
+
+    // Extract channel definitions with filterKey.
+    // Split on "export const" to isolate each channel, then check for filterKey.
+    const channels: Record<string, string> = {};
+    const blocks = transportContent.split(/(?=export const \w+:\s*ChannelDefinition)/);
+    for (const block of blocks) {
+      const nameMatch = block.match(/^export const (\w+):\s*ChannelDefinition/);
+      const filterMatch = block.match(/filterKey:\s*"(\w+)"/);
+      if (nameMatch && filterMatch) {
+        channels[nameMatch[1]!] = filterMatch[1]!;
+      }
+    }
+
+    expect(Object.keys(channels).length).toBeGreaterThan(0);
+
+    // Find all subscribe() calls that reference these channels
+    const tsFiles = findTsFiles(frontendDir);
+    const violations: string[] = [];
+
+    for (const file of tsFiles) {
+      const relPath = relative(frontendDir, file);
+      const content = readFileSync(file, "utf-8");
+
+      for (const [channelName, filterKey] of Object.entries(channels)) {
+        // Find subscribe(CHANNEL_NAME, { ... }, ...) calls
+        const regex = new RegExp(
+          `subscribe\\(\\s*${channelName}\\s*,\\s*\\{([^}]*)\\}`,
+          "g"
+        );
+        let match;
+        while ((match = regex.exec(content)) !== null) {
+          const paramsContent = match[1]!;
+          // Check that the filterKey (snake_case) is present in the params object
+          if (!paramsContent.includes(filterKey)) {
+            const lineNum = content.slice(0, match.index).split("\n").length;
+            violations.push(
+              `${relPath}:${lineNum}: subscribe(${channelName}) missing "${filterKey}" in params (has: {${paramsContent.trim()}})`
+            );
+          }
+        }
+      }
+    }
+
+    if (violations.length > 0) {
+      const message = [
+        "subscribe() calls missing filterKey in params. In Tauri mode, events are",
+        "broadcast globally and must be filtered client-side. Missing the filterKey",
+        "causes all events to be delivered to all listeners.",
+        "",
+        "Violations:",
+        ...violations.map((v) => `  ${v}`),
+        "",
+        "Fix: add the snake_case filterKey to params, e.g., { queryId, query_id: queryId }",
+      ].join("\n");
+
+      expect.fail(message);
+    }
+  });
+
   it("all API command mappings have valid format", () => {
     // Read the client.ts file to extract COMMAND_MAPPING
     const clientPath = join(frontendDir, "api/client.ts");
