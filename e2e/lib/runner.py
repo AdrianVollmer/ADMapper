@@ -1119,12 +1119,7 @@ class TestRunner:
         """Test security insights API."""
         results = []
 
-        # Skip insights for non-CrustDB backends (expensive variable-length path queries)
-        if self.backend != "crustdb":
-            self.logger.info("Skipping insights test (not optimized for this backend)")
-            return results
-
-        max_time_ms = 5000  # 5 seconds (insights can be slower)
+        max_time_ms = 10000  # 10 seconds (insights involve variable-length path queries)
 
         # Test insights endpoint
         def check_insights():
