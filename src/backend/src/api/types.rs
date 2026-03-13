@@ -295,6 +295,10 @@ pub struct QueryRequest {
     /// If true, mark as background query (excluded from back navigation)
     #[serde(default)]
     pub background: bool,
+    /// If true, wait for query completion instead of returning async mode.
+    /// Useful for programmatic clients that always want inline results.
+    #[serde(default)]
+    pub sync: bool,
 }
 
 /// Response when starting a query.

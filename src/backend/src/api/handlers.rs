@@ -1441,10 +1441,11 @@ pub async fn graph_query(
     let query_text = body.query.clone();
     let extract_graph = body.extract_graph;
     let language = body.language.clone();
+    let sync_mode = body.sync;
     let running_query_for_task = running_query.clone();
     let state_for_task = state.clone();
 
-    tokio::task::spawn_blocking(move || {
+    let task_handle = tokio::task::spawn_blocking(move || {
         // Helper to update query status in history
         let update_history = |status: &str,
                               duration_ms: Option<u64>,
@@ -1589,39 +1590,67 @@ pub async fn graph_query(
         state_for_task.broadcast_query_activity();
     });
 
-    // Wait briefly for fast queries to complete (50ms)
-    // This allows simple queries like COUNT to return inline without SSE overhead
-    const SYNC_TIMEOUT_MS: u64 = 50;
-    tokio::time::sleep(std::time::Duration::from_millis(SYNC_TIMEOUT_MS)).await;
-
-    // Check if query completed within the timeout
-    if let Some(progress) = running_query.final_state.read().clone() {
+    if sync_mode {
+        // Sync mode: wait for the query to complete, then return inline results
+        if let Err(e) = task_handle.await {
+            return Err(ApiError::Internal(format!("Query task panicked: {e}")));
+        }
+        let progress = running_query
+            .final_state
+            .read()
+            .clone()
+            .ok_or_else(|| ApiError::Internal("Query completed without result".to_string()))?;
         match progress.status {
             QueryStatus::Completed => {
-                debug!(query_id = %query_id, "Query completed fast - returning inline results");
-                return Ok(Json(QueryStartResponse::Sync {
+                debug!(query_id = %query_id, "Sync query completed");
+                Ok(Json(QueryStartResponse::Sync {
                     query_id,
                     duration_ms: progress.duration_ms.unwrap_or(0),
                     result_count: progress.result_count,
                     results: progress.results,
                     graph: progress.graph,
-                }));
+                }))
             }
-            QueryStatus::Failed => {
-                // Return error inline for fast failures
-                return Err(ApiError::BadRequest(
-                    progress.error.unwrap_or_else(|| "Query failed".to_string()),
-                ));
-            }
-            _ => {
-                // Aborted or unexpected status - fall through to async
+            QueryStatus::Failed => Err(ApiError::BadRequest(
+                progress.error.unwrap_or_else(|| "Query failed".to_string()),
+            )),
+            _ => Err(ApiError::Internal("Query was aborted".to_string())),
+        }
+    } else {
+        // Wait briefly for fast queries to complete (50ms)
+        // This allows simple queries like COUNT to return inline without SSE overhead
+        const SYNC_TIMEOUT_MS: u64 = 50;
+        tokio::time::sleep(std::time::Duration::from_millis(SYNC_TIMEOUT_MS)).await;
+
+        // Check if query completed within the timeout
+        if let Some(progress) = running_query.final_state.read().clone() {
+            match progress.status {
+                QueryStatus::Completed => {
+                    debug!(query_id = %query_id, "Query completed fast - returning inline results");
+                    return Ok(Json(QueryStartResponse::Sync {
+                        query_id,
+                        duration_ms: progress.duration_ms.unwrap_or(0),
+                        result_count: progress.result_count,
+                        results: progress.results,
+                        graph: progress.graph,
+                    }));
+                }
+                QueryStatus::Failed => {
+                    // Return error inline for fast failures
+                    return Err(ApiError::BadRequest(
+                        progress.error.unwrap_or_else(|| "Query failed".to_string()),
+                    ));
+                }
+                _ => {
+                    // Aborted or unexpected status - fall through to async
+                }
             }
         }
-    }
 
-    // Query still running - return async mode
-    debug!(query_id = %query_id, "Query still running - returning async mode");
-    Ok(Json(QueryStartResponse::Async { query_id }))
+        // Query still running - return async mode
+        debug!(query_id = %query_id, "Query still running - returning async mode");
+        Ok(Json(QueryStartResponse::Async { query_id }))
+    }
 }
 
 /// SSE endpoint for query progress updates.

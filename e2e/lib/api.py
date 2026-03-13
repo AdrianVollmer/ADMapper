@@ -280,7 +280,9 @@ class APIClient:
             elapsed += poll_interval
         return None
 
-    def query(self, cypher: str, timeout: int = 60) -> APIResponse:
+    def query(
+        self, cypher: str, timeout: int = 60, sync: bool = True
+    ) -> APIResponse:
         """
         Execute a Cypher query.
 
@@ -288,7 +290,10 @@ class APIClient:
         completion via query history).
         """
         # Start the query
-        response = self.post("/api/graph/query", {"query": cypher})
+        payload: dict[str, Any] = {"query": cypher}
+        if sync:
+            payload["sync"] = True
+        response = self.post("/api/graph/query", payload)
         if not response.ok:
             return response
 

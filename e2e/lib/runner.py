@@ -485,22 +485,12 @@ class TestRunner:
     def _extract_query_count(
         self, body: dict[str, Any], column: str
     ) -> int | None:
-        """Extract a count from a query response, with async fallback.
+        """Extract a count from a query response.
 
-        Tries the inline ``results`` dict first. If the query went async
-        (results not present), falls back to the ``result_count`` field that
-        the query-history stores.
+        Extracts from the inline ``results`` dict returned in sync mode.
         """
         result_data = self._body_get(body, "results", {})
-        count = self._extract_count(result_data, column)
-        if count is None:
-            count = self._body_get(body, "result_count", None)
-            if count is not None:
-                try:
-                    count = int(count)
-                except (TypeError, ValueError):
-                    count = None
-        return count
+        return self._extract_count(result_data, column)
 
     # =========================================================================
     # Search Tests
