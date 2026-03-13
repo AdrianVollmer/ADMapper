@@ -75,7 +75,7 @@ impl Neo4jDatabase {
             .password(&pass)
             .max_connections(3)
             .build()?;
-        let graph = runtime.block_on(async { Graph::connect(config).await })?;
+        let graph = Graph::connect(config)?;
 
         info!("Connected to Neo4j");
 
@@ -931,44 +931,19 @@ impl DatabaseBackend for Neo4jDatabase {
         let (headers, rows) = self.runtime.block_on(async {
             let mut stream = graph.execute(query(&cypher)).await?;
             let mut rows = Vec::new();
-            let mut found_headers: Vec<String> = Vec::new();
-
-            // Try common column names that might be returned
-            // Note: neo4rs doesn't expose column names, so we try common patterns
-            let try_columns = [
-                "n",
-                "m",
-                "a",
-                "b",
-                "r",
-                "e",
-                "p",
-                "result",
-                "count",
-                "total",
-                "name",
-                "id",
-                "value",
-                "nodes",
-                "relationships",
-                "path",
-                "src",
-                "tgt",
-                "hops",
-                "node_ids",
-                "rel_types",
-                "source",
-                "target",
-                "length",
-                "type",
-            ];
+            let mut headers: Vec<String> = Vec::new();
 
             while let Some(row) = stream.next().await? {
+                // Extract column names from the first row
+                if headers.is_empty() {
+                    headers = row.keys().iter().map(|k| k.to_string()).collect();
+                }
+
                 let mut row_values: Vec<JsonValue> = Vec::new();
 
-                for col in try_columns {
+                for col in &headers {
                     // Try different types for each column
-                    let val: Option<JsonValue> = if let Ok(node) = row.get::<Neo4jNode>(col) {
+                    let val: Option<JsonValue> = if let Ok(node) = row.get::<Neo4jNode>(col.as_str()) {
                         // Convert node with _type marker for graph extraction
                         let db_node = Neo4jDatabase::neo4j_node_to_db_node(&node);
                         Some(json!({
@@ -1062,21 +1037,13 @@ impl DatabaseBackend for Neo4jDatabase {
                         None
                     };
 
-                    if let Some(v) = val {
-                        // Track which columns we found
-                        if !found_headers.contains(&col.to_string()) {
-                            found_headers.push(col.to_string());
-                        }
-                        row_values.push(v);
-                    }
+                    row_values.push(val.unwrap_or(JsonValue::Null));
                 }
 
-                if !row_values.is_empty() {
-                    rows.push(JsonValue::Array(row_values));
-                }
+                rows.push(JsonValue::Array(row_values));
             }
 
-            Ok::<_, neo4rs::Error>((found_headers, rows))
+            Ok::<_, neo4rs::Error>((headers, rows))
         })?;
 
         Ok(json!({

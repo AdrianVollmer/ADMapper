@@ -348,10 +348,9 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             # Extract count from various result formats
-            result_data = self._body_get(response.body, "results", {})
-            total = self._extract_count(result_data, "total")
+            total = self._extract_query_count(response.body, "total")
             if total is None or total <= 0:
-                return False, f"Query returned no results: {result_data}", proof
+                return False, f"Query returned no results: {response.body}", proof
             self.logger.info(f"Total nodes: {total}")
             return True, "", proof
 
@@ -483,6 +482,26 @@ class TestRunner:
 
         return None
 
+    def _extract_query_count(
+        self, body: dict[str, Any], column: str
+    ) -> int | None:
+        """Extract a count from a query response, with async fallback.
+
+        Tries the inline ``results`` dict first. If the query went async
+        (results not present), falls back to the ``result_count`` field that
+        the query-history stores.
+        """
+        result_data = self._body_get(body, "results", {})
+        count = self._extract_count(result_data, column)
+        if count is None:
+            count = self._body_get(body, "result_count", None)
+            if count is not None:
+                try:
+                    count = int(count)
+                except (TypeError, ValueError):
+                    count = None
+        return count
+
     # =========================================================================
     # Search Tests
     # =========================================================================
@@ -602,8 +621,7 @@ class TestRunner:
             if elapsed_ms > max_time_ms:
                 return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            total = self._extract_count(result_data, "total")
+            total = self._extract_query_count(response.body, "total")
             if total != 20:
                 return False, f"Expected 20 PerfUsers, got {total}", proof
             self.logger.info(f"Count PerfUser: {elapsed_ms:.0f}ms")
@@ -622,8 +640,7 @@ class TestRunner:
             if elapsed_ms > max_time_ms:
                 return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            total = self._extract_count(result_data, "total")
+            total = self._extract_query_count(response.body, "total")
             if total != 10:
                 return False, f"Expected 10 PerfGroups, got {total}", proof
             self.logger.info(f"Count PerfGroup: {elapsed_ms:.0f}ms")
@@ -645,8 +662,7 @@ class TestRunner:
             if elapsed_ms > max_time_ms:
                 return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            total = self._extract_count(result_data, "total")
+            total = self._extract_query_count(response.body, "total")
             # User 0 has exactly 1 outgoing KNOWS edge (to user 1)
             if total != 1:
                 return False, f"Expected 1 outgoing KNOWS edge from user 0, got {total}", proof
@@ -669,8 +685,7 @@ class TestRunner:
             if elapsed_ms > max_time_ms:
                 return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            total = self._extract_count(result_data, "total")
+            total = self._extract_query_count(response.body, "total")
             # User 10 has exactly 1 incoming KNOWS edge (from user 9)
             if total != 1:
                 return False, f"Expected 1 incoming KNOWS edge to user 10, got {total}", proof
@@ -692,8 +707,7 @@ class TestRunner:
             if elapsed_ms > max_time_ms:
                 return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            total = self._extract_count(result_data, "total")
+            total = self._extract_query_count(response.body, "total")
             # Users 0, 2, 4, ..., 18 are enabled (10 total)
             if total != 10:
                 return False, f"Expected 10 enabled users, got {total}", proof
@@ -716,8 +730,7 @@ class TestRunner:
             if elapsed_ms > max_time_ms:
                 return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            total = self._extract_count(result_data, "total")
+            total = self._extract_query_count(response.body, "total")
             # enabled (even index) AND score >= 100 (index >= 10)
             # indices: 10, 12, 14, 16, 18 = 5 users
             if total != 5:
@@ -741,8 +754,7 @@ class TestRunner:
             if elapsed_ms > max_time_ms:
                 return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            total = self._extract_count(result_data, "total")
+            total = self._extract_query_count(response.body, "total")
             if total != 2:
                 return False, f"Expected 2 users (index 0 OR 19), got {total}", proof
             self.logger.info(f"Complex WHERE OR: {elapsed_ms:.0f}ms")
@@ -782,8 +794,7 @@ class TestRunner:
             if elapsed_ms > max_time_ms:
                 return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            hops = self._extract_count(result_data, "hops")
+            hops = self._extract_query_count(response.body, "hops")
             # user0 -> user1 -> ... -> user10 = 10 hops
             if hops != 10:
                 return False, f"Expected 10 hops, got {hops}", proof
@@ -821,8 +832,7 @@ class TestRunner:
             if elapsed_ms > max_time_ms:
                 return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
 
-            result_data = self._body_get(response.body, "results", {})
-            hops = self._extract_count(result_data, "hops")
+            hops = self._extract_query_count(response.body, "hops")
             if hops != 19:
                 return False, f"Expected 19 hops, got {hops}", proof
             self.logger.info(f"Shortest path (19 hops): {elapsed_ms:.0f}ms")
@@ -847,8 +857,7 @@ class TestRunner:
 
             # u1.enabled (even index) -> u2.score >= 50 (index >= 5)
             # Edges: 4->5, 6->7, 8->9, 10->11, 12->13, 14->15, 16->17, 18->19 = 8 pairs
-            result_data = self._body_get(response.body, "results", {})
-            total = self._extract_count(result_data, "total")
+            total = self._extract_query_count(response.body, "total")
             if total != 8:
                 return False, f"Expected 8 matching pairs, got {total}", proof
             self.logger.info(f"Combined pattern: {elapsed_ms:.0f}ms")
