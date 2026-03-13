@@ -301,49 +301,24 @@ fn execute_union_all(
             Some(cols) => {
                 if cols.len() != result.columns.len() {
                     return Err(Error::Cypher(format!(
-                        "UNION ALL branches must return the same number of columns (expected {}, got {})",
+                        "All sub queries in an UNION must have the same return column names \
+                         (expected {}, got {})",
                         cols.len(),
                         result.columns.len()
+                    )));
+                }
+                if cols != &result.columns {
+                    return Err(Error::Cypher(format!(
+                        "All sub queries in an UNION must have the same return column names \
+                         (expected [{}], got [{}])",
+                        cols.join(", "),
+                        result.columns.join(", ")
                     )));
                 }
             }
         }
 
-        // Remap column names in rows from subsequent branches to match
-        // the first branch's column names. Per SQL/Cypher semantics, UNION ALL
-        // uses the column names from the first branch.
-        if let Some(cols) = &combined_columns {
-            if cols != &result.columns {
-                let col_mapping: Vec<(&str, &str)> = result
-                    .columns
-                    .iter()
-                    .zip(cols.iter())
-                    .filter(|(src, dst)| src != dst)
-                    .map(|(src, dst)| (src.as_str(), dst.as_str()))
-                    .collect();
-
-                if !col_mapping.is_empty() {
-                    for row in &result.rows {
-                        let mut new_values = HashMap::new();
-                        for (key, value) in &row.values {
-                            let new_key = col_mapping
-                                .iter()
-                                .find(|(src, _)| src == key)
-                                .map(|(_, dst)| dst.to_string())
-                                .unwrap_or_else(|| key.clone());
-                            new_values.insert(new_key, value.clone());
-                        }
-                        combined_rows.push(Row { values: new_values });
-                    }
-                } else {
-                    combined_rows.extend(result.rows);
-                }
-            } else {
-                combined_rows.extend(result.rows);
-            }
-        } else {
-            combined_rows.extend(result.rows);
-        }
+        combined_rows.extend(result.rows);
         combined_stats.nodes_created += result.stats.nodes_created;
         combined_stats.nodes_deleted += result.stats.nodes_deleted;
         combined_stats.relationships_created += result.stats.relationships_created;

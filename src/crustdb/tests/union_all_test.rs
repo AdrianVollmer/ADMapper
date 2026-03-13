@@ -43,8 +43,13 @@ fn test_union_all_basic() {
     db.execute("CREATE (:Group {objectid: 'G1', name: 'Admins'})")
         .unwrap();
 
+    // Use matching column aliases across branches
     let result = db
-        .execute("MATCH (u:User) RETURN u.name UNION ALL MATCH (g:Group) RETURN g.name")
+        .execute(
+            "MATCH (u:User) RETURN u.name AS name \
+             UNION ALL \
+             MATCH (g:Group) RETURN g.name AS name",
+        )
         .unwrap();
 
     assert_eq!(result.columns.len(), 1);
@@ -92,6 +97,25 @@ fn test_union_all_column_count_mismatch() {
 }
 
 #[test]
+fn test_union_all_column_name_mismatch() {
+    let db = Database::in_memory().unwrap();
+
+    db.execute("CREATE (:User {objectid: 'U1', name: 'Alice'})")
+        .unwrap();
+    db.execute("CREATE (:Group {objectid: 'G1', name: 'Admins'})")
+        .unwrap();
+
+    // Different column names without explicit alias should be rejected
+    let result = db.execute("MATCH (u:User) RETURN u.name UNION ALL MATCH (g:Group) RETURN g.name");
+    assert!(result.is_err(), "Should reject mismatched column names");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("same return column names"),
+        "Error should mention column names, got: {err}"
+    );
+}
+
+#[test]
 fn test_union_all_three_branches() {
     let db = Database::in_memory().unwrap();
 
@@ -102,15 +126,36 @@ fn test_union_all_three_branches() {
     db.execute("CREATE (:Computer {objectid: 'C1', name: 'DC01'})")
         .unwrap();
 
+    // Use matching column aliases
     let result = db
         .execute(
-            "MATCH (u:User) RETURN u.name \
-             UNION ALL MATCH (g:Group) RETURN g.name \
-             UNION ALL MATCH (c:Computer) RETURN c.name",
+            "MATCH (u:User) RETURN u.name AS name \
+             UNION ALL MATCH (g:Group) RETURN g.name AS name \
+             UNION ALL MATCH (c:Computer) RETURN c.name AS name",
         )
         .unwrap();
 
     assert_eq!(result.rows.len(), 3);
+}
+
+#[test]
+fn test_union_all_three_branches_rejects_name_mismatch() {
+    let db = Database::in_memory().unwrap();
+
+    db.execute("CREATE (:User {objectid: 'U1', name: 'Alice'})")
+        .unwrap();
+    db.execute("CREATE (:Group {objectid: 'G1', name: 'Admins'})")
+        .unwrap();
+    db.execute("CREATE (:Computer {objectid: 'C1', name: 'DC01'})")
+        .unwrap();
+
+    // Different column names across branches should be rejected
+    let result = db.execute(
+        "MATCH (u:User) RETURN u.name \
+         UNION ALL MATCH (g:Group) RETURN g.name \
+         UNION ALL MATCH (c:Computer) RETURN c.name",
+    );
+    assert!(result.is_err(), "Should reject mismatched column names");
 }
 
 #[test]
@@ -120,9 +165,14 @@ fn test_union_all_empty_branch() {
     db.execute("CREATE (:User {objectid: 'U1', name: 'Alice'})")
         .unwrap();
 
-    // No groups exist, so second branch returns nothing
+    // No groups exist, so second branch returns nothing.
+    // Use matching aliases.
     let result = db
-        .execute("MATCH (u:User) RETURN u.name UNION ALL MATCH (g:Group) RETURN g.name")
+        .execute(
+            "MATCH (u:User) RETURN u.name AS name \
+             UNION ALL \
+             MATCH (g:Group) RETURN g.name AS name",
+        )
         .unwrap();
 
     assert_eq!(result.rows.len(), 1);
@@ -134,11 +184,12 @@ fn test_domain_trusts_query_returns_all_domains() {
     setup_domain_graph(&db);
 
     // The actual query used by ADMapper's "Domain Trusts" built-in
+    // (with matching column aliases per openCypher UNION rules)
     let result = db
         .execute(
-            "MATCH (d:Domain) RETURN d \
+            "MATCH (d:Domain) RETURN d AS result \
              UNION ALL \
-             MATCH p = (d:Domain)-[:TrustedBy]->(t:Domain) RETURN p",
+             MATCH p = (d:Domain)-[:TrustedBy]->(t:Domain) RETURN p AS result",
         )
         .unwrap();
 
@@ -172,54 +223,44 @@ fn test_domain_trusts_query_returns_all_domains() {
 }
 
 #[test]
-fn test_union_all_remaps_column_names() {
+fn test_domain_trusts_mismatched_columns_rejected() {
+    // The old Domain Trusts query used different return variable names (d vs p).
+    // Per openCypher spec, this must be rejected.
     let db = Database::in_memory().unwrap();
+    setup_domain_graph(&db);
 
-    db.execute("CREATE (:User {objectid: 'U1', name: 'Alice'})")
-        .unwrap();
-    db.execute("CREATE (:Group {objectid: 'G1', name: 'Admins'})")
-        .unwrap();
+    let result = db.execute(
+        "MATCH (d:Domain) RETURN d \
+         UNION ALL \
+         MATCH p = (d:Domain)-[:TrustedBy]->(t:Domain) RETURN p",
+    );
 
-    // Different column names across branches: u.name vs g.name
-    let result = db
-        .execute("MATCH (u:User) RETURN u.name UNION ALL MATCH (g:Group) RETURN g.name")
-        .unwrap();
-
-    // Column names should come from first branch
-    assert_eq!(result.columns, vec!["u.name"]);
-
-    // All rows should have values accessible via the first branch's column name
-    for row in &result.rows {
-        assert!(
-            row.values.get("u.name").is_some(),
-            "Row should have value under first branch column name 'u.name', but keys are: {:?}",
-            row.values.keys().collect::<Vec<_>>()
-        );
-    }
+    assert!(
+        result.is_err(),
+        "Should reject UNION ALL with mismatched column names (d vs p)"
+    );
 }
 
 #[test]
 fn test_domain_trusts_column_name_consistency() {
-    // Regression test: the Domain Trusts query uses different return variable
-    // names across branches (d vs p). The API reads values by column name,
-    // so all rows must have values keyed under the first branch's column name.
+    // With matching column aliases, all rows should be accessible by "result"
     let db = Database::in_memory().unwrap();
     setup_domain_graph(&db);
 
     let result = db
         .execute(
-            "MATCH (d:Domain) RETURN d \
+            "MATCH (d:Domain) RETURN d AS result \
              UNION ALL \
-             MATCH p = (d:Domain)-[:TrustedBy]->(t:Domain) RETURN p",
+             MATCH p = (d:Domain)-[:TrustedBy]->(t:Domain) RETURN p AS result",
         )
         .unwrap();
 
-    assert_eq!(result.columns, vec!["d"]);
+    assert_eq!(result.columns, vec!["result"]);
 
     for (i, row) in result.rows.iter().enumerate() {
         assert!(
-            row.values.get("d").is_some(),
-            "Row {} should have value under column name 'd', but keys are: {:?}",
+            row.values.get("result").is_some(),
+            "Row {} should have value under column name 'result', but keys are: {:?}",
             i,
             row.values.keys().collect::<Vec<_>>()
         );
@@ -238,9 +279,9 @@ fn test_domain_trusts_no_trusts_still_returns_domains() {
 
     let result = db
         .execute(
-            "MATCH (d:Domain) RETURN d \
+            "MATCH (d:Domain) RETURN d AS result \
              UNION ALL \
-             MATCH p = (d:Domain)-[:TrustedBy]->(t:Domain) RETURN p",
+             MATCH p = (d:Domain)-[:TrustedBy]->(t:Domain) RETURN p AS result",
         )
         .unwrap();
 

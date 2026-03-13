@@ -20,15 +20,14 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
       {
         id: "all-dcs",
         name: "Domain Controllers",
-        description:
-          "All domain controller computers (RID 516, 498, 521, SID S-1-5-9)",
+        description: "All domain controller computers (RID 516, 498, 521, SID S-1-5-9)",
         query: `MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE g.objectid ENDS WITH '-516' OR g.objectid ENDS WITH '-498' OR g.objectid ENDS WITH '-521' OR g.objectid ENDS WITH '-S-1-5-9' RETURN p`,
       },
       {
         id: "domain-trusts",
         name: "Domain Trusts",
         description: "All domains and their trust relationships",
-        query: `MATCH (d:Domain) RETURN d UNION ALL MATCH p = (d:Domain)-[:TrustedBy]->(t:Domain) RETURN p`,
+        query: `MATCH (d:Domain) RETURN d AS result UNION ALL MATCH p = (d:Domain)-[:TrustedBy]->(t:Domain) RETURN p AS result`,
       },
     ],
   },
