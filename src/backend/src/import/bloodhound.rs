@@ -119,6 +119,9 @@ pub struct BloodHoundImporter {
     progress_tx: broadcast::Sender<ImportProgress>,
     /// Track which object IDs we've seen to avoid duplicate nodes
     seen_nodes: HashSet<String>,
+    /// Track which edges we've seen to avoid duplicates across entities.
+    /// Key is (source, target, rel_type).
+    seen_edges: HashSet<(String, String, String)>,
     /// Buffer relationships within current file, flushed per-file for live progress
     edge_buffer: Vec<DbEdge>,
     /// Buffer domain nodes from trust relationships (for orphaned domains)
@@ -134,6 +137,7 @@ impl BloodHoundImporter {
             db,
             progress_tx,
             seen_nodes: HashSet::new(),
+            seen_edges: HashSet::new(),
             edge_buffer: Vec::new(),
             trust_domain_buffer: Vec::new(),
         }
@@ -360,9 +364,18 @@ impl BloodHoundImporter {
                 }
             }
 
-            // Extract relationships - buffered and flushed at end of file
+            // Extract relationships - deduplicated and buffered, flushed at end of file
             let relationships = self.extract_edges(&data_type, &entity);
-            self.edge_buffer.extend(relationships);
+            for edge in relationships {
+                let key = (
+                    edge.source.clone(),
+                    edge.target.clone(),
+                    edge.rel_type.clone(),
+                );
+                if self.seen_edges.insert(key) {
+                    self.edge_buffer.push(edge);
+                }
+            }
         }
 
         // Flush remaining nodes
@@ -1717,5 +1730,35 @@ mod tests {
         // Should only have 1 node due to deduplication
         let (node_count, _) = importer.db.get_stats().unwrap();
         assert_eq!(node_count, 1);
+    }
+
+    #[test]
+    fn test_import_deduplicates_edges() {
+        let mut importer = test_importer();
+
+        // Import a group with two members that reference the same user,
+        // which produces duplicate MemberOf edges.
+        let json_content = serde_json::json!({
+            "meta": {"type": "groups"},
+            "data": [
+                {
+                    "ObjectIdentifier": "S-1-5-21-GROUP1",
+                    "Properties": {"name": "group1"},
+                    "Members": [
+                        {"ObjectIdentifier": "S-1-5-21-USER1", "ObjectType": "User"},
+                        {"ObjectIdentifier": "S-1-5-21-USER1", "ObjectType": "User"}
+                    ]
+                }
+            ]
+        });
+
+        let mut progress = ImportProgress::new("test".to_string());
+        importer
+            .import_json_str(&json_content.to_string(), &mut progress)
+            .unwrap();
+
+        // Should only have 1 edge due to deduplication
+        let (_, edge_count) = importer.db.get_stats().unwrap();
+        assert_eq!(edge_count, 1);
     }
 }

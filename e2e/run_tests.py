@@ -135,6 +135,8 @@ class TestSuite:
     results: list[TestResult] = field(default_factory=list)
     # Query counts from consistency tests, keyed by query ID
     query_counts: dict[str, int] = field(default_factory=dict)
+    # Graph stats (total_nodes, total_edges) for cross-backend import validation
+    graph_stats: dict[str, int] = field(default_factory=dict)
 
     @property
     def total(self) -> int:
@@ -305,8 +307,9 @@ class E2ETestRunner:
                     message=str(e),
                 ))
 
-        # Store query consistency counts
+        # Store query consistency counts and graph stats
         suite.query_counts = runner.query_counts
+        suite.graph_stats = runner.graph_stats
 
         # Save server logs to report directory
         if self.server_process:
@@ -978,6 +981,59 @@ proof::before {
 </body>
 </html>'''
 
+    def _compare_graph_stats(self, suites: list[TestSuite]) -> list[TestResult]:
+        """Compare node and edge counts across backends.
+
+        All backends must import identical numbers of nodes and edges from
+        the same test data.  A mismatch indicates a backend-specific import
+        bug (e.g. duplicate edges or missing deduplication).
+        """
+        results: list[TestResult] = []
+        suites_with_stats = [s for s in suites if s.graph_stats]
+        if len(suites_with_stats) < 2:
+            return results
+
+        self.logger.info("=" * 42)
+        self.logger.info("Cross-backend graph stats")
+        self.logger.info("=" * 42)
+
+        for stat_key, label in [
+            ("total_nodes", "node count"),
+            ("total_edges", "edge count"),
+        ]:
+            counts: dict[str, int] = {}
+            for suite in suites_with_stats:
+                if stat_key in suite.graph_stats:
+                    counts[suite.backend] = suite.graph_stats[stat_key]
+
+            if len(counts) < 2:
+                continue
+
+            values = list(counts.values())
+            all_equal = all(v == values[0] for v in values)
+            counts_str = ", ".join(f"{b}={c}" for b, c in counts.items())
+
+            if all_equal:
+                log_pass(self.logger, f"  {label}: {counts_str}")
+                results.append(TestResult(
+                    name=f"Cross-backend: {label}",
+                    passed=True,
+                    duration_ms=0,
+                    message="",
+                    proof=counts_str,
+                ))
+            else:
+                log_fail(self.logger, f"  {label}: MISMATCH {counts_str}")
+                results.append(TestResult(
+                    name=f"Cross-backend: {label}",
+                    passed=False,
+                    duration_ms=0,
+                    message=f"Mismatch: {counts_str}",
+                    proof=counts_str,
+                ))
+
+        return results
+
     def _compare_query_counts(self, suites: list[TestSuite]) -> list[TestResult]:
         """Compare query counts across backends.
 
@@ -1069,9 +1125,10 @@ proof::before {
             if suite.failed > 0:
                 overall_failed = True
 
-        # Cross-backend query consistency comparison
+        # Cross-backend comparisons
         if len(suites) > 1:
-            comparison_results = self._compare_query_counts(suites)
+            comparison_results = self._compare_graph_stats(suites)
+            comparison_results += self._compare_query_counts(suites)
             if comparison_results:
                 # Add comparison results to a virtual "cross-backend" suite
                 comparison_suite = TestSuite(backend="cross-backend")

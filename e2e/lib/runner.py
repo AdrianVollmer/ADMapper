@@ -45,6 +45,8 @@ class TestRunner:
         self._expected_stats: dict[str, Any] | None = None
         # Populated by test_query_consistency() for cross-backend comparison
         self.query_counts: dict[str, int] = {}
+        # Populated by test_stats() for cross-backend import validation
+        self.graph_stats: dict[str, int] = {}
 
     @property
     def expected_stats(self) -> dict[str, Any]:
@@ -239,6 +241,11 @@ class TestRunner:
             if not response.ok:
                 return False, f"Detailed stats failed: {response.body}", proof
             detailed = response.body
+            # Store for cross-backend comparison
+            if isinstance(detailed, dict):
+                for key in ("total_nodes", "total_edges"):
+                    if key in detailed:
+                        self.graph_stats[key] = detailed[key]
             return True, "", proof
 
         results.append(self._run_test("Detailed stats endpoint works", check_detailed_stats))

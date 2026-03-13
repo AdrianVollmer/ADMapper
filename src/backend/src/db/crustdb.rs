@@ -256,18 +256,7 @@ impl CrustDatabase {
         }
 
         // Build index of objectid -> node_id for efficient lookups
-        let node_index = match self.db.build_property_index("objectid") {
-            Ok(index) => index,
-            Err(e) => {
-                debug!("Failed to build property index, falling back: {}", e);
-                return self.insert_edges_fallback(relationships);
-            }
-        };
-
-        // Convert relationships to the format expected by CrustDB batch insert
-        let mut batch: Vec<(i64, i64, String, serde_json::Value)> =
-            Vec::with_capacity(relationships.len());
-        let mut skipped = 0;
+        let node_index = self.db.build_property_index("objectid")?;
 
         // Collect unique placeholder nodes to create (deduplicated)
         let mut placeholder_set: std::collections::HashSet<(String, String)> =
@@ -301,14 +290,13 @@ impl CrustDatabase {
         let node_index = if !placeholder_set.is_empty() {
             debug!("Creating {} placeholder nodes", placeholder_set.len());
 
-            // Convert to batch format: (labels, properties)
             let placeholder_batch: Vec<(Vec<String>, serde_json::Value)> = placeholder_set
                 .iter()
                 .map(|(objectid, node_type)| {
                     let labels = vec![node_type.clone()];
                     let props = serde_json::json!({
                         "objectid": objectid,
-                        "name": objectid,  // Use objectid as name for placeholder
+                        "name": objectid,
                         "placeholder": true,
                         "node_type": node_type,
                     });
@@ -316,20 +304,19 @@ impl CrustDatabase {
                 })
                 .collect();
 
-            match self.db.insert_nodes_batch(&placeholder_batch) {
-                Ok(ids) => {
-                    debug!("Batch inserted {} placeholder nodes", ids.len());
-                }
-                Err(e) => {
-                    debug!("Batch placeholder insert failed: {}", e);
-                }
-            }
+            self.db.insert_nodes_batch(&placeholder_batch)?;
+            debug!("Inserted {} placeholder nodes", placeholder_set.len());
 
             // Rebuild index after creating placeholders
-            self.db.build_property_index("objectid").unwrap_or_default()
+            self.db.build_property_index("objectid")?
         } else {
             node_index
         };
+
+        // Convert relationships to the format expected by CrustDB batch insert
+        let mut batch: Vec<(i64, i64, String, serde_json::Value)> =
+            Vec::with_capacity(relationships.len());
+        let mut skipped = 0;
 
         for relationship in relationships {
             let source_id = node_index.get(&relationship.source);
@@ -357,43 +344,13 @@ impl CrustDatabase {
             return Ok(0);
         }
 
-        match self.db.insert_relationships_batch(&batch) {
-            Ok(ids) => {
-                debug!(
-                    "Batch inserted {} relationships (skipped {})",
-                    ids.len(),
-                    skipped
-                );
-                Ok(ids.len())
-            }
-            Err(e) => {
-                debug!("Batch relationship insert failed, falling back: {}", e);
-                self.insert_edges_fallback(relationships)
-            }
-        }
-    }
-
-    /// Fallback method for individual relationship inserts (used if batch fails).
-    fn insert_edges_fallback(&self, relationships: &[DbEdge]) -> Result<usize> {
-        let mut count = 0;
-        for relationship in relationships {
-            let props_str = serde_json::to_string(&relationship.properties)?;
-            let source = relationship.source.replace('\'', "''");
-            let target = relationship.target.replace('\'', "''");
-            let rel_type = relationship.rel_type.replace('\'', "''");
-            let props_escaped = props_str.replace('\'', "''");
-
-            let query = format!(
-                "MATCH (a {{objectid: '{}'}}), (b {{objectid: '{}'}}) \
-                 CREATE (a)-[:{}  {{properties: '{}'}}]->(b)",
-                source, target, rel_type, props_escaped
-            );
-
-            if self.execute(&query).is_ok() {
-                count += 1;
-            }
-        }
-        Ok(count)
+        let ids = self.db.insert_relationships_batch(&batch)?;
+        debug!(
+            "Batch inserted {} relationships (skipped {})",
+            ids.len(),
+            skipped
+        );
+        Ok(ids.len())
     }
 
     /// Insert a single node.
