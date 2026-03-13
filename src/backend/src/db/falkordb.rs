@@ -577,39 +577,30 @@ impl DatabaseBackend for FalkorDbDatabase {
             })
             .collect();
 
-        // Find effective DAs
-        let effective_da_query = format!(
-            "MATCH p = (u:User)-[*1..10]->(g:Group) \
-             WHERE g.objectid ENDS WITH '{}' \
-             RETURN DISTINCT u.objectid AS id, u.name AS name, min(length(p)) AS hops",
-            DOMAIN_ADMIN_SID_SUFFIX
-        );
-        let effective_da_rows = self.execute_query(&effective_da_query)?;
-
-        let effective_das: Vec<(String, String, usize)> = effective_da_rows
-            .iter()
-            .filter_map(|r| {
-                let id = r.first()?.as_str()?.to_string();
-                let name = r.get(1).and_then(|v| v.as_str()).unwrap_or(&id).to_string();
-                let hops = r.get(2).and_then(|v| v.as_i64()).unwrap_or(1) as usize;
-                Some((id, name, hops))
-            })
+        // Find effective DAs by reusing the paths-to-DA query with no exclusions.
+        let effective_das: Vec<(String, String, usize)> = self
+            .find_paths_to_domain_admins(&[])?
+            .into_iter()
+            .map(|(id, _label, name, hops)| (id, name, hops))
             .collect();
 
-        // Compute reachability
+        // Compute reachability from well-known principals.
+        // Look up each principal but skip the expensive untyped variable-length
+        // path traversal (OPTIONAL MATCH -[*1..5]->) which causes timeouts in
+        // FalkorDB. Use a simple direct-neighbor count instead.
         let mut reachability = Vec::new();
         for (name, pattern) in WELL_KNOWN_PRINCIPALS {
             let cypher = if pattern.starts_with('-') {
                 format!(
                     "MATCH (p) WHERE p.objectid ENDS WITH '{}' \
-                     OPTIONAL MATCH (p)-[*1..5]->(t) \
+                     OPTIONAL MATCH (p)-[]->(t) \
                      RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
                     pattern
                 )
             } else {
                 format!(
                     "MATCH (p {{objectid: '{}'}}) \
-                     OPTIONAL MATCH (p)-[*1..5]->(t) \
+                     OPTIONAL MATCH (p)-[]->(t) \
                      RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
                     pattern
                 )

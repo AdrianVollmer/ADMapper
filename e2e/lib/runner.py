@@ -1418,9 +1418,18 @@ class TestRunner:
             # Handle different result formats from different backends
             if isinstance(result_data, dict):
                 if "rows" in result_data:
-                    # CrustDB format: {headers: [...], rows: [[...]]}
+                    # Headers/rows format: {headers: [...], rows: [[...]]}
+                    # Use headers to find correct column indices (order is
+                    # not guaranteed by all backends).
+                    headers = result_data.get("headers", [])
                     rows = result_data.get("rows", [])
-                    if rows and len(rows[0]) >= 2:
+                    if rows and len(rows[0]) >= 2 and headers:
+                        col_map = {h: i for i, h in enumerate(headers)}
+                        src_idx = col_map.get("src", 0)
+                        tgt_idx = col_map.get("tgt", 1)
+                        source_id = str(rows[0][src_idx]) if rows[0][src_idx] else None
+                        target_id = str(rows[0][tgt_idx]) if rows[0][tgt_idx] else None
+                    elif rows and len(rows[0]) >= 2:
                         source_id = str(rows[0][0]) if rows[0][0] else None
                         target_id = str(rows[0][1]) if rows[0][1] else None
                 elif "results" in result_data:

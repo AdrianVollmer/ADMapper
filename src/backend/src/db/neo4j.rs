@@ -514,39 +514,30 @@ impl DatabaseBackend for Neo4jDatabase {
             })
             .collect();
 
-        // Find effective DAs (any path to DA groups)
-        let effective_da_query = format!(
-            "MATCH p = (u:User)-[*1..10]->(g:Group) \
-             WHERE g.objectid ENDS WITH '{}' \
-             RETURN DISTINCT u.objectid AS id, u.name AS name, min(length(p)) AS hops",
-            DOMAIN_ADMIN_SID_SUFFIX
-        );
-        let effective_da_rows = self.execute_query(query(&effective_da_query))?;
-
-        let effective_das: Vec<(String, String, usize)> = effective_da_rows
-            .iter()
-            .filter_map(|r| {
-                let id = r.get::<String>("id").ok()?;
-                let name = r.get::<String>("name").ok().unwrap_or_else(|| id.clone());
-                let hops = r.get::<i64>("hops").ok().unwrap_or(1) as usize;
-                Some((id, name, hops))
-            })
+        // Find effective DAs by reusing the paths-to-DA query with no exclusions.
+        let effective_das: Vec<(String, String, usize)> = self
+            .find_paths_to_domain_admins(&[])?
+            .into_iter()
+            .map(|(id, _label, name, hops)| (id, name, hops))
             .collect();
 
-        // Compute reachability from well-known principals
+        // Compute reachability from well-known principals.
+        // Use direct-neighbor count to avoid expensive untyped variable-length
+        // path traversals. Full transitive reachability is deferred to a
+        // future dedicated analysis pass.
         let mut reachability = Vec::new();
         for (name, pattern) in WELL_KNOWN_PRINCIPALS {
             let q = if pattern.starts_with('-') {
                 query(&format!(
                     "MATCH (p) WHERE p.objectid ENDS WITH '{}' \
-                     OPTIONAL MATCH (p)-[*1..5]->(t) \
+                     OPTIONAL MATCH (p)-[]->(t) \
                      RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
                     pattern
                 ))
             } else {
                 query(&format!(
                     "MATCH (p {{objectid: '{}'}}) \
-                     OPTIONAL MATCH (p)-[*1..5]->(t) \
+                     OPTIONAL MATCH (p)-[]->(t) \
                      RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
                     pattern
                 ))
