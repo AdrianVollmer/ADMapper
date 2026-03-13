@@ -76,5 +76,13 @@ export default [
       "no-unused-vars": "off",
     },
   },
+  {
+    files: ["src/**/__tests__/**/*.ts"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+      },
+    },
+  },
   prettier,
 ];

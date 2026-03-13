@@ -116,10 +116,7 @@ describe("Tauri API compatibility", () => {
 
       for (const [channelName, filterKey] of Object.entries(channels)) {
         // Find subscribe(CHANNEL_NAME, { ... }, ...) calls
-        const regex = new RegExp(
-          `subscribe\\(\\s*${channelName}\\s*,\\s*\\{([^}]*)\\}`,
-          "g"
-        );
+        const regex = new RegExp(`subscribe\\(\\s*${channelName}\\s*,\\s*\\{([^}]*)\\}`, "g");
         let match;
         while ((match = regex.exec(content)) !== null) {
           const paramsContent = match[1]!;

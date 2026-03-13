@@ -64,12 +64,7 @@ describe("getLabelParts", () => {
 
     it("never contains readable characters", () => {
       setLabelVisibilityMode("blur-all");
-      const labels = [
-        "DOMAIN ADMINS@CORP.LOCAL",
-        "S-1-5-21-1234567890-512",
-        "DC01.corp.local",
-        "user with spaces",
-      ];
+      const labels = ["DOMAIN ADMINS@CORP.LOCAL", "S-1-5-21-1234567890-512", "DC01.corp.local", "user with spaces"];
       for (const label of labels) {
         const parts = getLabelParts(label);
         expect(parts!.blurred).toBe("#".repeat(label.length));

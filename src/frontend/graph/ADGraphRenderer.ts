@@ -21,7 +21,6 @@ import { isNodeCollapsed, getHiddenChildCount, getHiddenNodeIds, toggleNodeColla
 import { getLabelParts } from "./label-visibility";
 import { getFixedNodeSizes, setFixedNodeSizesCallback } from "../components/settings";
 
-
 export interface RendererOptions {
   /** Container element or selector */
   container: HTMLElement | string;
