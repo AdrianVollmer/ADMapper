@@ -401,9 +401,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                     cypher_label
                 );
 
-                if let Err(e) = self.run_query(&cypher) {
-                    debug!("Failed to insert {} nodes batch: {}", cypher_label, e);
-                }
+                self.run_query(&cypher)?;
             }
         }
 
@@ -435,22 +433,25 @@ impl DatabaseBackend for FalkorDbDatabase {
                 let items: Vec<String> = chunk
                     .iter()
                     .map(|e| {
-                        let src = e.source.replace('\'', "\\'").replace('\\', "\\\\");
-                        let tgt = e.target.replace('\'', "\\'").replace('\\', "\\\\");
+                        // Escape backslashes first, then quotes, to avoid double-escaping
+                        let src = e.source.replace('\\', "\\\\").replace('\'', "\\'");
+                        let tgt = e.target.replace('\\', "\\\\").replace('\'', "\\'");
                         let src_type = e
                             .source_type
                             .as_deref()
                             .unwrap_or("Base")
+                            .replace('\\', "\\\\")
                             .replace('\'', "\\'");
                         let tgt_type = e
                             .target_type
                             .as_deref()
                             .unwrap_or("Base")
+                            .replace('\\', "\\\\")
                             .replace('\'', "\\'");
                         let props = serde_json::to_string(&e.properties)
                             .unwrap_or_default()
-                            .replace('\'', "\\'")
-                            .replace('\\', "\\\\");
+                            .replace('\\', "\\\\")
+                            .replace('\'', "\\'");
                         format!(
                             "{{src: '{}', tgt: '{}', src_type: '{}', tgt_type: '{}', props: '{}'}}",
                             src, tgt, src_type, tgt_type, props
@@ -458,33 +459,41 @@ impl DatabaseBackend for FalkorDbDatabase {
                     })
                     .collect();
 
-                // MERGE nodes (creates placeholders if not exist), then create relationship
-                let cypher = format!(
+                let items_str = items.join(", ");
+
+                // Step 1: Ensure all referenced nodes exist (placeholder if needed).
+                // Done as a separate query to avoid FalkorDB's UNWIND+MERGE row
+                // collapsing, which causes subsequent CREATE to lose edges when
+                // multiple rows reference the same source/target node.
+                let ensure_nodes = format!(
                     "UNWIND [{}] AS row \
                      MERGE (a {{objectid: row.src}}) \
                      ON CREATE SET a.placeholder = true, a.node_type = row.src_type \
                      MERGE (b {{objectid: row.tgt}}) \
-                     ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type \
-                     MERGE (a)-[r:{}]->(b) \
+                     ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type",
+                    items_str
+                );
+                self.run_query(&ensure_nodes)?;
+
+                // Step 2: Create edges using MATCH (nodes guaranteed to exist).
+                let create_edges = format!(
+                    "UNWIND [{}] AS row \
+                     MATCH (a {{objectid: row.src}}) \
+                     MATCH (b {{objectid: row.tgt}}) \
+                     CREATE (a)-[r:{}]->(b) \
                      SET r.properties = row.props \
                      RETURN count(r) AS created",
-                    items.join(", "),
+                    items_str,
                     rel_type
                 );
 
-                match self.execute_query(&cypher) {
-                    Ok(rows) => {
-                        let created = rows
-                            .first()
-                            .and_then(|r| r.first())
-                            .and_then(|v| v.as_i64())
-                            .unwrap_or(0) as usize;
-                        inserted += created;
-                    }
-                    Err(e) => {
-                        debug!("Failed to create {} relationships batch: {}", rel_type, e);
-                    }
-                }
+                let rows = self.execute_query(&create_edges)?;
+                let created = rows
+                    .first()
+                    .and_then(|r| r.first())
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as usize;
+                inserted += created;
             }
         }
 

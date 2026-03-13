@@ -610,6 +610,8 @@ proof::before {
             }
             if suite.query_counts:
                 backend_data["query_counts"] = suite.query_counts
+            if suite.graph_stats:
+                backend_data["graph_stats"] = suite.graph_stats
             current_summary["backends"][suite.backend] = backend_data
 
         # Save JSON summary for future comparisons

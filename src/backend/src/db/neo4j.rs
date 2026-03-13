@@ -838,7 +838,8 @@ impl DatabaseBackend for Neo4jDatabase {
         }
 
         let q = query(
-            "MATCH p = shortestPath((a {objectid: $from})-[*..20]->(b {objectid: $to})) \
+            "MATCH (a {objectid: $from}), (b {objectid: $to}), \
+             p = shortestPath((a)-[*..20]->(b)) \
              RETURN [n IN nodes(p) | n.objectid] AS node_ids, \
                     [r IN relationships(p) | type(r)] AS rel_types",
         )

@@ -1404,6 +1404,58 @@ class TestRunner:
 
         return results
 
+    @staticmethod
+    def _rewrite_shortestpath_for_falkordb(cypher: str) -> str:
+        """Rewrite shortestPath from MATCH pattern to WITH clause for FalkorDB.
+
+        FalkorDB only supports shortestPath in WITH or RETURN clauses, not
+        directly in MATCH patterns. This rewrites queries like:
+            MATCH ..., p = shortestPath((a)-[*1..N]->(b)) WHERE ... RETURN ...
+        to:
+            MATCH ..., (a), (b) WHERE ... WITH ..., shortestPath((a)-[*1..N]->(b)) AS p RETURN ...
+        """
+        import re
+
+        # Match pattern: p = shortestPath((...)-[*..N]->(...))
+        sp_match = re.search(
+            r',?\s*p\s*=\s*shortestPath\((\([^)]+\))-(\[[^\]]+\])->(\([^)]+\))\)',
+            cypher,
+        )
+        if not sp_match:
+            return cypher
+
+        full_sp = sp_match.group(0)
+        start_node = sp_match.group(1)  # e.g. (u)
+        rel_pattern = sp_match.group(2)  # e.g. [*1..10]
+        end_node = sp_match.group(3)  # e.g. (g)
+
+        # Remove the shortestPath assignment from MATCH
+        modified = cypher.replace(full_sp, "")
+
+        # Split on WHERE/RETURN to insert WITH clause
+        # Pattern: MATCH ... WHERE ... RETURN ...
+        return_match = re.search(r'\bRETURN\b', modified)
+        if not return_match:
+            return cypher
+
+        before_return = modified[:return_match.start()].rstrip()
+        return_clause = modified[return_match.start():]
+
+        # Extract variables used in RETURN that we need to carry through WITH
+        # Simple approach: pass through all bound variables from MATCH
+        # Find node variable names from start/end patterns
+        start_var = re.search(r'\((\w+)', start_node)
+        end_var = re.search(r'\((\w+)', end_node)
+        if not start_var or not end_var:
+            return cypher
+
+        sv = start_var.group(1)
+        ev = end_var.group(1)
+        sp_expr = f"shortestPath(({sv})-{rel_pattern}->({ev})) AS p"
+
+        result = f"{before_return} WITH {sv}, {ev}, {sp_expr} WHERE p IS NOT NULL {return_clause}"
+        return result
+
     def test_query_consistency(self) -> list[TestResult]:
         """Run all built-in and high-value path queries, recording result counts.
 
@@ -1432,6 +1484,10 @@ class TestRunner:
         consistency_queries.extend(self.EXTRA_CONSISTENCY_QUERIES)
 
         for query_id, cypher in consistency_queries:
+            # FalkorDB requires shortestPath in WITH/RETURN, not in MATCH
+            if self.backend == "falkordb":
+                cypher = self._rewrite_shortestpath_for_falkordb(cypher)
+
             def make_check(qid: str, q: str):
                 def check():
                     start = time.time()
