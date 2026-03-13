@@ -1047,10 +1047,13 @@ impl DatabaseBackend for FalkorDbDatabase {
             )
         };
 
+        // FalkorDB only supports shortestPath in WITH/RETURN clauses,
+        // not in MATCH patterns.
         let cypher = format!(
-            "MATCH (u:User), (da:Group), \
-             p = shortestPath((u)-[*1..10]->(da)) \
-             WHERE da.objectid ENDS WITH '-512' {} \
+            "MATCH (u:User), (da:Group) \
+             WHERE da.objectid ENDS WITH '-512' \
+             WITH u, da, shortestPath((u)-[*1..10]->(da)) AS p \
+             WHERE p IS NOT NULL {} \
              RETURN u.objectid AS id, u.name AS name, length(p) AS hops \
              ORDER BY hops, name",
             exclude_clause
