@@ -1352,7 +1352,8 @@ class TestRunner:
     EXTRA_CONSISTENCY_QUERIES: list[tuple[str, str]] = [
         (
             "insights/effective-domain-admins",
-            "MATCH (u:User)-[*1..10]->(g:Group) "
+            "MATCH (u:User), (g:Group), "
+            "p = shortestPath((u)-[*1..10]->(g)) "
             "WHERE g.objectid ENDS WITH '-512' "
             "RETURN DISTINCT u",
         ),

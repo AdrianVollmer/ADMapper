@@ -86,6 +86,52 @@ pub(super) fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
     // Check if this is a shortest path pattern (shortestPath() or allShortestPaths())
     if let Some(mode) = pattern.shortest_path {
         let all_paths = mode == crate::query::parser::ShortestPathMode::All;
+
+        if pattern.elements.len() > 3 {
+            // Comma-separated pattern with shortestPath, e.g.:
+            //   MATCH (u:User), (da:Group), p = shortestPath((u)-[*1..5]->(da))
+            // The last 3 elements are the shortestPath pattern (node-rel-node);
+            // preceding elements are regular patterns that bind variables.
+            // Propagate labels/properties from the preceding elements to the
+            // bare variable references inside shortestPath.
+            let split = pattern.elements.len() - 3;
+            let prefix_elements = &pattern.elements[..split];
+            let mut sp_elements: Vec<PatternElement> =
+                pattern.elements[split..].to_vec();
+
+            // Build a lookup of variable -> node pattern from prefix elements
+            let mut var_nodes = std::collections::HashMap::new();
+            for elem in prefix_elements {
+                if let PatternElement::Node(np) = elem {
+                    if let Some(ref var) = np.variable {
+                        var_nodes.insert(var.clone(), np);
+                    }
+                }
+            }
+
+            // Enrich bare nodes in the shortestPath pattern with labels/props
+            // from the prefix-bound variables.
+            for elem in &mut sp_elements {
+                if let PatternElement::Node(np) = elem {
+                    if let Some(ref var) = np.variable {
+                        if np.labels.is_empty() && np.properties.is_none() {
+                            if let Some(bound) = var_nodes.get(var) {
+                                np.labels = bound.labels.clone();
+                                np.properties = bound.properties.clone();
+                            }
+                        }
+                    }
+                }
+            }
+
+            let sp_pattern = Pattern {
+                elements: sp_elements,
+                path_variable: pattern.path_variable.clone(),
+                shortest_path: pattern.shortest_path,
+            };
+            return plan_shortest_path_pattern(&sp_pattern, all_paths);
+        }
+
         return plan_shortest_path_pattern(pattern, all_paths);
     }
 

@@ -1049,9 +1049,10 @@ impl DatabaseBackend for FalkorDbDatabase {
         };
 
         let cypher = format!(
-            "MATCH p = (u:User)-[*1..10]->(da:Group) \
+            "MATCH (u:User), (da:Group), \
+             p = shortestPath((u)-[*1..10]->(da)) \
              WHERE da.objectid ENDS WITH '-512' {} \
-             RETURN u.objectid AS id, u.name AS name, min(length(p)) AS hops \
+             RETURN u.objectid AS id, u.name AS name, length(p) AS hops \
              ORDER BY hops, name",
             exclude_clause
         );

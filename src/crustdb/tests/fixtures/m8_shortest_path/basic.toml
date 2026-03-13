@@ -74,3 +74,18 @@ row_count = 1
 columns = ["len"]
 # length(p) returns 2 because there are 2 edges: A->B->C
 values = [[2]]
+
+[[test]]
+name = "shortest_path_comma_separated_match"
+description = "openCypher 9: shortestPath as comma-separated pattern part with WHERE filter"
+[test.setup]
+cypher = [
+    "CREATE (:User {name: 'Alice', objectid: 'U1'})-[:MemberOf]->(:Group {name: 'IT', objectid: 'G1'})-[:MemberOf]->(:Group {name: 'DA', objectid: 'S-1-5-21-512'})",
+    "CREATE (:User {name: 'Bob', objectid: 'U2'})",
+]
+[test.query]
+cypher = "MATCH (u:User), (da:Group), p = shortestPath((u)-[*1..5]->(da)) WHERE da.objectid ENDS WITH '-512' RETURN u.name AS name, length(p) AS hops"
+[test.expected]
+row_count = 1
+columns = ["name", "hops"]
+values = [["Alice", 2]]
