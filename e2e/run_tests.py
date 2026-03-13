@@ -102,27 +102,21 @@ def setup_logging(debug: bool = False, log_file: Path | None = None) -> logging.
 
 def log_test(logger: logging.Logger, msg: str) -> None:
     """Log a test message with TEST level."""
-    record = logger.makeRecord(
-        logger.name, logging.INFO, "", 0, msg, (), None
-    )
+    record = logger.makeRecord(logger.name, logging.INFO, "", 0, msg, (), None)
     record.custom_level = "TEST"
     logger.handle(record)
 
 
 def log_pass(logger: logging.Logger, msg: str) -> None:
     """Log a pass message with PASS level."""
-    record = logger.makeRecord(
-        logger.name, logging.INFO, "", 0, msg, (), None
-    )
+    record = logger.makeRecord(logger.name, logging.INFO, "", 0, msg, (), None)
     record.custom_level = "PASS"
     logger.handle(record)
 
 
 def log_fail(logger: logging.Logger, msg: str) -> None:
     """Log a fail message with FAIL level."""
-    record = logger.makeRecord(
-        logger.name, logging.INFO, "", 0, msg, (), None
-    )
+    record = logger.makeRecord(logger.name, logging.INFO, "", 0, msg, (), None)
     record.custom_level = "FAIL"
     logger.handle(record)
 
@@ -247,9 +241,7 @@ class E2ETestRunner:
             return suite
 
         # Start server
-        self.server_process = start_server(
-            self.admapper_bin, db_url, port, self.logger
-        )
+        self.server_process = start_server(self.admapper_bin, db_url, port, self.logger)
         if not self.server_process:
             self.logger.error(f"Failed to start server for {backend}")
             return suite
@@ -297,15 +289,20 @@ class E2ETestRunner:
                     if result.passed:
                         log_pass(self.logger, f"{result.name} ({result.duration_ms}ms)")
                     else:
-                        log_fail(self.logger, f"{result.name}: {result.message} ({result.duration_ms}ms)")
+                        log_fail(
+                            self.logger,
+                            f"{result.name}: {result.message} ({result.duration_ms}ms)",
+                        )
             except Exception as e:
                 self.logger.error(f"Test module {name} failed with exception: {e}")
-                suite.results.append(TestResult(
-                    name=name,
-                    passed=False,
-                    duration_ms=0,
-                    message=str(e),
-                ))
+                suite.results.append(
+                    TestResult(
+                        name=name,
+                        passed=False,
+                        duration_ms=0,
+                        message=str(e),
+                    )
+                )
 
         # Store query consistency counts and graph stats
         suite.query_counts = runner.query_counts
@@ -400,7 +397,7 @@ class E2ETestRunner:
 
     def _generate_report_css(self) -> None:
         """Generate CSS file for XML report styling."""
-        css_content = '''/* E2E Test Report Styles */
+        css_content = """/* E2E Test Report Styles */
 testsuites {
   display: block;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -486,7 +483,7 @@ proof::before {
   font-weight: 600;
   color: #6c757d;
 }
-'''
+"""
         css_file = self.report_dir / "report.css"
         css_file.write_text(css_content)
         self.logger.info(f"Generated CSS: {css_file}")
@@ -528,7 +525,11 @@ proof::before {
 
         # Get all report directories sorted by name (timestamp) descending
         report_dirs = sorted(
-            [d for d in reports_base.iterdir() if d.is_dir() and d.name != "latest" and d != self.report_dir],
+            [
+                d
+                for d in reports_base.iterdir()
+                if d.is_dir() and d.name != "latest" and d != self.report_dir
+            ],
             key=lambda d: d.name,
             reverse=True,
         )[:limit]
@@ -572,7 +573,8 @@ proof::before {
                     summary["backends"][backend] = {
                         "total": int(testsuite.get("tests", "0")),
                         "failed": int(testsuite.get("failures", "0")),
-                        "passed": int(testsuite.get("tests", "0")) - int(testsuite.get("failures", "0")),
+                        "passed": int(testsuite.get("tests", "0"))
+                        - int(testsuite.get("failures", "0")),
                         "duration_ms": int(float(testsuite.get("time", "0")) * 1000),
                     }
             except Exception:
@@ -627,14 +629,24 @@ proof::before {
         prev_tests = self._load_previous_test_details(prev_report)
 
         # Generate HTML summary
-        html = self._build_summary_html(suites, commit, commit_short, timestamp, prev_report, previous_reports, prev_tests)
+        html = self._build_summary_html(
+            suites,
+            commit,
+            commit_short,
+            timestamp,
+            prev_report,
+            previous_reports,
+            prev_tests,
+        )
 
         html_file = self.report_dir / "summary.html"
         with open(html_file, "w") as f:
             f.write(html)
         self.logger.info(f"Generated summary report: {html_file}")
 
-    def _load_previous_test_details(self, prev_report: dict | None) -> dict[str, dict[str, dict]]:
+    def _load_previous_test_details(
+        self, prev_report: dict | None
+    ) -> dict[str, dict[str, dict]]:
         """Load per-test details from previous report (JSON or XML fallback)."""
         prev_tests: dict[str, dict[str, dict]] = {}
         if not prev_report:
@@ -719,7 +731,9 @@ proof::before {
                     if diff > 0:
                         comparison += f' <span class="worse">+{diff} failures</span>'
                     else:
-                        comparison += f' <span class="better">{abs(diff)} fewer failures</span>'
+                        comparison += (
+                            f' <span class="better">{abs(diff)} fewer failures</span>'
+                        )
 
             backend_rows.append(f'''
             <tr class="{status_class}">
@@ -747,7 +761,9 @@ proof::before {
 
         # Build header row with backend names
         backend_names = [s.backend for s in suites]
-        detail_header = "<th>Test</th>" + "".join(f"<th>{b}</th>" for b in backend_names)
+        detail_header = "<th>Test</th>" + "".join(
+            f"<th>{b}</th>" for b in backend_names
+        )
 
         # Build detail rows
         detail_rows = []
@@ -774,11 +790,13 @@ proof::before {
                         elif diff < -50:
                             delta = f' <span class="faster">{diff}ms</span>'
 
-                    cells.append(f'<td class="{status_class}"><span class="icon">{status_icon}</span> {duration_ms}ms{delta}</td>')
+                    cells.append(
+                        f'<td class="{status_class}"><span class="icon">{status_icon}</span> {duration_ms}ms{delta}</td>'
+                    )
 
             detail_rows.append(f"<tr>{''.join(cells)}</tr>")
 
-        details_section = f'''
+        details_section = f"""
         <details class="test-details">
             <summary>Detailed Test Results ({len(all_test_names)} tests)</summary>
             <table class="details-table">
@@ -789,7 +807,7 @@ proof::before {
                     {"".join(detail_rows)}
                 </tbody>
             </table>
-        </details>'''
+        </details>"""
 
         # Build history table
         history_rows = []
@@ -799,18 +817,20 @@ proof::before {
             backends_info = []
             for backend, data in report.get("backends", {}).items():
                 status = "pass" if data.get("failed", 0) == 0 else "fail"
-                backends_info.append(f'<span class="{status}">{backend}: {data.get("passed", 0)}/{data.get("total", 0)}</span>')
+                backends_info.append(
+                    f'<span class="{status}">{backend}: {data.get("passed", 0)}/{data.get("total", 0)}</span>'
+                )
 
-            history_rows.append(f'''
+            history_rows.append(f"""
             <tr>
                 <td><code>{report_commit}</code></td>
                 <td>{report_ts}</td>
                 <td>{" | ".join(backends_info)}</td>
-            </tr>''')
+            </tr>""")
 
         history_section = ""
         if history_rows:
-            history_section = f'''
+            history_section = f"""
         <details class="history-details">
             <summary>Recent History ({len(history_rows)} runs)</summary>
             <table class="history-table">
@@ -825,12 +845,12 @@ proof::before {
                     {"".join(history_rows)}
                 </tbody>
             </table>
-        </details>'''
+        </details>"""
 
         overall_status = "PASSED" if total_failed == 0 else "FAILED"
         overall_class = "pass" if total_failed == 0 else "fail"
 
-        return f'''<!DOCTYPE html>
+        return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -981,7 +1001,7 @@ proof::before {
         {history_section}
     </div>
 </body>
-</html>'''
+</html>"""
 
     def _compare_graph_stats(self, suites: list[TestSuite]) -> list[TestResult]:
         """Compare node and edge counts across backends.
@@ -1017,22 +1037,26 @@ proof::before {
 
             if all_equal:
                 log_pass(self.logger, f"  {label}: {counts_str}")
-                results.append(TestResult(
-                    name=f"Cross-backend: {label}",
-                    passed=True,
-                    duration_ms=0,
-                    message="",
-                    proof=counts_str,
-                ))
+                results.append(
+                    TestResult(
+                        name=f"Cross-backend: {label}",
+                        passed=True,
+                        duration_ms=0,
+                        message="",
+                        proof=counts_str,
+                    )
+                )
             else:
                 log_fail(self.logger, f"  {label}: MISMATCH {counts_str}")
-                results.append(TestResult(
-                    name=f"Cross-backend: {label}",
-                    passed=False,
-                    duration_ms=0,
-                    message=f"Mismatch: {counts_str}",
-                    proof=counts_str,
-                ))
+                results.append(
+                    TestResult(
+                        name=f"Cross-backend: {label}",
+                        passed=False,
+                        duration_ms=0,
+                        message=f"Mismatch: {counts_str}",
+                        proof=counts_str,
+                    )
+                )
 
         return results
 
@@ -1085,23 +1109,27 @@ proof::before {
             if all_equal:
                 matches += 1
                 log_pass(self.logger, f"  {query_id}: {counts_str}")
-                results.append(TestResult(
-                    name=f"Cross-backend: {query_id}",
-                    passed=True,
-                    duration_ms=0,
-                    message="",
-                    proof=counts_str,
-                ))
+                results.append(
+                    TestResult(
+                        name=f"Cross-backend: {query_id}",
+                        passed=True,
+                        duration_ms=0,
+                        message="",
+                        proof=counts_str,
+                    )
+                )
             else:
                 mismatches += 1
                 log_fail(self.logger, f"  {query_id}: MISMATCH {counts_str}")
-                results.append(TestResult(
-                    name=f"Cross-backend: {query_id}",
-                    passed=False,
-                    duration_ms=0,
-                    message=f"Count mismatch: {counts_str}",
-                    proof=counts_str,
-                ))
+                results.append(
+                    TestResult(
+                        name=f"Cross-backend: {query_id}",
+                        passed=False,
+                        duration_ms=0,
+                        message=f"Count mismatch: {counts_str}",
+                        proof=counts_str,
+                    )
+                )
 
         self.logger.info(f"Cross-backend: {matches} matched, {mismatches} mismatched")
         return results

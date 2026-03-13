@@ -944,7 +944,9 @@ impl DatabaseBackend for Neo4jDatabase {
 
                 for col in &headers {
                     // Try different types for each column
-                    let val: Option<JsonValue> = if let Ok(node) = row.get::<Neo4jNode>(col.as_str()) {
+                    let val: Option<JsonValue> = if let Ok(node) =
+                        row.get::<Neo4jNode>(col.as_str())
+                    {
                         // Convert node with _type marker for graph extraction
                         let db_node = Neo4jDatabase::neo4j_node_to_db_node(&node);
                         Some(json!({

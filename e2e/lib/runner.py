@@ -58,7 +58,9 @@ class TestRunner:
                 self._expected_stats = {}
         return self._expected_stats
 
-    def _run_test(self, name: str, test_fn: Callable[[], tuple[bool, str, str]]) -> TestResult:
+    def _run_test(
+        self, name: str, test_fn: Callable[[], tuple[bool, str, str]]
+    ) -> TestResult:
         """Run a single test and capture the result."""
         start = time.time()
         try:
@@ -68,7 +70,13 @@ class TestRunner:
             message = str(e)
             proof = ""
         duration_ms = int((time.time() - start) * 1000)
-        return TestResult(name=name, passed=passed, duration_ms=duration_ms, message=message, proof=proof)
+        return TestResult(
+            name=name,
+            passed=passed,
+            duration_ms=duration_ms,
+            message=message,
+            proof=proof,
+        )
 
     def _to_proof(self, data: Any) -> str:
         """Convert data to a proof string (JSON formatted)."""
@@ -79,7 +87,9 @@ class TestRunner:
         except Exception:
             return str(data)
 
-    def _body_get(self, body: dict[str, Any] | list[Any], key: str, default: Any = None) -> Any:
+    def _body_get(
+        self, body: dict[str, Any] | list[Any], key: str, default: Any = None
+    ) -> Any:
         """Safely get a value from response body that might be dict or list."""
         if isinstance(body, dict):
             return body.get(key, default)
@@ -127,7 +137,11 @@ class TestRunner:
         def check_test_data():
             if not self.test_data.exists():
                 return False, f"Test data not found: {self.test_data}", ""
-            return True, "", f"File: {self.test_data}, size: {self.test_data.stat().st_size} bytes"
+            return (
+                True,
+                "",
+                f"File: {self.test_data}, size: {self.test_data.stat().st_size} bytes",
+            )
 
         results.append(self._run_test("Test data file exists", check_test_data))
 
@@ -204,7 +218,9 @@ class TestRunner:
             self.logger.info(f"Relationships imported: {relationships}")
             return True, "", proof
 
-        results.append(self._run_test("Graph has relationships after import", check_relationships))
+        results.append(
+            self._run_test("Graph has relationships after import", check_relationships)
+        )
 
         return results
 
@@ -226,7 +242,11 @@ class TestRunner:
             nodes = self._body_get(response.body, "nodes", 0)
             relationships = self._body_get(response.body, "relationships", 0)
             if nodes <= 0 or relationships <= 0:
-                return False, f"Invalid stats: nodes={nodes}, relationships={relationships}", proof
+                return (
+                    False,
+                    f"Invalid stats: nodes={nodes}, relationships={relationships}",
+                    proof,
+                )
             return True, "", proof
 
         results.append(self._run_test("Basic stats endpoint works", check_basic_stats))
@@ -248,10 +268,13 @@ class TestRunner:
                         self.graph_stats[key] = detailed[key]
             return True, "", proof
 
-        results.append(self._run_test("Detailed stats endpoint works", check_detailed_stats))
+        results.append(
+            self._run_test("Detailed stats endpoint works", check_detailed_stats)
+        )
 
         # Validate counts against expected
         if detailed and expected:
+
             def check_total_nodes():
                 actual = detailed.get("total_nodes", 0)
                 exp = expected.get("total_nodes", 0)
@@ -267,7 +290,9 @@ class TestRunner:
                 self.logger.info(f"Total nodes: {actual}")
                 return True, "", proof
 
-            results.append(self._run_test("Total nodes is plausible", check_total_nodes))
+            results.append(
+                self._run_test("Total nodes is plausible", check_total_nodes)
+            )
 
             # Note: Relationship count from source files won't match actual imports
             # because some relationships reference non-existent nodes. We just verify
@@ -280,7 +305,9 @@ class TestRunner:
                 self.logger.info(f"Total relationships: {actual}")
                 return True, "", proof
 
-            results.append(self._run_test("Graph has relationships", check_has_relationships))
+            results.append(
+                self._run_test("Graph has relationships", check_has_relationships)
+            )
 
             # Check individual type counts
             # Note: domains use >= because trusts can create orphaned domain references
@@ -290,6 +317,7 @@ class TestRunner:
                 ("groups", "Groups", True),
                 ("domains", "Domains", False),  # Allow extra domains from trusts
             ]:
+
                 def make_check(key, name, exact):
                     def check():
                         actual = detailed.get(key, 0)
@@ -297,18 +325,29 @@ class TestRunner:
                         proof = f"actual: {actual}, expected: {exp}"
                         if exact:
                             if actual != exp:
-                                return False, f"Expected {exp} {name}, got {actual}", proof
+                                return (
+                                    False,
+                                    f"Expected {exp} {name}, got {actual}",
+                                    proof,
+                                )
                         else:
                             if actual < exp:
-                                return False, f"Expected at least {exp} {name}, got {actual}", proof
+                                return (
+                                    False,
+                                    f"Expected at least {exp} {name}, got {actual}",
+                                    proof,
+                                )
                         self.logger.info(f"{name}: {actual}")
                         return True, "", proof
+
                     return check
 
-                results.append(self._run_test(
-                    f"{type_name} count matches expected",
-                    make_check(type_key, type_name, exact_match)
-                ))
+                results.append(
+                    self._run_test(
+                        f"{type_name} count matches expected",
+                        make_check(type_key, type_name, exact_match),
+                    )
+                )
 
         # Node types endpoint
         def check_node_types():
@@ -336,7 +375,11 @@ class TestRunner:
             self.logger.info(f"Relationship types: {', '.join(types[:5])}")
             return True, "", proof
 
-        results.append(self._run_test("Relationship types endpoint works", check_relationship_types))
+        results.append(
+            self._run_test(
+                "Relationship types endpoint works", check_relationship_types
+            )
+        )
 
         return results
 
@@ -395,7 +438,9 @@ class TestRunner:
 
         # Relationship query
         def check_rel_query():
-            response = self.api.query("MATCH (n)-[r]->(m) RETURN count(r) AS edges LIMIT 1")
+            response = self.api.query(
+                "MATCH (n)-[r]->(m) RETURN count(r) AS edges LIMIT 1"
+            )
             proof = self._to_proof(response.body)
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
@@ -405,13 +450,17 @@ class TestRunner:
 
         # Property filter query
         def check_property_query():
-            response = self.api.query("MATCH (u:User) WHERE u.enabled = true RETURN count(u) AS enabled")
+            response = self.api.query(
+                "MATCH (u:User) WHERE u.enabled = true RETURN count(u) AS enabled"
+            )
             proof = self._to_proof(response.body)
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             return True, "", proof
 
-        results.append(self._run_test("Query with property filter", check_property_query))
+        results.append(
+            self._run_test("Query with property filter", check_property_query)
+        )
 
         # Return node properties
         def check_return_props():
@@ -421,17 +470,23 @@ class TestRunner:
                 return False, f"Query failed: {response.body}", proof
             return True, "", proof
 
-        results.append(self._run_test("Query returning node properties", check_return_props))
+        results.append(
+            self._run_test("Query returning node properties", check_return_props)
+        )
 
         # type() function
         def check_type_function():
-            response = self.api.query("MATCH (n)-[r]->(m) RETURN type(r) AS rel_type LIMIT 5")
+            response = self.api.query(
+                "MATCH (n)-[r]->(m) RETURN type(r) AS rel_type LIMIT 5"
+            )
             proof = self._to_proof(response.body)
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             return True, "", proof
 
-        results.append(self._run_test("Query with type() function", check_type_function))
+        results.append(
+            self._run_test("Query with type() function", check_type_function)
+        )
 
         # labels() function
         def check_labels_function():
@@ -441,7 +496,9 @@ class TestRunner:
                 return False, f"Query failed: {response.body}", proof
             return True, "", proof
 
-        results.append(self._run_test("Query with labels() function", check_labels_function))
+        results.append(
+            self._run_test("Query with labels() function", check_labels_function)
+        )
 
         return results
 
@@ -489,9 +546,7 @@ class TestRunner:
 
         return None
 
-    def _extract_query_count(
-        self, body: dict[str, Any], column: str
-    ) -> int | None:
+    def _extract_query_count(self, body: dict[str, Any], column: str) -> int | None:
         """Extract a count from a query response.
 
         Extracts from the inline ``results`` dict returned in sync mode.
@@ -546,7 +601,9 @@ class TestRunner:
                 return False, "No results for either case", proof
             return True, "", proof
 
-        results.append(self._run_test("Search is case insensitive", check_case_insensitive))
+        results.append(
+            self._run_test("Search is case insensitive", check_case_insensitive)
+        )
 
         # Search for non-existent term
         def check_no_results():
@@ -559,7 +616,9 @@ class TestRunner:
                 return False, f"Expected no results, got {len(items)}", proof
             return True, "", proof
 
-        results.append(self._run_test("Search returns empty for non-existent", check_no_results))
+        results.append(
+            self._run_test("Search returns empty for non-existent", check_no_results)
+        )
 
         return results
 
@@ -577,20 +636,24 @@ class TestRunner:
         def setup_perf_data():
             # Create all users with KNOWS chain in a single query
             # This creates: u0 -> u1 -> u2 -> ... -> u19
-            user_chain = "-[:PERF_KNOWS]->".join([
-                f"(u{i}:PerfUser {{name: 'perfuser{i}', index: {i}, "
-                f"enabled: {str(i % 2 == 0).lower()}, score: {i * 10}}})"
-                for i in range(20)
-            ])
+            user_chain = "-[:PERF_KNOWS]->".join(
+                [
+                    f"(u{i}:PerfUser {{name: 'perfuser{i}', index: {i}, "
+                    f"enabled: {str(i % 2 == 0).lower()}, score: {i * 10}}})"
+                    for i in range(20)
+                ]
+            )
             response = self.api.query(f"CREATE {user_chain}")
             if not response.ok:
                 return False, f"Failed to create users: {response.body}", ""
 
             # Create all groups in a single query
-            groups = ", ".join([
-                f"(g{i}:PerfGroup {{name: 'perfgroup{i}', index: {i}, priority: {i % 5}}})"
-                for i in range(10)
-            ])
+            groups = ", ".join(
+                [
+                    f"(g{i}:PerfGroup {{name: 'perfgroup{i}', index: {i}, priority: {i % 5}}})"
+                    for i in range(10)
+                ]
+            )
             response = self.api.query(f"CREATE {groups}")
             if not response.ok:
                 return False, f"Failed to create groups: {response.body}", ""
@@ -616,7 +679,11 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
 
             total = self._extract_query_count(response.body, "total")
             if total != 20:
@@ -624,7 +691,9 @@ class TestRunner:
             self.logger.info(f"Count PerfUser: {elapsed_ms:.0f}ms")
             return True, "", proof
 
-        results.append(self._run_test("Perf: Count users (expect 20)", check_user_count))
+        results.append(
+            self._run_test("Perf: Count users (expect 20)", check_user_count)
+        )
 
         # Test 2: Count PerfGroup nodes (should be 10)
         def check_group_count():
@@ -635,7 +704,11 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
 
             total = self._extract_query_count(response.body, "total")
             if total != 10:
@@ -643,7 +716,9 @@ class TestRunner:
             self.logger.info(f"Count PerfGroup: {elapsed_ms:.0f}ms")
             return True, "", proof
 
-        results.append(self._run_test("Perf: Count groups (expect 10)", check_group_count))
+        results.append(
+            self._run_test("Perf: Count groups (expect 10)", check_group_count)
+        )
 
         # Test 3: Outgoing KNOWS edges from a user (user 0 -> user 1)
         def check_outgoing():
@@ -657,12 +732,20 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
 
             total = self._extract_query_count(response.body, "total")
             # User 0 has exactly 1 outgoing KNOWS edge (to user 1)
             if total != 1:
-                return False, f"Expected 1 outgoing KNOWS edge from user 0, got {total}", proof
+                return (
+                    False,
+                    f"Expected 1 outgoing KNOWS edge from user 0, got {total}",
+                    proof,
+                )
             self.logger.info(f"Outgoing edges: {elapsed_ms:.0f}ms")
             return True, "", proof
 
@@ -680,12 +763,20 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
 
             total = self._extract_query_count(response.body, "total")
             # User 10 has exactly 1 incoming KNOWS edge (from user 9)
             if total != 1:
-                return False, f"Expected 1 incoming KNOWS edge to user 10, got {total}", proof
+                return (
+                    False,
+                    f"Expected 1 incoming KNOWS edge to user 10, got {total}",
+                    proof,
+                )
             self.logger.info(f"Incoming edges: {elapsed_ms:.0f}ms")
             return True, "", proof
 
@@ -702,7 +793,11 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
 
             total = self._extract_query_count(response.body, "total")
             # Users 0, 2, 4, ..., 18 are enabled (10 total)
@@ -725,17 +820,27 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
 
             total = self._extract_query_count(response.body, "total")
             # enabled (even index) AND score >= 100 (index >= 10)
             # indices: 10, 12, 14, 16, 18 = 5 users
             if total != 5:
-                return False, f"Expected 5 users (enabled AND score>=100), got {total}", proof
+                return (
+                    False,
+                    f"Expected 5 users (enabled AND score>=100), got {total}",
+                    proof,
+                )
             self.logger.info(f"Complex WHERE AND: {elapsed_ms:.0f}ms")
             return True, "", proof
 
-        results.append(self._run_test("Perf: Complex WHERE with AND", check_complex_where_and))
+        results.append(
+            self._run_test("Perf: Complex WHERE with AND", check_complex_where_and)
+        )
 
         # Test 7: Complex WHERE with OR
         def check_complex_where_or():
@@ -749,7 +854,11 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
 
             total = self._extract_query_count(response.body, "total")
             if total != 2:
@@ -757,7 +866,9 @@ class TestRunner:
             self.logger.info(f"Complex WHERE OR: {elapsed_ms:.0f}ms")
             return True, "", proof
 
-        results.append(self._run_test("Perf: Complex WHERE with OR", check_complex_where_or))
+        results.append(
+            self._run_test("Perf: Complex WHERE with OR", check_complex_where_or)
+        )
 
         # Test 8: Shortest path (user 0 to user 10 via KNOWS chain)
         # Backend-specific syntax required:
@@ -789,7 +900,11 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
 
             hops = self._extract_query_count(response.body, "hops")
             # user0 -> user1 -> ... -> user10 = 10 hops
@@ -798,7 +913,9 @@ class TestRunner:
             self.logger.info(f"Shortest path (10 hops): {elapsed_ms:.0f}ms")
             return True, "", proof
 
-        results.append(self._run_test("Perf: Shortest path (10 hops)", check_shortest_path_perf))
+        results.append(
+            self._run_test("Perf: Shortest path (10 hops)", check_shortest_path_perf)
+        )
 
         # Test 9: Longer shortest path (user 0 to user 19)
         # Backend-specific syntax (same as test 8)
@@ -827,7 +944,11 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
 
             hops = self._extract_query_count(response.body, "hops")
             if hops != 19:
@@ -835,7 +956,9 @@ class TestRunner:
             self.logger.info(f"Shortest path (19 hops): {elapsed_ms:.0f}ms")
             return True, "", proof
 
-        results.append(self._run_test("Perf: Shortest path (19 hops)", check_longer_shortest_path))
+        results.append(
+            self._run_test("Perf: Shortest path (19 hops)", check_longer_shortest_path)
+        )
 
         # Test 10: Combined pattern - path traversal with property filter
         def check_combined_pattern():
@@ -850,7 +973,11 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Query too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
 
             # u1.enabled (even index) -> u2.score >= 50 (index >= 5)
             # Edges: 4->5, 6->7, 8->9, 10->11, 12->13, 14->15, 16->17, 18->19 = 8 pairs
@@ -860,7 +987,11 @@ class TestRunner:
             self.logger.info(f"Combined pattern: {elapsed_ms:.0f}ms")
             return True, "", proof
 
-        results.append(self._run_test("Perf: Combined pattern with filters", check_combined_pattern))
+        results.append(
+            self._run_test(
+                "Perf: Combined pattern with filters", check_combined_pattern
+            )
+        )
 
         # Test 11: Node connections API - get a real node from imported data
         # First, find a User node with connections
@@ -876,7 +1007,9 @@ class TestRunner:
             items = response.body
             if not items or not isinstance(items, list) or len(items) == 0:
                 # Fall back to querying for any user
-                response = self.api.query("MATCH (u:User) RETURN u.objectid AS id LIMIT 1")
+                response = self.api.query(
+                    "MATCH (u:User) RETURN u.objectid AS id LIMIT 1"
+                )
                 if not response.ok:
                     return False, f"Query failed: {response.body}", proof
                 result_data = self._body_get(response.body, "results", {})
@@ -894,7 +1027,9 @@ class TestRunner:
             self.logger.info(f"Using node {test_node_id} for connections tests")
             return True, "", proof
 
-        results.append(self._run_test("Perf: Find test node for connections", find_test_node))
+        results.append(
+            self._run_test("Perf: Find test node for connections", find_test_node)
+        )
 
         if not test_node_id:
             return results
@@ -908,7 +1043,11 @@ class TestRunner:
             if not response.ok:
                 return False, f"Node counts failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Node counts too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Node counts too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
             # Verify response has expected fields
             body = response.body
             if not isinstance(body, dict):
@@ -917,7 +1056,9 @@ class TestRunner:
             for field in required:
                 if field not in body:
                     return False, f"Missing field: {field}", proof
-            self.logger.info(f"Node counts: {elapsed_ms:.0f}ms, in={body.get('incoming')}, out={body.get('outgoing')}")
+            self.logger.info(
+                f"Node counts: {elapsed_ms:.0f}ms, in={body.get('incoming')}, out={body.get('outgoing')}"
+            )
             return True, "", proof
 
         results.append(self._run_test("Perf: Node counts API (<3s)", check_node_counts))
@@ -931,17 +1072,27 @@ class TestRunner:
             if not response.ok:
                 return False, f"Incoming connections failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Incoming connections too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Incoming connections too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
             # Verify response structure
             body = response.body
             if not isinstance(body, dict):
                 return False, f"Expected dict, got {type(body)}", proof
             nodes = body.get("nodes", [])
             relationships = body.get("relationships", [])
-            self.logger.info(f"Incoming connections: {elapsed_ms:.0f}ms, {len(nodes)} nodes, {len(relationships)} relationships")
+            self.logger.info(
+                f"Incoming connections: {elapsed_ms:.0f}ms, {len(nodes)} nodes, {len(relationships)} relationships"
+            )
             return True, "", proof
 
-        results.append(self._run_test("Perf: Incoming connections API (<3s)", check_incoming_connections))
+        results.append(
+            self._run_test(
+                "Perf: Incoming connections API (<3s)", check_incoming_connections
+            )
+        )
 
         # Test 14: Outgoing connections API
         def check_outgoing_connections():
@@ -952,17 +1103,27 @@ class TestRunner:
             if not response.ok:
                 return False, f"Outgoing connections failed: {response.body}", proof
             if elapsed_ms > max_time_ms:
-                return False, f"Outgoing connections too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)", proof
+                return (
+                    False,
+                    f"Outgoing connections too slow: {elapsed_ms:.0f}ms (max {max_time_ms}ms)",
+                    proof,
+                )
             # Verify response structure
             body = response.body
             if not isinstance(body, dict):
                 return False, f"Expected dict, got {type(body)}", proof
             nodes = body.get("nodes", [])
             relationships = body.get("relationships", [])
-            self.logger.info(f"Outgoing connections: {elapsed_ms:.0f}ms, {len(nodes)} nodes, {len(relationships)} relationships")
+            self.logger.info(
+                f"Outgoing connections: {elapsed_ms:.0f}ms, {len(nodes)} nodes, {len(relationships)} relationships"
+            )
             return True, "", proof
 
-        results.append(self._run_test("Perf: Outgoing connections API (<3s)", check_outgoing_connections))
+        results.append(
+            self._run_test(
+                "Perf: Outgoing connections API (<3s)", check_outgoing_connections
+            )
+        )
 
         return results
 
@@ -986,7 +1147,9 @@ class TestRunner:
             self.logger.info(f"Query history has {len(entries)} entries")
             return True, "", proof
 
-        results.append(self._run_test("Query history is not empty", check_history_not_empty))
+        results.append(
+            self._run_test("Query history is not empty", check_history_not_empty)
+        )
 
         # Query history should respond quickly (< 100ms)
         def check_history_fast():
@@ -997,11 +1160,17 @@ class TestRunner:
             if not response.ok:
                 return False, f"Query history failed: {response.body}", proof
             if elapsed_ms > 100:
-                return False, f"Query history too slow: {elapsed_ms:.1f}ms (expected <100ms)", proof
+                return (
+                    False,
+                    f"Query history too slow: {elapsed_ms:.1f}ms (expected <100ms)",
+                    proof,
+                )
             self.logger.info(f"Query history responded in {elapsed_ms:.1f}ms")
             return True, "", proof
 
-        results.append(self._run_test("Query history responds in <100ms", check_history_fast))
+        results.append(
+            self._run_test("Query history responds in <100ms", check_history_fast)
+        )
 
         return results
 
@@ -1029,7 +1198,9 @@ class TestRunner:
                 test_node_id = items[0].get("id", items[0].get("objectid", ""))
             if not test_node_id:
                 # Fallback: query for any user
-                response = self.api.query("MATCH (u:User) RETURN u.objectid AS id LIMIT 1")
+                response = self.api.query(
+                    "MATCH (u:User) RETURN u.objectid AS id LIMIT 1"
+                )
                 if response.ok:
                     result_data = self._body_get(response.body, "results", {})
                     if isinstance(result_data, list) and result_data:
@@ -1119,7 +1290,9 @@ class TestRunner:
         """Test security insights API."""
         results = []
 
-        max_time_ms = 10000  # 10 seconds (insights involve variable-length path queries)
+        max_time_ms = (
+            10000  # 10 seconds (insights involve variable-length path queries)
+        )
 
         # Test insights endpoint
         def check_insights():
@@ -1162,7 +1335,9 @@ class TestRunner:
     def test_choke_points(self) -> list[TestResult]:
         """Test choke points API (edge betweenness centrality)."""
         results = []
-        max_time_ms = 30000  # 30 seconds (expensive algorithm, but cached after first run)
+        max_time_ms = (
+            30000  # 30 seconds (expensive algorithm, but cached after first run)
+        )
 
         # Test choke points endpoint (first call - computes)
         def check_choke_points_first():
@@ -1188,7 +1363,9 @@ class TestRunner:
             )
             return True, "", proof
 
-        results.append(self._run_test("Choke points API works", check_choke_points_first))
+        results.append(
+            self._run_test("Choke points API works", check_choke_points_first)
+        )
 
         # Test choke points endpoint (second call - should use cache)
         def check_choke_points_cached():
@@ -1200,11 +1377,15 @@ class TestRunner:
                 return False, f"Choke points (cached) failed: {response.body}", proof
             # Cached call should be fast (< 500ms)
             if elapsed_ms > 500:
-                self.logger.warning(f"Choke points cached call slower than expected: {elapsed_ms:.0f}ms")
+                self.logger.warning(
+                    f"Choke points cached call slower than expected: {elapsed_ms:.0f}ms"
+                )
             self.logger.info(f"Choke points (cached): {elapsed_ms:.0f}ms")
             return True, "", proof
 
-        results.append(self._run_test("Choke points cached call fast", check_choke_points_cached))
+        results.append(
+            self._run_test("Choke points cached call fast", check_choke_points_cached)
+        )
 
         return results
 
@@ -1297,7 +1478,11 @@ class TestRunner:
             if not found:
                 return False, "No path found between nodes", proof
             if len(path) < 2:
-                return False, f"Path too short: expected at least 2 nodes, got {len(path)}", proof
+                return (
+                    False,
+                    f"Path too short: expected at least 2 nodes, got {len(path)}",
+                    proof,
+                )
             self.logger.info(f"Shortest path: {elapsed_ms:.0f}ms, {len(path)} steps")
             return True, "", proof
 
@@ -1375,7 +1560,14 @@ class TestRunner:
         """
         import re
 
-        queries_file = project_root / "src" / "frontend" / "components" / "queries" / "builtin-queries.ts"
+        queries_file = (
+            project_root
+            / "src"
+            / "frontend"
+            / "components"
+            / "queries"
+            / "builtin-queries.ts"
+        )
         content = queries_file.read_text()
 
         results: list[tuple[str, str]] = []
@@ -1384,9 +1576,9 @@ class TestRunner:
         # Match id-to-query spans that do NOT contain another "id:" in between
         # (which would indicate crossing into a different object).
         pattern = re.compile(
-            r'id:\s*"([^"]+)"'     # capture the query id
-            r'(?:(?!id:\s*").)*?'   # skip fields, but stop if another id: appears
-            r'query:\s*`([^`]+)`',  # capture the query string
+            r'id:\s*"([^"]+)"'  # capture the query id
+            r'(?:(?!id:\s*").)*?'  # skip fields, but stop if another id: appears
+            r"query:\s*`([^`]+)`",  # capture the query string
             re.DOTALL,
         )
 
@@ -1394,7 +1586,7 @@ class TestRunner:
             query_id = match.group(1)
             query = match.group(2).strip()
             # Normalize whitespace (template literals may have newlines)
-            query = re.sub(r'\s+', ' ', query)
+            query = re.sub(r"\s+", " ", query)
             results.append((f"builtin/{query_id}", query))
 
         return results
@@ -1413,7 +1605,7 @@ class TestRunner:
 
         # Match pattern: p = shortestPath((...)-[*..N]->(...))
         sp_match = re.search(
-            r',?\s*p\s*=\s*shortestPath\((\([^)]+\))-(\[[^\]]+\])->(\([^)]+\))\)',
+            r",?\s*p\s*=\s*shortestPath\((\([^)]+\))-(\[[^\]]+\])->(\([^)]+\))\)",
             cypher,
         )
         if not sp_match:
@@ -1429,18 +1621,18 @@ class TestRunner:
 
         # Split on WHERE/RETURN to insert WITH clause
         # Pattern: MATCH ... WHERE ... RETURN ...
-        return_match = re.search(r'\bRETURN\b', modified)
+        return_match = re.search(r"\bRETURN\b", modified)
         if not return_match:
             return cypher
 
-        before_return = modified[:return_match.start()].rstrip()
-        return_clause = modified[return_match.start():]
+        before_return = modified[: return_match.start()].rstrip()
+        return_clause = modified[return_match.start() :]
 
         # Extract variables used in RETURN that we need to carry through WITH
         # Simple approach: pass through all bound variables from MATCH
         # Find node variable names from start/end patterns
-        start_var = re.search(r'\((\w+)', start_node)
-        end_var = re.search(r'\((\w+)', end_node)
+        start_var = re.search(r"\((\w+)", start_node)
+        end_var = re.search(r"\((\w+)", end_node)
         if not start_var or not end_var:
             return cypher
 
@@ -1467,13 +1659,17 @@ class TestRunner:
         # Parse queries from the frontend source
         consistency_queries = self._parse_builtin_queries(project_root)
         if not consistency_queries:
-            results.append(self._run_test(
-                "Parse builtin queries",
-                lambda: (False, "No queries parsed from builtin-queries.ts", ""),
-            ))
+            results.append(
+                self._run_test(
+                    "Parse builtin queries",
+                    lambda: (False, "No queries parsed from builtin-queries.ts", ""),
+                )
+            )
             return results
 
-        self.logger.info(f"Parsed {len(consistency_queries)} queries from builtin-queries.ts")
+        self.logger.info(
+            f"Parsed {len(consistency_queries)} queries from builtin-queries.ts"
+        )
 
         # Add extra queries (insights, etc.)
         consistency_queries.extend(self.EXTRA_CONSISTENCY_QUERIES)
@@ -1505,11 +1701,14 @@ class TestRunner:
                     self.query_counts[qid] = count
                     self.logger.info(f"  {qid}: {count} ({elapsed_ms:.0f}ms)")
                     return True, "", proof
+
                 return check
 
-            results.append(self._run_test(
-                f"Consistency: {query_id}",
-                make_check(query_id, cypher),
-            ))
+            results.append(
+                self._run_test(
+                    f"Consistency: {query_id}",
+                    make_check(query_id, cypher),
+                )
+            )
 
         return results

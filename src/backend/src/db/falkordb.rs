@@ -483,8 +483,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                      CREATE (a)-[r:{}]->(b) \
                      SET r.properties = row.props \
                      RETURN count(r) AS created",
-                    items_str,
-                    rel_type
+                    items_str, rel_type
                 );
 
                 let rows = self.execute_query(&create_edges)?;
