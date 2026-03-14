@@ -319,7 +319,7 @@ pub fn graph_choke_points(
 ) -> Result<crate::db::ChokePointsResponse, String> {
     let db = state.db().ok_or("Not connected to database")?;
     debug!("Getting choke points (IPC)");
-    core::graph_choke_points(db.as_ref(), 10)
+    core::graph_choke_points(db.as_ref(), 50)
 }
 
 // ============================================================================

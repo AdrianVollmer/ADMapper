@@ -66,6 +66,13 @@ interface TabState<T> {
   data: T | null;
 }
 
+/** Choke points pagination */
+const CHOKE_POINTS_PAGE_SIZE = 10;
+let chokePointsPage = 0;
+
+/** Modal expanded state */
+let modalExpanded = false;
+
 /** Modal element */
 let modalEl: HTMLElement | null = null;
 
@@ -97,9 +104,12 @@ export async function openInsights(): Promise<void> {
   reachabilityState = { loading: true, error: null, data: null };
   staleState = { loading: true, error: null, data: null };
   chokePointsState = { loading: true, error: null, data: null };
+  chokePointsPage = 0;
+  modalExpanded = false;
   activeTab = "da-analysis";
 
   modalEl!.hidden = false;
+  updateModalExpanded();
   renderModal();
 
   // Load all tabs in parallel
@@ -116,6 +126,22 @@ function closeModal(): void {
   }
 }
 
+/** Update modal expanded/collapsed state */
+function updateModalExpanded(): void {
+  if (!modalEl) return;
+  const content = modalEl.querySelector(".modal-content") as HTMLElement;
+  if (!content) return;
+
+  content.classList.toggle("modal-expanded", modalExpanded);
+
+  const expandIcon = modalEl.querySelector(".expand-icon") as HTMLElement;
+  const collapseIcon = modalEl.querySelector(".collapse-icon") as HTMLElement;
+  if (expandIcon && collapseIcon) {
+    expandIcon.style.display = modalExpanded ? "none" : "";
+    collapseIcon.style.display = modalExpanded ? "" : "none";
+  }
+}
+
 /** Create the modal element */
 function createModal(): void {
   modalEl = document.createElement("div");
@@ -125,11 +151,21 @@ function createModal(): void {
     <div class="modal-content modal-lg">
       <div class="modal-header">
         <h2 class="modal-title">Security Insights</h2>
-        <button class="modal-close" data-action="close" aria-label="Close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
+        <div class="modal-header-actions">
+          <button class="modal-close" data-action="toggle-expand" aria-label="Expand" id="insights-expand-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="expand-icon">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+            </svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="collapse-icon" style="display:none">
+              <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>
+            </svg>
+          </button>
+          <button class="modal-close" data-action="close" aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <div class="modal-body" id="insights-body"></div>
       <div class="modal-footer">
@@ -350,31 +386,44 @@ function renderChokePointsTab(): string {
     `;
   }
 
-  // Find max betweenness for normalization
+  // Pagination
+  const totalPages = Math.ceil(choke_points.length / CHOKE_POINTS_PAGE_SIZE);
+  chokePointsPage = Math.min(chokePointsPage, totalPages - 1);
+  const startIdx = chokePointsPage * CHOKE_POINTS_PAGE_SIZE;
+  const pageItems = choke_points.slice(startIdx, startIdx + CHOKE_POINTS_PAGE_SIZE);
+
+  // Find max betweenness for normalization (across all items, not just page)
   const maxBetweenness = Math.max(...choke_points.map((cp) => cp.betweenness));
 
   let rowsHtml = "";
-  for (const [i, cp] of choke_points.entries()) {
+  for (const [pageIdx, cp] of pageItems.entries()) {
+    const globalIdx = startIdx + pageIdx;
     const normalizedScore = maxBetweenness > 0 ? (cp.betweenness / maxBetweenness) * 100 : 0;
-    const barWidth = Math.max(normalizedScore, 5); // Minimum 5% for visibility
+    const barWidth = Math.max(normalizedScore, 5);
 
     rowsHtml += `
-      <div class="choke-point-row" data-query="choke-point" data-index="${i}" title="Click to view in graph">
-        <div class="choke-point-rank">#${i + 1}</div>
-        <div class="choke-point-details">
-          <div class="choke-point-path">
-            <span class="choke-point-node">${escapeHtml(cp.source_name)}</span>
-            <span class="choke-point-relationship">&rarr; ${escapeHtml(cp.rel_type)} &rarr;</span>
-            <span class="choke-point-node">${escapeHtml(cp.target_name)}</span>
+      <tr class="choke-point-tr" data-query="choke-point" data-index="${globalIdx}" title="Click to view in graph">
+        <td class="choke-point-cell-rank">${globalIdx + 1}</td>
+        <td class="choke-point-cell-score">
+          <div class="choke-point-bar-container">
+            <div class="choke-point-bar" style="width: ${barWidth}%"></div>
           </div>
-          <div class="choke-point-meta">
-            <span class="choke-point-labels">${escapeHtml(cp.source_label)} to ${escapeHtml(cp.target_label)}</span>
-          </div>
-        </div>
-        <div class="choke-point-score">
-          <div class="choke-point-bar" style="width: ${barWidth}%"></div>
           <span class="choke-point-value">${cp.betweenness.toFixed(1)}</span>
-        </div>
+        </td>
+        <td class="choke-point-cell-source">${escapeHtml(cp.source_name)}<span class="choke-point-type-label">${escapeHtml(cp.source_label)}</span></td>
+        <td class="choke-point-cell-rel">${escapeHtml(cp.rel_type)}</td>
+        <td class="choke-point-cell-target">${escapeHtml(cp.target_name)}<span class="choke-point-type-label">${escapeHtml(cp.target_label)}</span></td>
+      </tr>
+    `;
+  }
+
+  let paginationHtml = "";
+  if (totalPages > 1) {
+    paginationHtml = `
+      <div class="choke-points-pagination">
+        <button class="btn btn-sm btn-secondary" data-action="choke-page-prev" ${chokePointsPage === 0 ? "disabled" : ""}>Prev</button>
+        <span class="choke-points-page-info">Page ${chokePointsPage + 1} of ${totalPages}</span>
+        <button class="btn btn-sm btn-secondary" data-action="choke-page-next" ${chokePointsPage >= totalPages - 1 ? "disabled" : ""}>Next</button>
       </div>
     `;
   }
@@ -384,13 +433,27 @@ function renderChokePointsTab(): string {
       <div class="insight-section">
         <h3 class="insight-section-title">Choke Points</h3>
         <p class="insight-desc">
-          Relationships with the highest betweenness centrality - removing these would disrupt the most attack paths.
+          Relationships with the highest betweenness centrality &mdash; removing these would disrupt the most attack paths.
           Analyzed ${total_nodes.toLocaleString()} nodes and ${total_edges.toLocaleString()} relationships.
         </p>
-        <div class="choke-points-list">
-          ${rowsHtml}
+        <div class="choke-points-table-wrap">
+          <table class="choke-points-table">
+            <thead>
+              <tr>
+                <th class="choke-th-rank">#</th>
+                <th class="choke-th-score">Score</th>
+                <th class="choke-th-source">Source</th>
+                <th class="choke-th-rel">Relationship</th>
+                <th class="choke-th-target">Target</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
         </div>
-        <p class="text-xs text-gray-500 mt-3">Click on a row to view the relationship in the graph. Higher scores indicate more paths pass through this relationship.</p>
+        ${paginationHtml}
+        <p class="text-xs text-gray-500 mt-2">Click a row to view the relationship in the graph.</p>
       </div>
     </div>
   `;
@@ -653,13 +716,33 @@ function handleClick(e: Event): void {
     case "close":
       closeModal();
       break;
+    case "toggle-expand":
+      modalExpanded = !modalExpanded;
+      updateModalExpanded();
+      break;
     case "refresh":
       // Reload all tabs
+      chokePointsPage = 0;
       loadDAAnalysis();
       loadReachability();
       loadStaleObjects();
       loadChokePoints();
       break;
+    case "choke-page-prev":
+      if (chokePointsPage > 0) {
+        chokePointsPage--;
+        renderModal();
+      }
+      break;
+    case "choke-page-next": {
+      const total = chokePointsState.data?.choke_points.length ?? 0;
+      const maxPage = Math.ceil(total / CHOKE_POINTS_PAGE_SIZE) - 1;
+      if (chokePointsPage < maxPage) {
+        chokePointsPage++;
+        renderModal();
+      }
+      break;
+    }
   }
 }
 

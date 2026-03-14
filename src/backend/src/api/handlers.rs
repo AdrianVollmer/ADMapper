@@ -1215,9 +1215,9 @@ pub async fn graph_choke_points(
     State(state): State<AppState>,
 ) -> Result<Json<crate::db::ChokePointsResponse>, ApiError> {
     let db = state.require_db()?;
-    // Return top 10 choke points by default
+    // Return top 50 choke points
     let result = run_db(db, |db| {
-        core::graph_choke_points(db, 10).map_err(DbError::Database)
+        core::graph_choke_points(db, 50).map_err(DbError::Database)
     })
     .await?;
     info!(
