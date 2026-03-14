@@ -158,6 +158,8 @@ pub struct ChokePoint {
     pub rel_type: String,
     /// Betweenness centrality score (higher = more paths pass through)
     pub betweenness: f64,
+    /// Whether the source node is marked as high-value
+    pub source_highvalue: bool,
 }
 
 /// Response containing choke point analysis results.

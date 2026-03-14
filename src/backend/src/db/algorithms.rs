@@ -177,6 +177,11 @@ pub fn relationship_betweenness_centrality(
             let edge = &edges[edge_idx];
             let src = node_by_id.get(edge.source.as_str())?;
             let tgt = node_by_id.get(edge.target.as_str())?;
+            let source_highvalue = src
+                .properties
+                .get("is_highvalue")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             Some(ChokePoint {
                 source_id: src.id.clone(),
                 source_name: src.name.clone(),
@@ -186,6 +191,7 @@ pub fn relationship_betweenness_centrality(
                 target_label: tgt.label.clone(),
                 rel_type: edge.rel_type.clone(),
                 betweenness: score,
+                source_highvalue,
             })
         })
         .collect();

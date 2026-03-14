@@ -17,7 +17,7 @@ import { api } from "../api/client";
 import type { RawADGraph } from "../graph/types";
 
 /** Tab identifiers */
-type TabId = "da-analysis" | "reachability" | "stale-objects" | "choke-points";
+type TabId = "da-analysis" | "reachability" | "stale-objects" | "choke-points" | "unexpected-choke-points";
 
 /** Domain Admin Analysis data */
 interface DAAnalysisData {
@@ -50,7 +50,21 @@ interface ChokePointData {
   target_label: string;
   rel_type: string;
   betweenness: number;
+  source_highvalue: boolean;
 }
+
+/** Labels considered domain/infrastructure objects */
+const DOMAIN_OBJECT_LABELS = new Set([
+  "Domain",
+  "OU",
+  "GPO",
+  "Container",
+  "CertTemplate",
+  "EnterpriseCA",
+  "RootCA",
+  "AIACA",
+  "NTAuthStore",
+]);
 
 /** Choke Points response */
 interface ChokePointsData {
@@ -69,6 +83,7 @@ interface TabState<T> {
 /** Choke points pagination */
 const CHOKE_POINTS_PAGE_SIZE = 10;
 let chokePointsPage = 0;
+let unexpectedChokePointsPage = 0;
 
 /** Modal expanded state */
 let modalExpanded = false;
@@ -105,6 +120,7 @@ export async function openInsights(): Promise<void> {
   staleState = { loading: true, error: null, data: null };
   chokePointsState = { loading: true, error: null, data: null };
   chokePointsPage = 0;
+  unexpectedChokePointsPage = 0;
   modalExpanded = false;
   activeTab = "da-analysis";
 
@@ -206,6 +222,9 @@ function renderModal(): void {
       <button class="db-type-tab ${activeTab === "choke-points" ? "active" : ""}" data-tab="choke-points">
         Choke Points
       </button>
+      <button class="db-type-tab ${activeTab === "unexpected-choke-points" ? "active" : ""}" data-tab="unexpected-choke-points">
+        Unexpected Choke Points
+      </button>
     </div>
     <div class="insight-tab-content" ${activeTab !== "da-analysis" ? "hidden" : ""} id="tab-da-analysis">
       ${renderDAAnalysisTab()}
@@ -218,6 +237,9 @@ function renderModal(): void {
     </div>
     <div class="insight-tab-content" ${activeTab !== "choke-points" ? "hidden" : ""} id="tab-choke-points">
       ${renderChokePointsTab()}
+    </div>
+    <div class="insight-tab-content" ${activeTab !== "unexpected-choke-points" ? "hidden" : ""} id="tab-unexpected-choke-points">
+      ${renderUnexpectedChokePointsTab()}
     </div>
   `;
 }
@@ -361,6 +383,81 @@ function renderStaleObjectsTab(): string {
   `;
 }
 
+/** Render a paginated choke points table */
+function renderChokePointsTable(opts: {
+  items: ChokePointData[];
+  allItems: ChokePointData[];
+  page: number;
+  prevAction: string;
+  nextAction: string;
+  /** Maps filtered index to global index in chokePointsState.data.choke_points */
+  globalIndexMap: number[];
+}): string {
+  const { items, allItems, page, prevAction, nextAction, globalIndexMap } = opts;
+  const totalPages = Math.ceil(items.length / CHOKE_POINTS_PAGE_SIZE);
+  const clampedPage = Math.min(page, Math.max(totalPages - 1, 0));
+  const startIdx = clampedPage * CHOKE_POINTS_PAGE_SIZE;
+  const pageItems = items.slice(startIdx, startIdx + CHOKE_POINTS_PAGE_SIZE);
+
+  // Normalize against the full (unfiltered) dataset for consistent bars
+  const maxBetweenness = Math.max(...allItems.map((cp) => cp.betweenness), 0);
+
+  let rowsHtml = "";
+  for (const [pageIdx, cp] of pageItems.entries()) {
+    const displayRank = startIdx + pageIdx + 1;
+    const globalIdx = globalIndexMap[startIdx + pageIdx];
+    const normalizedScore = maxBetweenness > 0 ? (cp.betweenness / maxBetweenness) * 100 : 0;
+    const barWidth = Math.max(normalizedScore, 5);
+
+    rowsHtml += `
+      <tr class="choke-point-tr" data-query="choke-point" data-index="${globalIdx}" title="Click to view in graph">
+        <td class="choke-point-cell-rank">${displayRank}</td>
+        <td class="choke-point-cell-score">
+          <div class="choke-point-bar-container">
+            <div class="choke-point-bar" style="width: ${barWidth}%"></div>
+          </div>
+          <span class="choke-point-value">${cp.betweenness.toFixed(1)}</span>
+        </td>
+        <td class="choke-point-cell-source">${escapeHtml(cp.source_name)}<span class="choke-point-type-label">${escapeHtml(cp.source_label)}</span></td>
+        <td class="choke-point-cell-rel">${escapeHtml(cp.rel_type)}</td>
+        <td class="choke-point-cell-target">${escapeHtml(cp.target_name)}<span class="choke-point-type-label">${escapeHtml(cp.target_label)}</span></td>
+      </tr>
+    `;
+  }
+
+  let paginationHtml = "";
+  if (totalPages > 1) {
+    paginationHtml = `
+      <div class="choke-points-pagination">
+        <button class="btn btn-sm btn-secondary" data-action="${prevAction}" ${clampedPage === 0 ? "disabled" : ""}>Prev</button>
+        <span class="choke-points-page-info">Page ${clampedPage + 1} of ${totalPages}</span>
+        <button class="btn btn-sm btn-secondary" data-action="${nextAction}" ${clampedPage >= totalPages - 1 ? "disabled" : ""}>Next</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="choke-points-table-wrap">
+      <table class="choke-points-table">
+        <thead>
+          <tr>
+            <th class="choke-th-rank">#</th>
+            <th class="choke-th-score">Score</th>
+            <th class="choke-th-source">Source</th>
+            <th class="choke-th-rel">Relationship</th>
+            <th class="choke-th-target">Target</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+    ${paginationHtml}
+    <p class="text-xs text-gray-500 mt-2">Click a row to view the relationship in the graph.</p>
+  `;
+}
+
 /** Render Choke Points tab */
 function renderChokePointsTab(): string {
   if (chokePointsState.loading) {
@@ -386,47 +483,7 @@ function renderChokePointsTab(): string {
     `;
   }
 
-  // Pagination
-  const totalPages = Math.ceil(choke_points.length / CHOKE_POINTS_PAGE_SIZE);
-  chokePointsPage = Math.min(chokePointsPage, totalPages - 1);
-  const startIdx = chokePointsPage * CHOKE_POINTS_PAGE_SIZE;
-  const pageItems = choke_points.slice(startIdx, startIdx + CHOKE_POINTS_PAGE_SIZE);
-
-  // Find max betweenness for normalization (across all items, not just page)
-  const maxBetweenness = Math.max(...choke_points.map((cp) => cp.betweenness));
-
-  let rowsHtml = "";
-  for (const [pageIdx, cp] of pageItems.entries()) {
-    const globalIdx = startIdx + pageIdx;
-    const normalizedScore = maxBetweenness > 0 ? (cp.betweenness / maxBetweenness) * 100 : 0;
-    const barWidth = Math.max(normalizedScore, 5);
-
-    rowsHtml += `
-      <tr class="choke-point-tr" data-query="choke-point" data-index="${globalIdx}" title="Click to view in graph">
-        <td class="choke-point-cell-rank">${globalIdx + 1}</td>
-        <td class="choke-point-cell-score">
-          <div class="choke-point-bar-container">
-            <div class="choke-point-bar" style="width: ${barWidth}%"></div>
-          </div>
-          <span class="choke-point-value">${cp.betweenness.toFixed(1)}</span>
-        </td>
-        <td class="choke-point-cell-source">${escapeHtml(cp.source_name)}<span class="choke-point-type-label">${escapeHtml(cp.source_label)}</span></td>
-        <td class="choke-point-cell-rel">${escapeHtml(cp.rel_type)}</td>
-        <td class="choke-point-cell-target">${escapeHtml(cp.target_name)}<span class="choke-point-type-label">${escapeHtml(cp.target_label)}</span></td>
-      </tr>
-    `;
-  }
-
-  let paginationHtml = "";
-  if (totalPages > 1) {
-    paginationHtml = `
-      <div class="choke-points-pagination">
-        <button class="btn btn-sm btn-secondary" data-action="choke-page-prev" ${chokePointsPage === 0 ? "disabled" : ""}>Prev</button>
-        <span class="choke-points-page-info">Page ${chokePointsPage + 1} of ${totalPages}</span>
-        <button class="btn btn-sm btn-secondary" data-action="choke-page-next" ${chokePointsPage >= totalPages - 1 ? "disabled" : ""}>Next</button>
-      </div>
-    `;
-  }
+  const globalIndexMap = choke_points.map((_, i) => i);
 
   return `
     <div class="insights-container">
@@ -436,24 +493,72 @@ function renderChokePointsTab(): string {
           Relationships with the highest betweenness centrality &mdash; removing these would disrupt the most attack paths.
           Analyzed ${total_nodes.toLocaleString()} nodes and ${total_edges.toLocaleString()} relationships.
         </p>
-        <div class="choke-points-table-wrap">
-          <table class="choke-points-table">
-            <thead>
-              <tr>
-                <th class="choke-th-rank">#</th>
-                <th class="choke-th-score">Score</th>
-                <th class="choke-th-source">Source</th>
-                <th class="choke-th-rel">Relationship</th>
-                <th class="choke-th-target">Target</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rowsHtml}
-            </tbody>
-          </table>
+        ${renderChokePointsTable({
+          items: choke_points,
+          allItems: choke_points,
+          page: chokePointsPage,
+          prevAction: "choke-page-prev",
+          nextAction: "choke-page-next",
+          globalIndexMap,
+        })}
+      </div>
+    </div>
+  `;
+}
+
+/** Render Unexpected Choke Points tab */
+function renderUnexpectedChokePointsTab(): string {
+  if (chokePointsState.loading) {
+    return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing choke points...</span></div>`;
+  }
+  if (chokePointsState.error) {
+    return `<div class="insight-error">${escapeHtml(chokePointsState.error)}</div>`;
+  }
+  if (!chokePointsState.data) {
+    return `<div class="insight-error">No data available</div>`;
+  }
+
+  const { choke_points, total_edges, total_nodes } = chokePointsState.data;
+
+  // Filter: source is neither high-value nor a domain/infrastructure object
+  const globalIndexMap: number[] = [];
+  const filtered = choke_points.filter((cp, i) => {
+    if (cp.source_highvalue || DOMAIN_OBJECT_LABELS.has(cp.source_label)) {
+      return false;
+    }
+    globalIndexMap.push(i);
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    return `
+      <div class="insights-container">
+        <div class="insight-section">
+          <h3 class="insight-section-title">Unexpected Choke Points</h3>
+          <p class="text-gray-500">No unexpected choke points found. All high-centrality relationships originate from high-value or domain objects.</p>
         </div>
-        ${paginationHtml}
-        <p class="text-xs text-gray-500 mt-2">Click a row to view the relationship in the graph.</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="insights-container">
+      <div class="insight-section">
+        <h3 class="insight-section-title">Unexpected Choke Points</h3>
+        <p class="insight-desc">
+          Choke points where the source is neither a high-value target nor a domain object &mdash;
+          these represent surprising attack paths from low-privilege entities.
+          Showing ${filtered.length} of ${choke_points.length} total choke points
+          (${total_nodes.toLocaleString()} nodes, ${total_edges.toLocaleString()} relationships analyzed).
+        </p>
+        ${renderChokePointsTable({
+          items: filtered,
+          allItems: choke_points,
+          page: unexpectedChokePointsPage,
+          prevAction: "unexpected-choke-page-prev",
+          nextAction: "unexpected-choke-page-next",
+          globalIndexMap,
+        })}
       </div>
     </div>
   `;
@@ -723,6 +828,7 @@ function handleClick(e: Event): void {
     case "refresh":
       // Reload all tabs
       chokePointsPage = 0;
+      unexpectedChokePointsPage = 0;
       loadDAAnalysis();
       loadReachability();
       loadStaleObjects();
@@ -739,6 +845,24 @@ function handleClick(e: Event): void {
       const maxPage = Math.ceil(total / CHOKE_POINTS_PAGE_SIZE) - 1;
       if (chokePointsPage < maxPage) {
         chokePointsPage++;
+        renderModal();
+      }
+      break;
+    }
+    case "unexpected-choke-page-prev":
+      if (unexpectedChokePointsPage > 0) {
+        unexpectedChokePointsPage--;
+        renderModal();
+      }
+      break;
+    case "unexpected-choke-page-next": {
+      const cps = chokePointsState.data?.choke_points ?? [];
+      const unexpectedCount = cps.filter(
+        (cp) => !cp.source_highvalue && !DOMAIN_OBJECT_LABELS.has(cp.source_label),
+      ).length;
+      const maxUnexpectedPage = Math.ceil(unexpectedCount / CHOKE_POINTS_PAGE_SIZE) - 1;
+      if (unexpectedChokePointsPage < maxUnexpectedPage) {
+        unexpectedChokePointsPage++;
         renderModal();
       }
       break;

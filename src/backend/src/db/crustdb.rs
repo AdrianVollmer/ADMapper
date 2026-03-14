@@ -1417,8 +1417,8 @@ impl CrustDatabase {
             let target_info = self.get_node_info_by_internal_id(relationship.target)?;
 
             if let (
-                Some((source_id, source_name, source_label)),
-                Some((target_id, target_name, target_label)),
+                Some((source_id, source_name, source_label, source_highvalue)),
+                Some((target_id, target_name, target_label, _)),
             ) = (source_info, target_info)
             {
                 choke_points.push(ChokePoint {
@@ -1430,6 +1430,7 @@ impl CrustDatabase {
                     target_label,
                     rel_type: relationship.rel_type,
                     betweenness,
+                    source_highvalue,
                 });
             }
         }
@@ -1447,14 +1448,14 @@ impl CrustDatabase {
         })
     }
 
-    /// Helper to get node info (objectid, name, label) by internal database ID.
+    /// Helper to get node info (objectid, name, label, is_highvalue) by internal database ID.
     fn get_node_info_by_internal_id(
         &self,
         internal_id: i64,
-    ) -> Result<Option<(String, String, String)>> {
+    ) -> Result<Option<(String, String, String, bool)>> {
         // Query for node by internal ID
         let query = format!(
-            "MATCH (n) WHERE id(n) = {} RETURN n.objectid, n.name, labels(n)",
+            "MATCH (n) WHERE id(n) = {} RETURN n.objectid, n.name, labels(n), n.is_highvalue",
             internal_id
         );
         let result = self.execute(&query)?;
@@ -1501,7 +1502,16 @@ impl CrustDatabase {
             })
             .unwrap_or_else(|| "Base".to_string());
 
-        Ok(Some((objectid, name, label)))
+        let is_highvalue = row
+            .values
+            .get("n.is_highvalue")
+            .and_then(|v| match v {
+                crustdb::ResultValue::Property(crustdb::PropertyValue::Bool(b)) => Some(*b),
+                _ => None,
+            })
+            .unwrap_or(false);
+
+        Ok(Some((objectid, name, label, is_highvalue)))
     }
 }
 

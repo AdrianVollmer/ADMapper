@@ -56,6 +56,14 @@ ADMapper computes relationship betweenness centrality using Brandes' algorithm:
 
 Results are cached and recomputed when the graph changes.
 
+## Unexpected Choke Points
+
+A filtered view of choke points where the source node is neither a high-value
+target nor a domain infrastructure object (Domain, OU, GPO, Container, etc.).
+These represent surprising attack paths from low-privilege entities and are
+often the most actionable findings, since they highlight relationships that
+should not carry high centrality.
+
 ## Paths to High-Value Targets
 
 For any selected node, ADMapper shows whether attack paths exist to high-value targets:
