@@ -31,7 +31,7 @@ fn normalize_node_type(data_type: &str) -> String {
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result,
+    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result,
     SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
@@ -1374,158 +1374,10 @@ impl CrustDatabase {
         false
     }
 
-    /// Get choke points using relationship betweenness centrality.
-    ///
-    /// Uses Brandes' algorithm to compute which relationships have the most shortest
-    /// paths passing through them. These are critical "choke point" relationships.
-    pub fn get_choke_points(&self, top_k: usize) -> Result<ChokePointsResponse> {
-        use super::types::ChokePoint;
-
-        debug!(
-            top_k = top_k,
-            "Computing choke points via relationship betweenness"
-        );
-
-        // Run the relationship betweenness centrality algorithm
-        // Use directed=true since AD permissions are directional
-        let result = self
-            .db
-            .relationship_betweenness_centrality(None, true)
-            .map_err(|e| DbError::Database(e.to_string()))?;
-
-        let total_edges = result.relationships_count;
-        let total_nodes = result.nodes_processed;
-
-        // Get all ranked relationships so we can fill both lists (choke_points + unexpected)
-        let all_edges = result.top_k(usize::MAX);
-
-        // Resolve relationship IDs to full relationship/node info, filling both lists
-        let mut choke_points = Vec::with_capacity(top_k);
-        let mut unexpected_choke_points = Vec::with_capacity(top_k);
-
-        for (rel_id, betweenness) in all_edges {
-            if choke_points.len() >= top_k && unexpected_choke_points.len() >= top_k {
-                break;
-            }
-
-            let relationship = match self
-                .db
-                .get_relationship(rel_id)
-                .map_err(|e| DbError::Database(e.to_string()))?
-            {
-                Some(e) => e,
-                None => continue,
-            };
-
-            let source_info = self.get_node_info_by_internal_id(relationship.source)?;
-            let target_info = self.get_node_info_by_internal_id(relationship.target)?;
-
-            if let (
-                Some((source_id, source_name, source_label, source_highvalue)),
-                Some((target_id, target_name, target_label, _)),
-            ) = (source_info, target_info)
-            {
-                let cp = ChokePoint {
-                    source_id,
-                    source_name,
-                    source_label,
-                    target_id,
-                    target_name,
-                    target_label,
-                    rel_type: relationship.rel_type,
-                    betweenness,
-                    source_highvalue,
-                };
-
-                if unexpected_choke_points.len() < top_k && !cp.is_expected_source() {
-                    unexpected_choke_points.push(cp.clone());
-                }
-                if choke_points.len() < top_k {
-                    choke_points.push(cp);
-                }
-            }
-        }
-
-        info!(
-            count = choke_points.len(),
-            unexpected = unexpected_choke_points.len(),
-            total_edges = total_edges,
-            "Choke points computed"
-        );
-
-        Ok(ChokePointsResponse {
-            choke_points,
-            unexpected_choke_points,
-            total_edges,
-            total_nodes,
-        })
-    }
-
-    /// Helper to get node info (objectid, name, label, is_highvalue) by internal database ID.
-    fn get_node_info_by_internal_id(
-        &self,
-        internal_id: i64,
-    ) -> Result<Option<(String, String, String, bool)>> {
-        // Query for node by internal ID
-        let query = format!(
-            "MATCH (n) WHERE id(n) = {} RETURN n.objectid, n.name, labels(n), n.is_highvalue",
-            internal_id
-        );
-        let result = self.execute(&query)?;
-
-        if result.rows.is_empty() {
-            return Ok(None);
-        }
-
-        let row = &result.rows[0];
-
-        let objectid = row
-            .values
-            .get("n.objectid")
-            .and_then(|v| match v {
-                crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => {
-                    Some(s.clone())
-                }
-                _ => None,
-            })
-            .unwrap_or_else(|| format!("unknown-{}", internal_id));
-
-        let name = row
-            .values
-            .get("n.name")
-            .and_then(|v| match v {
-                crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => {
-                    Some(s.clone())
-                }
-                _ => None,
-            })
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        let label = row
-            .values
-            .get("labels(n)")
-            .and_then(|v| match v {
-                crustdb::ResultValue::Property(crustdb::PropertyValue::List(labels)) => {
-                    labels.first().and_then(|l| match l {
-                        crustdb::PropertyValue::String(s) => Some(s.clone()),
-                        _ => None,
-                    })
-                }
-                _ => None,
-            })
-            .unwrap_or_else(|| "Base".to_string());
-
-        let is_highvalue = row
-            .values
-            .get("n.is_highvalue")
-            .and_then(|v| match v {
-                crustdb::ResultValue::Property(crustdb::PropertyValue::Bool(b)) => Some(*b),
-                _ => None,
-            })
-            .unwrap_or(false);
-
-        Ok(Some((objectid, name, label, is_highvalue)))
-    }
+    // Choke points: uses default DatabaseBackend::get_choke_points() which loads
+    // all nodes/edges once and runs Brandes' algorithm in-memory via algorithms.rs.
+    // The previous CrustDB-specific override ran per-edge Cypher queries to resolve
+    // node metadata, causing O(E) query overhead.
 }
 
 // ============================================================================
@@ -1582,9 +1434,8 @@ impl DatabaseBackend for CrustDatabase {
         CrustDatabase::get_security_insights(self)
     }
 
-    fn get_choke_points(&self, top_k: usize) -> Result<ChokePointsResponse> {
-        CrustDatabase::get_choke_points(self, top_k)
-    }
+    // get_choke_points: uses default trait implementation (algorithms.rs)
+    // which loads all nodes/edges once and runs Brandes' algorithm in-memory.
 
     fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
         CrustDatabase::get_all_nodes(self)
