@@ -777,7 +777,9 @@
   .modal-content.modal-expanded {
     @apply max-w-none;
     width: min(80vw, fit-content);
-    transition: width 0.15s ease, max-width 0.15s ease;
+    transition:
+      width 0.15s ease,
+      max-width 0.15s ease;
   }
 
   .modal-title {

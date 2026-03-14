@@ -53,7 +53,6 @@ interface ChokePointData {
   source_highvalue: boolean;
 }
 
-
 /** Choke Points response */
 interface ChokePointsData {
   choke_points: ChokePointData[];

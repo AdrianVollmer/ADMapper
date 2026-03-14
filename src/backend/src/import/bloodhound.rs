@@ -1075,7 +1075,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_user() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-1234-USER",
@@ -1098,7 +1098,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_computer() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-1234-COMP",
@@ -1119,7 +1119,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_group() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-1234-GROUP",
@@ -1138,7 +1138,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_missing_id() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         let entity = serde_json::json!({
             "Properties": {
@@ -1152,7 +1152,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_missing_name() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // If name is missing, should use ObjectIdentifier as label
         let entity = serde_json::json!({
@@ -1169,7 +1169,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_expands_uac_flags() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // UAC = 0x10200 = NORMAL_ACCOUNT (0x200) + DONT_EXPIRE_PASSWORD (0x10000)
         // Account is enabled (ACCOUNTDISABLE bit not set)
@@ -1193,7 +1193,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_uac_disabled_account() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // UAC = 0x202 = ACCOUNTDISABLE (0x2) + NORMAL_ACCOUNT (0x200)
         let entity = serde_json::json!({
@@ -1211,7 +1211,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_uac_asrep_roastable() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // UAC = 0x400200 = NORMAL_ACCOUNT (0x200) + DONT_REQ_PREAUTH (0x400000)
         let entity = serde_json::json!({
@@ -1230,7 +1230,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_uac_preserves_existing_enabled() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // If BloodHound already provides 'enabled', don't overwrite it
         let entity = serde_json::json!({
@@ -1254,7 +1254,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_marks_domain_admins_high_value() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // Domain Admins group (SID ends with -512)
         let entity = serde_json::json!({
@@ -1270,7 +1270,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_marks_enterprise_admins_high_value() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // Enterprise Admins group (SID ends with -519)
         let entity = serde_json::json!({
@@ -1286,7 +1286,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_marks_builtin_administrators_high_value() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // Builtin Administrators (SID ends with -544)
         let entity = serde_json::json!({
@@ -1302,7 +1302,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_marks_enterprise_domain_controllers_high_value() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // Enterprise Domain Controllers (SID ends with -S-1-5-9)
         let entity = serde_json::json!({
@@ -1318,7 +1318,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_marks_domain_high_value() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // Domain objects should be high value
         let entity = serde_json::json!({
@@ -1334,7 +1334,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_regular_user_not_high_value() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // Regular user should NOT be high value
         let entity = serde_json::json!({
@@ -1350,7 +1350,7 @@ mod tests {
 
     #[test]
     fn test_extract_node_preserves_existing_highvalue() {
-        let mut importer = test_importer();
+        let importer = test_importer();
 
         // If BloodHound already marks as high value, preserve it
         let entity = serde_json::json!({
