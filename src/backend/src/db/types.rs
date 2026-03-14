@@ -162,11 +162,33 @@ pub struct ChokePoint {
     pub source_highvalue: bool,
 }
 
+/// Labels considered domain/infrastructure objects for filtering.
+const DOMAIN_OBJECT_LABELS: &[&str] = &[
+    "Domain",
+    "OU",
+    "GPO",
+    "Container",
+    "CertTemplate",
+    "EnterpriseCA",
+    "RootCA",
+    "AIACA",
+    "NTAuthStore",
+];
+
+impl ChokePoint {
+    /// Whether the source is an "expected" high-centrality node (high-value or domain object).
+    pub fn is_expected_source(&self) -> bool {
+        self.source_highvalue || DOMAIN_OBJECT_LABELS.contains(&self.source_label.as_str())
+    }
+}
+
 /// Response containing choke point analysis results.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ChokePointsResponse {
     /// Top choke point relationships, sorted by betweenness (highest first)
     pub choke_points: Vec<ChokePoint>,
+    /// Top choke points where source is neither high-value nor a domain object
+    pub unexpected_choke_points: Vec<ChokePoint>,
     /// Total number of relationships analyzed
     pub total_edges: usize,
     /// Total number of nodes in the graph

@@ -1396,13 +1396,18 @@ impl CrustDatabase {
         let total_edges = result.relationships_count;
         let total_nodes = result.nodes_processed;
 
-        // Get top k relationships by betweenness
-        let top_edges = result.top_k(top_k);
+        // Get all ranked relationships so we can fill both lists (choke_points + unexpected)
+        let all_edges = result.top_k(usize::MAX);
 
-        // Resolve relationship IDs to full relationship/node info
-        let mut choke_points = Vec::with_capacity(top_edges.len());
-        for (rel_id, betweenness) in top_edges {
-            // Get the relationship
+        // Resolve relationship IDs to full relationship/node info, filling both lists
+        let mut choke_points = Vec::with_capacity(top_k);
+        let mut unexpected_choke_points = Vec::with_capacity(top_k);
+
+        for (rel_id, betweenness) in all_edges {
+            if choke_points.len() >= top_k && unexpected_choke_points.len() >= top_k {
+                break;
+            }
+
             let relationship = match self
                 .db
                 .get_relationship(rel_id)
@@ -1412,7 +1417,6 @@ impl CrustDatabase {
                 None => continue,
             };
 
-            // Get source and target node info
             let source_info = self.get_node_info_by_internal_id(relationship.source)?;
             let target_info = self.get_node_info_by_internal_id(relationship.target)?;
 
@@ -1421,7 +1425,7 @@ impl CrustDatabase {
                 Some((target_id, target_name, target_label, _)),
             ) = (source_info, target_info)
             {
-                choke_points.push(ChokePoint {
+                let cp = ChokePoint {
                     source_id,
                     source_name,
                     source_label,
@@ -1431,18 +1435,27 @@ impl CrustDatabase {
                     rel_type: relationship.rel_type,
                     betweenness,
                     source_highvalue,
-                });
+                };
+
+                if unexpected_choke_points.len() < top_k && !cp.is_expected_source() {
+                    unexpected_choke_points.push(cp.clone());
+                }
+                if choke_points.len() < top_k {
+                    choke_points.push(cp);
+                }
             }
         }
 
         info!(
             count = choke_points.len(),
+            unexpected = unexpected_choke_points.len(),
             total_edges = total_edges,
             "Choke points computed"
         );
 
         Ok(ChokePointsResponse {
             choke_points,
+            unexpected_choke_points,
             total_edges,
             total_nodes,
         })

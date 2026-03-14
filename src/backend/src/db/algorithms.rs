@@ -34,6 +34,7 @@ pub fn relationship_betweenness_centrality(
     if num_nodes == 0 || num_edges == 0 {
         return ChokePointsResponse {
             choke_points: Vec::new(),
+            unexpected_choke_points: Vec::new(),
             total_edges: num_edges,
             total_nodes: num_nodes,
         };
@@ -158,7 +159,7 @@ pub fn relationship_betweenness_centrality(
         }
     }
 
-    // Collect top-k
+    // Sort all edges by betweenness (descending)
     let mut ranked: Vec<(usize, f64)> = edge_betweenness
         .iter()
         .enumerate()
@@ -166,44 +167,65 @@ pub fn relationship_betweenness_centrality(
         .map(|(i, &s)| (i, s))
         .collect();
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    ranked.truncate(top_k);
 
     // Build lookup for node metadata
     let node_by_id: HashMap<&str, &DbNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
-    let choke_points: Vec<ChokePoint> = ranked
-        .into_iter()
-        .filter_map(|(edge_idx, score)| {
-            let edge = &edges[edge_idx];
-            let src = node_by_id.get(edge.source.as_str())?;
-            let tgt = node_by_id.get(edge.target.as_str())?;
-            let source_highvalue = src
-                .properties
-                .get("is_highvalue")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            Some(ChokePoint {
-                source_id: src.id.clone(),
-                source_name: src.name.clone(),
-                source_label: src.label.clone(),
-                target_id: tgt.id.clone(),
-                target_name: tgt.name.clone(),
-                target_label: tgt.label.clone(),
-                rel_type: edge.rel_type.clone(),
-                betweenness: score,
-                source_highvalue,
-            })
-        })
-        .collect();
+    // Split into two lists: all choke points (top_k) and unexpected choke points (top_k)
+    let mut choke_points = Vec::with_capacity(top_k);
+    let mut unexpected_choke_points = Vec::with_capacity(top_k);
+
+    for (edge_idx, score) in ranked {
+        // Stop once both lists are full
+        if choke_points.len() >= top_k && unexpected_choke_points.len() >= top_k {
+            break;
+        }
+
+        let edge = &edges[edge_idx];
+        let (src, tgt) = match (
+            node_by_id.get(edge.source.as_str()),
+            node_by_id.get(edge.target.as_str()),
+        ) {
+            (Some(s), Some(t)) => (s, t),
+            _ => continue,
+        };
+
+        let source_highvalue = src
+            .properties
+            .get("is_highvalue")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let cp = ChokePoint {
+            source_id: src.id.clone(),
+            source_name: src.name.clone(),
+            source_label: src.label.clone(),
+            target_id: tgt.id.clone(),
+            target_name: tgt.name.clone(),
+            target_label: tgt.label.clone(),
+            rel_type: edge.rel_type.clone(),
+            betweenness: score,
+            source_highvalue,
+        };
+
+        if unexpected_choke_points.len() < top_k && !cp.is_expected_source() {
+            unexpected_choke_points.push(cp.clone());
+        }
+        if choke_points.len() < top_k {
+            choke_points.push(cp);
+        }
+    }
 
     debug!(
         top_score = choke_points.first().map(|c| c.betweenness),
         results = choke_points.len(),
+        unexpected = unexpected_choke_points.len(),
         "Betweenness centrality complete"
     );
 
     ChokePointsResponse {
         choke_points,
+        unexpected_choke_points,
         total_edges: num_edges,
         total_nodes: num_nodes,
     }

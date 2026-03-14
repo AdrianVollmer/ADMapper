@@ -53,22 +53,11 @@ interface ChokePointData {
   source_highvalue: boolean;
 }
 
-/** Labels considered domain/infrastructure objects */
-const DOMAIN_OBJECT_LABELS = new Set([
-  "Domain",
-  "OU",
-  "GPO",
-  "Container",
-  "CertTemplate",
-  "EnterpriseCA",
-  "RootCA",
-  "AIACA",
-  "NTAuthStore",
-]);
 
 /** Choke Points response */
 interface ChokePointsData {
   choke_points: ChokePointData[];
+  unexpected_choke_points: ChokePointData[];
   total_edges: number;
   total_nodes: number;
 }
@@ -386,31 +375,30 @@ function renderStaleObjectsTab(): string {
 /** Render a paginated choke points table */
 function renderChokePointsTable(opts: {
   items: ChokePointData[];
-  allItems: ChokePointData[];
   page: number;
   prevAction: string;
   nextAction: string;
-  /** Maps filtered index to global index in chokePointsState.data.choke_points */
-  globalIndexMap: number[];
 }): string {
-  const { items, allItems, page, prevAction, nextAction, globalIndexMap } = opts;
+  const { items, page, prevAction, nextAction } = opts;
   const totalPages = Math.ceil(items.length / CHOKE_POINTS_PAGE_SIZE);
   const clampedPage = Math.min(page, Math.max(totalPages - 1, 0));
   const startIdx = clampedPage * CHOKE_POINTS_PAGE_SIZE;
   const pageItems = items.slice(startIdx, startIdx + CHOKE_POINTS_PAGE_SIZE);
 
-  // Normalize against the full (unfiltered) dataset for consistent bars
-  const maxBetweenness = Math.max(...allItems.map((cp) => cp.betweenness), 0);
+  const maxBetweenness = Math.max(...items.map((cp) => cp.betweenness), 0);
 
   let rowsHtml = "";
   for (const [pageIdx, cp] of pageItems.entries()) {
     const displayRank = startIdx + pageIdx + 1;
-    const globalIdx = globalIndexMap[startIdx + pageIdx];
     const normalizedScore = maxBetweenness > 0 ? (cp.betweenness / maxBetweenness) * 100 : 0;
     const barWidth = Math.max(normalizedScore, 5);
 
     rowsHtml += `
-      <tr class="choke-point-tr" data-query="choke-point" data-index="${globalIdx}" title="Click to view in graph">
+      <tr class="choke-point-tr" data-query="choke-point"
+          data-source-id="${escapeHtml(cp.source_id)}"
+          data-target-id="${escapeHtml(cp.target_id)}"
+          data-rel-type="${escapeHtml(cp.rel_type)}"
+          title="Click to view in graph">
         <td class="choke-point-cell-rank">${displayRank}</td>
         <td class="choke-point-cell-score">
           <div class="choke-point-bar-container">
@@ -483,8 +471,6 @@ function renderChokePointsTab(): string {
     `;
   }
 
-  const globalIndexMap = choke_points.map((_, i) => i);
-
   return `
     <div class="insights-container">
       <div class="insight-section">
@@ -495,11 +481,9 @@ function renderChokePointsTab(): string {
         </p>
         ${renderChokePointsTable({
           items: choke_points,
-          allItems: choke_points,
           page: chokePointsPage,
           prevAction: "choke-page-prev",
           nextAction: "choke-page-next",
-          globalIndexMap,
         })}
       </div>
     </div>
@@ -518,19 +502,9 @@ function renderUnexpectedChokePointsTab(): string {
     return `<div class="insight-error">No data available</div>`;
   }
 
-  const { choke_points, total_edges, total_nodes } = chokePointsState.data;
+  const { unexpected_choke_points, total_edges, total_nodes } = chokePointsState.data;
 
-  // Filter: source is neither high-value nor a domain/infrastructure object
-  const globalIndexMap: number[] = [];
-  const filtered = choke_points.filter((cp, i) => {
-    if (cp.source_highvalue || DOMAIN_OBJECT_LABELS.has(cp.source_label)) {
-      return false;
-    }
-    globalIndexMap.push(i);
-    return true;
-  });
-
-  if (filtered.length === 0) {
+  if (unexpected_choke_points.length === 0) {
     return `
       <div class="insights-container">
         <div class="insight-section">
@@ -548,16 +522,14 @@ function renderUnexpectedChokePointsTab(): string {
         <p class="insight-desc">
           Choke points where the source is neither a high-value target nor a domain object &mdash;
           these represent surprising attack paths from low-privilege entities.
-          Showing ${filtered.length} of ${choke_points.length} total choke points
+          ${unexpected_choke_points.length} results
           (${total_nodes.toLocaleString()} nodes, ${total_edges.toLocaleString()} relationships analyzed).
         </p>
         ${renderChokePointsTable({
-          items: filtered,
-          allItems: choke_points,
+          items: unexpected_choke_points,
           page: unexpectedChokePointsPage,
           prevAction: "unexpected-choke-page-prev",
           nextAction: "unexpected-choke-page-next",
-          globalIndexMap,
         })}
       </div>
     </div>
@@ -715,6 +687,21 @@ async function loadChokePoints(): Promise<void> {
   renderModal();
 }
 
+/** Execute a choke point graph query using direct IDs */
+async function executeChokePointQuery(sourceId: string, targetId: string, relType: string): Promise<void> {
+  const query = `MATCH p=(a)-[r]->(b) WHERE a.objectid = '${sourceId}' AND b.objectid = '${targetId}' AND type(r) = '${relType}' RETURN p`;
+  try {
+    const result = await executeQuery(query, { extractGraph: true });
+    if (result.graph && result.graph.nodes.length > 0) {
+      loadGraphData(result.graph as unknown as RawADGraph);
+    }
+  } catch (err) {
+    if (!(err instanceof QueryAbortedError)) {
+      console.error("Failed to execute choke point query:", err);
+    }
+  }
+}
+
 /** Execute a graph query and render the result */
 async function executeGraphQuery(queryType: string, extraData?: string): Promise<void> {
   let query: string;
@@ -742,15 +729,6 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
     case "stale-computers": {
       const threshold = daysToWindowsFileTime(staleThresholdDays);
       query = `MATCH (c:Computer) WHERE c.enabled = true AND c.lastlogon < ${threshold} RETURN c LIMIT 500`;
-      break;
-    }
-    case "choke-point": {
-      // extraData contains the index into choke_points array
-      const index = parseInt(extraData ?? "0", 10);
-      const cp = chokePointsState.data?.choke_points[index];
-      if (!cp) return;
-      // Query for the relationship and its connected nodes
-      query = `MATCH p=(a)-[r]->(b) WHERE a.objectid = '${cp.source_id}' AND b.objectid = '${cp.target_id}' AND type(r) = '${cp.rel_type}' RETURN p`;
       break;
     }
     default:
@@ -803,10 +781,19 @@ function handleClick(e: Event): void {
   const clickableValue = target.closest("[data-query]") as HTMLElement;
   if (clickableValue) {
     const queryType = clickableValue.getAttribute("data-query");
+    if (queryType === "choke-point") {
+      const sourceId = clickableValue.getAttribute("data-source-id");
+      const targetId = clickableValue.getAttribute("data-target-id");
+      const relType = clickableValue.getAttribute("data-rel-type");
+      if (sourceId && targetId && relType) {
+        closeModal();
+        executeChokePointQuery(sourceId, targetId, relType);
+      }
+      return;
+    }
     const sid = clickableValue.getAttribute("data-sid");
-    const index = clickableValue.getAttribute("data-index");
     if (queryType) {
-      executeGraphQuery(queryType, sid ?? index ?? undefined);
+      executeGraphQuery(queryType, sid ?? undefined);
     }
     return;
   }
@@ -856,10 +843,7 @@ function handleClick(e: Event): void {
       }
       break;
     case "unexpected-choke-page-next": {
-      const cps = chokePointsState.data?.choke_points ?? [];
-      const unexpectedCount = cps.filter(
-        (cp) => !cp.source_highvalue && !DOMAIN_OBJECT_LABELS.has(cp.source_label),
-      ).length;
+      const unexpectedCount = chokePointsState.data?.unexpected_choke_points.length ?? 0;
       const maxUnexpectedPage = Math.ceil(unexpectedCount / CHOKE_POINTS_PAGE_SIZE) - 1;
       if (unexpectedChokePointsPage < maxUnexpectedPage) {
         unexpectedChokePointsPage++;
