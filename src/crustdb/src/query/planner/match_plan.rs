@@ -96,8 +96,7 @@ pub(super) fn plan_pattern(pattern: &Pattern) -> Result<PlanOperator> {
             // bare variable references inside shortestPath.
             let split = pattern.elements.len() - 3;
             let prefix_elements = &pattern.elements[..split];
-            let mut sp_elements: Vec<PatternElement> =
-                pattern.elements[split..].to_vec();
+            let mut sp_elements: Vec<PatternElement> = pattern.elements[split..].to_vec();
 
             // Build a lookup of variable -> node pattern from prefix elements
             let mut var_nodes = std::collections::HashMap::new();

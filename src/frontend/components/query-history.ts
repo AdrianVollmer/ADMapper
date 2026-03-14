@@ -268,6 +268,17 @@ async function clearHistory(): Promise<void> {
   }
 }
 
+/** Abort all running queries */
+async function abortAllQueries(): Promise<void> {
+  const running = entries.filter((e) => e.status === "running");
+  try {
+    await Promise.all(running.map((e) => api.postNoContent(`/api/query/abort/${e.id}`)));
+    await loadHistory();
+  } catch (err) {
+    console.error("Failed to abort queries:", err);
+  }
+}
+
 /** Abort a running query */
 async function abortQuery(queryId: string): Promise<void> {
   try {
@@ -395,6 +406,8 @@ function renderListView(body: HTMLElement, footer: HTMLElement): void {
 
   const totalPages = Math.ceil(pagination.total / pagination.perPage);
 
+  const hasRunning = entries.some((e) => e.status === "running");
+
   body.innerHTML = `
     <div class="query-history-list">
       ${entries
@@ -402,12 +415,12 @@ function renderListView(body: HTMLElement, footer: HTMLElement): void {
           const isRunning = entry.status === "running";
           const duration = getLiveDuration(entry);
           return `
-        <div class="query-history-item" data-action="select" data-id="${escapeHtml(entry.id)}">
+        <div class="query-history-item" data-action="select" data-id="${escapeHtml(entry.id)}" title="${escapeHtml(entry.query)}">
           <div class="query-history-item-header">
-            <span class="query-history-name">${escapeHtml(entry.name)}</span>
+            <div class="query-history-query">${escapeHtml(truncate(entry.query, 120))}</div>
             <div class="query-history-meta">
               ${getStatusBadge(entry.status, isRunning)}
-              <span class="query-history-duration">${formatDuration(duration)}</span>
+              ${entry.background ? '<span class="badge-background">BG</span>' : ""}
               ${
                 isRunning
                   ? `<button class="btn btn-sm btn-danger ml-2" data-action="abort" data-id="${escapeHtml(entry.id)}">Abort</button>`
@@ -415,10 +428,10 @@ function renderListView(body: HTMLElement, footer: HTMLElement): void {
               }
             </div>
           </div>
-          <div class="query-history-query">${escapeHtml(truncate(entry.query, 100))}</div>
           <div class="query-history-footer">
             <span class="query-history-time">${formatTimestamp(entry.started_at)}</span>
             ${entry.result_count !== null ? `<span class="query-history-results">${entry.result_count} results</span>` : ""}
+            <span class="query-history-duration">${formatDuration(duration)}</span>
             ${entry.error ? `<span class="query-history-error" title="${escapeHtml(entry.error)}">Error</span>` : ""}
           </div>
         </div>
@@ -445,6 +458,7 @@ function renderListView(body: HTMLElement, footer: HTMLElement): void {
   `;
 
   footer.innerHTML = `
+    ${hasRunning ? '<button class="btn btn-danger" data-action="abort-all">Abort All</button>' : ""}
     <button class="btn btn-danger" data-action="clear-all">Clear All</button>
     <button class="btn btn-secondary" data-action="close">Close</button>
   `;
@@ -630,6 +644,10 @@ function handleModalClick(e: Event): void {
       }
       break;
     }
+
+    case "abort-all":
+      abortAllQueries();
+      break;
 
     case "clear-all":
       clearHistory();

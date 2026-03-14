@@ -266,7 +266,7 @@ function renderReachabilityTab(): string {
     <div class="insights-container">
       <div class="insight-section">
         <h3 class="insight-section-title">Reachability from Well-Known Principals</h3>
-        <p class="insight-desc">Objects reachable via non-MemberOf relationships (control paths, permissions, etc.):</p>
+        <p class="insight-desc">Objects with direct non-MemberOf relationships (permissions, sessions, delegation, etc.):</p>
         <div class="insight-stats">
           ${rowsHtml}
         </div>
@@ -402,16 +402,16 @@ async function loadDAAnalysis(): Promise<void> {
   renderModal();
 
   try {
-    // Run both queries in parallel - return distinct users to get accurate count
+    // Run both queries in parallel using shortestPath to avoid combinatorial explosion
     const [effectiveResult, realResult] = await Promise.all([
-      executeQuery(`MATCH (u:User)-[r*1..10]->(g:Group) WHERE g.objectid ENDS WITH '-512' RETURN DISTINCT u`, {
-        extractGraph: false,
-        background: true,
-      }),
-      executeQuery(`MATCH (u:User)-[:MemberOf*1..10]->(g:Group) WHERE g.objectid ENDS WITH '-512' RETURN DISTINCT u`, {
-        extractGraph: false,
-        background: true,
-      }),
+      executeQuery(
+        `MATCH (u:User), (g:Group), p = shortestPath((u)-[*1..10]->(g)) WHERE g.objectid ENDS WITH '-512' RETURN DISTINCT u`,
+        { extractGraph: false, background: true }
+      ),
+      executeQuery(
+        `MATCH (u:User), (g:Group), p = shortestPath((u)-[:MemberOf*1..10]->(g)) WHERE g.objectid ENDS WITH '-512' RETURN DISTINCT u`,
+        { extractGraph: false, background: true }
+      ),
     ]);
 
     const effectiveCount = effectiveResult.resultCount;
@@ -450,14 +450,13 @@ async function loadReachability(): Promise<void> {
   try {
     const results: ReachabilityData[] = [];
 
-    // Run all reachability queries in parallel
+    // Run all reachability queries in parallel - single hop, exclude MemberOf
     const queries = principals.map(async (p) => {
       try {
-        // Use NONE() to exclude MemberOf relationships from the path
         const query = `
-          MATCH (g:Group)-[r*1..5]->(target)
+          MATCH (g:Group)-[r]->(target)
           WHERE g.objectid ENDS WITH '${p.sid}'
-          AND NONE(rel IN r WHERE type(rel) = 'MemberOf')
+          AND type(r) <> 'MemberOf'
           RETURN DISTINCT target
         `;
         const result = await executeQuery(query, { extractGraph: false, background: true });
@@ -554,16 +553,16 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
 
   switch (queryType) {
     case "effective-das":
-      query = `MATCH p=(u:User)-[r*1..10]->(g:Group) WHERE g.objectid ENDS WITH '-512' RETURN p LIMIT 500`;
+      query = `MATCH (u:User), (g:Group), p = shortestPath((u)-[*1..10]->(g)) WHERE g.objectid ENDS WITH '-512' RETURN p LIMIT 500`;
       break;
     case "real-das":
-      query = `MATCH p=(u:User)-[:MemberOf*1..10]->(g:Group) WHERE g.objectid ENDS WITH '-512' RETURN p LIMIT 500`;
+      query = `MATCH (u:User), (g:Group), p = shortestPath((u)-[:MemberOf*1..10]->(g)) WHERE g.objectid ENDS WITH '-512' RETURN p LIMIT 500`;
       break;
     case "reachability":
       query = `
-        MATCH p=(g:Group)-[r*1..5]->(target)
+        MATCH p=(g:Group)-[r]->(target)
         WHERE g.objectid ENDS WITH '${extraData}'
-        AND NONE(rel IN r WHERE type(rel) = 'MemberOf')
+        AND type(r) <> 'MemberOf'
         RETURN p LIMIT 500
       `;
       break;
