@@ -21,8 +21,10 @@ pub enum Statement {
     Set(SetClause),
     /// Standalone RETURN (e.g., RETURN 1, RETURN "hello")
     Return(ReturnClause),
-    /// UNION ALL of multiple queries
+    /// UNION ALL of multiple queries (preserves duplicates)
     UnionAll(Vec<Statement>),
+    /// UNION of multiple queries (deduplicates rows)
+    Union(Vec<Statement>),
 }
 
 impl Statement {
@@ -37,7 +39,9 @@ impl Statement {
                 m.set_clause.is_none() && m.delete_clause.is_none() && m.create_clause.is_none()
             }
             Statement::Return(_) => true,
-            Statement::UnionAll(queries) => queries.iter().all(|q| q.is_read_only()),
+            Statement::UnionAll(queries) | Statement::Union(queries) => {
+                queries.iter().all(|q| q.is_read_only())
+            }
             Statement::Create(_)
             | Statement::Merge(_)
             | Statement::Delete(_)

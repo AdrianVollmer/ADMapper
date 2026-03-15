@@ -46,9 +46,9 @@ pub fn plan(statement: &Statement) -> Result<QueryPlan> {
         Statement::Merge(_) => {
             return Err(Error::Cypher("MERGE not yet supported".into()));
         }
-        Statement::UnionAll(_) => {
+        Statement::UnionAll(_) | Statement::Union(_) => {
             return Err(Error::Internal(
-                "UNION ALL should be handled at the executor level, not the planner".into(),
+                "UNION should be handled at the executor level, not the planner".into(),
             ));
         }
     };

@@ -111,9 +111,8 @@ fn build_regular_query(pair: Pair<Rule>) -> Result<Statement> {
     } else if all_unions {
         Ok(Statement::UnionAll(queries))
     } else {
-        Err(Error::Parse(
-            "UNION without ALL is not yet supported; use UNION ALL".into(),
-        ))
+        // Plain UNION (with deduplication)
+        Ok(Statement::Union(queries))
     }
 }
 

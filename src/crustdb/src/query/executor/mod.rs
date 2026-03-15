@@ -240,9 +240,12 @@ pub fn execute_with_cache(
     cache: Option<&mut EntityCache>,
     max_bindings: Option<usize>,
 ) -> Result<QueryResult> {
-    // Handle UNION ALL at the statement level: execute each branch and concatenate
+    // Handle UNION/UNION ALL at the statement level: execute each branch and concatenate
     if let Statement::UnionAll(queries) = statement {
         return execute_union_all(queries, storage, cache, max_bindings);
+    }
+    if let Statement::Union(queries) = statement {
+        return execute_union(queries, storage, cache, max_bindings);
     }
 
     let t0 = std::time::Instant::now();
@@ -275,6 +278,28 @@ pub fn execute_with_cache(
         opt_ms - plan_ms,
         exec_ms - opt_ms
     );
+
+    Ok(result)
+}
+
+/// Execute a UNION query: run each branch, concatenate, then deduplicate.
+fn execute_union(
+    queries: &[Statement],
+    storage: &SqliteStorage,
+    cache: Option<&mut EntityCache>,
+    max_bindings: Option<usize>,
+) -> Result<QueryResult> {
+    let mut result = execute_union_all(queries, storage, cache, max_bindings)?;
+
+    // Deduplicate rows by serializing each row to a comparable key.
+    // We use the Debug representation of the sorted key-value pairs.
+    let mut seen = std::collections::HashSet::new();
+    result.rows.retain(|row| {
+        let mut pairs: Vec<_> = row.values.iter().collect();
+        pairs.sort_by_key(|(k, _)| k.clone());
+        let key = format!("{:?}", pairs);
+        seen.insert(key)
+    });
 
     Ok(result)
 }

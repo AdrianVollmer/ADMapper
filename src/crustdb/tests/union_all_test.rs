@@ -299,3 +299,68 @@ fn test_domain_trusts_no_trusts_still_returns_domains() {
         .count();
     assert_eq!(node_count, 2, "Should return both domains");
 }
+
+// =============================================================================
+// UNION (with deduplication) Tests
+// =============================================================================
+
+#[test]
+fn test_union_dedup_basic() {
+    let db = Database::in_memory().unwrap();
+
+    db.execute("CREATE (:Person {name: 'Alice'})").unwrap();
+    db.execute("CREATE (:Person {name: 'Bob'})").unwrap();
+    db.execute("CREATE (:Employee {name: 'Alice'})").unwrap();
+    db.execute("CREATE (:Employee {name: 'Charlie'})").unwrap();
+
+    // UNION should deduplicate Alice
+    let result = db
+        .execute(
+            "MATCH (p:Person) RETURN p.name AS name \
+             UNION \
+             MATCH (e:Employee) RETURN e.name AS name",
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 3, "Alice should appear only once");
+
+    let names: std::collections::HashSet<String> = result
+        .rows
+        .iter()
+        .map(|r| match r.get("name").unwrap() {
+            ResultValue::Property(PropertyValue::String(s)) => s.clone(),
+            _ => panic!("Expected string"),
+        })
+        .collect();
+    assert!(names.contains("Alice"));
+    assert!(names.contains("Bob"));
+    assert!(names.contains("Charlie"));
+}
+
+#[test]
+fn test_union_all_preserves_dupes_union_removes_them() {
+    let db = Database::in_memory().unwrap();
+
+    db.execute("CREATE (:A {val: 1})").unwrap();
+    db.execute("CREATE (:B {val: 1})").unwrap();
+
+    // UNION ALL: should return 2 rows (both val=1)
+    let result_all = db
+        .execute(
+            "MATCH (a:A) RETURN a.val AS v \
+             UNION ALL \
+             MATCH (b:B) RETURN b.val AS v",
+        )
+        .unwrap();
+    assert_eq!(result_all.rows.len(), 2);
+
+    // UNION: should return 1 row (deduped)
+    let result_union = db
+        .execute(
+            "MATCH (a:A) RETURN a.val AS v \
+             UNION \
+             MATCH (b:B) RETURN b.val AS v",
+        )
+        .unwrap();
+    assert_eq!(result_union.rows.len(), 1);
+}
