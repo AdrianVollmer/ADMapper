@@ -13,7 +13,7 @@ use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
 use crate::history::QueryHistoryService;
 use crate::import::{BloodHoundImporter, ImportProgress};
 use crate::settings::{self, Settings};
-use crate::state::{AppState, ImportJob, RunningQuery};
+use crate::state::{AppState, ImportJob, QueryDedupKey, RunningQuery};
 use axum::{
     extract::{Multipart, Path, Query, State},
     http::StatusCode,
@@ -1372,6 +1372,107 @@ pub async fn graph_query(
     Json(body): Json<QueryRequest>,
 ) -> Result<Json<QueryStartResponse>, ApiError> {
     let db = state.require_db()?;
+
+    // Build dedup key from query parameters (excludes background and sync flags)
+    let dedup_key = QueryDedupKey {
+        query: body.query.clone(),
+        extract_graph: body.extract_graph,
+        language: body.language.clone(),
+    };
+
+    // Check for an identical running query we can piggyback on
+    if let Some(existing_id) = state.query_dedup_index.get(&dedup_key) {
+        let existing_query_id = existing_id.value().clone();
+        if let Some(existing_query) = state.running_queries.get(&existing_query_id) {
+            let rq = existing_query.value().clone();
+            // Only share if the query hasn't completed yet
+            if rq.completed_at.read().is_none() {
+                rq.subscriber_count
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                info!(
+                    query_id = %existing_query_id,
+                    query = %body.query,
+                    subscribers = rq.subscriber_count.load(std::sync::atomic::Ordering::Relaxed),
+                    "Deduplicating query - sharing existing execution"
+                );
+
+                if body.sync {
+                    // Sync mode: subscribe and wait for completion
+                    let mut rx = rq.progress_tx.subscribe();
+                    // Check if already completed (race with subscription)
+                    if let Some(progress) = rq.final_state.read().clone() {
+                        return match progress.status {
+                            QueryStatus::Completed => Ok(Json(QueryStartResponse::Sync {
+                                query_id: existing_query_id,
+                                duration_ms: progress.duration_ms.unwrap_or(0),
+                                result_count: progress.result_count,
+                                results: progress.results,
+                                graph: progress.graph,
+                            })),
+                            QueryStatus::Failed => Err(ApiError::BadRequest(
+                                progress.error.unwrap_or_else(|| "Query failed".to_string()),
+                            )),
+                            _ => Err(ApiError::Internal("Query was aborted".to_string())),
+                        };
+                    }
+                    // Wait for completion
+                    while let Ok(progress) = rx.recv().await {
+                        match progress.status {
+                            QueryStatus::Completed => {
+                                return Ok(Json(QueryStartResponse::Sync {
+                                    query_id: existing_query_id,
+                                    duration_ms: progress.duration_ms.unwrap_or(0),
+                                    result_count: progress.result_count,
+                                    results: progress.results,
+                                    graph: progress.graph,
+                                }));
+                            }
+                            QueryStatus::Failed => {
+                                return Err(ApiError::BadRequest(
+                                    progress.error.unwrap_or_else(|| "Query failed".to_string()),
+                                ));
+                            }
+                            QueryStatus::Aborted => {
+                                return Err(ApiError::Internal("Query was aborted".to_string()));
+                            }
+                            QueryStatus::Running => continue,
+                        }
+                    }
+                    return Err(ApiError::Internal(
+                        "Lost connection to shared query".to_string(),
+                    ));
+                }
+
+                // Async mode: check if already completed (fast path)
+                if let Some(progress) = rq.final_state.read().clone() {
+                    match progress.status {
+                        QueryStatus::Completed => {
+                            return Ok(Json(QueryStartResponse::Sync {
+                                query_id: existing_query_id,
+                                duration_ms: progress.duration_ms.unwrap_or(0),
+                                result_count: progress.result_count,
+                                results: progress.results,
+                                graph: progress.graph,
+                            }));
+                        }
+                        QueryStatus::Failed => {
+                            return Err(ApiError::BadRequest(
+                                progress.error.unwrap_or_else(|| "Query failed".to_string()),
+                            ));
+                        }
+                        _ => {} // fall through to async
+                    }
+                }
+
+                return Ok(Json(QueryStartResponse::Async {
+                    query_id: existing_query_id,
+                }));
+            }
+        }
+        // Stale entry in dedup index, remove it
+        state.query_dedup_index.remove(&dedup_key);
+    }
+
     info!(query = %body.query, "Starting query");
 
     // Generate query ID and setup tracking
@@ -1394,11 +1495,16 @@ pub async fn graph_query(
         progress_tx: progress_tx.clone(),
         final_state: RwLock::new(None),
         completed_at: RwLock::new(None),
+        subscriber_count: std::sync::atomic::AtomicUsize::new(1),
+        dedup_key: dedup_key.clone(),
     });
 
     state
         .running_queries
         .insert(query_id.clone(), running_query.clone());
+    state
+        .query_dedup_index
+        .insert(dedup_key, query_id.clone());
 
     // Broadcast query activity update (new query started)
     state.broadcast_query_activity();
@@ -1460,6 +1566,13 @@ pub async fn graph_query(
             }
         };
 
+        // Helper to mark query as done and remove from dedup index
+        let mark_completed = |rq: &RunningQuery, state: &AppState| {
+            *rq.completed_at.write() = Some(std::time::Instant::now());
+            state.query_dedup_index.remove(&rq.dedup_key);
+            state.broadcast_query_activity();
+        };
+
         // Check if cancelled before starting
         if cancel_token.is_cancelled() {
             let duration_ms = started_at.elapsed().as_millis() as u64;
@@ -1477,8 +1590,7 @@ pub async fn graph_query(
             let _ = progress_tx.send(progress.clone());
             state_for_task.emit_query_progress(&progress);
             *running_query_for_task.final_state.write() = Some(progress);
-            *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
-            state_for_task.broadcast_query_activity();
+            mark_completed(&running_query_for_task, &state_for_task);
             return;
         }
 
@@ -1509,8 +1621,7 @@ pub async fn graph_query(
             let _ = progress_tx.send(progress.clone());
             state_for_task.emit_query_progress(&progress);
             *running_query_for_task.final_state.write() = Some(progress);
-            *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
-            state_for_task.broadcast_query_activity();
+            mark_completed(&running_query_for_task, &state_for_task);
             return;
         }
 
@@ -1584,10 +1695,7 @@ pub async fn graph_query(
         // Mark the query as completed with a timestamp for TTL-based cleanup.
         // The query stays in running_queries so late subscribers can get the result.
         // A background task will clean up queries that have been completed for >2 minutes.
-        *running_query_for_task.completed_at.write() = Some(std::time::Instant::now());
-
-        // Broadcast activity update (query no longer "running" for UI purposes)
-        state_for_task.broadcast_query_activity();
+        mark_completed(&running_query_for_task, &state_for_task);
     });
 
     if sync_mode {
@@ -1688,6 +1796,8 @@ pub async fn query_progress(
 }
 
 /// Abort a running query.
+/// With deduplication, multiple subscribers may share a query. Abort only
+/// actually cancels the query when the last subscriber disconnects.
 #[instrument(skip(state))]
 pub async fn query_abort(
     State(state): State<AppState>,
@@ -1699,7 +1809,22 @@ pub async fn query_abort(
         .map(|r| r.value().clone())
         .ok_or_else(|| ApiError::NotFound("Query not found".to_string()))?;
 
-    info!(query_id = %query_id, "Aborting query");
+    let prev_subscribers = query
+        .subscriber_count
+        .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+
+    if prev_subscribers > 1 {
+        // Other subscribers still need this query, don't actually cancel
+        debug!(
+            query_id = %query_id,
+            remaining = prev_subscribers - 1,
+            "Subscriber detached from shared query, keeping alive"
+        );
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    // Last subscriber - actually cancel the query
+    info!(query_id = %query_id, "Aborting query (last subscriber)");
 
     // Cancel the token - this will signal the query to abort
     query.cancel_token.cancel();
@@ -1726,6 +1851,9 @@ pub async fn query_abort(
     };
     let _ = query.progress_tx.send(progress.clone());
     *query.final_state.write() = Some(progress);
+
+    // Remove from dedup index so future identical queries start fresh
+    state.query_dedup_index.remove(&query.dedup_key);
 
     Ok(StatusCode::NO_CONTENT)
 }

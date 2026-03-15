@@ -30,6 +30,15 @@ use crate::db::Neo4jDatabase;
 // Running Query State
 // ============================================================================
 
+/// Key for deduplicating identical running queries.
+/// Two queries with the same text, extract_graph flag, and language are considered identical.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct QueryDedupKey {
+    pub query: String,
+    pub extract_graph: bool,
+    pub language: Option<String>,
+}
+
 /// State for a running query.
 pub struct RunningQuery {
     pub query_id: String,
@@ -41,6 +50,10 @@ pub struct RunningQuery {
     pub final_state: RwLock<Option<QueryProgress>>,
     /// When the query completed (for TTL-based cleanup).
     pub completed_at: RwLock<Option<std::time::Instant>>,
+    /// Number of active subscribers sharing this query.
+    pub subscriber_count: std::sync::atomic::AtomicUsize,
+    /// The dedup key for this query (used to remove from index on cleanup).
+    pub dedup_key: QueryDedupKey,
 }
 
 // ============================================================================
@@ -81,6 +94,8 @@ pub struct AppState {
     pub import_jobs: Arc<DashMap<String, Arc<ImportJob>>>,
     /// Active running queries for tracking and cancellation.
     pub running_queries: Arc<DashMap<String, Arc<RunningQuery>>>,
+    /// Index from dedup key -> query_id for running queries (not yet completed).
+    pub query_dedup_index: Arc<DashMap<QueryDedupKey, String>>,
     /// Counter for synchronous queries (path finding, connections, etc.)
     sync_query_count: Arc<std::sync::atomic::AtomicUsize>,
     /// Broadcast channel for query activity updates.
@@ -99,6 +114,7 @@ impl AppState {
             history_service: Arc::new(RwLock::new(None)),
             import_jobs: Arc::new(DashMap::new()),
             running_queries: Arc::new(DashMap::new()),
+            query_dedup_index: Arc::new(DashMap::new()),
             sync_query_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             query_activity_tx,
             #[cfg(feature = "desktop")]
@@ -126,6 +142,7 @@ impl AppState {
             history_service: Arc::new(RwLock::new(Some(Arc::new(history_service)))),
             import_jobs: Arc::new(DashMap::new()),
             running_queries: Arc::new(DashMap::new()),
+            query_dedup_index: Arc::new(DashMap::new()),
             sync_query_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             query_activity_tx,
             #[cfg(feature = "desktop")]
@@ -257,6 +274,7 @@ impl AppState {
     /// Queries that have been completed for more than 2 minutes are removed.
     pub fn spawn_query_cleanup_task(&self) {
         let running_queries = self.running_queries.clone();
+        let query_dedup_index = self.query_dedup_index.clone();
         const CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
         const QUERY_TTL: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -271,14 +289,18 @@ impl AppState {
                 for entry in running_queries.iter() {
                     if let Some(completed_at) = *entry.value().completed_at.read() {
                         if now.duration_since(completed_at) > QUERY_TTL {
-                            to_remove.push(entry.key().clone());
+                            to_remove.push((
+                                entry.key().clone(),
+                                entry.value().dedup_key.clone(),
+                            ));
                         }
                     }
                 }
 
-                // Remove expired queries
-                for query_id in to_remove {
+                // Remove expired queries and their dedup index entries
+                for (query_id, dedup_key) in to_remove {
                     running_queries.remove(&query_id);
+                    query_dedup_index.remove(&dedup_key);
                     debug!(query_id = %query_id, "Cleaned up expired query");
                 }
             }
