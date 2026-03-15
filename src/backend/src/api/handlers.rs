@@ -1502,9 +1502,7 @@ pub async fn graph_query(
     state
         .running_queries
         .insert(query_id.clone(), running_query.clone());
-    state
-        .query_dedup_index
-        .insert(dedup_key, query_id.clone());
+    state.query_dedup_index.insert(dedup_key, query_id.clone());
 
     // Broadcast query activity update (new query started)
     state.broadcast_query_activity();

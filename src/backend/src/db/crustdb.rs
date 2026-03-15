@@ -31,8 +31,8 @@ fn normalize_node_type(data_type: &str) -> String {
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result,
-    SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
+    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// A graph database backed by CrustDB.

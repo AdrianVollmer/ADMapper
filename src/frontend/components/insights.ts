@@ -19,7 +19,13 @@ import { api } from "../api/client";
 import type { RawADGraph } from "../graph/types";
 
 /** Tab identifiers */
-type TabId = "da-analysis" | "reachability" | "stale-objects" | "account-exposure" | "choke-points" | "unexpected-choke-points";
+type TabId =
+  | "da-analysis"
+  | "reachability"
+  | "stale-objects"
+  | "account-exposure"
+  | "choke-points"
+  | "unexpected-choke-points";
 
 /** Domain Admin Analysis data */
 interface DAAnalysisData {
@@ -739,22 +745,22 @@ async function loadAccountExposure(): Promise<void> {
 
   try {
     const [kerbResult, asrepResult, delegationResult, protectedResult] = await Promise.all([
-      executeQuery(
-        `MATCH (u:User) WHERE u.hasspn = true AND u.enabled = true RETURN u`,
-        { extractGraph: false, background: true }
-      ),
-      executeQuery(
-        `MATCH (u:User) WHERE u.dontreqpreauth = true AND u.enabled = true RETURN u`,
-        { extractGraph: false, background: true }
-      ),
-      executeQuery(
-        `MATCH (c:Computer) WHERE c.unconstraineddelegation = true AND c.enabled = true RETURN c`,
-        { extractGraph: false, background: true }
-      ),
-      executeQuery(
-        `MATCH (u:User)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u`,
-        { extractGraph: false, background: true }
-      ),
+      executeQuery(`MATCH (u:User) WHERE u.hasspn = true AND u.enabled = true RETURN u`, {
+        extractGraph: false,
+        background: true,
+      }),
+      executeQuery(`MATCH (u:User) WHERE u.dontreqpreauth = true AND u.enabled = true RETURN u`, {
+        extractGraph: false,
+        background: true,
+      }),
+      executeQuery(`MATCH (c:Computer) WHERE c.unconstraineddelegation = true AND c.enabled = true RETURN c`, {
+        extractGraph: false,
+        background: true,
+      }),
+      executeQuery(`MATCH (u:User)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u`, {
+        extractGraph: false,
+        background: true,
+      }),
     ]);
 
     accountExposureState = {

@@ -289,10 +289,7 @@ impl AppState {
                 for entry in running_queries.iter() {
                     if let Some(completed_at) = *entry.value().completed_at.read() {
                         if now.duration_since(completed_at) > QUERY_TTL {
-                            to_remove.push((
-                                entry.key().clone(),
-                                entry.value().dedup_key.clone(),
-                            ));
+                            to_remove.push((entry.key().clone(), entry.value().dedup_key.clone()));
                         }
                     }
                 }
