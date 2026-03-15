@@ -65,7 +65,7 @@ impl Statement {
                 final_query,
             } => {
                 stages.iter().all(|s| {
-                    s.match_clause.as_ref().map_or(true, |m| {
+                    s.match_clause.as_ref().is_none_or(|m| {
                         m.set_clause.is_none()
                             && m.delete_clause.is_none()
                             && m.create_clause.is_none()

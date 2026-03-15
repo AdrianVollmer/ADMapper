@@ -46,7 +46,7 @@ fn main() {
     if let Some(query_string) = &args.query {
         run_batch(&db, query_string);
     } else if let Some(file_path) = &args.file {
-        match fs::read_to_string(&file_path) {
+        match fs::read_to_string(file_path) {
             Ok(content) => run_batch(&db, &content),
             Err(e) => {
                 eprintln!("Error reading file '{}': {}", file_path, e);

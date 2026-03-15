@@ -458,7 +458,7 @@ fn execute_pipeline(
         final_bindings,
         storage,
         &mut ctx,
-        cache.as_deref_mut(),
+        cache,
     )?;
     result.stats.execution_time_ms = t0.elapsed().as_millis() as u64;
 
