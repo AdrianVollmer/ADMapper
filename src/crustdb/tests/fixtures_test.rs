@@ -78,8 +78,10 @@ struct Expected {
     columns: Option<Vec<String>>,
     #[allow(dead_code)]
     rows: Option<Vec<toml::Value>>,
-    #[allow(dead_code)]
     row_count: Option<usize>,
+    /// Ordered rows - verifies both content and order.
+    /// Each inner array corresponds to one row, with values in column order.
+    ordered_rows: Option<Vec<Vec<toml::Value>>>,
 
     // For error cases
     #[allow(dead_code)]
@@ -199,6 +201,71 @@ fn run_test_case(test: &TestCase) {
                 col
             );
         }
+    }
+
+    // Check ordered_rows (verifies both content and order)
+    if let Some(ref expected_rows) = test.expected.ordered_rows {
+        let columns = test
+            .expected
+            .columns
+            .as_ref()
+            .expect("ordered_rows requires columns to be specified");
+
+        assert_eq!(
+            result.rows.len(),
+            expected_rows.len(),
+            "Test '{}': row count mismatch (expected {}, got {})",
+            test.name,
+            expected_rows.len(),
+            result.rows.len()
+        );
+
+        for (i, (actual_row, expected_row)) in
+            result.rows.iter().zip(expected_rows.iter()).enumerate()
+        {
+            assert_eq!(
+                expected_row.len(),
+                columns.len(),
+                "Test '{}': row {} has wrong number of expected values",
+                test.name,
+                i
+            );
+            for (j, (col, expected_val)) in columns.iter().zip(expected_row.iter()).enumerate() {
+                let actual_val = actual_row.get(col).unwrap_or_else(|| {
+                    panic!("Test '{}': row {} missing column '{}'", test.name, i, col)
+                });
+                assert!(
+                    result_value_matches_toml(actual_val, expected_val),
+                    "Test '{}': row {} col {} ('{}') mismatch: actual={:?}, expected={:?}",
+                    test.name,
+                    i,
+                    j,
+                    col,
+                    actual_val,
+                    expected_val
+                );
+            }
+        }
+    }
+}
+
+/// Check if a ResultValue matches a TOML value.
+fn result_value_matches_toml(actual: &crustdb::ResultValue, expected: &toml::Value) -> bool {
+    match (actual, expected) {
+        (crustdb::ResultValue::Property(prop), _) => property_value_matches_toml(prop, expected),
+        _ => false,
+    }
+}
+
+/// Check if a PropertyValue matches a TOML value.
+fn property_value_matches_toml(actual: &crustdb::PropertyValue, expected: &toml::Value) -> bool {
+    match (actual, expected) {
+        (crustdb::PropertyValue::String(s), toml::Value::String(e)) => s == e,
+        (crustdb::PropertyValue::Integer(i), toml::Value::Integer(e)) => *i == *e,
+        (crustdb::PropertyValue::Float(f), toml::Value::Float(e)) => (*f - *e).abs() < f64::EPSILON,
+        (crustdb::PropertyValue::Bool(b), toml::Value::Boolean(e)) => *b == *e,
+        (crustdb::PropertyValue::Null, _) => false,
+        _ => false,
     }
 }
 
@@ -1004,4 +1071,119 @@ fn test_m10_skip_and_limit() {
         .execute("MATCH (n:Person) RETURN n SKIP 1 LIMIT 2")
         .unwrap();
     assert_eq!(result.rows.len(), 2);
+}
+
+// =============================================================================
+// M11: ORDER BY Tests
+// =============================================================================
+
+#[test]
+fn test_m11_order_by_fixtures() {
+    let fixtures = find_fixtures("m11_order_by");
+    assert!(!fixtures.is_empty(), "No M11 fixtures found");
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for fixture_path in &fixtures {
+        let fixture = load_fixture(fixture_path);
+
+        for test in &fixture.test {
+            let result = std::panic::catch_unwind(|| {
+                run_test_case(test);
+            });
+
+            let desc = test.description.as_deref().unwrap_or("");
+            match result {
+                Ok(()) => {
+                    passed += 1;
+                    println!("  ✓ {}: {}", test.name, desc);
+                }
+                Err(e) => {
+                    failed += 1;
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown error".to_string()
+                    };
+                    println!("  ✗ {}: {} - {}", test.name, desc, msg);
+                }
+            }
+        }
+    }
+
+    println!("\nM11 ORDER BY: {} passed, {} failed", passed, failed);
+    assert_eq!(failed, 0, "Some M11 ORDER BY tests failed");
+}
+
+#[test]
+fn test_m11_order_by_basic() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Charlie'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+
+    let result = db
+        .execute("MATCH (n:Person) RETURN n.name ORDER BY n.name")
+        .unwrap();
+    assert_eq!(result.rows.len(), 3);
+
+    let names: Vec<&str> = result
+        .rows
+        .iter()
+        .map(|r| match r.get("n.name").unwrap() {
+            crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => s.as_str(),
+            _ => panic!("Expected string"),
+        })
+        .collect();
+    assert_eq!(names, vec!["Alice", "Bob", "Charlie"]);
+}
+
+#[test]
+fn test_m11_order_by_desc() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Charlie'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+    db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+
+    let result = db
+        .execute("MATCH (n:Person) RETURN n.name ORDER BY n.name DESC")
+        .unwrap();
+
+    let names: Vec<&str> = result
+        .rows
+        .iter()
+        .map(|r| match r.get("n.name").unwrap() {
+            crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => s.as_str(),
+            _ => panic!("Expected string"),
+        })
+        .collect();
+    assert_eq!(names, vec!["Charlie", "Bob", "Alice"]);
+}
+
+#[test]
+fn test_m11_order_by_integer() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice', age: 30})")
+        .unwrap();
+    db.execute("CREATE (n:Person {name: 'Bob', age: 25})")
+        .unwrap();
+    db.execute("CREATE (n:Person {name: 'Charlie', age: 35})")
+        .unwrap();
+
+    let result = db
+        .execute("MATCH (n:Person) RETURN n.name, n.age ORDER BY n.age")
+        .unwrap();
+
+    let names: Vec<&str> = result
+        .rows
+        .iter()
+        .map(|r| match r.get("n.name").unwrap() {
+            crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => s.as_str(),
+            _ => panic!("Expected string"),
+        })
+        .collect();
+    assert_eq!(names, vec!["Bob", "Alice", "Charlie"]);
 }

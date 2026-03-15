@@ -4,8 +4,8 @@
 //! execution plan that can be run by the executor.
 
 use super::ast::{
-    BinaryOperator, Expression, Literal, MatchClause, Pattern, PatternElement, ReturnClause,
-    Statement,
+    BinaryOperator, Expression, Literal, MatchClause, OrderByItem, Pattern, PatternElement,
+    ReturnClause, Statement,
 };
 use crate::error::{Error, Result};
 
@@ -13,7 +13,7 @@ use crate::error::{Error, Result};
 pub use super::operators::{
     AggregateColumn, AggregateFunction, CreateNode, CreateRelationship, ExpandDirection,
     ExpandParams, FilterPredicate, PlanExpr, PlanLiteral, PlanOperator, ProjectColumn, QueryPlan,
-    SetOperation, ShortestPathParams, TargetPropertyFilter, VarLenExpandParams,
+    SetOperation, ShortestPathParams, SortKey, TargetPropertyFilter, VarLenExpandParams,
 };
 
 mod create;
@@ -124,6 +124,15 @@ pub(super) fn plan_return(
         };
     }
 
+    // Add ORDER BY (must come after projection, before SKIP/LIMIT)
+    if let Some(ref order_by) = return_clause.order_by {
+        let keys = plan_order_by(order_by, return_clause)?;
+        plan = PlanOperator::Sort {
+            source: Box::new(plan),
+            keys,
+        };
+    }
+
     // Add SKIP
     if let Some(skip) = return_clause.skip {
         plan = PlanOperator::Skip {
@@ -172,4 +181,48 @@ pub(super) fn plan_set_clause(set_clause: &super::parser::SetClause) -> Result<V
     }
 
     Ok(ops)
+}
+
+/// Plan ORDER BY items into sort keys.
+///
+/// Resolves each ORDER BY expression to a projected column name by:
+/// 1. Checking if it matches a RETURN alias (e.g., `ORDER BY name` when `RETURN n.name AS name`)
+/// 2. Formatting the expression and matching against auto-generated column names
+fn plan_order_by(order_by: &[OrderByItem], return_clause: &ReturnClause) -> Result<Vec<SortKey>> {
+    order_by
+        .iter()
+        .map(|item| {
+            let expr_str = format_expression(&item.expression);
+
+            // First, check if it matches a RETURN alias directly
+            let column = return_clause
+                .items
+                .iter()
+                .find_map(|ri| {
+                    // Match explicit alias
+                    if let Some(ref alias) = ri.alias {
+                        if alias == &expr_str {
+                            return Some(alias.clone());
+                        }
+                    }
+                    // Match expression text (auto-generated alias)
+                    let ri_expr = format_expression(&ri.expression);
+                    if ri_expr == expr_str {
+                        return Some(ri.alias.clone().unwrap_or(ri_expr));
+                    }
+                    None
+                })
+                .ok_or_else(|| {
+                    Error::Cypher(format!(
+                        "ORDER BY expression '{}' not found in RETURN clause",
+                        expr_str
+                    ))
+                })?;
+
+            Ok(SortKey {
+                column,
+                descending: item.descending,
+            })
+        })
+        .collect()
 }

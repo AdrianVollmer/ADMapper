@@ -135,8 +135,7 @@ pub enum PlanOperator {
     /// SQL pushdown for DISTINCT type(r) - returns all relationship types directly.
     /// Much faster than scanning all relationships: O(distinct_types) vs O(relationships).
     RelationshipTypesScan { alias: String },
-    /// Sort rows.
-    #[allow(dead_code)]
+    /// Sort rows by column values.
     Sort {
         source: Box<PlanOperator>,
         keys: Vec<SortKey>,
@@ -368,10 +367,11 @@ pub enum AggregateFunction {
     Collect(PlanExpr),
 }
 
-/// Sort key.
+/// Sort key referencing a projected column by name.
 #[derive(Debug, Clone)]
 pub struct SortKey {
-    pub expr: PlanExpr,
+    /// Column name to sort by (must match a projected alias).
+    pub column: String,
     pub descending: bool,
 }
 

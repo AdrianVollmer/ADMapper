@@ -355,15 +355,71 @@ fn execute_operator(
             Ok(ExecutionResult::Bindings(Vec::new()))
         }
 
-        PlanOperator::Sort { source, keys: _ } => {
-            // TODO: Implement sorting
-            let bindings = execute_operator_to_bindings(source, storage, ctx, cache)?;
-            Ok(ExecutionResult::Bindings(bindings))
+        PlanOperator::Sort { source, keys } => {
+            // Sort operates on Rows (after projection)
+            match execute_operator(source, storage, ctx, cache)? {
+                ExecutionResult::Rows { columns, mut rows } => {
+                    rows.sort_by(|a, b| {
+                        for key in keys {
+                            let av = a.get(&key.column);
+                            let bv = b.get(&key.column);
+                            let cmp = compare_result_values(av, bv);
+                            let cmp = if key.descending { cmp.reverse() } else { cmp };
+                            if cmp != std::cmp::Ordering::Equal {
+                                return cmp;
+                            }
+                        }
+                        std::cmp::Ordering::Equal
+                    });
+                    Ok(ExecutionResult::Rows { columns, rows })
+                }
+                ExecutionResult::Bindings(bindings) => {
+                    // Sort on bindings is a no-op (shouldn't happen in well-formed plans)
+                    Ok(ExecutionResult::Bindings(bindings))
+                }
+            }
         }
 
         PlanOperator::RelationshipScan { .. } => {
             Err(Error::Cypher("RelationshipScan not implemented".into()))
         }
+    }
+}
+
+/// Compare two optional ResultValues for sorting.
+/// NULL values sort last (after all non-NULL values).
+fn compare_result_values(
+    a: Option<&crate::query::ResultValue>,
+    b: Option<&crate::query::ResultValue>,
+) -> std::cmp::Ordering {
+    use crate::graph::PropertyValue;
+    use crate::query::ResultValue;
+
+    match (a, b) {
+        (None, None) => std::cmp::Ordering::Equal,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (Some(a), Some(b)) => match (a, b) {
+            (ResultValue::Property(pa), ResultValue::Property(pb)) => match (pa, pb) {
+                (PropertyValue::Integer(x), PropertyValue::Integer(y)) => x.cmp(y),
+                (PropertyValue::Float(x), PropertyValue::Float(y)) => {
+                    x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+                }
+                (PropertyValue::Integer(x), PropertyValue::Float(y)) => (*x as f64)
+                    .partial_cmp(y)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                (PropertyValue::Float(x), PropertyValue::Integer(y)) => x
+                    .partial_cmp(&(*y as f64))
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                (PropertyValue::String(x), PropertyValue::String(y)) => x.cmp(y),
+                (PropertyValue::Bool(x), PropertyValue::Bool(y)) => x.cmp(y),
+                (PropertyValue::Null, PropertyValue::Null) => std::cmp::Ordering::Equal,
+                (PropertyValue::Null, _) => std::cmp::Ordering::Greater,
+                (_, PropertyValue::Null) => std::cmp::Ordering::Less,
+                _ => std::cmp::Ordering::Equal,
+            },
+            _ => std::cmp::Ordering::Equal,
+        },
     }
 }
 

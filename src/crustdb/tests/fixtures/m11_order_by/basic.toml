@@ -1,0 +1,113 @@
+[[test]]
+name = "order_by_string_asc"
+description = "ORDER BY string property ascending (default)"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Charlie'})",
+    "CREATE (n:Person {name: 'Alice'})",
+    "CREATE (n:Person {name: 'Bob'})",
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n.name ORDER BY n.name"
+[test.expected]
+columns = ["n.name"]
+ordered_rows = [
+    ["Alice"],
+    ["Bob"],
+    ["Charlie"],
+]
+
+[[test]]
+name = "order_by_string_desc"
+description = "ORDER BY string property descending"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Charlie'})",
+    "CREATE (n:Person {name: 'Alice'})",
+    "CREATE (n:Person {name: 'Bob'})",
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n.name ORDER BY n.name DESC"
+[test.expected]
+columns = ["n.name"]
+ordered_rows = [
+    ["Charlie"],
+    ["Bob"],
+    ["Alice"],
+]
+
+[[test]]
+name = "order_by_integer_asc"
+description = "ORDER BY integer property ascending"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Alice', age: 30})",
+    "CREATE (n:Person {name: 'Bob', age: 25})",
+    "CREATE (n:Person {name: 'Charlie', age: 35})",
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n.name, n.age ORDER BY n.age"
+[test.expected]
+columns = ["n.name", "n.age"]
+ordered_rows = [
+    ["Bob", 25],
+    ["Alice", 30],
+    ["Charlie", 35],
+]
+
+[[test]]
+name = "order_by_with_limit"
+description = "ORDER BY combined with LIMIT"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Charlie'})",
+    "CREATE (n:Person {name: 'Alice'})",
+    "CREATE (n:Person {name: 'Bob'})",
+    "CREATE (n:Person {name: 'David'})",
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n.name ORDER BY n.name LIMIT 2"
+[test.expected]
+columns = ["n.name"]
+ordered_rows = [
+    ["Alice"],
+    ["Bob"],
+]
+
+[[test]]
+name = "order_by_with_skip_and_limit"
+description = "ORDER BY combined with SKIP and LIMIT"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Charlie'})",
+    "CREATE (n:Person {name: 'Alice'})",
+    "CREATE (n:Person {name: 'Bob'})",
+    "CREATE (n:Person {name: 'David'})",
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n.name ORDER BY n.name SKIP 1 LIMIT 2"
+[test.expected]
+columns = ["n.name"]
+ordered_rows = [
+    ["Bob"],
+    ["Charlie"],
+]
+
+[[test]]
+name = "order_by_alias"
+description = "ORDER BY using column alias"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Charlie'})",
+    "CREATE (n:Person {name: 'Alice'})",
+    "CREATE (n:Person {name: 'Bob'})",
+]
+[test.query]
+cypher = "MATCH (n:Person) RETURN n.name AS name ORDER BY name"
+[test.expected]
+columns = ["name"]
+ordered_rows = [
+    ["Alice"],
+    ["Bob"],
+    ["Charlie"],
+]
