@@ -13,6 +13,7 @@ import { setPathStart, setPathEnd } from "./search";
 import { getRenderer, loadGraphData } from "./graph-view";
 import { showError, showConfirm } from "../utils/notifications";
 import { executeQuery, QueryAbortedError } from "../utils/query";
+import { HIGH_VALUE_RIDS, ridWhereClause } from "./queries/builtin-queries";
 
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
@@ -1152,12 +1153,8 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
 
 /** Show path to high-value target when indicator is clicked */
 async function showPathToHighValue(nodeId: string): Promise<void> {
-  // High-value RIDs to check (same as backend)
-  const HIGH_VALUE_RIDS = ["-519", "-512", "-518", "-516", "-498", "-544", "-548", "-549", "-551"];
-  const ridConditions = HIGH_VALUE_RIDS.map((rid) => `b.objectid ENDS WITH '${rid}'`).join(" OR ");
-
   const escapedId = nodeId.replace(/'/g, "\\'");
-  const query = `MATCH p = (a)-[*1..]->(b) WHERE a.objectid = '${escapedId}' AND (${ridConditions}) RETURN p LIMIT 1`;
+  const query = `MATCH p = shortestPath((a)-[*1..]->(b)) WHERE a.objectid = '${escapedId}' AND (${ridWhereClause("b", HIGH_VALUE_RIDS)}) RETURN p`;
 
   try {
     const result = await executeQuery(query, { extractGraph: true });

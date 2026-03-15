@@ -1136,9 +1136,9 @@ impl CrustDatabase {
 
         // Use variable-length path to find transitive MemberOf membership
         let query = format!(
-            "MATCH (n {{objectid: '{}'}})-[:MemberOf*1..20]->(g) \
+            "MATCH p = shortestPath((n {{objectid: '{}'}})-[:MemberOf*1..20]->(g)) \
              WHERE g.objectid ENDS WITH '{}' \
-             RETURN g.objectid LIMIT 1",
+             RETURN g.objectid",
             id_escaped, suffix_escaped
         );
 

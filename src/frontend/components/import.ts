@@ -307,10 +307,9 @@ function cleanup(): void {
 
 /** Query to find all members of Domain Admin groups (SID ends with -512) */
 const DOMAIN_ADMINS_QUERY = `
-MATCH (m)-[e:Relationship]->(g:Group)
+MATCH p = (m)-[:MemberOf]->(g:Group)
 WHERE g.objectid ENDS WITH '-512'
-AND e.rel_type = 'MemberOf'
-RETURN m, e, g
+RETURN p
 `;
 
 /** Load Domain Admin members after import */

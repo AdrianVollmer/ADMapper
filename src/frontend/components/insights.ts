@@ -757,10 +757,10 @@ async function loadAccountExposure(): Promise<void> {
         extractGraph: false,
         background: true,
       }),
-      executeQuery(`MATCH (u:User)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u`, {
-        extractGraph: false,
-        background: true,
-      }),
+      executeQuery(
+        `MATCH (u:User), (g:Group), p = shortestPath((u)-[:MemberOf*1..]->(g)) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u`,
+        { extractGraph: false, background: true }
+      ),
     ]);
 
     accountExposureState = {
@@ -843,7 +843,7 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
       query = `MATCH (c:Computer) WHERE c.unconstraineddelegation = true AND c.enabled = true RETURN c LIMIT 500`;
       break;
     case "protected-users":
-      query = `MATCH (u:User)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u LIMIT 500`;
+      query = `MATCH (u:User), (g:Group), p = shortestPath((u)-[:MemberOf*1..]->(g)) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u LIMIT 500`;
       break;
     case "stale-users": {
       const threshold = daysToWindowsFileTime(staleThresholdDays);

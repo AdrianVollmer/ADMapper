@@ -561,8 +561,10 @@ impl DatabaseBackend for FalkorDbDatabase {
 
         // Find real DAs
         let real_da_query = format!(
-            "MATCH (u:User)-[:MemberOf*1..]->(g:Group) \
+            "MATCH (u:User), (g:Group) \
              WHERE g.objectid ENDS WITH '{}' \
+             WITH u, g, shortestPath((u)-[:MemberOf*1..]->(g)) AS p \
+             WHERE p IS NOT NULL \
              RETURN DISTINCT u.objectid AS id, u.name AS name",
             DOMAIN_ADMIN_SID_SUFFIX
         );
@@ -950,9 +952,11 @@ impl DatabaseBackend for FalkorDbDatabase {
 
         // Use variable-length path to find transitive MemberOf membership
         let cypher = format!(
-            "MATCH (n {{objectid: '{}'}})-[:MemberOf*1..20]->(g) \
+            "MATCH (n {{objectid: '{}'}}), (g) \
              WHERE g.objectid ENDS WITH '{}' \
-             RETURN g.objectid LIMIT 1",
+             WITH n, g, shortestPath((n)-[:MemberOf*1..20]->(g)) AS p \
+             WHERE p IS NOT NULL \
+             RETURN g.objectid",
             id_escaped, suffix_escaped
         );
 

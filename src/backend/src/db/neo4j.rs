@@ -498,7 +498,7 @@ impl DatabaseBackend for Neo4jDatabase {
 
         // Find real DAs (direct MemberOf path to DA groups)
         let real_da_query = format!(
-            "MATCH (u:User)-[:MemberOf*1..]->(g:Group) \
+            "MATCH (u:User), (g:Group), p = shortestPath((u)-[:MemberOf*1..]->(g)) \
              WHERE g.objectid ENDS WITH '{}' \
              RETURN DISTINCT u.objectid AS id, u.name AS name",
             DOMAIN_ADMIN_SID_SUFFIX
@@ -805,9 +805,9 @@ impl DatabaseBackend for Neo4jDatabase {
     ) -> Result<Option<String>> {
         // Use variable-length path to find transitive MemberOf membership
         let q = query(
-            "MATCH (n {objectid: $id})-[:MemberOf*1..20]->(g) \
+            "MATCH p = shortestPath((n {objectid: $id})-[:MemberOf*1..20]->(g)) \
              WHERE g.objectid ENDS WITH $suffix \
-             RETURN g.objectid LIMIT 1",
+             RETURN g.objectid",
         )
         .param("id", node_id.to_string())
         .param("suffix", sid_suffix.to_string());

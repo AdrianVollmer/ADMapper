@@ -4,6 +4,27 @@
 
 import type { QueryCategory } from "./types";
 
+/**
+ * Well-known high-value group RIDs in Active Directory.
+ * Used across insights, sidebar, and built-in queries.
+ */
+export const HIGH_VALUE_RIDS = [
+  "-519", // Enterprise Admins
+  "-512", // Domain Admins
+  "-518", // Schema Admins
+  "-516", // Domain Controllers
+  "-498", // Enterprise Read-only Domain Controllers
+  "-544", // Administrators
+  "-548", // Account Operators
+  "-549", // Server Operators
+  "-551", // Backup Operators
+];
+
+/** Build a WHERE clause matching any of the given RID suffixes on a variable */
+export function ridWhereClause(variable: string, rids: string[]): string {
+  return rids.map((rid) => `${variable}.objectid ENDS WITH '${rid}'`).join(" OR ");
+}
+
 /** Built-in queries organized by category */
 export const BUILTIN_QUERIES: QueryCategory[] = [
   {
@@ -160,19 +181,19 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
         id: "high-value-groups",
         name: "High Value Groups",
         description: "Privileged groups by well-known SID",
-        query: `MATCH (g:Group) WHERE g.objectid ENDS WITH '-512' OR g.objectid ENDS WITH '-519' OR g.objectid ENDS WITH '-518' OR g.objectid ENDS WITH '-516' OR g.objectid ENDS WITH '-498' OR g.objectid ENDS WITH '-S-1-5-9' OR g.objectid ENDS WITH '-544' OR g.objectid ENDS WITH '-548' OR g.objectid ENDS WITH '-549' OR g.objectid ENDS WITH '-551' RETURN g`,
+        query: `MATCH (g:Group) WHERE ${ridWhereClause("g", [...HIGH_VALUE_RIDS, "-S-1-5-9"])} RETURN g`,
       },
       {
         id: "high-value-users",
         name: "High Value Users",
         description: "Users who are members of high-value groups",
-        query: `MATCH p = (u:User)-[:MemberOf]->(g:Group) WHERE g.objectid ENDS WITH '-512' OR g.objectid ENDS WITH '-519' OR g.objectid ENDS WITH '-518' OR g.objectid ENDS WITH '-S-1-5-9' OR g.objectid ENDS WITH '-544' OR g.objectid ENDS WITH '-548' OR g.objectid ENDS WITH '-549' OR g.objectid ENDS WITH '-551' RETURN p`,
+        query: `MATCH p = (u:User)-[:MemberOf]->(g:Group) WHERE ${ridWhereClause("g", [...HIGH_VALUE_RIDS, "-S-1-5-9"])} RETURN p`,
       },
       {
         id: "high-value-computers",
         name: "High Value Computers",
         description: "Computers who are members of high-value groups (e.g., Domain Controllers)",
-        query: `MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE g.objectid ENDS WITH '-516' OR g.objectid ENDS WITH '-498' OR g.objectid ENDS WITH '-521' OR g.objectid ENDS WITH '-S-1-5-9' RETURN p`,
+        query: `MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE ${ridWhereClause("g", ["-516", "-498", "-521", "-S-1-5-9"])} RETURN p`,
       },
     ],
   },

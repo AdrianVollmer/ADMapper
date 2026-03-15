@@ -493,7 +493,7 @@ fn check_path_to_condition(
     let escaped_id = node_id.replace('\'', "\\'");
     // Use variable-length path syntax (1 to 20 hops)
     let query_text = format!(
-        "MATCH p = (a)-[*1..20]->(b) WHERE a.objectid = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
+        "MATCH p = shortestPath((a)-[*1..20]->(b)) WHERE a.objectid = '{}' AND ({}) RETURN length(p) AS hops",
         escaped_id, condition
     );
 
