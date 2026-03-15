@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 
 // Re-export plan types for backwards compatibility
 pub use super::operators::{
-    AggregateColumn, AggregateFunction, CreateNode, CreateRelationship, ExpandDirection,
+    AggregateColumn, AggregateFunction, CaseWhen, CreateNode, CreateRelationship, ExpandDirection,
     ExpandParams, FilterPredicate, PlanExpr, PlanLiteral, PlanOperator, ProjectColumn, QueryPlan,
     SetOperation, ShortestPathParams, SortKey, TargetPropertyFilter, VarLenExpandParams,
 };

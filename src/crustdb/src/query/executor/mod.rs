@@ -296,7 +296,7 @@ fn execute_union(
     let mut seen = std::collections::HashSet::new();
     result.rows.retain(|row| {
         let mut pairs: Vec<_> = row.values.iter().collect();
-        pairs.sort_by_key(|(k, _)| k.clone());
+        pairs.sort_by_key(|(k, _)| (*k).clone());
         let key = format!("{:?}", pairs);
         seen.insert(key)
     });

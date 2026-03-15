@@ -1,6 +1,6 @@
 //! Expression planning - converts AST expressions to plan expressions and predicates.
 
-use super::{AggregateFunction, FilterPredicate};
+use super::{AggregateFunction, CaseWhen, FilterPredicate};
 use super::{BinaryOperator, Error, Expression, Literal, PlanExpr, PlanLiteral, Result};
 
 /// Convert AST expression to plan expression.
@@ -34,6 +34,42 @@ pub(super) fn plan_expression(expr: &Expression) -> Result<PlanExpr> {
             Ok(PlanExpr::Function {
                 name: name.clone(),
                 args: planned_args?,
+            })
+        }
+        Expression::Case {
+            operand,
+            whens,
+            else_,
+        } => {
+            let plan_operand = operand
+                .as_ref()
+                .map(|e| plan_expression(e).map(Box::new))
+                .transpose()?;
+
+            let plan_whens: Result<Vec<_>> = whens
+                .iter()
+                .map(|(when_expr, then_expr)| {
+                    let when = if plan_operand.is_some() {
+                        // Simple CASE: WHEN values compared by equality
+                        CaseWhen::Value(plan_expression(when_expr)?)
+                    } else {
+                        // Searched CASE: WHEN predicates
+                        CaseWhen::Predicate(plan_expression_as_predicate(when_expr)?)
+                    };
+                    let then = plan_expression(then_expr)?;
+                    Ok((when, then))
+                })
+                .collect();
+
+            let plan_else = else_
+                .as_ref()
+                .map(|e| plan_expression(e).map(Box::new))
+                .transpose()?;
+
+            Ok(PlanExpr::Case {
+                operand: plan_operand,
+                whens: plan_whens?,
+                else_: plan_else,
             })
         }
         _ => Err(Error::Cypher(format!(

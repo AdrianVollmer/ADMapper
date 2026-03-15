@@ -1,0 +1,65 @@
+[[test]]
+name = "case_searched"
+description = "Searched CASE expression (CASE WHEN ... THEN ...)"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Alice', age: 30})",
+    "CREATE (n:Person {name: 'Bob', age: 15})",
+    "CREATE (n:Person {name: 'Charlie', age: 65})",
+]
+[test.query]
+cypher = """
+MATCH (n:Person)
+RETURN n.name,
+       CASE WHEN n.age < 18 THEN 'minor'
+            WHEN n.age >= 60 THEN 'senior'
+            ELSE 'adult' END AS category
+ORDER BY n.name
+"""
+[test.expected]
+columns = ["n.name", "category"]
+ordered_rows = [
+    ["Alice", "adult"],
+    ["Bob", "minor"],
+    ["Charlie", "senior"],
+]
+
+[[test]]
+name = "case_simple"
+description = "Simple CASE expression (CASE expr WHEN value THEN ...)"
+[test.setup]
+cypher = [
+    "CREATE (n:Status {code: 1})",
+    "CREATE (n:Status {code: 2})",
+    "CREATE (n:Status {code: 3})",
+]
+[test.query]
+cypher = """
+MATCH (n:Status)
+RETURN CASE n.code WHEN 1 THEN 'active'
+                   WHEN 2 THEN 'inactive'
+                   ELSE 'unknown' END AS label
+ORDER BY label
+"""
+[test.expected]
+columns = ["label"]
+ordered_rows = [
+    ["active"],
+    ["inactive"],
+    ["unknown"],
+]
+
+[[test]]
+name = "case_no_else"
+description = "CASE without ELSE returns null"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Alice', age: 30})",
+]
+[test.query]
+cypher = """
+MATCH (n:Person)
+RETURN CASE WHEN n.age > 50 THEN 'old' END AS label
+"""
+[test.expected]
+row_count = 1

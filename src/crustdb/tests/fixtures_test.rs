@@ -1187,3 +1187,67 @@ fn test_m11_order_by_integer() {
         .collect();
     assert_eq!(names, vec!["Bob", "Alice", "Charlie"]);
 }
+
+// =============================================================================
+// CASE Expression Tests
+// =============================================================================
+
+#[test]
+fn test_case_expression_fixtures() {
+    let fixtures = find_fixtures("m11_case");
+    assert!(!fixtures.is_empty(), "No CASE fixtures found");
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for fixture_path in &fixtures {
+        let fixture = load_fixture(fixture_path);
+
+        for test in &fixture.test {
+            let result = std::panic::catch_unwind(|| {
+                run_test_case(test);
+            });
+
+            let desc = test.description.as_deref().unwrap_or("");
+            match result {
+                Ok(()) => {
+                    passed += 1;
+                    println!("  ✓ {}: {}", test.name, desc);
+                }
+                Err(e) => {
+                    failed += 1;
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown error".to_string()
+                    };
+                    println!("  ✗ {}: {} - {}", test.name, desc, msg);
+                }
+            }
+        }
+    }
+
+    println!("\nCASE Expressions: {} passed, {} failed", passed, failed);
+    assert_eq!(failed, 0, "Some CASE expression tests failed");
+}
+
+#[test]
+fn test_case_searched_basic() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice', age: 30})")
+        .unwrap();
+
+    let result = db
+        .execute("MATCH (n:Person) RETURN CASE WHEN n.age > 18 THEN 'adult' ELSE 'minor' END AS category")
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    match result.rows[0].get("category").unwrap() {
+        crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => {
+            assert_eq!(s, "adult");
+        }
+        _ => panic!("Expected string"),
+    }
+}

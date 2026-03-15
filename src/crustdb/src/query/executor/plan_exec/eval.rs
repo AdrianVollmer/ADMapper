@@ -1,7 +1,8 @@
+use super::filter::evaluate_predicate;
 use super::{Binding, Path};
 use crate::error::Result;
 use crate::graph::{Node, PropertyValue, Relationship};
-use crate::query::planner::{PlanExpr, PlanLiteral};
+use crate::query::planner::{CaseWhen, PlanExpr, PlanLiteral};
 
 #[derive(Debug, Clone)]
 pub(super) enum EvalValue {
@@ -125,6 +126,39 @@ pub(super) fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalVa
                     }
                 }
                 _ => Ok(EvalValue::Null), // Unknown function
+            }
+        }
+
+        PlanExpr::Case {
+            operand,
+            whens,
+            else_,
+        } => {
+            let operand_val = operand
+                .as_ref()
+                .map(|e| evaluate_expr(e, binding))
+                .transpose()?;
+
+            for (when, then) in whens {
+                let matched = match when {
+                    CaseWhen::Predicate(pred) => evaluate_predicate(pred, binding)?,
+                    CaseWhen::Value(val_expr) => {
+                        let val = evaluate_expr(val_expr, binding)?;
+                        match &operand_val {
+                            Some(op) => values_equal(op, &val),
+                            None => false,
+                        }
+                    }
+                };
+                if matched {
+                    return evaluate_expr(then, binding);
+                }
+            }
+
+            // No WHEN matched - return ELSE or NULL
+            match else_ {
+                Some(e) => evaluate_expr(e, binding),
+                None => Ok(EvalValue::Null),
             }
         }
     }

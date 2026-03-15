@@ -327,9 +327,36 @@ pub enum FilterPredicate {
 pub enum PlanExpr {
     Literal(PlanLiteral),
     Variable(String),
-    Property { variable: String, property: String },
-    Function { name: String, args: Vec<PlanExpr> },
-    PathLength { path_variable: String },
+    Property {
+        variable: String,
+        property: String,
+    },
+    Function {
+        name: String,
+        args: Vec<PlanExpr>,
+    },
+    PathLength {
+        path_variable: String,
+    },
+    /// CASE expression.
+    /// Searched form: `CASE WHEN pred THEN expr ... ELSE expr END`
+    /// Simple form: `CASE operand WHEN value THEN expr ... ELSE expr END`
+    Case {
+        /// Operand for simple CASE (None for searched CASE)
+        operand: Option<Box<PlanExpr>>,
+        /// (condition_or_value, result) pairs
+        whens: Vec<(CaseWhen, PlanExpr)>,
+        else_: Option<Box<PlanExpr>>,
+    },
+}
+
+/// A WHEN clause in a CASE expression.
+#[derive(Debug, Clone)]
+pub enum CaseWhen {
+    /// Searched CASE: WHEN <predicate> THEN ... (the predicate is a FilterPredicate)
+    Predicate(FilterPredicate),
+    /// Simple CASE: WHEN <value> THEN ... (compared against operand)
+    Value(PlanExpr),
 }
 
 /// Literal value in plan.
