@@ -4,9 +4,9 @@
 //! against the storage backend, producing a `QueryResult`.
 
 mod convert;
-mod eval;
+pub(crate) mod eval;
 mod expand;
-mod filter;
+pub(crate) mod filter;
 mod mutate;
 mod project;
 mod scan;
@@ -436,5 +436,153 @@ fn execute_operator_to_bindings(
             // This shouldn't happen in a well-formed plan
             Err(Error::Internal("Expected bindings, got rows".into()))
         }
+    }
+}
+
+/// Execute a plan and return raw bindings (for WITH clause support).
+pub fn execute_plan_bindings(
+    plan: &QueryPlan,
+    storage: &SqliteStorage,
+    ctx: &mut ExecutionContext,
+    cache: Option<&mut EntityCache>,
+) -> Result<Vec<Binding>> {
+    execute_operator_to_bindings(&plan.root, storage, ctx, cache)
+}
+
+/// Execute a plan using provided bindings as the source.
+///
+/// Replaces the leaf operator's output with the given bindings, allowing
+/// the rest of the plan (Project, Aggregate, Sort, etc.) to process them.
+pub fn execute_plan_on_bindings(
+    plan: &QueryPlan,
+    bindings: Vec<Binding>,
+    storage: &SqliteStorage,
+    ctx: &mut ExecutionContext,
+    cache: Option<&mut EntityCache>,
+) -> Result<QueryResult> {
+    let result = execute_operator_on_bindings(&plan.root, bindings, storage, ctx, cache)?;
+    match result {
+        ExecutionResult::Bindings(_) => Ok(QueryResult {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            stats: ctx.stats.clone(),
+        }),
+        ExecutionResult::Rows { columns, rows } => Ok(QueryResult {
+            columns,
+            rows,
+            stats: ctx.stats.clone(),
+        }),
+    }
+}
+
+/// Execute an operator, injecting provided bindings at leaf positions.
+fn execute_operator_on_bindings(
+    op: &PlanOperator,
+    bindings: Vec<Binding>,
+    storage: &SqliteStorage,
+    ctx: &mut ExecutionContext,
+    cache: Option<&mut EntityCache>,
+) -> Result<ExecutionResult> {
+    match op {
+        // Leaf operators get replaced by the provided bindings
+        PlanOperator::Empty | PlanOperator::ProduceRow | PlanOperator::NodeScan { .. } => {
+            Ok(ExecutionResult::Bindings(bindings))
+        }
+
+        // Operators that process their source - recurse with bindings
+        PlanOperator::Project {
+            source,
+            columns,
+            distinct,
+        } => {
+            let inner_bindings =
+                execute_on_bindings_to_bindings(source, bindings, storage, ctx, cache)?;
+            execute_project(inner_bindings, columns, *distinct, storage)
+        }
+
+        PlanOperator::Aggregate {
+            source,
+            group_by,
+            aggregates,
+        } => {
+            let inner_bindings =
+                execute_on_bindings_to_bindings(source, bindings, storage, ctx, cache)?;
+            execute_aggregate(inner_bindings, group_by, aggregates, storage)
+        }
+
+        PlanOperator::Sort { source, keys } => {
+            let inner = execute_operator_on_bindings(source, bindings, storage, ctx, cache)?;
+            match inner {
+                ExecutionResult::Rows { columns, mut rows } => {
+                    rows.sort_by(|a, b| {
+                        for key in keys {
+                            let av = a.get(&key.column);
+                            let bv = b.get(&key.column);
+                            let cmp = compare_result_values(av, bv);
+                            let cmp = if key.descending { cmp.reverse() } else { cmp };
+                            if cmp != std::cmp::Ordering::Equal {
+                                return cmp;
+                            }
+                        }
+                        std::cmp::Ordering::Equal
+                    });
+                    Ok(ExecutionResult::Rows { columns, rows })
+                }
+                other => Ok(other),
+            }
+        }
+
+        PlanOperator::Limit { source, count } => {
+            match execute_operator_on_bindings(source, bindings, storage, ctx, cache)? {
+                ExecutionResult::Bindings(mut b) => {
+                    b.truncate(*count as usize);
+                    Ok(ExecutionResult::Bindings(b))
+                }
+                ExecutionResult::Rows { columns, mut rows } => {
+                    rows.truncate(*count as usize);
+                    Ok(ExecutionResult::Rows { columns, rows })
+                }
+            }
+        }
+
+        PlanOperator::Skip { source, count } => {
+            match execute_operator_on_bindings(source, bindings, storage, ctx, cache)? {
+                ExecutionResult::Bindings(b) => {
+                    let skipped: Vec<_> = b.into_iter().skip(*count as usize).collect();
+                    Ok(ExecutionResult::Bindings(skipped))
+                }
+                ExecutionResult::Rows { columns, rows } => {
+                    let skipped: Vec<_> = rows.into_iter().skip(*count as usize).collect();
+                    Ok(ExecutionResult::Rows {
+                        columns,
+                        rows: skipped,
+                    })
+                }
+            }
+        }
+
+        PlanOperator::Filter { source, predicate } => {
+            let inner_bindings =
+                execute_on_bindings_to_bindings(source, bindings, storage, ctx, cache)?;
+            let filtered = filter_bindings(inner_bindings, predicate)?;
+            Ok(ExecutionResult::Bindings(filtered))
+        }
+
+        // Fallback: execute normally (ignoring provided bindings)
+        _ => execute_operator(op, storage, ctx, cache),
+    }
+}
+
+/// Helper: execute on bindings and expect bindings back.
+fn execute_on_bindings_to_bindings(
+    op: &PlanOperator,
+    bindings: Vec<Binding>,
+    storage: &SqliteStorage,
+    ctx: &mut ExecutionContext,
+    cache: Option<&mut EntityCache>,
+) -> Result<Vec<Binding>> {
+    match execute_operator_on_bindings(op, bindings, storage, ctx, cache)? {
+        ExecutionResult::Bindings(b) => Ok(b),
+        ExecutionResult::Rows { .. } => Err(Error::Internal("Expected bindings, got rows".into())),
     }
 }

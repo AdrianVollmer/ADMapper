@@ -12,8 +12,9 @@ use pest_derive::Parser;
 // Re-export AST types for backwards compatibility
 pub use super::ast::{
     BinaryOperator, CreateClause, DeleteClause, Direction, Expression, LengthSpec,
-    ListPredicateKind, Literal, NodePattern, Pattern, PatternElement, RelationshipPattern,
-    ReturnClause, SetClause, SetItem, ShortestPathMode, Statement, UnaryOperator,
+    ListPredicateKind, Literal, MatchClause, NodePattern, Pattern, PatternElement,
+    RelationshipPattern, ReturnClause, SetClause, SetItem, ShortestPathMode, Statement,
+    UnaryOperator,
 };
 
 mod clause;
@@ -68,7 +69,7 @@ fn build_ast(pairs: Pairs<Rule>) -> Result<Statement> {
                 return build_single_part_query(pair);
             }
             Rule::MultiPartQuery => {
-                return Err(Error::Parse("Multi-part queries not yet supported".into()));
+                return build_multi_part_query(pair);
             }
             Rule::EOI => continue,
             _ => continue,
@@ -114,6 +115,104 @@ fn build_regular_query(pair: Pair<Rule>) -> Result<Statement> {
         // Plain UNION (with deduplication)
         Ok(Statement::Union(queries))
     }
+}
+
+/// Build AST from a MultiPartQuery.
+///
+/// Grammar: `((ReadingClause*)  (UpdatingClause*) With)+ SinglePartQuery`
+/// Each WITH-terminated segment becomes a WithStage. The final SinglePartQuery
+/// becomes the terminating query.
+fn build_multi_part_query(pair: Pair<Rule>) -> Result<Statement> {
+    use super::ast::WithStage;
+
+    let mut stages: Vec<WithStage> = Vec::new();
+    let mut current_reading: Option<Pair<Rule>> = None;
+    let mut final_query: Option<Statement> = None;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::ReadingClause => {
+                // Accumulate reading clauses - for now we only support one MATCH per stage
+                for rc_inner in inner.into_inner() {
+                    if rc_inner.as_rule() == Rule::Match {
+                        current_reading = Some(rc_inner);
+                    }
+                }
+            }
+            Rule::UpdatingClause => {
+                return Err(Error::Parse(
+                    "Updating clauses before WITH not yet supported".into(),
+                ));
+            }
+            Rule::With => {
+                // Parse WITH clause: WITH ~ ProjectionBody ~ (SP? ~ Where)?
+                let mut with_clause = None;
+                let mut post_where = None;
+
+                for with_inner in inner.into_inner() {
+                    match with_inner.as_rule() {
+                        Rule::ProjectionBody => {
+                            with_clause = Some(build_projection_body(with_inner)?);
+                        }
+                        Rule::Where => {
+                            post_where = Some(build_where_clause(with_inner)?.predicate);
+                        }
+                        _ => {}
+                    }
+                }
+
+                let with_clause = with_clause
+                    .ok_or_else(|| Error::Parse("WITH requires projection body".into()))?;
+
+                // Build the MatchClause for this stage if there was a MATCH
+                let match_clause = if let Some(match_pair) = current_reading.take() {
+                    let mut pattern = None;
+                    let mut where_clause = None;
+                    for mc_inner in match_pair.into_inner() {
+                        match mc_inner.as_rule() {
+                            Rule::Pattern => {
+                                pattern = Some(build_pattern(mc_inner)?);
+                            }
+                            Rule::Where => {
+                                where_clause = Some(build_where_clause(mc_inner)?);
+                            }
+                            _ => {}
+                        }
+                    }
+                    let pattern =
+                        pattern.ok_or_else(|| Error::Parse("MATCH requires a pattern".into()))?;
+                    Some(MatchClause {
+                        pattern,
+                        where_clause,
+                        return_clause: None,
+                        delete_clause: None,
+                        set_clause: None,
+                        create_clause: None,
+                    })
+                } else {
+                    None
+                };
+
+                stages.push(WithStage {
+                    match_clause,
+                    with_clause,
+                    post_where,
+                });
+            }
+            Rule::SinglePartQuery => {
+                final_query = Some(build_single_part_query(inner)?);
+            }
+            _ => {}
+        }
+    }
+
+    let final_query =
+        final_query.ok_or_else(|| Error::Parse("Multi-part query requires a final part".into()))?;
+
+    Ok(Statement::Pipeline {
+        stages,
+        final_query: Box::new(final_query),
+    })
 }
 
 /// Build AST from a SinglePartQuery.

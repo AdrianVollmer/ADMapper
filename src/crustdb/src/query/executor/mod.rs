@@ -14,7 +14,7 @@ mod result;
 
 use super::parser::Statement;
 use super::planner;
-use super::{QueryResult, QueryStats, Row};
+use super::{QueryResult, QueryStats, ResultValue, Row};
 use crate::error::{Error, Result};
 use crate::graph::{Node, PropertyValue, Relationship};
 use crate::storage::{EntityCache, SqliteStorage};
@@ -67,6 +67,8 @@ pub struct Binding {
     paths: SmallVec<[(String, Path); 1]>,
     /// Relationship lists for variable-length relationship bindings.
     relationship_lists: SmallVec<[(String, Vec<Relationship>); 1]>,
+    /// Scalar values from WITH projections (e.g., `WITH n.name AS name`).
+    scalars: SmallVec<[(String, PropertyValue); 4]>,
 }
 
 impl Binding {
@@ -76,6 +78,7 @@ impl Binding {
             relationships: SmallVec::new(),
             paths: SmallVec::new(),
             relationship_lists: SmallVec::new(),
+            scalars: SmallVec::new(),
         }
     }
 
@@ -113,6 +116,15 @@ impl Binding {
             .iter()
             .find(|(n, _)| n == name)
             .map(|(_, relationships)| relationships)
+    }
+
+    /// Look up a scalar value by variable name.
+    #[inline]
+    pub fn get_scalar(&self, name: &str) -> Option<&PropertyValue> {
+        self.scalars
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, val)| val)
     }
 
     /// Iterate over all bound node variables and their nodes.
@@ -154,6 +166,11 @@ impl Binding {
         self
     }
 
+    pub fn with_scalar(mut self, var: &str, value: PropertyValue) -> Self {
+        self.scalars.push((var.to_string(), value));
+        self
+    }
+
     /// Merge two bindings together (cross join).
     pub fn merge(&self, other: &Binding) -> Binding {
         let mut result = self.clone();
@@ -165,6 +182,7 @@ impl Binding {
         result
             .relationship_lists
             .extend(other.relationship_lists.iter().cloned());
+        result.scalars.extend(other.scalars.iter().cloned());
         result
     }
 }
@@ -247,6 +265,13 @@ pub fn execute_with_cache(
     if let Statement::Union(queries) = statement {
         return execute_union(queries, storage, cache, max_bindings);
     }
+    if let Statement::Pipeline {
+        stages,
+        final_query,
+    } = statement
+    {
+        return execute_pipeline(stages, final_query, storage, cache, max_bindings);
+    }
 
     let t0 = std::time::Instant::now();
 
@@ -278,6 +303,261 @@ pub fn execute_with_cache(
         opt_ms - plan_ms,
         exec_ms - opt_ms
     );
+
+    Ok(result)
+}
+
+/// Execute a multi-part query with WITH clauses.
+///
+/// Each WITH stage: execute MATCH -> project WITH items into new bindings -> filter post-WHERE.
+/// The final query's RETURN projects from the accumulated bindings.
+fn execute_pipeline(
+    stages: &[super::ast::WithStage],
+    final_query: &Statement,
+    storage: &SqliteStorage,
+    mut cache: Option<&mut EntityCache>,
+    max_bindings: Option<usize>,
+) -> Result<QueryResult> {
+    let t0 = std::time::Instant::now();
+    let mut current_bindings: Option<Vec<Binding>> = None;
+
+    for stage in stages {
+        // Step 1: Execute the MATCH clause of this stage (if present)
+        let stage_bindings = if let Some(ref match_clause) = stage.match_clause {
+            // Plan just the MATCH (no RETURN)
+            let match_stmt = Statement::Match(super::ast::MatchClause {
+                pattern: match_clause.pattern.clone(),
+                where_clause: match_clause.where_clause.clone(),
+                return_clause: None,
+                delete_clause: None,
+                set_clause: None,
+                create_clause: None,
+            });
+            let plan = planner::plan(&match_stmt)?;
+            let optimized = planner::optimize(plan);
+            let mut ctx = plan_exec::ExecutionContext::new(max_bindings);
+            let bindings = plan_exec::execute_plan_bindings(
+                &optimized,
+                storage,
+                &mut ctx,
+                cache.as_deref_mut(),
+            )?;
+
+            // Cross-join with previous bindings if any
+            if let Some(prev) = &current_bindings {
+                let mut joined = Vec::new();
+                for pb in prev {
+                    for nb in &bindings {
+                        joined.push(pb.merge(nb));
+                    }
+                }
+                joined
+            } else {
+                bindings
+            }
+        } else if let Some(prev) = current_bindings.take() {
+            prev
+        } else {
+            vec![Binding::new()]
+        };
+
+        // Step 2: Project WITH items into new bindings
+        let with_return = &stage.with_clause;
+        let has_aggregates = with_return
+            .items
+            .iter()
+            .any(|item| planner::expression::is_aggregate_expression(&item.expression));
+
+        let projected_bindings = if has_aggregates {
+            // For aggregation, execute the full aggregate plan and convert rows back to bindings
+            let plan = planner::plan_return(planner::PlanOperator::ProduceRow, with_return)?;
+            let optimized = planner::optimize(planner::QueryPlan { root: plan });
+            let mut ctx = plan_exec::ExecutionContext::new(max_bindings);
+            // Feed the stage bindings through the aggregate plan
+            let result = plan_exec::execute_plan_on_bindings(
+                &optimized,
+                stage_bindings,
+                storage,
+                &mut ctx,
+                cache.as_deref_mut(),
+            )?;
+            rows_to_bindings(&result)
+        } else {
+            project_with_bindings(&stage_bindings, with_return)?
+        };
+
+        // Step 3: Apply post-WHERE filter
+        let filtered_bindings = if let Some(ref where_expr) = stage.post_where {
+            let pred = planner::expression::plan_expression_as_predicate(where_expr)?;
+            let mut result = Vec::new();
+            for binding in projected_bindings {
+                if plan_exec::filter::evaluate_predicate_on(&pred, &binding)? {
+                    result.push(binding);
+                }
+            }
+            result
+        } else {
+            projected_bindings
+        };
+
+        current_bindings = Some(filtered_bindings);
+    }
+
+    // Execute final query: project bindings into result rows
+    let bindings = current_bindings.unwrap_or_default();
+
+    // Extract the RETURN clause from the final query
+    let return_clause = match final_query {
+        Statement::Return(rc) => rc,
+        Statement::Match(mc) => mc
+            .return_clause
+            .as_ref()
+            .ok_or_else(|| Error::Internal("Pipeline final MATCH requires RETURN".into()))?,
+        _ => {
+            return Err(Error::Internal(
+                "Pipeline final query must be RETURN or MATCH...RETURN".into(),
+            ))
+        }
+    };
+
+    // For the final stage, if there's a MATCH, we need to execute it with the bindings
+    // For now, handle the simple case: just RETURN (no additional MATCH)
+    let final_bindings = if let Statement::Match(mc) = final_query {
+        // Execute the final MATCH for each binding
+        let match_stmt = Statement::Match(super::ast::MatchClause {
+            pattern: mc.pattern.clone(),
+            where_clause: mc.where_clause.clone(),
+            return_clause: None,
+            delete_clause: None,
+            set_clause: None,
+            create_clause: None,
+        });
+        let plan = planner::plan(&match_stmt)?;
+        let optimized = planner::optimize(plan);
+        let mut ctx = plan_exec::ExecutionContext::new(max_bindings);
+        let new_bindings =
+            plan_exec::execute_plan_bindings(&optimized, storage, &mut ctx, cache.as_deref_mut())?;
+        // Cross-join with accumulated bindings
+        let mut joined = Vec::new();
+        for pb in &bindings {
+            for nb in &new_bindings {
+                joined.push(pb.merge(nb));
+            }
+        }
+        joined
+    } else {
+        bindings
+    };
+
+    // Project the final RETURN
+    let plan = planner::plan_return(planner::PlanOperator::ProduceRow, return_clause)?;
+    let optimized = planner::optimize(planner::QueryPlan { root: plan });
+    let mut ctx = plan_exec::ExecutionContext::new(max_bindings);
+    let mut result = plan_exec::execute_plan_on_bindings(
+        &optimized,
+        final_bindings,
+        storage,
+        &mut ctx,
+        cache.as_deref_mut(),
+    )?;
+    result.stats.execution_time_ms = t0.elapsed().as_millis() as u64;
+
+    debug!(
+        "Pipeline executed: {} stages, {} rows in {}us",
+        stages.len(),
+        result.rows.len(),
+        t0.elapsed().as_micros()
+    );
+
+    Ok(result)
+}
+
+/// Convert result rows back to bindings with scalar values.
+fn rows_to_bindings(result: &QueryResult) -> Vec<Binding> {
+    result
+        .rows
+        .iter()
+        .map(|row| {
+            let mut binding = Binding::new();
+            for (col, val) in &row.values {
+                match val {
+                    ResultValue::Node {
+                        id,
+                        labels,
+                        properties,
+                    } => {
+                        binding = binding.with_node(
+                            col,
+                            Node {
+                                id: *id,
+                                labels: labels.clone(),
+                                properties: properties.clone(),
+                            },
+                        );
+                    }
+                    ResultValue::Property(pv) => {
+                        binding = binding.with_scalar(col, pv.clone());
+                    }
+                    _ => {}
+                }
+            }
+            binding
+        })
+        .collect()
+}
+
+/// Project WITH items into new bindings (non-aggregate case).
+fn project_with_bindings(
+    bindings: &[Binding],
+    with_clause: &super::ast::ReturnClause,
+) -> Result<Vec<Binding>> {
+    use super::ast::Expression;
+
+    let mut result = Vec::new();
+    let mut seen = if with_clause.distinct {
+        Some(std::collections::HashSet::new())
+    } else {
+        None
+    };
+
+    for binding in bindings {
+        let mut new_binding = Binding::new();
+
+        for item in &with_clause.items {
+            let alias = item
+                .alias
+                .clone()
+                .unwrap_or_else(|| planner::expression::format_expression(&item.expression));
+
+            match &item.expression {
+                Expression::Variable(var) => {
+                    if let Some(node) = binding.get_node(var) {
+                        new_binding = new_binding.with_node(&alias, node.clone());
+                    } else if let Some(rel) = binding.get_relationship(var) {
+                        new_binding = new_binding.with_relationship(&alias, rel.clone());
+                    } else if let Some(path) = binding.get_path(var) {
+                        new_binding = new_binding.with_path(&alias, path.clone());
+                    } else if let Some(scalar) = binding.get_scalar(var) {
+                        new_binding = new_binding.with_scalar(&alias, scalar.clone());
+                    }
+                }
+                _ => {
+                    let plan_expr = planner::expression::plan_expression(&item.expression)?;
+                    let val = plan_exec::eval::evaluate_expr_pub(&plan_expr, binding)?;
+                    new_binding = new_binding.with_scalar(&alias, val);
+                }
+            }
+        }
+
+        if let Some(ref mut seen_set) = seen {
+            let key = format!("{:?}", new_binding.scalars);
+            if !seen_set.insert(key) {
+                continue;
+            }
+        }
+
+        result.push(new_binding);
+    }
 
     Ok(result)
 }

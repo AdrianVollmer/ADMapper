@@ -16,6 +16,14 @@ pub(super) fn filter_bindings(
     Ok(result)
 }
 
+/// Public interface for evaluating predicates (used by WITH WHERE).
+pub(crate) fn evaluate_predicate_on(
+    predicate: &FilterPredicate,
+    binding: &Binding,
+) -> Result<bool> {
+    evaluate_predicate(predicate, binding)
+}
+
 pub(super) fn evaluate_predicate(predicate: &FilterPredicate, binding: &Binding) -> Result<bool> {
     match predicate {
         FilterPredicate::True => Ok(true),

@@ -4,7 +4,7 @@ use super::{AggregateFunction, CaseWhen, FilterPredicate};
 use super::{BinaryOperator, Error, Expression, Literal, PlanExpr, PlanLiteral, Result};
 
 /// Convert AST expression to plan expression.
-pub(super) fn plan_expression(expr: &Expression) -> Result<PlanExpr> {
+pub(crate) fn plan_expression(expr: &Expression) -> Result<PlanExpr> {
     match expr {
         Expression::Literal(lit) => Ok(PlanExpr::Literal(plan_literal(lit))),
         Expression::Variable(v) => Ok(PlanExpr::Variable(v.clone())),
@@ -80,7 +80,7 @@ pub(super) fn plan_expression(expr: &Expression) -> Result<PlanExpr> {
 }
 
 /// Convert expression to filter predicate.
-pub(super) fn plan_expression_as_predicate(expr: &Expression) -> Result<FilterPredicate> {
+pub(crate) fn plan_expression_as_predicate(expr: &Expression) -> Result<FilterPredicate> {
     match expr {
         Expression::BinaryOp { left, op, right } => match op {
             BinaryOperator::And => Ok(FilterPredicate::And {
@@ -300,7 +300,7 @@ pub(super) fn plan_literal(lit: &Literal) -> PlanLiteral {
 // Aggregate Detection
 // =============================================================================
 
-pub(super) fn is_aggregate_expression(expr: &Expression) -> bool {
+pub(crate) fn is_aggregate_expression(expr: &Expression) -> bool {
     match expr {
         Expression::FunctionCall { name, .. } => {
             let upper = name.to_uppercase();
@@ -365,7 +365,7 @@ pub(super) fn try_extract_aggregate(expr: &Expression) -> Result<Option<Aggregat
 }
 
 /// Format expression for default alias.
-pub(super) fn format_expression(expr: &Expression) -> String {
+pub(crate) fn format_expression(expr: &Expression) -> String {
     match expr {
         Expression::Variable(v) => v.clone(),
         Expression::Property { base, property } => {

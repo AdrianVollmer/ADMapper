@@ -1,0 +1,82 @@
+[[test]]
+name = "with_passthrough"
+description = "WITH passes through a variable to RETURN"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Alice', age: 30})",
+    "CREATE (n:Person {name: 'Bob', age: 25})",
+]
+[test.query]
+cypher = "MATCH (n:Person) WITH n RETURN n.name ORDER BY n.name"
+[test.expected]
+columns = ["n.name"]
+ordered_rows = [
+    ["Alice"],
+    ["Bob"],
+]
+
+[[test]]
+name = "with_projection"
+description = "WITH projects expressions into new variables"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Charlie'})",
+    "CREATE (n:Person {name: 'Alice'})",
+    "CREATE (n:Person {name: 'Bob'})",
+]
+[test.query]
+cypher = "MATCH (n:Person) WITH n.name AS name RETURN name ORDER BY name"
+[test.expected]
+columns = ["name"]
+ordered_rows = [
+    ["Alice"],
+    ["Bob"],
+    ["Charlie"],
+]
+
+[[test]]
+name = "with_where_filter"
+description = "WITH followed by WHERE filters on projected values"
+[test.setup]
+cypher = [
+    "CREATE (n:Person {name: 'Alice', age: 30})",
+    "CREATE (n:Person {name: 'Bob', age: 15})",
+    "CREATE (n:Person {name: 'Charlie', age: 45})",
+]
+[test.query]
+cypher = "MATCH (n:Person) WITH n WHERE n.age > 20 RETURN n.name ORDER BY n.name"
+[test.expected]
+columns = ["n.name"]
+ordered_rows = [
+    ["Alice"],
+    ["Charlie"],
+]
+
+[[test]]
+name = "with_aggregation_then_filter"
+description = "WITH aggregation followed by WHERE on aggregate result"
+[test.setup]
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})",
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(c:Person {name: 'Charlie'})",
+    "CREATE (d:Person {name: 'David'})-[:KNOWS]->(e:Person {name: 'Eve'})",
+]
+[test.query]
+cypher = "MATCH (n:Person)-[:KNOWS]->(f) WITH n.name AS name, count(f) AS friends WHERE friends > 1 RETURN name, friends"
+[test.expected]
+columns = ["name", "friends"]
+row_count = 1
+
+[[test]]
+name = "with_distinct"
+description = "WITH DISTINCT deduplicates intermediate results"
+[test.setup]
+cypher = [
+    "CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})",
+    "CREATE (a:Person {name: 'Alice'})-[:LIKES]->(c:Person {name: 'Charlie'})",
+]
+[test.query]
+cypher = "MATCH (n:Person)-[]->(m) WITH DISTINCT n.name AS name RETURN name"
+[test.expected]
+columns = ["name"]
+row_count = 1

@@ -1251,3 +1251,63 @@ fn test_case_searched_basic() {
         _ => panic!("Expected string"),
     }
 }
+
+// =============================================================================
+// WITH Clause Tests
+// =============================================================================
+
+#[test]
+fn test_with_clause_fixtures() {
+    let fixtures = find_fixtures("m11_with");
+    assert!(!fixtures.is_empty(), "No WITH fixtures found");
+
+    let mut passed = 0;
+    let mut failed = 0;
+
+    for fixture_path in &fixtures {
+        let fixture = load_fixture(fixture_path);
+
+        for test in &fixture.test {
+            let result = std::panic::catch_unwind(|| {
+                run_test_case(test);
+            });
+
+            let desc = test.description.as_deref().unwrap_or("");
+            match result {
+                Ok(()) => {
+                    passed += 1;
+                    println!("  ✓ {}: {}", test.name, desc);
+                }
+                Err(e) => {
+                    failed += 1;
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown error".to_string()
+                    };
+                    println!("  ✗ {}: {} - {}", test.name, desc, msg);
+                }
+            }
+        }
+    }
+
+    println!("\nWITH Clause: {} passed, {} failed", passed, failed);
+    assert_eq!(failed, 0, "Some WITH clause tests failed");
+}
+
+#[test]
+fn test_with_basic_passthrough() {
+    let db = Database::in_memory().unwrap();
+    db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+
+    let result = db.execute("MATCH (n:Person) WITH n RETURN n.name").unwrap();
+    assert_eq!(result.rows.len(), 1);
+    match result.rows[0].get("n.name").unwrap() {
+        crustdb::ResultValue::Property(crustdb::PropertyValue::String(s)) => {
+            assert_eq!(s, "Alice");
+        }
+        _ => panic!("Expected string"),
+    }
+}

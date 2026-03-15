@@ -5,7 +5,7 @@ use crate::graph::{Node, PropertyValue, Relationship};
 use crate::query::planner::{CaseWhen, PlanExpr, PlanLiteral};
 
 #[derive(Debug, Clone)]
-pub(super) enum EvalValue {
+pub(in crate::query::executor) enum EvalValue {
     Null,
     Bool(bool),
     Int(i64),
@@ -34,6 +34,8 @@ pub(super) fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalVa
                 Ok(EvalValue::Relationship(relationship.clone()))
             } else if let Some(path) = binding.get_path(v) {
                 Ok(EvalValue::Path(path.clone()))
+            } else if let Some(scalar) = binding.get_scalar(v) {
+                Ok(property_to_eval_value(Some(scalar)))
             } else {
                 Ok(EvalValue::Null)
             }
@@ -161,6 +163,32 @@ pub(super) fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalVa
                 None => Ok(EvalValue::Null),
             }
         }
+    }
+}
+
+/// Evaluate a plan expression against a binding and return a PropertyValue.
+/// Public interface for WITH clause projection.
+pub(crate) fn evaluate_expr_pub(
+    expr: &PlanExpr,
+    binding: &Binding,
+) -> crate::error::Result<crate::graph::PropertyValue> {
+    let val = evaluate_expr(expr, binding)?;
+    Ok(eval_value_to_property(val))
+}
+
+/// Convert an EvalValue to a PropertyValue.
+pub(crate) fn eval_value_to_property(val: EvalValue) -> crate::graph::PropertyValue {
+    match val {
+        EvalValue::Null => PropertyValue::Null,
+        EvalValue::Bool(b) => PropertyValue::Bool(b),
+        EvalValue::Int(i) => PropertyValue::Integer(i),
+        EvalValue::Float(f) => PropertyValue::Float(f),
+        EvalValue::String(s) => PropertyValue::String(s),
+        EvalValue::List(items) => {
+            PropertyValue::List(items.into_iter().map(eval_value_to_property).collect())
+        }
+        // Nodes, Relationships, Paths can't be directly represented as PropertyValue
+        EvalValue::Node(_) | EvalValue::Relationship(_) | EvalValue::Path(_) => PropertyValue::Null,
     }
 }
 

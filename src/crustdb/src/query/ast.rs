@@ -25,6 +25,24 @@ pub enum Statement {
     UnionAll(Vec<Statement>),
     /// UNION of multiple queries (deduplicates rows)
     Union(Vec<Statement>),
+    /// Multi-part query with WITH clause(s).
+    /// Each WithStage is a reading clause + WITH projection.
+    /// The final_query is the terminating SinglePartQuery.
+    Pipeline {
+        stages: Vec<WithStage>,
+        final_query: Box<Statement>,
+    },
+}
+
+/// A single WITH-terminated stage in a multi-part query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WithStage {
+    /// The reading clause (MATCH + WHERE) before WITH, if any.
+    pub match_clause: Option<MatchClause>,
+    /// The WITH projection (reuses ReturnClause structure).
+    pub with_clause: ReturnClause,
+    /// Optional WHERE after WITH.
+    pub post_where: Option<Expression>,
 }
 
 impl Statement {
@@ -41,6 +59,18 @@ impl Statement {
             Statement::Return(_) => true,
             Statement::UnionAll(queries) | Statement::Union(queries) => {
                 queries.iter().all(|q| q.is_read_only())
+            }
+            Statement::Pipeline {
+                stages,
+                final_query,
+            } => {
+                stages.iter().all(|s| {
+                    s.match_clause.as_ref().map_or(true, |m| {
+                        m.set_clause.is_none()
+                            && m.delete_clause.is_none()
+                            && m.create_clause.is_none()
+                    })
+                }) && final_query.is_read_only()
             }
             Statement::Create(_)
             | Statement::Merge(_)

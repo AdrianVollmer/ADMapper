@@ -17,7 +17,7 @@ pub use super::operators::{
 };
 
 mod create;
-mod expression;
+pub(crate) mod expression;
 mod match_plan;
 mod optimizer;
 
@@ -46,9 +46,9 @@ pub fn plan(statement: &Statement) -> Result<QueryPlan> {
         Statement::Merge(_) => {
             return Err(Error::Cypher("MERGE not yet supported".into()));
         }
-        Statement::UnionAll(_) | Statement::Union(_) => {
+        Statement::UnionAll(_) | Statement::Union(_) | Statement::Pipeline { .. } => {
             return Err(Error::Internal(
-                "UNION should be handled at the executor level, not the planner".into(),
+                "UNION/Pipeline should be handled at the executor level, not the planner".into(),
             ));
         }
     };
@@ -57,13 +57,13 @@ pub fn plan(statement: &Statement) -> Result<QueryPlan> {
 }
 
 /// Plan a standalone RETURN statement (e.g., RETURN 1, RETURN "hello").
-pub(super) fn plan_standalone_return(return_clause: &ReturnClause) -> Result<PlanOperator> {
+pub(crate) fn plan_standalone_return(return_clause: &ReturnClause) -> Result<PlanOperator> {
     // Use ProduceRow to create a single empty row, then project the expressions
     plan_return(PlanOperator::ProduceRow, return_clause)
 }
 
 /// Plan a RETURN clause into projection, aggregation, and pagination.
-pub(super) fn plan_return(
+pub(crate) fn plan_return(
     source: PlanOperator,
     return_clause: &ReturnClause,
 ) -> Result<PlanOperator> {
