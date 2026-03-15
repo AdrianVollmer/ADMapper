@@ -203,7 +203,7 @@ MATCH (n:Person {name: 'Charlie'}) DETACH DELETE n
 - [x] Update operator
 - [x] Delete operator (with DETACH)
 
-### M8: Aggregation [open]
+### M8: Aggregation [done]
 
 GROUP BY and aggregate functions.
 
@@ -215,11 +215,28 @@ MATCH (p:Person)-[:KNOWS]->(f) RETURN p.name, count(f) as friends
 MATCH (n:Person) RETURN avg(n.age), min(n.age), max(n.age)
 ```
 
-- [ ] Aggregate function parser (count, sum, avg, min, max, collect)
-- [ ] GROUP BY detection
-- [ ] Aggregation operator
+- [x] Aggregate function parser (count, sum, avg, min, max, collect)
+- [x] GROUP BY detection (implicit, from non-aggregate RETURN expressions)
+- [x] Aggregation operator
 
-### M9: Query Optimization [open]
+### M9: Functions [done]
+
+Built-in Cypher functions.
+
+```cypher
+MATCH ()-[r]->() RETURN type(r)
+
+MATCH (n) RETURN id(n), labels(n)
+
+MATCH (n:Person) RETURN toLower(n.name), size(n.name)
+```
+
+- [x] type(r), id(n), labels(n)
+- [x] size(), length()
+- [x] toLower(), toUpper()
+- [x] coalesce()
+
+### M10: Query Optimization [open]
 
 Basic query planning and optimization.
 
@@ -228,15 +245,16 @@ Basic query planning and optimization.
 - [ ] Predicate pushdown
 - [ ] Projection pushdown
 
-### M10: Advanced Features [open]
+### M11: Advanced Features [open]
 
 - [ ] MERGE (upsert)
 - [ ] OPTIONAL MATCH
-- [ ] UNION
+- [x] UNION ALL
+- [ ] UNION (with deduplication)
 - [ ] WITH clause (query chaining)
 - [ ] ORDER BY
 - [x] SKIP, LIMIT
-- [ ] DISTINCT
+- [x] DISTINCT
 - [ ] CASE expressions
 - [ ] List comprehensions
 
@@ -270,6 +288,7 @@ are in `tests/fixtures/`, organized by milestone:
 - `m6_multi_hop/` - Variable-length paths
 - `m7_mutation/` - SET and DELETE operations
 - `m8_aggregation/` - Aggregate functions
+- `m9_functions/` - Built-in functions (type, id, labels, etc.)
 - `m10_limit_skip/` - LIMIT and SKIP clauses
 
 See `tests/fixtures/README.md` for the TOML format specification.
