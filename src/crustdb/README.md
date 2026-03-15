@@ -250,12 +250,12 @@ Basic query planning and optimization.
 - [ ] MERGE (upsert)
 - [ ] OPTIONAL MATCH
 - [x] UNION ALL
-- [ ] UNION (with deduplication)
-- [ ] WITH clause (query chaining)
-- [ ] ORDER BY
+- [x] UNION (with deduplication)
+- [x] WITH clause (query chaining)
+- [x] ORDER BY
 - [x] SKIP, LIMIT
 - [x] DISTINCT
-- [ ] CASE expressions
+- [x] CASE expressions (searched and simple)
 - [ ] List comprehensions
 
 ## Usage
@@ -290,6 +290,9 @@ are in `tests/fixtures/`, organized by milestone:
 - `m8_aggregation/` - Aggregate functions
 - `m9_functions/` - Built-in functions (type, id, labels, etc.)
 - `m10_limit_skip/` - LIMIT and SKIP clauses
+- `m11_order_by/` - ORDER BY
+- `m11_case/` - CASE expressions
+- `m11_with/` - WITH clause (query chaining)
 
 See `tests/fixtures/README.md` for the TOML format specification.
 
