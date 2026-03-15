@@ -453,13 +453,8 @@ fn execute_pipeline(
     let plan = planner::plan_return(planner::PlanOperator::ProduceRow, return_clause)?;
     let optimized = planner::optimize(planner::QueryPlan { root: plan });
     let mut ctx = plan_exec::ExecutionContext::new(max_bindings);
-    let mut result = plan_exec::execute_plan_on_bindings(
-        &optimized,
-        final_bindings,
-        storage,
-        &mut ctx,
-        cache,
-    )?;
+    let mut result =
+        plan_exec::execute_plan_on_bindings(&optimized, final_bindings, storage, &mut ctx, cache)?;
     result.stats.execution_time_ms = t0.elapsed().as_millis() as u64;
 
     debug!(
