@@ -374,11 +374,13 @@ pub fn node_status_full(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeS
         });
     }
 
-    // Check group memberships for Enterprise Admins (-519)
-    let is_enterprise_admin = db
-        .find_membership_by_sid_suffix(node_id, "-519")
-        .map_err(|e| e.to_string())?
-        .is_some();
+    // Check if the node itself IS an Enterprise Admins or Domain Admins group
+    // (by its own objectid), or if it's a MEMBER OF one.
+    let is_enterprise_admin = node_id.ends_with("-519")
+        || db
+            .find_membership_by_sid_suffix(node_id, "-519")
+            .map_err(|e| e.to_string())?
+            .is_some();
 
     if is_enterprise_admin {
         return Ok(NodeStatus {
@@ -392,11 +394,11 @@ pub fn node_status_full(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeS
         });
     }
 
-    // Check group memberships for Domain Admins (-512)
-    let is_domain_admin = db
-        .find_membership_by_sid_suffix(node_id, "-512")
-        .map_err(|e| e.to_string())?
-        .is_some();
+    let is_domain_admin = node_id.ends_with("-512")
+        || db
+            .find_membership_by_sid_suffix(node_id, "-512")
+            .map_err(|e| e.to_string())?
+            .is_some();
 
     if is_domain_admin {
         return Ok(NodeStatus {
@@ -432,6 +434,12 @@ pub fn node_status_full(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeS
         &["-518", "-516", "-498", "-544", "-548", "-549", "-551"];
 
     let mut is_high_value = is_high_value_property;
+    if !is_high_value {
+        // Check if the node itself IS a high-value group (by its own objectid)
+        is_high_value = OTHER_HIGH_VALUE_RIDS
+            .iter()
+            .any(|rid| node_id.ends_with(rid));
+    }
     if !is_high_value {
         for rid in OTHER_HIGH_VALUE_RIDS {
             if db
@@ -491,9 +499,10 @@ fn check_path_to_condition(
     condition: &str,
 ) -> Result<Option<usize>, String> {
     let escaped_id = node_id.replace('\'', "\\'");
-    // Use variable-length path syntax (1 to 20 hops)
+    // Use shortestPath with explicit a <> b guard to avoid Neo4j's
+    // "start and end nodes are the same" error.
     let query_text = format!(
-        "MATCH p = shortestPath((a)-[*1..20]->(b)) WHERE a.objectid = '{}' AND ({}) RETURN length(p) AS hops",
+        "MATCH p = shortestPath((a)-[*1..20]->(b)) WHERE a.objectid = '{}' AND ({}) AND a <> b RETURN length(p) AS hops",
         escaped_id, condition
     );
 

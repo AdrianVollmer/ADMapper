@@ -803,10 +803,12 @@ impl DatabaseBackend for Neo4jDatabase {
         node_id: &str,
         sid_suffix: &str,
     ) -> Result<Option<String>> {
-        // Use variable-length path to find transitive MemberOf membership
+        // Use variable-length path to find transitive MemberOf membership.
+        // The n <> g guard prevents Neo4j's "start and end nodes are the same"
+        // error when the node itself matches the SID suffix.
         let q = query(
             "MATCH p = shortestPath((n {objectid: $id})-[:MemberOf*1..20]->(g)) \
-             WHERE g.objectid ENDS WITH $suffix \
+             WHERE g.objectid ENDS WITH $suffix AND n <> g \
              RETURN g.objectid",
         )
         .param("id", node_id.to_string())

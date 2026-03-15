@@ -1565,7 +1565,8 @@ class TestRunner:
         """Parse queries from the frontend builtin-queries.ts source file.
 
         This ensures the e2e test always uses the same queries as the UI,
-        with no duplication.
+        with no duplication. Evaluates JS template literal interpolations
+        like ``${ridWhereClause("g", [...HIGH_VALUE_RIDS, "-S-1-5-9"])}``.
         """
         import re
 
@@ -1578,6 +1579,57 @@ class TestRunner:
             / "builtin-queries.ts"
         )
         content = queries_file.read_text()
+
+        # Parse HIGH_VALUE_RIDS array from the TS source
+        high_value_rids: list[str] = []
+        rids_match = re.search(
+            r"export\s+const\s+HIGH_VALUE_RIDS\s*=\s*\[(.*?)\]",
+            content,
+            re.DOTALL,
+        )
+        if rids_match:
+            high_value_rids = re.findall(r'"([^"]+)"', rids_match.group(1))
+
+        def rid_where_clause(variable: str, rids: list[str]) -> str:
+            """Python equivalent of the TS ridWhereClause function."""
+            return " OR ".join(
+                f"{variable}.objectid ENDS WITH '{rid}'" for rid in rids
+            )
+
+        def evaluate_interpolation(expr: str) -> str:
+            """Evaluate a JS template literal interpolation expression."""
+            # Match ridWhereClause("var", [...]) calls
+            m = re.match(
+                r'ridWhereClause\(\s*"(\w+)"\s*,\s*\[(.*?)\]\s*\)',
+                expr,
+                re.DOTALL,
+            )
+            if not m:
+                return "${" + expr + "}"  # return unmodified if unrecognized
+
+            variable = m.group(1)
+            args_str = m.group(2)
+
+            # Build the RID list by resolving ...HIGH_VALUE_RIDS spreads
+            # and string literals
+            rids: list[str] = []
+            for token in re.finditer(
+                r'\.\.\.HIGH_VALUE_RIDS|"([^"]+)"', args_str
+            ):
+                if token.group(0) == "...HIGH_VALUE_RIDS":
+                    rids.extend(high_value_rids)
+                else:
+                    rids.append(token.group(1))
+
+            return rid_where_clause(variable, rids)
+
+        def interpolate_template(query: str) -> str:
+            """Replace ${...} expressions in a JS template literal."""
+            return re.sub(
+                r"\$\{([^}]+)\}",
+                lambda m: evaluate_interpolation(m.group(1)),
+                query,
+            )
 
         results: list[tuple[str, str]] = []
 
@@ -1594,6 +1646,8 @@ class TestRunner:
         for match in pattern.finditer(content):
             query_id = match.group(1)
             query = match.group(2).strip()
+            # Evaluate JS template literal interpolations
+            query = interpolate_template(query)
             # Normalize whitespace (template literals may have newlines)
             query = re.sub(r"\s+", " ", query)
             results.append((f"builtin/{query_id}", query))
