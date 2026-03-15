@@ -94,11 +94,7 @@ export function handleGraphClicks(e: MouseEvent): boolean {
 /** Update the graph view based on connection state.
  *  When `isNewConnection` is true (user just connected to a different DB),
  *  any existing graph is cleared and the "run a query" placeholder is shown. */
-export function updateGraphForConnectionState(
-  connected: boolean,
-  error?: string,
-  isNewConnection = false,
-): void {
+export function updateGraphForConnectionState(connected: boolean, error?: string, isNewConnection = false): void {
   // Don't interfere with dev mode demo data
   if (import.meta.env.DEV) return;
 
