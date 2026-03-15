@@ -106,12 +106,6 @@ admapper --headless falkordb://localhost:6379
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `NEO4J_HOST` | Neo4j server hostname | `localhost` |
-| `NEO4J_PORT` | Neo4j bolt port | `7687` |
-| `NEO4J_USER` | Neo4j username | `neo4j` |
-| `NEO4J_PASSWORD` | Neo4j password | - |
-| `FALKORDB_HOST` | FalkorDB hostname | `localhost` |
-| `FALKORDB_PORT` | FalkorDB port | `6379` |
 | `RUST_LOG` | Log level | `info` |
 
 ## Exit Codes

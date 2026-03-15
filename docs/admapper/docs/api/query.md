@@ -17,13 +17,21 @@ Execute a Cypher query.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `query` | string | Yes | Cypher query |
+| `extract_graph` | boolean | No | Extract graph structure from path results (default: `false`) |
+| `background` | boolean | No | Mark as background query, excluded from back navigation (default: `false`) |
+| `sync` | boolean | No | Wait for completion instead of returning async mode (default: `false`) |
+| `language` | string | No | Query language override (defaults to backend's default) |
 
 **Response:**
 
-For queries returning rows:
+The response has two modes, indicated by the `mode` field.
+
+**Sync mode** -- the query completed inline (either fast enough or `sync: true`
+was set):
 
 ```json
 {
+  "mode": "sync",
   "query_id": "550e8400-e29b-41d4-a716-446655440000",
   "columns": ["u.name"],
   "rows": [
@@ -34,10 +42,22 @@ For queries returning rows:
 }
 ```
 
-For queries returning a graph (paths):
+**Async mode** -- the query is still running. Subscribe to progress events
+via the progress endpoint:
 
 ```json
 {
+  "mode": "async",
+  "query_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+When `extract_graph` is set, sync mode responses include graph data instead of
+rows:
+
+```json
+{
+  "mode": "sync",
   "query_id": "550e8400-e29b-41d4-a716-446655440000",
   "nodes": [...],
   "relationships": [...],

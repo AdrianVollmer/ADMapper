@@ -213,36 +213,39 @@ When no path exists:
 
 ## GET /api/graph/insights
 
-Get security insights.
+Get security insights including domain admin analysis and reachability from
+well-known principals.
 
 **Response:**
 
 ```json
 {
-  "high_value_targets": [
-    {"id": 50, "name": "Domain Admins@CORP.LOCAL", "labels": ["Group"]}
+  "effective_da_count": 42,
+  "real_da_count": 5,
+  "da_ratio": 8.4,
+  "total_users": 1500,
+  "effective_da_percentage": 2.8,
+  "reachability": [
+    {
+      "principal_name": "Domain Users",
+      "principal_sid": "S-1-5-21-...-513",
+      "reachable_count": 120
+    }
   ],
-  "kerberoastable": [
-    {"id": 60, "name": "SVC_SQL@CORP.LOCAL", "labels": ["User"]}
+  "effective_das": [
+    ["S-1-5-21-...", "JSMITH@CORP.LOCAL", 3]
   ],
-  "asrep_roastable": [
-    {"id": 70, "name": "LEGACY_USER@CORP.LOCAL", "labels": ["User"]}
-  ],
-  "unconstrained_delegation": [
-    {"id": 80, "name": "SERVER01.CORP.LOCAL", "labels": ["Computer"]}
+  "real_das": [
+    ["S-1-5-21-...", "ADMIN@CORP.LOCAL"]
   ]
 }
 ```
 
 ## GET /api/graph/choke-points
 
-Get relationships with high betweenness centrality.
-
-**Query Parameters:**
-
-| Name | Type | Default | Description |
-|------|------|---------|-------------|
-| `limit` | number | 10 | Maximum results |
+Get relationships with high betweenness centrality. Returns the top 50 choke
+points and the top 50 unexpected choke points (where the source is neither a
+high-value target nor a domain infrastructure object).
 
 **Response:**
 
@@ -250,18 +253,21 @@ Get relationships with high betweenness centrality.
 {
   "choke_points": [
     {
-      "relationship": {
-        "id": 150,
-        "type": "AdminTo",
-        "source": 42,
-        "target": 80
-      },
+      "source_id": "S-1-5-21-...",
       "source_name": "JSMITH@CORP.LOCAL",
+      "source_label": "User",
+      "target_id": "S-1-5-21-...",
       "target_name": "SERVER01.CORP.LOCAL",
-      "centrality": 0.85
+      "target_label": "Computer",
+      "rel_type": "AdminTo",
+      "betweenness": 4250.5,
+      "source_highvalue": false
     }
-  ]
+  ],
+  "unexpected_choke_points": [],
+  "total_edges": 8200,
+  "total_nodes": 1500
 }
 ```
 
-Higher centrality values indicate relationships that many shortest paths pass through.
+Higher betweenness values indicate relationships that more shortest paths pass through.

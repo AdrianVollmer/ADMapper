@@ -109,24 +109,50 @@ admapper neo4j://neo4j:password@localhost:7687
 admapper falkordb://localhost:6379
 ```
 
-### Environment Variables
+### Running with Docker
+
+Keep a separate data directory per project so you can switch between
+environments by swapping the mount.
+
+**Neo4j:**
 
 ```bash
-# Neo4j
-export NEO4J_HOST=localhost
-export NEO4J_PORT=7687
-export NEO4J_USER=neo4j
-export NEO4J_PASSWORD=password
+# Create data directories per project
+mkdir -p ~/admapper/neo4j/{corp,staging}
 
-# FalkorDB
-export FALKORDB_HOST=localhost
-export FALKORDB_PORT=6379
+# Run Neo4j with a specific project directory
+docker run -d --name admapper-neo4j \
+  -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/password \
+  -v ~/admapper/neo4j/corp:/data \
+  neo4j:5
+
+# To switch projects, stop the container and start a new one
+# pointing at a different directory
+docker stop admapper-neo4j && docker rm admapper-neo4j
+docker run -d --name admapper-neo4j \
+  -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/password \
+  -v ~/admapper/neo4j/staging:/data \
+  neo4j:5
 ```
 
-## Switching Backends
+**FalkorDB:**
 
-Data is not automatically migrated between backends. To switch:
+```bash
+mkdir -p ~/admapper/falkor/corp
 
-1. Export data from the current backend (or keep original BloodHound files)
-2. Start ADMapper with the new backend URL
-3. Re-import the BloodHound data
+docker run -d --name admapper-falkor \
+  -p 6379:6379 \
+  -v ~/admapper/falkor/corp:/data \
+  falkordb/falkordb:latest
+```
+
+Replace `docker` with `podman` if you prefer a rootless setup.
+
+## Important: Neo4j Compatibility
+
+Do not use ADMapper with a Neo4j database that was populated by the original
+BloodHound. ADMapper uses its own schema and import logic; connecting to a
+BloodHound-managed Neo4j instance will produce incorrect results. Always start
+from a fresh database and import your collector data through ADMapper.

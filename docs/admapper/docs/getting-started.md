@@ -8,30 +8,41 @@ This guide covers installation and basic usage of ADMapper.
 
 Download the latest release from the [releases page](https://github.com/AdrianVollmer/ADMapper/releases) for your platform:
 
-- **Windows**: `admapper-windows.exe`
-- **macOS**: `admapper-macos`
-- **Linux**: `admapper-linux`
+- **Windows**: `admapper-windows-amd64.exe`
+- **macOS**: `admapper-macos-universal`
+- **Linux**: `admapper-linux-amd64`
 
 ### Building from Source
 
 Requirements:
 
-- Rust 1.75+
+- Rust 1.85+ (edition 2024)
 - Node.js 18+ (for frontend)
+
+On Debian/Ubuntu, install the build dependencies for Tauri:
+
+```bash
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev \
+  libssl-dev \
+  libgtk-3-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev
+```
 
 ```bash
 # Clone the repository
 git clone https://github.com/AdrianVollmer/ADMapper.git
 cd ADMapper
 
-# Build the backend
-cd src/backend
-cargo build --release
-
-# Build the frontend
-cd ../frontend
+# Build the frontend (assets are embedded in the final binary)
+cd src/frontend
 npm install
 npm run build
+
+# Build the backend
+cd ../backend
+cargo build --release
 ```
 
 ## Running ADMapper
@@ -66,8 +77,9 @@ Access the web interface at `http://localhost:9191`.
 
 ADMapper imports BloodHound collection data. Collect data from your AD environment using:
 
-- [SharpHound](https://github.com/BloodHoundAD/SharpHound) (Windows)
+- [SharpHound](https://github.com/BloodHoundAD/SharpHound) (Windows) -- greatly preferred, most complete and reliable collector
 - [BloodHound.py](https://github.com/dirkjanm/BloodHound.py) (Python)
+- [RustHound](https://github.com/NH-RED-TEAM/RustHound) (Rust)
 
 ### Import via UI
 
@@ -86,17 +98,11 @@ curl -X POST http://localhost:9191/api/import \
 
 After importing data, try these queries:
 
-### Count all nodes
-
-```cypher
-MATCH (n) RETURN count(n)
-```
-
 ### Find Domain Admins
 
 ```cypher
 MATCH (g:Group)
-WHERE g.name CONTAINS 'Domain Admins'
+WHERE g.objectid ENDS WITH '-512'
 RETURN g
 ```
 

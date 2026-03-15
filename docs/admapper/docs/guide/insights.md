@@ -1,43 +1,40 @@
 # Security Insights
 
 ADMapper provides automated security analysis to identify common AD vulnerabilities.
+Open the insights modal from the toolbar to view findings across several tabs.
 
-## Insights Panel
+## Domain Admin Analysis
 
-Open the Insights panel from the sidebar to view automated findings.
+Compares users with any path to Domain Admins (effective DAs) against direct or
+transitive group members (real DAs). The ratio shows how much privilege expansion
+exists in the environment. Click on a count to visualize the paths in the graph.
 
-## High-Value Targets
+## Reachability
 
-Groups and accounts with elevated privileges:
+Shows how many objects well-known principals (Domain Users, Domain Computers,
+Authenticated Users, Everyone) can reach via non-MemberOf relationships. High
+counts indicate overly permissive configurations.
 
-- Domain Admins
-- Enterprise Admins
-- Schema Admins
-- Backup Operators
-- Account Operators
+## Stale Objects
 
-Click any item to navigate to it in the graph.
+Counts enabled users and computers whose last logon exceeds a configurable
+threshold (30, 60, 90, or 180 days). Click on a count to view the stale objects
+in the graph.
 
-## Kerberoastable Accounts
+## Account Exposure
 
-User accounts with Service Principal Names (SPNs) set. These can be targeted for offline password cracking:
+Counts enabled accounts and computers with risky configurations:
 
-- Accounts with `hasspn = true`
-- Only enabled accounts are shown
+- **Kerberoastable Users** -- accounts with SPNs set (`hasspn = true`), vulnerable
+  to offline password cracking
+- **AS-REP Roastable Users** -- accounts that do not require Kerberos
+  pre-authentication (`dontreqpreauth = true`)
+- **Unconstrained Delegation** -- computers that can impersonate any user who
+  authenticates to them
+- **Protected Users Members** -- accounts in the Protected Users group (RID 525),
+  which receive additional credential protections
 
-## AS-REP Roastable
-
-Accounts that do not require Kerberos pre-authentication:
-
-- Accounts with `dontreqpreauth = true`
-- Vulnerable to offline password attacks
-
-## Unconstrained Delegation
-
-Computers configured for unconstrained delegation. These can impersonate any user that authenticates to them:
-
-- Servers with delegation enabled
-- Excludes domain controllers (expected behavior)
+Click on any count to view the matching objects in the graph.
 
 ## Choke Points
 
@@ -64,33 +61,3 @@ These represent surprising attack paths from low-privilege entities and are
 often the most actionable findings, since they highlight relationships that
 should not carry high centrality.
 
-## Paths to High-Value Targets
-
-For any selected node, ADMapper shows whether attack paths exist to high-value targets:
-
-- Green: No path to HVT
-- Red: Path exists
-
-Use shortest path queries to explore the actual paths.
-
-## Owned Nodes
-
-Mark nodes as "owned" to track compromised accounts:
-
-1. Select a node
-2. Click "Mark as Owned" in the details panel
-
-Owned nodes are highlighted in the graph. Use this to:
-
-- Track lateral movement progress
-- Identify remaining paths from owned positions
-
-## Export
-
-Export insights as JSON for reporting:
-
-```bash
-curl http://localhost:9191/api/graph/insights
-```
-
-Response includes all insight categories with node details.

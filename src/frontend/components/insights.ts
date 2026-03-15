@@ -1,10 +1,12 @@
 /**
  * Security Insights Component
  *
- * Modal for viewing security insights with three tabs:
+ * Modal for viewing security insights with tabs:
  * - Domain Admin Analysis
  * - Reachability
  * - Stale Objects
+ * - Account Exposure
+ * - Choke Points / Unexpected Choke Points
  *
  * Each tab loads independently with parallel query execution.
  * Clicking on count values opens a graph visualization.
@@ -17,7 +19,7 @@ import { api } from "../api/client";
 import type { RawADGraph } from "../graph/types";
 
 /** Tab identifiers */
-type TabId = "da-analysis" | "reachability" | "stale-objects" | "choke-points" | "unexpected-choke-points";
+type TabId = "da-analysis" | "reachability" | "stale-objects" | "account-exposure" | "choke-points" | "unexpected-choke-points";
 
 /** Domain Admin Analysis data */
 interface DAAnalysisData {
@@ -31,6 +33,14 @@ interface ReachabilityData {
   principalName: string;
   principalSid: string;
   count: number;
+}
+
+/** Account Exposure data */
+interface AccountExposureData {
+  kerberoastable: number;
+  asrepRoastable: number;
+  unconstrainedDelegation: number;
+  protectedUsers: number;
 }
 
 /** Stale Objects data */
@@ -86,6 +96,7 @@ let activeTab: TabId = "da-analysis";
 let daState: TabState<DAAnalysisData> = { loading: false, error: null, data: null };
 let reachabilityState: TabState<ReachabilityData[]> = { loading: false, error: null, data: null };
 let staleState: TabState<StaleObjectsData> = { loading: false, error: null, data: null };
+let accountExposureState: TabState<AccountExposureData> = { loading: false, error: null, data: null };
 let chokePointsState: TabState<ChokePointsData> = { loading: false, error: null, data: null };
 
 /** Stale threshold in days */
@@ -106,6 +117,7 @@ export async function openInsights(): Promise<void> {
   daState = { loading: true, error: null, data: null };
   reachabilityState = { loading: true, error: null, data: null };
   staleState = { loading: true, error: null, data: null };
+  accountExposureState = { loading: true, error: null, data: null };
   chokePointsState = { loading: true, error: null, data: null };
   chokePointsPage = 0;
   unexpectedChokePointsPage = 0;
@@ -120,6 +132,7 @@ export async function openInsights(): Promise<void> {
   loadDAAnalysis();
   loadReachability();
   loadStaleObjects();
+  loadAccountExposure();
   loadChokePoints();
 }
 
@@ -207,6 +220,9 @@ function renderModal(): void {
       <button class="db-type-tab ${activeTab === "stale-objects" ? "active" : ""}" data-tab="stale-objects">
         Stale Objects
       </button>
+      <button class="db-type-tab ${activeTab === "account-exposure" ? "active" : ""}" data-tab="account-exposure">
+        Account Exposure
+      </button>
       <button class="db-type-tab ${activeTab === "choke-points" ? "active" : ""}" data-tab="choke-points">
         Choke Points
       </button>
@@ -222,6 +238,9 @@ function renderModal(): void {
     </div>
     <div class="insight-tab-content" ${activeTab !== "stale-objects" ? "hidden" : ""} id="tab-stale-objects">
       ${renderStaleObjectsTab()}
+    </div>
+    <div class="insight-tab-content" ${activeTab !== "account-exposure" ? "hidden" : ""} id="tab-account-exposure">
+      ${renderAccountExposureTab()}
     </div>
     <div class="insight-tab-content" ${activeTab !== "choke-points" ? "hidden" : ""} id="tab-choke-points">
       ${renderChokePointsTab()}
@@ -364,6 +383,49 @@ function renderStaleObjectsTab(): string {
               ${computers.toLocaleString()}
             </span>
           </div>
+        </div>
+        <p class="text-xs text-gray-500 mt-3">Click on a count to view the objects in the graph</p>
+      </div>
+    </div>
+  `;
+}
+
+/** Render Account Exposure tab */
+function renderAccountExposureTab(): string {
+  if (accountExposureState.loading) {
+    return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing account exposure...</span></div>`;
+  }
+  if (accountExposureState.error) {
+    return `<div class="insight-error">${escapeHtml(accountExposureState.error)}</div>`;
+  }
+  if (!accountExposureState.data) {
+    return `<div class="insight-error">No data available</div>`;
+  }
+
+  const { kerberoastable, asrepRoastable, unconstrainedDelegation, protectedUsers } = accountExposureState.data;
+
+  function row(label: string, count: number, queryType: string): string {
+    return `
+      <div class="insight-row">
+        <span class="insight-label">${escapeHtml(label)}</span>
+        <span class="insight-value ${count > 0 ? "clickable" : ""}"
+              ${count > 0 ? `data-query="${queryType}" title="Click to view graph"` : ""}>
+          ${count.toLocaleString()}
+        </span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="insights-container">
+      <div class="insight-section">
+        <h3 class="insight-section-title">Account Exposure</h3>
+        <p class="insight-desc">Enabled accounts and computers with risky configurations.</p>
+        <div class="insight-stats" style="margin-top: 1rem;">
+          ${row("Kerberoastable Users", kerberoastable, "kerberoastable")}
+          ${row("AS-REP Roastable Users", asrepRoastable, "asrep-roastable")}
+          ${row("Unconstrained Delegation", unconstrainedDelegation, "unconstrained-delegation")}
+          ${row("Protected Users Members", protectedUsers, "protected-users")}
         </div>
         <p class="text-xs text-gray-500 mt-3">Click on a count to view the objects in the graph</p>
       </div>
@@ -670,6 +732,51 @@ async function loadStaleObjects(): Promise<void> {
   renderModal();
 }
 
+/** Load Account Exposure data */
+async function loadAccountExposure(): Promise<void> {
+  accountExposureState = { loading: true, error: null, data: null };
+  renderModal();
+
+  try {
+    const [kerbResult, asrepResult, delegationResult, protectedResult] = await Promise.all([
+      executeQuery(
+        `MATCH (u:User) WHERE u.hasspn = true AND u.enabled = true RETURN u`,
+        { extractGraph: false, background: true }
+      ),
+      executeQuery(
+        `MATCH (u:User) WHERE u.dontreqpreauth = true AND u.enabled = true RETURN u`,
+        { extractGraph: false, background: true }
+      ),
+      executeQuery(
+        `MATCH (c:Computer) WHERE c.unconstraineddelegation = true AND c.enabled = true RETURN c`,
+        { extractGraph: false, background: true }
+      ),
+      executeQuery(
+        `MATCH (u:User)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u`,
+        { extractGraph: false, background: true }
+      ),
+    ]);
+
+    accountExposureState = {
+      loading: false,
+      error: null,
+      data: {
+        kerberoastable: kerbResult.resultCount,
+        asrepRoastable: asrepResult.resultCount,
+        unconstrainedDelegation: delegationResult.resultCount,
+        protectedUsers: protectedResult.resultCount,
+      },
+    };
+  } catch (err) {
+    if (err instanceof QueryAbortedError) {
+      return;
+    }
+    accountExposureState = { loading: false, error: getQueryErrorMessage(err), data: null };
+  }
+
+  renderModal();
+}
+
 /** Load Choke Points data */
 async function loadChokePoints(): Promise<void> {
   chokePointsState = { loading: true, error: null, data: null };
@@ -719,6 +826,18 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
         AND type(r) <> 'MemberOf'
         RETURN p LIMIT 500
       `;
+      break;
+    case "kerberoastable":
+      query = `MATCH (u:User) WHERE u.hasspn = true AND u.enabled = true RETURN u LIMIT 500`;
+      break;
+    case "asrep-roastable":
+      query = `MATCH (u:User) WHERE u.dontreqpreauth = true AND u.enabled = true RETURN u LIMIT 500`;
+      break;
+    case "unconstrained-delegation":
+      query = `MATCH (c:Computer) WHERE c.unconstraineddelegation = true AND c.enabled = true RETURN c LIMIT 500`;
+      break;
+    case "protected-users":
+      query = `MATCH (u:User)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u LIMIT 500`;
       break;
     case "stale-users": {
       const threshold = daysToWindowsFileTime(staleThresholdDays);
@@ -818,6 +937,7 @@ function handleClick(e: Event): void {
       loadDAAnalysis();
       loadReachability();
       loadStaleObjects();
+      loadAccountExposure();
       loadChokePoints();
       break;
     case "choke-page-prev":
