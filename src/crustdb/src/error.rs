@@ -48,6 +48,10 @@ pub enum Error {
     #[error("Resource limit exceeded: {0}")]
     ResourceLimit(String),
 
+    /// Attempted a write operation on a read-only database.
+    #[error("Database is read-only")]
+    ReadOnly,
+
     /// Internal error (e.g., lock poisoned).
     #[error("Internal error: {0}")]
     Internal(String),

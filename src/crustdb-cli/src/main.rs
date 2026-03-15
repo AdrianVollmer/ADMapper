@@ -2,8 +2,8 @@
 
 use clap::Parser;
 use crustdb::{Database, ResultValue};
-use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
+use rustyline::DefaultEditor;
 use std::fs;
 use std::process;
 
@@ -21,12 +21,21 @@ struct Args {
     /// Execute queries from file (queries separated by semicolon)
     #[arg(short = 'f', long = "file", conflicts_with = "query")]
     file: Option<String>,
+
+    /// Open database in read-write mode (default is read-only)
+    #[arg(short = 'w', long = "write")]
+    write: bool,
 }
 
 fn main() {
     let args = Args::parse();
 
-    let db = match Database::open(&args.database) {
+    let db = if args.write {
+        Database::open(&args.database)
+    } else {
+        Database::open_read_only(&args.database)
+    };
+    let db = match db {
         Ok(db) => db,
         Err(e) => {
             eprintln!("Error opening database: {}", e);
@@ -34,9 +43,9 @@ fn main() {
         }
     };
 
-    if let Some(query_string) = args.query {
-        run_batch(&db, &query_string);
-    } else if let Some(file_path) = args.file {
+    if let Some(query_string) = &args.query {
+        run_batch(&db, query_string);
+    } else if let Some(file_path) = &args.file {
         match fs::read_to_string(&file_path) {
             Ok(content) => run_batch(&db, &content),
             Err(e) => {
@@ -182,8 +191,13 @@ fn properties_to_json(
 
 /// Run interactive REPL mode.
 fn run_interactive(db: &Database, db_path: &str) {
+    let mode = if db.is_read_only() {
+        "read-only"
+    } else {
+        "read-write"
+    };
     println!("CrustDB - Interactive Cypher Shell");
-    println!("Connected to: {}", db_path);
+    println!("Connected to: {} ({})", db_path, mode);
     println!("Type 'exit' or Ctrl-D to quit.\n");
 
     let mut rl = DefaultEditor::new().expect("Failed to create editor");

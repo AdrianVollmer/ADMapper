@@ -35,6 +35,9 @@ pub struct Database {
     pub(crate) read_index: AtomicUsize,
     /// Path to database file (None for in-memory).
     pub(crate) db_path: Option<PathBuf>,
+    /// Whether this database is opened in read-only mode.
+    /// Write queries will be rejected with `Error::ReadOnly`.
+    pub(crate) read_only: bool,
     /// Whether query caching is enabled (disabled by default).
     pub(crate) caching_enabled: bool,
     /// Entity cache for nodes and relationships (reduces SQLite lookups during traversals).
@@ -74,6 +77,42 @@ impl Database {
             read_pool,
             read_index: AtomicUsize::new(0),
             db_path: Some(path_buf),
+            read_only: false,
+            caching_enabled: false,
+            entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
+            max_intermediate_bindings: None,
+        })
+    }
+
+    /// Open an existing database in read-only mode.
+    ///
+    /// All connections are read-only. Write queries will be rejected with
+    /// `Error::ReadOnly`. The database file must already exist.
+    pub fn open_read_only<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::open_read_only_with_pool_size(path, DEFAULT_READ_POOL_SIZE)
+    }
+
+    /// Open an existing database in read-only mode with a specific pool size.
+    pub fn open_read_only_with_pool_size<P: AsRef<Path>>(
+        path: P,
+        pool_size: usize,
+    ) -> Result<Self> {
+        let path_buf = path.as_ref().to_path_buf();
+
+        // All connections are read-only - no write connection needed.
+        // We still need one "primary" connection for stats/metadata queries.
+        let primary = SqliteStorage::open_read_only(&path_buf)?;
+
+        let read_pool = (0..pool_size)
+            .map(|_| SqliteStorage::open_read_only(&path_buf).map(Mutex::new))
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Self {
+            write_conn: Mutex::new(primary),
+            read_pool,
+            read_index: AtomicUsize::new(0),
+            db_path: Some(path_buf),
+            read_only: true,
             caching_enabled: false,
             entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
             max_intermediate_bindings: None,
@@ -91,10 +130,16 @@ impl Database {
             read_pool: Vec::new(), // No pooling for in-memory
             read_index: AtomicUsize::new(0),
             db_path: None,
+            read_only: false,
             caching_enabled: false,
             entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
             max_intermediate_bindings: None,
         })
+    }
+
+    /// Returns true if this database was opened in read-only mode.
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
     }
 
     /// Get a read connection from the pool (round-robin).
@@ -202,6 +247,7 @@ impl Database {
     /// // Now queries like MATCH (n {objectid: '...'}) will use the index
     /// ```
     pub fn create_property_index(&self, property: &str) -> Result<()> {
+        self.require_writable()?;
         let storage = self
             .write_conn
             .lock()
@@ -214,6 +260,7 @@ impl Database {
     /// Returns Ok(true) if the index existed and was dropped,
     /// Ok(false) if the index didn't exist.
     pub fn drop_property_index(&self, property: &str) -> Result<bool> {
+        self.require_writable()?;
         let storage = self
             .write_conn
             .lock()
@@ -249,6 +296,10 @@ impl Database {
     /// are cached during traversals to reduce SQLite lookups.
     pub fn execute(&self, query: &str) -> Result<QueryResult> {
         let statement = query::parser::parse(query)?;
+
+        if !statement.is_read_only() && self.read_only {
+            return Err(Error::ReadOnly);
+        }
 
         if statement.is_read_only() {
             // Use read connection from pool for query execution
@@ -355,9 +406,19 @@ impl Database {
         storage.database_size()
     }
 
+    /// Return an error if the database is read-only.
+    fn require_writable(&self) -> Result<()> {
+        if self.read_only {
+            Err(Error::ReadOnly)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Clear all data from the database.
     /// This is much faster than using Cypher DELETE queries.
     pub fn clear(&self) -> Result<()> {
+        self.require_writable()?;
         let storage = self
             .write_conn
             .lock()
@@ -489,7 +550,8 @@ impl Drop for Database {
     fn drop(&mut self) {
         // Checkpoint WAL and close connections gracefully.
         // This ensures WAL files are merged back into the main database file.
-        if self.db_path.is_some() {
+        // Skip for read-only databases (checkpoint requires write access).
+        if self.db_path.is_some() && !self.read_only {
             if let Ok(storage) = self.write_conn.lock() {
                 // PRAGMA wal_checkpoint(TRUNCATE) merges WAL into main DB and truncates WAL file
                 let _ = storage.checkpoint();
@@ -1256,6 +1318,98 @@ mod tests {
         // Pool size 0 should also work (no read pool)
         let db2 = Database::open_with_pool_size(&db_path, 0).unwrap();
         let result = db2.execute("MATCH (n:Test) RETURN n.x").unwrap();
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_read_only_allows_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_readonly.db");
+
+        // Create and populate database
+        {
+            let db = Database::open(&db_path).unwrap();
+            db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+            db.execute("CREATE (n:Person {name: 'Bob'})").unwrap();
+        }
+
+        // Open read-only and verify reads work
+        let db = Database::open_read_only(&db_path).unwrap();
+        assert!(db.is_read_only());
+
+        let result = db.execute("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result.rows.len(), 2);
+
+        let stats = db.stats().unwrap();
+        assert_eq!(stats.node_count, 2);
+    }
+
+    #[test]
+    fn test_read_only_rejects_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_readonly_write.db");
+
+        // Create database
+        {
+            let db = Database::open(&db_path).unwrap();
+            db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+        }
+
+        // Open read-only
+        let db = Database::open_read_only(&db_path).unwrap();
+
+        // CREATE should fail
+        let err = db.execute("CREATE (n:Person {name: 'Eve'})").unwrap_err();
+        assert!(
+            matches!(err, Error::ReadOnly),
+            "Expected ReadOnly error, got: {}",
+            err
+        );
+
+        // SET should fail
+        let err = db.execute("MATCH (n:Person) SET n.age = 30").unwrap_err();
+        assert!(matches!(err, Error::ReadOnly));
+
+        // DELETE should fail
+        let err = db.execute("MATCH (n) DELETE n").unwrap_err();
+        assert!(matches!(err, Error::ReadOnly));
+
+        // clear() should fail
+        let err = db.clear().unwrap_err();
+        assert!(matches!(err, Error::ReadOnly));
+    }
+
+    #[test]
+    fn test_read_only_fails_on_nonexistent_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("nonexistent.db");
+
+        // Should fail because the file doesn't exist
+        let result = Database::open_read_only(&db_path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wal_cleanup_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_wal_cleanup.db");
+        let wal_path = dir.path().join("test_wal_cleanup.db-wal");
+
+        // Create database, write data, then drop (should checkpoint)
+        {
+            let db = Database::open(&db_path).unwrap();
+            db.execute("CREATE (n:Test {x: 1})").unwrap();
+        }
+
+        // After clean drop, WAL should not exist (checkpoint truncates it)
+        assert!(
+            !wal_path.exists(),
+            "WAL file should be cleaned up after Database::drop()"
+        );
+
+        // Data should survive the checkpoint
+        let db = Database::open(&db_path).unwrap();
+        let result = db.execute("MATCH (n:Test) RETURN n.x").unwrap();
         assert_eq!(result.rows.len(), 1);
     }
 }

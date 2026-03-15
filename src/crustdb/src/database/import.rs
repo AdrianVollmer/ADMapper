@@ -14,6 +14,7 @@ impl super::Database {
         &self,
         nodes: &[(Vec<String>, serde_json::Value)],
     ) -> Result<Vec<i64>> {
+        self.require_writable()?;
         let mut storage = self
             .write_conn
             .lock()
@@ -39,6 +40,7 @@ impl super::Database {
         &self,
         nodes: &[(Vec<String>, serde_json::Value)],
     ) -> Result<Vec<i64>> {
+        self.require_writable()?;
         let mut storage = self
             .write_conn
             .lock()
@@ -55,6 +57,7 @@ impl super::Database {
     /// This is useful for streaming relationship import where relationships may reference
     /// nodes that haven't been imported yet.
     pub fn get_or_create_node_by_objectid(&self, objectid: &str, label: &str) -> Result<i64> {
+        self.require_writable()?;
         let storage = self
             .write_conn
             .lock()
@@ -72,6 +75,7 @@ impl super::Database {
         &self,
         relationships: &[(i64, i64, String, serde_json::Value)],
     ) -> Result<Vec<i64>> {
+        self.require_writable()?;
         let mut storage = self
             .write_conn
             .lock()
