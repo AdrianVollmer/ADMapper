@@ -91,18 +91,33 @@ export function handleGraphClicks(e: MouseEvent): boolean {
   return false;
 }
 
-/** Update the graph view based on connection state */
-export function updateGraphForConnectionState(connected: boolean, error?: string): void {
+/** Update the graph view based on connection state.
+ *  When `isNewConnection` is true (user just connected to a different DB),
+ *  any existing graph is cleared and the "run a query" placeholder is shown. */
+export function updateGraphForConnectionState(
+  connected: boolean,
+  error?: string,
+  isNewConnection = false,
+): void {
   // Don't interfere with dev mode demo data
   if (import.meta.env.DEV) return;
 
-  // If we have a renderer, the user has already loaded data - don't replace it
+  // On a fresh connection, always clear stale data from the previous DB
+  if (isNewConnection) {
+    if (!connected) {
+      showNoConnectionPlaceholder(error);
+    } else {
+      showConnectedPlaceholder();
+    }
+    return;
+  }
+
+  // Status refresh on page load: preserve existing graph if any
   if (renderer) return;
 
   if (!connected) {
     showNoConnectionPlaceholder(error);
   } else {
-    // Connected but no data loaded yet - show a different message
     showConnectedPlaceholder();
   }
 }
