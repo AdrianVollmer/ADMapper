@@ -369,6 +369,7 @@ pub(super) fn execute_shortest_path(
     max_hops: u32,
     _k: u32,
     target_property_filter: Option<&TargetPropertyFilter>,
+    limit: Option<u64>,
     storage: &SqliteStorage,
     mut cache: Option<&mut EntityCache>,
     ctx: &mut ExecutionContext,
@@ -387,6 +388,7 @@ pub(super) fn execute_shortest_path(
     );
 
     let mut result = Vec::new();
+    let limit = limit.map(|l| l as usize);
 
     // Resolve target property filter to matching node IDs for early termination.
     // Supports Eq, EndsWith, StartsWith, Contains via SQL pushdown.
@@ -425,7 +427,7 @@ pub(super) fn execute_shortest_path(
         );
     }
 
-    for binding in bindings {
+    'outer: for binding in bindings {
         let source_node = binding
             .get_node(source_variable)
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
@@ -547,6 +549,13 @@ pub(super) fn execute_shortest_path(
 
             result.push(new_binding);
             ctx.track_bindings(1)?;
+
+            // Early termination when limit is reached
+            if let Some(lim) = limit {
+                if result.len() >= lim {
+                    break 'outer;
+                }
+            }
         }
     }
 

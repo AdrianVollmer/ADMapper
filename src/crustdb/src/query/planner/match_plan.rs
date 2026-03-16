@@ -399,6 +399,7 @@ pub fn plan_shortest_path_pattern(pattern: &Pattern, all_paths: bool) -> Result<
         target_property_filter: target_property_filter
             .clone()
             .map(|(property, value)| TargetPropertyFilter::Eq { property, value }),
+        limit: None,
     });
 
     // Add inline property filter for target if not pushed down (complex expressions)

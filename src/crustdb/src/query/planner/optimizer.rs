@@ -129,6 +129,13 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                     PlanOperator::VariableLengthExpand(p)
                 }
 
+                // LIMIT on ShortestPath can be pushed down for early termination
+                PlanOperator::ShortestPath(mut p) if p.limit.is_none() => {
+                    p.source = Box::new(optimize_operator(*p.source));
+                    p.limit = Some(count);
+                    PlanOperator::ShortestPath(p)
+                }
+
                 // LIMIT on Project can be pushed through to inner operators
                 PlanOperator::Project {
                     source: project_source,
@@ -172,7 +179,17 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                                 distinct: false,
                             }
                         }
-                        // Push through Filter -> VariableLengthExpand
+                        // Push through to ShortestPath
+                        PlanOperator::ShortestPath(mut p) if p.limit.is_none() => {
+                            p.source = Box::new(optimize_operator(*p.source));
+                            p.limit = Some(count);
+                            PlanOperator::Project {
+                                source: Box::new(PlanOperator::ShortestPath(p)),
+                                columns,
+                                distinct: false,
+                            }
+                        }
+                        // Push through Filter -> expand/shortest-path
                         // This handles: MATCH (a)-[*]->(b) WHERE ... RETURN ... LIMIT n
                         // First optimize the Filter (which may push target predicates),
                         // then push LIMIT into the result
@@ -212,11 +229,27 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                                     }
                                 }
                                 // Filter was optimized away (predicate fully pushed),
-                                // check if we got VariableLengthExpand
+                                // check if we got an expand-like operator
                                 PlanOperator::VariableLengthExpand(mut p) if p.limit.is_none() => {
                                     p.limit = Some(count);
                                     PlanOperator::Project {
                                         source: Box::new(PlanOperator::VariableLengthExpand(p)),
+                                        columns,
+                                        distinct: false,
+                                    }
+                                }
+                                PlanOperator::Expand(mut p) if p.limit.is_none() => {
+                                    p.limit = Some(count);
+                                    PlanOperator::Project {
+                                        source: Box::new(PlanOperator::Expand(p)),
+                                        columns,
+                                        distinct: false,
+                                    }
+                                }
+                                PlanOperator::ShortestPath(mut p) if p.limit.is_none() => {
+                                    p.limit = Some(count);
+                                    PlanOperator::Project {
+                                        source: Box::new(PlanOperator::ShortestPath(p)),
                                         columns,
                                         distinct: false,
                                     }
@@ -966,6 +999,56 @@ mod tests {
         } else {
             panic!("Expected Project at root, got {:?}", plan.root);
         }
+    }
+
+    #[test]
+    fn test_limit_through_filter_into_expand() {
+        // MATCH (a)-[:KNOWS]->(b) WHERE b.name = 'Alice' RETURN b LIMIT 3
+        // Filter should be eliminated (pushed into Expand target_property_filter)
+        // and LIMIT should be pushed into Expand
+        let plan = plan_query("MATCH (a)-[:KNOWS]->(b) WHERE b.name = 'Alice' RETURN b LIMIT 3");
+        if let PlanOperator::Project { source, .. } = plan.root {
+            if let PlanOperator::Expand(ref p) = *source {
+                assert_eq!(p.limit, Some(3), "LIMIT should be pushed into Expand");
+                assert!(
+                    p.target_property_filter.is_some(),
+                    "target filter should be pushed into Expand"
+                );
+            } else {
+                panic!("Expected Expand under Project, got {:?}", source);
+            }
+        } else {
+            panic!("Expected Project at root");
+        }
+    }
+
+    #[test]
+    fn test_limit_through_filter_into_shortest_path() {
+        // shortestPath with WHERE and LIMIT — LIMIT should push through
+        // when the filter is fully eliminated
+        let plan = plan_query(
+            "MATCH p = shortestPath((a:User)-[*]->(b:Group)) WHERE b.name ENDS WITH '-admin' RETURN p LIMIT 2",
+        );
+        // After optimization the VarLen/ShortestPath should have limit=2
+        // and target_property_filter set
+        fn find_sp(op: &PlanOperator) -> Option<&ShortestPathParams> {
+            match op {
+                PlanOperator::ShortestPath(p) => Some(p),
+                PlanOperator::Project { source, .. } => find_sp(source),
+                PlanOperator::Filter { source, .. } => find_sp(source),
+                _ => None,
+            }
+        }
+        let sp = find_sp(&plan.root).expect("Should contain ShortestPath");
+        assert!(
+            sp.target_property_filter.is_some(),
+            "target filter should be pushed into ShortestPath"
+        );
+        assert_eq!(
+            sp.limit,
+            Some(2),
+            "LIMIT should be pushed into ShortestPath"
+        );
     }
 
     // =========================================================================

@@ -282,6 +282,7 @@ fn execute_operator(
                 p.max_hops,
                 p.k,
                 p.target_property_filter.as_ref(),
+                p.limit,
                 storage,
                 cache,
                 ctx,

@@ -74,6 +74,8 @@ pub struct ShortestPathParams {
     /// When set, BFS pre-resolves matching target node IDs via SQL and terminates
     /// as soon as all targets are found.
     pub target_property_filter: Option<TargetPropertyFilter>,
+    /// Limit for early termination (pushed down from RETURN ... LIMIT).
+    pub limit: Option<u64>,
 }
 
 /// Plan operators form a tree representing the execution strategy.
