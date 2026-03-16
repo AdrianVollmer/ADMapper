@@ -203,6 +203,29 @@ pub(super) fn execute_variable_length_expand(
         (None, None) => None,
     };
 
+    // Pre-resolve target labels to node IDs for fast HashSet lookup during BFS.
+    // This avoids scanning the label set on every explored node.
+    let target_id_set: Option<HashSet<i64>> =
+        if target_id_set.is_none() && !req.target_labels.is_empty() {
+            let mut ids = HashSet::new();
+            for label in req.target_labels {
+                for node in storage.find_nodes_by_label(label)? {
+                    ids.insert(node.id);
+                }
+            }
+            trace!(
+                pre_resolved_targets = ids.len(),
+                labels = ?req.target_labels,
+                "variable_length_expand: pre-resolved target labels to IDs"
+            );
+            if ids.is_empty() {
+                return Ok(ExecutionResult::Bindings(result));
+            }
+            Some(ids)
+        } else {
+            target_id_set
+        };
+
     let limit = req.limit.map(|l| l as usize);
 
     for binding in bindings {
@@ -265,8 +288,10 @@ pub(super) fn execute_variable_length_expand(
                     if let Some(target_node) =
                         get_node_cached(current_id, storage, cache.as_deref_mut())?
                     {
-                        // Check target labels
-                        let matches_labels = req.target_labels.is_empty()
+                        // Skip label check when target_id_set is populated
+                        // (labels were already resolved to IDs above)
+                        let matches_labels = target_id_set.is_some()
+                            || req.target_labels.is_empty()
                             || req.target_labels.iter().any(|l| target_node.has_label(l));
 
                         if matches_labels {

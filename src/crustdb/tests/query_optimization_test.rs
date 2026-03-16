@@ -317,6 +317,57 @@ fn test_distinct_type_r_is_fast_at_scale() {
 }
 
 // =============================================================================
+// VarLenExpand target_ids pre-resolution
+// =============================================================================
+
+#[test]
+fn test_varlen_expand_target_labels_correct_results() {
+    let (db, _, _) = setup();
+    // Variable-length path from User to Computer — User->Computer via HasSession/AdminTo
+    // or User->Group->Computer via MemberOf+CanRDP. Should only return Computer nodes.
+    let result = db
+        .execute("MATCH (a:User)-[*1..2]->(b:Computer) RETURN DISTINCT b.name AS comp LIMIT 10")
+        .unwrap();
+    assert!(
+        !result.rows.is_empty(),
+        "Should find paths from User to Computer"
+    );
+    for row in &result.rows {
+        let name = match row.get("comp") {
+            Some(ResultValue::Property(PropertyValue::String(s))) => s.as_str(),
+            other => panic!("Expected string computer name, got {:?}", other),
+        };
+        assert!(
+            name.starts_with("Computer"),
+            "Target should be a Computer node, got: {name}"
+        );
+    }
+}
+
+#[test]
+fn test_varlen_expand_target_labels_is_fast() {
+    let (db, _, _) = setup();
+
+    // Warm up
+    let _ = db.execute("MATCH (a:User)-[*1..2]->(b:Computer) RETURN b.name LIMIT 5");
+
+    // With target_ids pre-resolution, BFS uses HashSet::contains() instead
+    // of scanning labels on every explored node.
+    let start = Instant::now();
+    let result = db
+        .execute("MATCH (a:User)-[*1..2]->(b:Computer) RETURN b.name LIMIT 5")
+        .unwrap();
+    let elapsed = start.elapsed().as_millis();
+
+    assert!(!result.rows.is_empty());
+    eprintln!("VarLen User->Computer LIMIT 5 elapsed: {elapsed}ms");
+    assert!(
+        elapsed < 500,
+        "VarLen expand took {elapsed}ms; expected <500ms with target_ids pre-resolution"
+    );
+}
+
+// =============================================================================
 // Regression: without optimizations, these queries would be catastrophically slow
 // =============================================================================
 
