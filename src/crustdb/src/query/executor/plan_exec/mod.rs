@@ -242,6 +242,7 @@ fn execute_operator(
                 types: &p.types,
                 direction: p.direction,
                 limit: p.limit,
+                target_property_filter: p.target_property_filter.as_ref(),
             };
             execute_expand(bindings, &request, storage, cache, ctx)
         }

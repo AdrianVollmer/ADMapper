@@ -29,6 +29,9 @@ pub struct ExpandParams {
     pub direction: ExpandDirection,
     /// Limit for early termination (pushed down from RETURN ... LIMIT).
     pub limit: Option<u64>,
+    /// Target property filter for early rejection of non-matching neighbors.
+    /// When set, only neighbors matching this filter produce bindings.
+    pub target_property_filter: Option<TargetPropertyFilter>,
 }
 
 /// Parameters for variable-length expand (BFS).
@@ -459,6 +462,8 @@ pub struct ExpandRequest<'a> {
     pub direction: ExpandDirection,
     /// Limit for early termination.
     pub limit: Option<u64>,
+    /// Target property filter for early rejection of non-matching neighbors.
+    pub target_property_filter: Option<&'a TargetPropertyFilter>,
 }
 
 /// Parameters for a variable-length expand operation (BFS).

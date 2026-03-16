@@ -41,6 +41,13 @@ pub(super) fn execute_expand(
                 continue;
             }
 
+            // Check target property filter (pushed down from WHERE)
+            if let Some(filter) = &req.target_property_filter {
+                if !node_matches_target_filter(&target_node, filter) {
+                    continue;
+                }
+            }
+
             let mut new_binding = binding
                 .clone()
                 .with_node(req.target_variable, target_node.clone());
@@ -73,6 +80,58 @@ pub(super) fn execute_expand(
     }
 
     Ok(ExecutionResult::Bindings(result))
+}
+
+/// Check if a node matches a target property filter inline.
+/// Used by single-hop expand to reject non-matching neighbors early.
+fn node_matches_target_filter(node: &Node, filter: &TargetPropertyFilter) -> bool {
+    match filter {
+        TargetPropertyFilter::Eq { property, value } => {
+            if let Some(prop) = node.properties.get(property.as_str()) {
+                property_matches_json(prop, value)
+            } else {
+                false
+            }
+        }
+        TargetPropertyFilter::EndsWith { property, suffix } => {
+            matches!(
+                node.properties.get(property.as_str()),
+                Some(crate::graph::PropertyValue::String(s)) if s.ends_with(suffix.as_str())
+            )
+        }
+        TargetPropertyFilter::StartsWith { property, prefix } => {
+            matches!(
+                node.properties.get(property.as_str()),
+                Some(crate::graph::PropertyValue::String(s)) if s.starts_with(prefix.as_str())
+            )
+        }
+        TargetPropertyFilter::Contains {
+            property,
+            substring,
+        } => {
+            matches!(
+                node.properties.get(property.as_str()),
+                Some(crate::graph::PropertyValue::String(s)) if s.contains(substring.as_str())
+            )
+        }
+    }
+}
+
+/// Compare a PropertyValue against a serde_json::Value for equality.
+fn property_matches_json(prop: &crate::graph::PropertyValue, json: &serde_json::Value) -> bool {
+    use crate::graph::PropertyValue;
+    match (prop, json) {
+        (PropertyValue::String(s), serde_json::Value::String(j)) => s == j,
+        (PropertyValue::Integer(i), serde_json::Value::Number(n)) => {
+            n.as_i64().is_some_and(|j| *i == j)
+        }
+        (PropertyValue::Float(f), serde_json::Value::Number(n)) => {
+            n.as_f64().is_some_and(|j| *f == j)
+        }
+        (PropertyValue::Bool(b), serde_json::Value::Bool(j)) => b == j,
+        (PropertyValue::Null, serde_json::Value::Null) => true,
+        _ => false,
+    }
 }
 
 /// Resolve a target property filter to matching nodes.

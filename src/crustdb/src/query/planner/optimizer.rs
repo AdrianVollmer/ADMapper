@@ -1,8 +1,8 @@
 //! Query plan optimization passes.
 
 use super::{
-    AggregateFunction, FilterPredicate, PlanExpr, PlanLiteral, PlanOperator, QueryPlan,
-    ShortestPathParams, TargetPropertyFilter, VarLenExpandParams,
+    AggregateFunction, ExpandParams, FilterPredicate, PlanExpr, PlanLiteral, PlanOperator,
+    QueryPlan, ShortestPathParams, TargetPropertyFilter, VarLenExpandParams,
 };
 
 /// Apply optimization passes to a query plan.
@@ -255,6 +255,7 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
         PlanOperator::Filter { source, predicate } => match *source {
             PlanOperator::VariableLengthExpand(p) => push_filter_into_var_len_expand(p, predicate),
             PlanOperator::ShortestPath(p) => push_filter_into_shortest_path(p, predicate),
+            PlanOperator::Expand(p) => push_filter_into_expand(p, predicate),
             other => PlanOperator::Filter {
                 source: Box::new(optimize_operator(other)),
                 predicate,
@@ -609,6 +610,29 @@ fn push_filter_into_shortest_path(
     wrap_with_filter(pushed, leftover)
 }
 
+/// Push filter predicates from a WHERE clause into a single-hop Expand.
+///
+/// Target predicates (on the target variable) become `target_property_filter`
+/// for early rejection of non-matching neighbors. Source predicates go into
+/// the NodeScan for reduced starting set.
+fn push_filter_into_expand(mut p: ExpandParams, predicate: FilterPredicate) -> PlanOperator {
+    if p.target_property_filter.is_none() {
+        if let Some((pushed_filter, remaining_predicate)) =
+            extract_target_property_filter(&predicate, &p.target_variable)
+        {
+            p.source = Box::new(optimize_operator(*p.source));
+            p.target_property_filter = Some(pushed_filter);
+            let expand = PlanOperator::Expand(p);
+            return wrap_with_remaining(expand, remaining_predicate);
+        }
+    }
+    // Couldn't push target predicate (or already has one), try source pushdown
+    p.source = Box::new(optimize_operator(*p.source));
+    let expand = PlanOperator::Expand(p);
+    let (pushed, leftover) = try_push_source_filter_into_node_scan(predicate, expand);
+    wrap_with_filter(pushed, leftover)
+}
+
 /// After pushing a target filter, handle remaining predicates:
 /// try source pushdown, then wrap leftovers in a Filter.
 fn wrap_with_remaining(operator: PlanOperator, remaining: Option<FilterPredicate>) -> PlanOperator {
@@ -661,6 +685,14 @@ fn try_push_source_filter_into_node_scan(
                 return (PlanOperator::ShortestPath(p), result);
             }
             (PlanOperator::ShortestPath(p), Some(predicate))
+        }
+        PlanOperator::Expand(mut p) => {
+            if let Some(result) =
+                try_push_into_inner_scan(&predicate, &p.source_variable, &mut p.source)
+            {
+                return (PlanOperator::Expand(p), result);
+            }
+            (PlanOperator::Expand(p), Some(predicate))
         }
         other => (other, Some(predicate)),
     }
@@ -933,6 +965,105 @@ mod tests {
             }
         } else {
             panic!("Expected Project at root, got {:?}", plan.root);
+        }
+    }
+
+    // =========================================================================
+    // Single-hop Expand filter pushdown tests
+    // =========================================================================
+
+    #[test]
+    fn test_expand_target_filter_pushdown() {
+        // WHERE b.name = 'Admin' should be pushed into Expand.target_property_filter
+        let plan =
+            plan_query("MATCH (a:User)-[:MEMBER_OF]->(b:Group) WHERE b.name = 'Admin' RETURN a");
+        if let PlanOperator::Project { source, .. } = plan.root {
+            // Filter should be eliminated — predicate pushed into Expand
+            if let PlanOperator::Expand(ref p) = *source {
+                assert!(
+                    p.target_property_filter.is_some(),
+                    "Target filter should be pushed into Expand"
+                );
+                if let Some(TargetPropertyFilter::Eq {
+                    ref property,
+                    ref value,
+                }) = p.target_property_filter
+                {
+                    assert_eq!(property, "name");
+                    assert_eq!(*value, serde_json::Value::String("Admin".to_string()));
+                } else {
+                    panic!("Expected Eq filter, got {:?}", p.target_property_filter);
+                }
+            } else {
+                panic!(
+                    "Expected Expand directly under Project (Filter eliminated), got {:?}",
+                    source
+                );
+            }
+        } else {
+            panic!("Expected Project at root");
+        }
+    }
+
+    #[test]
+    fn test_expand_source_filter_pushdown() {
+        // WHERE a.id = 'user1' should be pushed into the NodeScan under Expand
+        let plan = plan_query("MATCH (a)-[:KNOWS]->(b) WHERE a.id = 'user1' RETURN b");
+        if let PlanOperator::Project { source, .. } = plan.root {
+            if let PlanOperator::Expand(ref p) = *source {
+                if let PlanOperator::NodeScan {
+                    ref property_filter,
+                    ..
+                } = *p.source
+                {
+                    assert!(
+                        property_filter.is_some(),
+                        "Source predicate should be pushed into NodeScan"
+                    );
+                } else {
+                    panic!("Expected NodeScan under Expand");
+                }
+            } else {
+                panic!("Expected Expand under Project, got {:?}", source);
+            }
+        } else {
+            panic!("Expected Project at root");
+        }
+    }
+
+    #[test]
+    fn test_expand_both_filters_pushdown() {
+        // Both source and target filters should be pushed down
+        let plan = plan_query(
+            "MATCH (a)-[:KNOWS]->(b) WHERE a.id = 'user1' AND b.name ENDS WITH '-admin' RETURN b",
+        );
+        if let PlanOperator::Project { source, .. } = plan.root {
+            // Filter should be eliminated entirely
+            if let PlanOperator::Expand(ref p) = *source {
+                assert!(
+                    p.target_property_filter.is_some(),
+                    "Target filter should be pushed into Expand"
+                );
+                if let PlanOperator::NodeScan {
+                    ref property_filter,
+                    ..
+                } = *p.source
+                {
+                    assert!(
+                        property_filter.is_some(),
+                        "Source filter should be pushed into NodeScan"
+                    );
+                } else {
+                    panic!("Expected NodeScan under Expand");
+                }
+            } else {
+                panic!(
+                    "Expected Expand under Project (Filter eliminated), got {:?}",
+                    source
+                );
+            }
+        } else {
+            panic!("Expected Project at root");
         }
     }
 

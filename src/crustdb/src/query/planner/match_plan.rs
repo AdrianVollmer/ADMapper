@@ -285,6 +285,7 @@ pub(super) fn plan_pattern_segment(
                 types: rel.types.clone(),
                 direction: rel.direction.into(),
                 limit: None,
+                target_property_filter: None,
             });
         }
 
