@@ -171,7 +171,10 @@ impl BloodHoundImporter {
 
         let bytes_total: u64 = json_files.iter().map(|(_, size)| size).sum();
 
-        info!(file_count = json_files.len(), bytes_total, "Found JSON files in ZIP");
+        info!(
+            file_count = json_files.len(),
+            bytes_total, "Found JSON files in ZIP"
+        );
         debug!(files = ?json_files, "JSON files to process");
 
         let mut progress = ImportProgress::new(job_id.to_string())
