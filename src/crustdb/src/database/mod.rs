@@ -13,6 +13,7 @@ use crate::query;
 use crate::storage::{CacheStats, EntityCache, EntityCacheConfig, EntityCacheStats, SqliteStorage};
 
 use crate::query::executor::algorithms::RelationshipBetweenness;
+use crate::query::executor::ResourceLimits;
 use crate::query::QueryResult;
 
 /// Default number of read connections in the pool.
@@ -46,6 +47,9 @@ pub struct Database {
     /// Maximum intermediate bindings allowed per query (memory safeguard).
     /// None means unlimited. Set via `set_max_intermediate_bindings`.
     pub(crate) max_intermediate_bindings: Option<usize>,
+    /// Maximum BFS frontier entries allowed per query (memory safeguard).
+    /// None means unlimited. Set via `set_max_frontier_entries`.
+    pub(crate) max_frontier_entries: Option<usize>,
 }
 
 impl Database {
@@ -81,6 +85,7 @@ impl Database {
             caching_enabled: false,
             entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
             max_intermediate_bindings: None,
+            max_frontier_entries: None,
         })
     }
 
@@ -116,6 +121,7 @@ impl Database {
             caching_enabled: false,
             entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
             max_intermediate_bindings: None,
+            max_frontier_entries: None,
         })
     }
 
@@ -134,6 +140,7 @@ impl Database {
             caching_enabled: false,
             entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
             max_intermediate_bindings: None,
+            max_frontier_entries: None,
         })
     }
 
@@ -220,6 +227,26 @@ impl Database {
     /// production use is 1_000_000.
     pub fn set_max_intermediate_bindings(&mut self, limit: Option<usize>) {
         self.max_intermediate_bindings = limit;
+    }
+
+    /// Set the maximum BFS frontier entries allowed per query.
+    ///
+    /// This prevents out-of-memory conditions on shortestPath and
+    /// variable-length expand queries over dense graphs. When the BFS
+    /// queue exceeds this limit, the query returns an error instead of
+    /// consuming all available memory.
+    ///
+    /// `None` means unlimited (default). A reasonable starting point for
+    /// production use is 2_000_000.
+    pub fn set_max_frontier_entries(&mut self, limit: Option<usize>) {
+        self.max_frontier_entries = limit;
+    }
+
+    fn resource_limits(&self) -> ResourceLimits {
+        ResourceLimits {
+            max_bindings: self.max_intermediate_bindings,
+            max_frontier_entries: self.max_frontier_entries,
+        }
     }
 
     /// Get statistics about the entity cache.
@@ -331,7 +358,7 @@ impl Database {
                         &statement,
                         &read_storage,
                         cache_ref,
-                        self.max_intermediate_bindings,
+                        self.resource_limits(),
                     )?
                 };
 
@@ -360,7 +387,7 @@ impl Database {
                     &statement,
                     &read_storage,
                     cache_ref,
-                    self.max_intermediate_bindings,
+                    self.resource_limits(),
                 )
             }
         } else {
@@ -376,12 +403,7 @@ impl Database {
                 entity_cache.clear();
             }
 
-            query::executor::execute_with_cache(
-                &statement,
-                &storage,
-                None,
-                self.max_intermediate_bindings,
-            )
+            query::executor::execute_with_cache(&statement, &storage, None, self.resource_limits())
         }
     }
 

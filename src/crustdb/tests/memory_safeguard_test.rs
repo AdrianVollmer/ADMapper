@@ -98,3 +98,98 @@ fn test_set_limit_to_none_removes_safeguard() {
     let result = db.execute("MATCH (y:Y), (z:Z) RETURN y.n, z.n").unwrap();
     assert_eq!(result.rows.len(), 100);
 }
+
+// =============================================================================
+// BFS frontier limit tests
+// =============================================================================
+
+/// Build a dense "star" graph where a hub connects to many spokes,
+/// and each spoke connects to the next. This creates a graph where
+/// BFS frontier grows quickly with depth.
+fn setup_dense_graph(db: &Database, fan_out: usize) {
+    db.execute("CREATE (:Hub {name: 'hub'})").unwrap();
+    for i in 0..fan_out {
+        db.execute(&format!("CREATE (:Spoke {{idx: {}}})", i))
+            .unwrap();
+    }
+    for i in 0..fan_out {
+        db.execute(&format!(
+            "MATCH (h:Hub), (s:Spoke {{idx: {}}}) CREATE (h)-[:LINK]->(s)",
+            i
+        ))
+        .unwrap();
+    }
+    // Connect spokes in a ring so BFS has depth > 1
+    for i in 0..fan_out {
+        let next = (i + 1) % fan_out;
+        db.execute(&format!(
+            "MATCH (a:Spoke {{idx: {}}}), (b:Spoke {{idx: {}}}) CREATE (a)-[:LINK]->(b)",
+            i, next
+        ))
+        .unwrap();
+    }
+}
+
+#[test]
+fn test_frontier_limit_triggers_on_variable_length_expand() {
+    let mut db = setup_db();
+    setup_dense_graph(&db, 50);
+
+    // With a very tight frontier limit, the BFS should fail
+    db.set_max_frontier_entries(Some(10));
+    let result = db.execute("MATCH (h:Hub {name: 'hub'})-[:LINK*1..3]->(s) RETURN s.idx");
+    assert!(result.is_err(), "Expected frontier limit error");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("BFS frontier"),
+        "Error should mention BFS frontier, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_frontier_limit_triggers_on_shortest_path() {
+    let mut db = setup_db();
+    setup_dense_graph(&db, 50);
+
+    db.set_max_frontier_entries(Some(10));
+    let result = db.execute(
+        "MATCH p = shortestPath((h:Hub {name: 'hub'})-[:LINK*1..3]->(s:Spoke {idx: 25})) RETURN p",
+    );
+    assert!(result.is_err(), "Expected frontier limit error");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("BFS frontier"),
+        "Error should mention BFS frontier, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_frontier_limit_allows_small_queries() {
+    let mut db = setup_db();
+    // Small chain: A -> B -> C
+    db.execute(
+        "CREATE (:Start {name: 'A'})-[:NEXT]->(:Mid {name: 'B'})-[:NEXT]->(:End {name: 'C'})",
+    )
+    .unwrap();
+
+    // Frontier limit of 100 is plenty for a 3-node chain
+    db.set_max_frontier_entries(Some(100));
+    let result = db
+        .execute("MATCH (a:Start {name: 'A'})-[:NEXT*1..2]->(b) RETURN b.name")
+        .unwrap();
+    assert_eq!(result.rows.len(), 2); // B and C
+}
+
+#[test]
+fn test_frontier_limit_default_unlimited() {
+    let db = setup_db();
+    setup_dense_graph(&db, 50);
+
+    // Default is unlimited - should succeed
+    let result = db
+        .execute("MATCH (h:Hub {name: 'hub'})-[:LINK*1..2]->(s) RETURN s.idx")
+        .unwrap();
+    assert!(!result.rows.is_empty());
+}

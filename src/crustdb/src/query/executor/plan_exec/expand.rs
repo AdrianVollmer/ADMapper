@@ -248,6 +248,7 @@ pub(super) fn execute_variable_length_expand(
                 new_path_rels.push(relationship);
 
                 queue.push_back((next_id, new_path_nodes, new_path_rels));
+                ctx.check_frontier(queue.len())?;
             }
         }
     }
@@ -378,6 +379,7 @@ pub(super) fn execute_shortest_path(
                 new_path_rel_ids.push(relationship.id);
 
                 queue.push_back((next_id, new_path_nodes, new_path_rel_ids));
+                ctx.check_frontier(queue.len())?;
             }
         }
 

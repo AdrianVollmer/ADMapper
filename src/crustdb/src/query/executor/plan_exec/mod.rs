@@ -37,19 +37,27 @@ use crate::storage::{EntityCache, SqliteStorage};
 /// limit acts as a circuit breaker to prevent out-of-memory conditions on
 /// queries that produce explosive intermediate results (e.g., large cross
 /// joins or deep variable-length path traversals).
+/// Resource limits for query execution to prevent OOM conditions.
+#[derive(Debug, Clone, Default)]
+pub struct ResourceLimits {
+    /// Maximum number of intermediate bindings allowed. None = unlimited.
+    pub max_bindings: Option<usize>,
+    /// Maximum BFS frontier entries allowed. None = unlimited (default: 2M).
+    pub max_frontier_entries: Option<usize>,
+}
+
 pub(crate) struct ExecutionContext {
     pub stats: QueryStats,
-    /// Maximum number of intermediate bindings allowed. None = unlimited.
-    max_bindings: Option<usize>,
+    limits: ResourceLimits,
     /// Running count of bindings produced so far.
     bindings_produced: usize,
 }
 
 impl ExecutionContext {
-    pub fn new(max_bindings: Option<usize>) -> Self {
+    pub fn new(limits: ResourceLimits) -> Self {
         Self {
             stats: QueryStats::default(),
-            max_bindings,
+            limits,
             bindings_produced: 0,
         }
     }
@@ -58,11 +66,26 @@ impl ExecutionContext {
     /// Call after pushing to a result vec.
     pub fn track_bindings(&mut self, count: usize) -> Result<()> {
         self.bindings_produced += count;
-        if let Some(max) = self.max_bindings {
+        if let Some(max) = self.limits.max_bindings {
             if self.bindings_produced > max {
                 return Err(Error::ResourceLimit(format!(
                     "query produced more than {} intermediate results; \
                      simplify the query or increase the limit",
+                    max
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Check whether the BFS frontier has exceeded the allowed size.
+    /// Call after pushing entries to a BFS queue.
+    pub fn check_frontier(&self, queue_len: usize) -> Result<()> {
+        if let Some(max) = self.limits.max_frontier_entries {
+            if queue_len > max {
+                return Err(Error::ResourceLimit(format!(
+                    "BFS frontier exceeded {} entries; \
+                     reduce path depth or add filters to narrow the search",
                     max
                 )));
             }
@@ -128,9 +151,9 @@ pub fn execute_plan(
     plan: &QueryPlan,
     storage: &SqliteStorage,
     cache: Option<&mut EntityCache>,
-    max_bindings: Option<usize>,
+    limits: ResourceLimits,
 ) -> Result<QueryResult> {
-    let mut ctx = ExecutionContext::new(max_bindings);
+    let mut ctx = ExecutionContext::new(limits);
     let start = std::time::Instant::now();
 
     // Execute the plan tree
