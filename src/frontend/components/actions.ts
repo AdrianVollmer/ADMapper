@@ -7,6 +7,7 @@
 
 import { toggleNavSidebar, toggleDetailSidebar, toggleSidebars } from "./sidebars";
 import { getRenderer, setLayout, relayoutGraph, toggleLabelVisibility, cycleLayout } from "./graph-view";
+import { toggleMagnifier, isMagnifierActive } from "../graph/magnifier";
 import { triggerBloodHoundImport } from "./import";
 import { openQueryHistory, goBackInHistory } from "./query-history";
 import { showKeyboardShortcuts } from "./keyboard";
@@ -51,6 +52,7 @@ export const Actions = {
   FIT_GRAPH: "fit-graph",
   FULLSCREEN: "fullscreen",
   TOGGLE_LABEL_VISIBILITY: "toggle-label-visibility",
+  TOGGLE_MAGNIFIER: "toggle-magnifier",
   // Tools menu
   IMPORT_BLOODHOUND: "import-bloodhound",
   GENERATE_DATA: "generate-data",
@@ -129,6 +131,14 @@ const actionHandlers: Record<StaticAction, () => void> = {
     // Import dynamically to avoid circular dependency
     import("../utils/notifications").then(({ showInfo }) => {
       showInfo(modeName);
+    });
+  },
+  "toggle-magnifier": () => {
+    const r = getRenderer();
+    if (!r) return;
+    toggleMagnifier(r.sigma);
+    import("../utils/notifications").then(({ showInfo }) => {
+      showInfo(isMagnifierActive() ? "Magnifier On" : "Magnifier Off");
     });
   },
   // Tools menu

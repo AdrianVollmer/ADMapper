@@ -9,6 +9,7 @@ import type { ADGraphRenderer, LayoutType } from "../graph";
 import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel, updateDetailPanelForEdge } from "./sidebars";
 import { clearCollapseState } from "../graph/collapse";
+import { destroyMagnifier } from "../graph/magnifier";
 import { dispatchAction, type Action } from "./actions";
 import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-visibility";
 import { getDefaultLayout } from "./settings";
@@ -123,7 +124,8 @@ export function showConnectedPlaceholder(): void {
   const container = document.getElementById("graph-canvas");
   if (!container) return;
 
-  // Clean up existing renderer
+  // Clean up existing renderer and magnifier
+  destroyMagnifier();
   if (renderer) {
     renderer.destroy();
     renderer = null;
@@ -158,7 +160,8 @@ export function showNoConnectionPlaceholder(error?: string): void {
   const container = document.getElementById("graph-canvas");
   if (!container) return;
 
-  // Clean up existing renderer
+  // Clean up existing renderer and magnifier
+  destroyMagnifier();
   if (renderer) {
     renderer.destroy();
     renderer = null;
@@ -225,7 +228,8 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
     }
   }
 
-  // Clean up existing renderer
+  // Clean up existing renderer and magnifier
+  destroyMagnifier();
   if (renderer) {
     renderer.destroy();
     renderer = null;
