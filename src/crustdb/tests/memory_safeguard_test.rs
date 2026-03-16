@@ -183,11 +183,11 @@ fn test_frontier_limit_allows_small_queries() {
 }
 
 #[test]
-fn test_frontier_limit_default_unlimited() {
+fn test_frontier_limit_default_allows_normal_queries() {
     let db = setup_db();
     setup_dense_graph(&db, 50);
 
-    // Default is unlimited - should succeed
+    // Default frontier limit (2M) is high enough for normal queries
     let result = db
         .execute("MATCH (h:Hub {name: 'hub'})-[:LINK*1..2]->(s) RETURN s.idx")
         .unwrap();

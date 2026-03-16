@@ -37,13 +37,26 @@ use crate::storage::{EntityCache, SqliteStorage};
 /// limit acts as a circuit breaker to prevent out-of-memory conditions on
 /// queries that produce explosive intermediate results (e.g., large cross
 /// joins or deep variable-length path traversals).
+/// Default BFS frontier limit (2 million entries ≈ 24 MB of queue memory).
+const DEFAULT_MAX_FRONTIER_ENTRIES: usize = 2_000_000;
+
 /// Resource limits for query execution to prevent OOM conditions.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ResourceLimits {
     /// Maximum number of intermediate bindings allowed. None = unlimited.
     pub max_bindings: Option<usize>,
-    /// Maximum BFS frontier entries allowed. None = unlimited (default: 2M).
+    /// Maximum BFS frontier entries allowed. Defaults to 2M.
+    /// Set to `None` to disable (not recommended).
     pub max_frontier_entries: Option<usize>,
+}
+
+impl Default for ResourceLimits {
+    fn default() -> Self {
+        Self {
+            max_bindings: None,
+            max_frontier_entries: Some(DEFAULT_MAX_FRONTIER_ENTRIES),
+        }
+    }
 }
 
 pub(crate) struct ExecutionContext {
