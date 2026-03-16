@@ -280,7 +280,7 @@ fn execute_operator(
                 p.min_hops,
                 p.max_hops,
                 p.k,
-                p.target_property_filter.clone(),
+                p.target_property_filter.as_ref(),
                 storage,
                 cache,
                 ctx,

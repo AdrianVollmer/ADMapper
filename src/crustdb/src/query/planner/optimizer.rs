@@ -2,7 +2,7 @@
 
 use super::{
     AggregateFunction, FilterPredicate, PlanExpr, PlanLiteral, PlanOperator, QueryPlan,
-    TargetPropertyFilter,
+    ShortestPathParams, TargetPropertyFilter, VarLenExpandParams,
 };
 
 /// Apply optimization passes to a query plan.
@@ -252,63 +252,14 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
         }
 
         // Optimize Filter: try to push predicates into underlying operators
-        PlanOperator::Filter { source, predicate } => {
-            // Try to push target predicates into VariableLengthExpand
-            if let PlanOperator::VariableLengthExpand(mut p) = *source {
-                if p.target_property_filter.is_none() {
-                    // Try to extract a pushable target predicate
-                    if let Some((pushed_filter, remaining_predicate)) =
-                        extract_target_property_filter(&predicate, &p.target_variable)
-                    {
-                        p.source = Box::new(optimize_operator(*p.source));
-                        p.target_property_filter = Some(pushed_filter);
-                        let optimized_expand = PlanOperator::VariableLengthExpand(p);
-
-                        // If there's remaining predicate, try to push source
-                        // predicates into the NodeScan before wrapping with Filter.
-                        if let Some(remaining) = remaining_predicate {
-                            let (pushed_expand, leftover) =
-                                try_push_source_filter_into_expand(remaining, optimized_expand);
-                            if let Some(leftover_pred) = leftover {
-                                PlanOperator::Filter {
-                                    source: Box::new(pushed_expand),
-                                    predicate: leftover_pred,
-                                }
-                            } else {
-                                pushed_expand
-                            }
-                        } else {
-                            optimized_expand
-                        }
-                    } else {
-                        // Couldn't push target predicate, but try source pushdown
-                        p.source = Box::new(optimize_operator(*p.source));
-                        let expand = PlanOperator::VariableLengthExpand(p);
-                        let (pushed_expand, leftover) =
-                            try_push_source_filter_into_expand(predicate, expand);
-                        if let Some(leftover_pred) = leftover {
-                            PlanOperator::Filter {
-                                source: Box::new(pushed_expand),
-                                predicate: leftover_pred,
-                            }
-                        } else {
-                            pushed_expand
-                        }
-                    }
-                } else {
-                    p.source = Box::new(optimize_operator(*p.source));
-                    PlanOperator::Filter {
-                        source: Box::new(PlanOperator::VariableLengthExpand(p)),
-                        predicate,
-                    }
-                }
-            } else {
-                PlanOperator::Filter {
-                    source: Box::new(optimize_operator(*source)),
-                    predicate,
-                }
-            }
-        }
+        PlanOperator::Filter { source, predicate } => match *source {
+            PlanOperator::VariableLengthExpand(p) => push_filter_into_var_len_expand(p, predicate),
+            PlanOperator::ShortestPath(p) => push_filter_into_shortest_path(p, predicate),
+            other => PlanOperator::Filter {
+                source: Box::new(optimize_operator(other)),
+                predicate,
+            },
+        },
         PlanOperator::Project {
             source,
             columns,
@@ -606,53 +557,135 @@ fn extract_source_property_filter(
     }
 }
 
-/// Try to push a source property filter from a remaining predicate into
-/// the NodeScan that feeds a VariableLengthExpand.
+/// Push filter predicates from a WHERE clause into a VariableLengthExpand.
+///
+/// Target predicates (on the target variable) become `target_property_filter`
+/// for early BFS termination. Source predicates go into the NodeScan for
+/// reduced starting set.
+fn push_filter_into_var_len_expand(
+    mut p: VarLenExpandParams,
+    predicate: FilterPredicate,
+) -> PlanOperator {
+    if p.target_property_filter.is_none() {
+        if let Some((pushed_filter, remaining_predicate)) =
+            extract_target_property_filter(&predicate, &p.target_variable)
+        {
+            p.source = Box::new(optimize_operator(*p.source));
+            p.target_property_filter = Some(pushed_filter);
+            let expand = PlanOperator::VariableLengthExpand(p);
+            return wrap_with_remaining(expand, remaining_predicate);
+        }
+    }
+    // Couldn't push target predicate (or already has one), try source pushdown
+    p.source = Box::new(optimize_operator(*p.source));
+    let expand = PlanOperator::VariableLengthExpand(p);
+    let (pushed, leftover) = try_push_source_filter_into_node_scan(predicate, expand);
+    wrap_with_filter(pushed, leftover)
+}
+
+/// Push filter predicates from a WHERE clause into a ShortestPath.
+///
+/// Target predicates (on the target variable) become `target_property_filter`
+/// for early BFS termination. Source predicates go into the NodeScan for
+/// reduced starting set.
+fn push_filter_into_shortest_path(
+    mut p: ShortestPathParams,
+    predicate: FilterPredicate,
+) -> PlanOperator {
+    if p.target_property_filter.is_none() {
+        if let Some((pushed_filter, remaining_predicate)) =
+            extract_target_property_filter(&predicate, &p.target_variable)
+        {
+            p.source = Box::new(optimize_operator(*p.source));
+            p.target_property_filter = Some(pushed_filter);
+            let sp = PlanOperator::ShortestPath(p);
+            return wrap_with_remaining(sp, remaining_predicate);
+        }
+    }
+    // Couldn't push target predicate (or already has one), try source pushdown
+    p.source = Box::new(optimize_operator(*p.source));
+    let sp = PlanOperator::ShortestPath(p);
+    let (pushed, leftover) = try_push_source_filter_into_node_scan(predicate, sp);
+    wrap_with_filter(pushed, leftover)
+}
+
+/// After pushing a target filter, handle remaining predicates:
+/// try source pushdown, then wrap leftovers in a Filter.
+fn wrap_with_remaining(operator: PlanOperator, remaining: Option<FilterPredicate>) -> PlanOperator {
+    if let Some(remaining_pred) = remaining {
+        let (pushed, leftover) = try_push_source_filter_into_node_scan(remaining_pred, operator);
+        wrap_with_filter(pushed, leftover)
+    } else {
+        operator
+    }
+}
+
+/// Wrap an operator in a Filter if there's a leftover predicate.
+fn wrap_with_filter(operator: PlanOperator, leftover: Option<FilterPredicate>) -> PlanOperator {
+    if let Some(pred) = leftover {
+        PlanOperator::Filter {
+            source: Box::new(operator),
+            predicate: pred,
+        }
+    } else {
+        operator
+    }
+}
+
+/// Try to push a source property equality filter into the NodeScan that feeds
+/// a VariableLengthExpand or ShortestPath.
 ///
 /// Transforms:
-///   Filter(a.prop = 'X') -> VarLenExpand(source: NodeScan(no filter))
+///   Filter(a.prop = 'X') -> Expand(source: NodeScan(no filter))
 /// Into:
-///   VarLenExpand(source: NodeScan(property_filter: (prop, 'X')))
+///   Expand(source: NodeScan(property_filter: (prop, 'X')))
 ///
-/// Returns the (possibly modified) expand operator and any remaining predicate.
-fn try_push_source_filter_into_expand(
+/// Returns the (possibly modified) operator and any remaining predicate.
+fn try_push_source_filter_into_node_scan(
     predicate: FilterPredicate,
-    expand: PlanOperator,
+    operator: PlanOperator,
 ) -> (PlanOperator, Option<FilterPredicate>) {
-    // Destructure immediately to take ownership
-    if let PlanOperator::VariableLengthExpand(mut p) = expand {
-        if let PlanOperator::NodeScan {
-            variable,
-            label_groups,
-            limit: scan_limit,
-            property_filter: None,
-        } = *p.source
-        {
-            if let Some((prop_filter, remaining)) =
-                extract_source_property_filter(&predicate, &p.source_variable)
+    match operator {
+        PlanOperator::VariableLengthExpand(mut p) => {
+            if let Some(result) =
+                try_push_into_inner_scan(&predicate, &p.source_variable, &mut p.source)
             {
-                p.source = Box::new(PlanOperator::NodeScan {
-                    variable,
-                    label_groups,
-                    limit: scan_limit,
-                    property_filter: Some(prop_filter),
-                });
-                return (PlanOperator::VariableLengthExpand(p), remaining);
+                return (PlanOperator::VariableLengthExpand(p), result);
             }
-            // Reassemble -- couldn't push
-            p.source = Box::new(PlanOperator::NodeScan {
-                variable,
-                label_groups,
-                limit: scan_limit,
-                property_filter: None,
-            });
-            return (PlanOperator::VariableLengthExpand(p), Some(predicate));
+            (PlanOperator::VariableLengthExpand(p), Some(predicate))
         }
-        // Inner source isn't a bare NodeScan
-        return (PlanOperator::VariableLengthExpand(p), Some(predicate));
+        PlanOperator::ShortestPath(mut p) => {
+            if let Some(result) =
+                try_push_into_inner_scan(&predicate, &p.source_variable, &mut p.source)
+            {
+                return (PlanOperator::ShortestPath(p), result);
+            }
+            (PlanOperator::ShortestPath(p), Some(predicate))
+        }
+        other => (other, Some(predicate)),
     }
-    // Not a VariableLengthExpand
-    (expand, Some(predicate))
+}
+
+/// Try to push a source property filter into a NodeScan that is the inner
+/// source of an expand operator. Returns `Some(remaining)` on success.
+fn try_push_into_inner_scan(
+    predicate: &FilterPredicate,
+    source_variable: &str,
+    source: &mut Box<PlanOperator>,
+) -> Option<Option<FilterPredicate>> {
+    if let PlanOperator::NodeScan {
+        property_filter: ref mut pf @ None,
+        ..
+    } = **source
+    {
+        if let Some((prop_filter, remaining)) =
+            extract_source_property_filter(predicate, source_variable)
+        {
+            *pf = Some(prop_filter);
+            return Some(remaining);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -900,6 +933,129 @@ mod tests {
             }
         } else {
             panic!("Expected Project at root, got {:?}", plan.root);
+        }
+    }
+
+    // =========================================================================
+    // ShortestPath filter pushdown tests
+    // =========================================================================
+
+    #[test]
+    fn test_shortest_path_ends_with_filter_pushdown() {
+        let plan = plan_query(
+            "MATCH p = shortestPath((a)-[:REL*1..5]->(b)) WHERE b.name ENDS WITH '-512' RETURN p",
+        );
+        // Should push ENDS WITH into ShortestPath.target_property_filter
+        fn find_shortest_path(op: &PlanOperator) -> Option<&ShortestPathParams> {
+            match op {
+                PlanOperator::ShortestPath(p) => Some(p),
+                PlanOperator::Project { source, .. } => find_shortest_path(source),
+                PlanOperator::Filter { source, .. } => find_shortest_path(source),
+                _ => None,
+            }
+        }
+        let sp = find_shortest_path(&plan.root).expect("Should contain ShortestPath");
+        assert!(
+            sp.target_property_filter.is_some(),
+            "ENDS WITH should be pushed into ShortestPath"
+        );
+        if let Some(TargetPropertyFilter::EndsWith {
+            ref property,
+            ref suffix,
+        }) = sp.target_property_filter
+        {
+            assert_eq!(property, "name");
+            assert_eq!(suffix, "-512");
+        } else {
+            panic!(
+                "Expected EndsWith filter, got {:?}",
+                sp.target_property_filter
+            );
+        }
+    }
+
+    #[test]
+    fn test_shortest_path_eq_filter_pushdown() {
+        let plan =
+            plan_query("MATCH p = shortestPath((a)-[:REL*1..5]->(b)) WHERE b.id = 42 RETURN p");
+        fn find_shortest_path(op: &PlanOperator) -> Option<&ShortestPathParams> {
+            match op {
+                PlanOperator::ShortestPath(p) => Some(p),
+                PlanOperator::Project { source, .. } => find_shortest_path(source),
+                PlanOperator::Filter { source, .. } => find_shortest_path(source),
+                _ => None,
+            }
+        }
+        let sp = find_shortest_path(&plan.root).expect("Should contain ShortestPath");
+        assert!(
+            sp.target_property_filter.is_some(),
+            "Eq predicate should be pushed into ShortestPath"
+        );
+        matches!(
+            sp.target_property_filter,
+            Some(TargetPropertyFilter::Eq { .. })
+        );
+    }
+
+    #[test]
+    fn test_shortest_path_source_filter_pushdown() {
+        let plan = plan_query(
+            "MATCH p = shortestPath((a)-[:REL*1..5]->(b)) WHERE a.name = 'Alice' RETURN p",
+        );
+        fn find_shortest_path(op: &PlanOperator) -> Option<&ShortestPathParams> {
+            match op {
+                PlanOperator::ShortestPath(p) => Some(p),
+                PlanOperator::Project { source, .. } => find_shortest_path(source),
+                PlanOperator::Filter { source, .. } => find_shortest_path(source),
+                _ => None,
+            }
+        }
+        let sp = find_shortest_path(&plan.root).expect("Should contain ShortestPath");
+        // Source filter should be pushed into the NodeScan under ShortestPath
+        if let PlanOperator::NodeScan {
+            ref property_filter,
+            ..
+        } = *sp.source
+        {
+            assert!(
+                property_filter.is_some(),
+                "Source predicate should be pushed into NodeScan"
+            );
+        } else {
+            panic!("Expected NodeScan under ShortestPath, got {:?}", sp.source);
+        }
+    }
+
+    #[test]
+    fn test_shortest_path_both_filters_pushdown() {
+        // Both source and target filters should be pushed down simultaneously
+        let plan = plan_query(
+            "MATCH p = shortestPath((a)-[:REL*1..5]->(b)) WHERE a.name = 'Alice' AND b.name ENDS WITH '-512' RETURN p",
+        );
+        fn find_shortest_path(op: &PlanOperator) -> Option<&ShortestPathParams> {
+            match op {
+                PlanOperator::ShortestPath(p) => Some(p),
+                PlanOperator::Project { source, .. } => find_shortest_path(source),
+                PlanOperator::Filter { source, .. } => find_shortest_path(source),
+                _ => None,
+            }
+        }
+        let sp = find_shortest_path(&plan.root).expect("Should contain ShortestPath");
+        assert!(
+            sp.target_property_filter.is_some(),
+            "Target filter should be pushed into ShortestPath"
+        );
+        if let PlanOperator::NodeScan {
+            ref property_filter,
+            ..
+        } = *sp.source
+        {
+            assert!(
+                property_filter.is_some(),
+                "Source filter should be pushed into NodeScan"
+            );
+        } else {
+            panic!("Expected NodeScan under ShortestPath");
         }
     }
 }

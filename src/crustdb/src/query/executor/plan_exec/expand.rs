@@ -309,7 +309,7 @@ pub(super) fn execute_shortest_path(
     min_hops: u32,
     max_hops: u32,
     _k: u32,
-    target_property_filter: Option<(String, serde_json::Value)>,
+    target_property_filter: Option<&TargetPropertyFilter>,
     storage: &SqliteStorage,
     mut cache: Option<&mut EntityCache>,
     ctx: &mut ExecutionContext,
@@ -329,22 +329,25 @@ pub(super) fn execute_shortest_path(
 
     let mut result = Vec::new();
 
-    // If we have a specific target property filter, look up the target node directly
-    // This enables early termination when we find this specific node
-    let specific_target_id: Option<i64> = if let Some((ref prop, ref value)) =
-        target_property_filter
-    {
-        // Look up node(s) matching the property filter
-        let nodes = storage.find_nodes_by_property(prop, value, target_labels, Some(1))?;
-        trace!(specific_target_id = ?nodes.first().map(|n| n.id), "shortest_path: resolved target filter");
-        nodes.first().map(|n| n.id)
+    // Resolve target property filter to matching node IDs for early termination.
+    // Supports Eq, EndsWith, StartsWith, Contains via SQL pushdown.
+    let filter_resolved_ids: Option<HashSet<i64>> = if let Some(filter) = target_property_filter {
+        let nodes = resolve_target_property_filter(filter, target_labels, storage)?;
+        trace!(
+            resolved_targets = nodes.len(),
+            "shortest_path: resolved target filter to node IDs"
+        );
+        if nodes.is_empty() {
+            return Ok(ExecutionResult::Bindings(result));
+        }
+        Some(nodes.into_iter().map(|n| n.id).collect())
     } else {
         None
     };
 
-    // Pre-scan target nodes if we have label constraints (and no specific target)
+    // Pre-scan target nodes if we have label constraints (and no filter-resolved IDs)
     let target_ids: Option<HashSet<i64>> =
-        if specific_target_id.is_none() && !target_labels.is_empty() {
+        if filter_resolved_ids.is_none() && !target_labels.is_empty() {
             let mut ids = HashSet::new();
             for label in target_labels {
                 for node in storage.find_nodes_by_label(label)? {
@@ -403,19 +406,21 @@ pub(super) fn execute_shortest_path(
 
             // Check if we reached a valid target
             if depth >= min_hops && current_id != source_node.id {
-                let is_target = if let Some(specific_id) = specific_target_id {
-                    current_id == specific_id
+                let is_target = if let Some(ref ids) = filter_resolved_ids {
+                    ids.contains(&current_id)
+                } else if let Some(ref ids) = target_ids {
+                    ids.contains(&current_id)
                 } else {
-                    target_ids
-                        .as_ref()
-                        .map(|ids| ids.contains(&current_id))
-                        .unwrap_or(true)
+                    true
                 };
 
                 if is_target {
                     found_targets.push(current_id);
-                    // Early termination for specific target
-                    if specific_target_id.is_some() {
+                    // Early termination: if filter resolves to exactly 1 target
+                    if filter_resolved_ids
+                        .as_ref()
+                        .is_some_and(|ids| ids.len() == 1)
+                    {
                         break;
                     }
                 }

@@ -4,7 +4,7 @@ use super::{
     extract_simple_property_filter, plan_create_after_match, plan_expression_as_predicate,
     plan_inline_properties, plan_return, plan_set_clause, Error, ExpandParams, Expression,
     FilterPredicate, MatchClause, Pattern, PatternElement, PlanOperator, Result,
-    ShortestPathParams, VarLenExpandParams,
+    ShortestPathParams, TargetPropertyFilter, VarLenExpandParams,
 };
 
 /// Plan a MATCH statement.
@@ -395,7 +395,9 @@ pub fn plan_shortest_path_pattern(pattern: &Pattern, all_paths: bool) -> Result<
         min_hops,
         max_hops,
         k,
-        target_property_filter: target_property_filter.clone(),
+        target_property_filter: target_property_filter
+            .clone()
+            .map(|(property, value)| TargetPropertyFilter::Eq { property, value }),
     });
 
     // Add inline property filter for target if not pushed down (complex expressions)

@@ -67,9 +67,10 @@ pub struct ShortestPathParams {
     pub min_hops: u32,
     pub max_hops: u32,
     pub k: u32,
-    /// Target property filter for early termination (e.g., {id: 99}).
-    /// When set, BFS can terminate as soon as the specific target is found.
-    pub target_property_filter: Option<(String, serde_json::Value)>,
+    /// Target property filter for early termination (e.g., ENDS WITH '-512').
+    /// When set, BFS pre-resolves matching target node IDs via SQL and terminates
+    /// as soon as all targets are found.
+    pub target_property_filter: Option<TargetPropertyFilter>,
 }
 
 /// Plan operators form a tree representing the execution strategy.
