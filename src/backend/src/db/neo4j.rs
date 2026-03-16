@@ -270,9 +270,8 @@ impl DatabaseBackend for Neo4jDatabase {
 
     fn clear(&self) -> Result<()> {
         info!("Clearing all data from Neo4j");
-        // Delete all relationships first, then all nodes
-        self.run_query(query("MATCH ()-[r]->() DELETE r"))?;
-        self.run_query(query("MATCH (n) DELETE n"))?;
+        // Delete all nodes and relationships in one pass
+        self.run_query(query("MATCH (n) DETACH DELETE n"))?;
 
         // Create indexes on objectid for fast MERGE lookups during import
         // BloodHound node types that need indexes
@@ -290,7 +289,7 @@ impl DatabaseBackend for Neo4jDatabase {
             "RootCA",
             "AIACA",
             "NTAuthStore",
-            "Base", // For placeholder nodes
+            "Base", // For placeholder nodes and index-backed MERGE lookups
         ];
 
         for label in labels {
@@ -336,8 +335,9 @@ impl DatabaseBackend for Neo4jDatabase {
         }
 
         // Batch insert nodes of each label using UNWIND with flattened properties
-        // Use MERGE on objectid only to find existing placeholder nodes, then set label
-        const BATCH_SIZE: usize = 200;
+        // MERGE on :Base label so the Base.objectid index is used for fast lookups.
+        // All nodes carry :Base as a secondary label to enable index-backed MERGE.
+        const BATCH_SIZE: usize = 500;
         for (cypher_label, label_nodes) in nodes_by_label {
             for chunk in label_nodes.chunks(BATCH_SIZE) {
                 // Build list of flattened property maps
@@ -349,11 +349,11 @@ impl DatabaseBackend for Neo4jDatabase {
                     })
                     .collect();
 
-                // MERGE on objectid only (finds placeholders), then add label and set properties
+                // MERGE on :Base to use the objectid index, then add the real label
                 // REMOVE n.placeholder clears the placeholder marker if this was a placeholder
                 let cypher = format!(
                     "UNWIND [{}] AS props \
-                     MERGE (n {{objectid: props.objectid}}) \
+                     MERGE (n:Base {{objectid: props.objectid}}) \
                      SET n:{}, n += props \
                      REMOVE n.placeholder",
                     items.join(", "),
@@ -382,8 +382,8 @@ impl DatabaseBackend for Neo4jDatabase {
         }
 
         // Batch insert relationships of each type using UNWIND
-        // Use MERGE for nodes to create placeholders if they don't exist
-        const BATCH_SIZE: usize = 500;
+        // MERGE on :Base label so the Base.objectid index is used for fast lookups
+        const BATCH_SIZE: usize = 1000;
         let mut inserted = 0;
         for (rel_type, type_edges) in edges_by_type {
             for chunk in type_edges.chunks(BATCH_SIZE) {
@@ -402,14 +402,13 @@ impl DatabaseBackend for Neo4jDatabase {
                     .map(|e| serde_json::to_string(&e.properties).unwrap_or_default())
                     .collect();
 
-                // MERGE nodes (creates placeholders if not exist), then create relationship
-                // Note: We match on objectid only (not label) so placeholder nodes merge
-                // correctly with real nodes inserted later
+                // MERGE on :Base to use the objectid index for fast lookups.
+                // Placeholder nodes are created with :Base label if they don't exist.
                 let q = query(&format!(
                     "UNWIND range(0, size($srcs)-1) AS i \
-                     MERGE (a {{objectid: $srcs[i]}}) \
+                     MERGE (a:Base {{objectid: $srcs[i]}}) \
                      ON CREATE SET a.placeholder = true, a.node_type = $src_types[i] \
-                     MERGE (b {{objectid: $tgts[i]}}) \
+                     MERGE (b:Base {{objectid: $tgts[i]}}) \
                      ON CREATE SET b.placeholder = true, b.node_type = $tgt_types[i] \
                      MERGE (a)-[r:{}]->(b) \
                      SET r.properties = $props[i] \
@@ -459,9 +458,10 @@ impl DatabaseBackend for Neo4jDatabase {
     fn get_detailed_stats(&self) -> Result<DetailedStats> {
         let (total_nodes, total_edges) = self.get_stats()?;
 
-        // Get counts by label
+        // Get counts by label (filter out Base which is a secondary label on all nodes)
         let rows = self.execute_query(query(
-            "MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count",
+            "MATCH (n) WITH [l IN labels(n) WHERE l <> 'Base'][0] AS label \
+             RETURN label, count(*) AS count",
         ))?;
 
         let mut type_counts: HashMap<String, usize> = HashMap::new();

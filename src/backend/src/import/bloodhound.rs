@@ -14,7 +14,7 @@ use tracing::{debug, error, info, trace, warn};
 use zip::ZipArchive;
 
 /// Batch size for database inserts.
-const BATCH_SIZE: usize = 1000;
+const BATCH_SIZE: usize = 2000;
 
 /// Well-known high-value RIDs in Active Directory.
 /// These are built-in privileged groups that attackers typically target.

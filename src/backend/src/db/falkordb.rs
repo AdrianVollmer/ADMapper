@@ -317,9 +317,8 @@ impl DatabaseBackend for FalkorDbDatabase {
 
     fn clear(&self) -> Result<()> {
         info!("Clearing all data from FalkorDB");
-        // Delete all relationships first, then all nodes
-        self.run_query("MATCH ()-[r]->() DELETE r")?;
-        self.run_query("MATCH (n) DELETE n")?;
+        // Delete all nodes and relationships in one pass
+        self.run_query("MATCH (n) DETACH DELETE n")?;
 
         // Create indexes on objectid for fast MERGE lookups during import
         // BloodHound node types that need indexes
@@ -342,6 +341,7 @@ impl DatabaseBackend for FalkorDbDatabase {
 
         for label in labels {
             // FalkorDB uses CREATE INDEX syntax
+            // Base label is used on all nodes for index-backed MERGE lookups
             let index_query = format!("CREATE INDEX FOR (n:{}) ON (n.objectid)", label);
             // Ignore errors (index may already exist)
             let _ = self.run_query(&index_query);
@@ -377,8 +377,9 @@ impl DatabaseBackend for FalkorDbDatabase {
         }
 
         // Batch insert nodes of each label using UNWIND with flattened properties
-        // Use MERGE on objectid only to find existing placeholder nodes, then set label
-        const BATCH_SIZE: usize = 200;
+        // MERGE on :Base label so the Base.objectid index is used for fast lookups.
+        // All nodes carry :Base as a secondary label to enable index-backed MERGE.
+        const BATCH_SIZE: usize = 500;
         for (cypher_label, label_nodes) in nodes_by_label {
             for chunk in label_nodes.chunks(BATCH_SIZE) {
                 // Build list of flattened property maps
@@ -390,11 +391,11 @@ impl DatabaseBackend for FalkorDbDatabase {
                     })
                     .collect();
 
-                // MERGE on objectid only (finds placeholders), then add label and set properties
+                // MERGE on :Base to use the objectid index, then add the real label
                 // REMOVE n.placeholder clears the placeholder marker if this was a placeholder
                 let cypher = format!(
                     "UNWIND [{}] AS props \
-                     MERGE (n {{objectid: props.objectid}}) \
+                     MERGE (n:Base {{objectid: props.objectid}}) \
                      SET n:{}, n += props \
                      REMOVE n.placeholder",
                     items.join(", "),
@@ -424,8 +425,8 @@ impl DatabaseBackend for FalkorDbDatabase {
         }
 
         // Batch insert relationships of each type using UNWIND
-        // Use MERGE for nodes to create placeholders if they don't exist
-        const BATCH_SIZE: usize = 200;
+        // MERGE on :Base label so the Base.objectid index is used for fast lookups
+        const BATCH_SIZE: usize = 500;
         let mut inserted = 0;
         for (rel_type, type_edges) in edges_by_type {
             for chunk in type_edges.chunks(BATCH_SIZE) {
@@ -465,21 +466,22 @@ impl DatabaseBackend for FalkorDbDatabase {
                 // Done as a separate query to avoid FalkorDB's UNWIND+MERGE row
                 // collapsing, which causes subsequent CREATE to lose edges when
                 // multiple rows reference the same source/target node.
+                // MERGE on :Base to use the objectid index for fast lookups.
                 let ensure_nodes = format!(
                     "UNWIND [{}] AS row \
-                     MERGE (a {{objectid: row.src}}) \
+                     MERGE (a:Base {{objectid: row.src}}) \
                      ON CREATE SET a.placeholder = true, a.node_type = row.src_type \
-                     MERGE (b {{objectid: row.tgt}}) \
+                     MERGE (b:Base {{objectid: row.tgt}}) \
                      ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type",
                     items_str
                 );
                 self.run_query(&ensure_nodes)?;
 
-                // Step 2: Create edges using MATCH (nodes guaranteed to exist).
+                // Step 2: Create edges using MATCH on :Base (nodes guaranteed to exist).
                 let create_edges = format!(
                     "UNWIND [{}] AS row \
-                     MATCH (a {{objectid: row.src}}) \
-                     MATCH (b {{objectid: row.tgt}}) \
+                     MATCH (a:Base {{objectid: row.src}}) \
+                     MATCH (b:Base {{objectid: row.tgt}}) \
                      CREATE (a)-[r:{}]->(b) \
                      SET r.properties = row.props \
                      RETURN count(r) AS created",
@@ -520,9 +522,11 @@ impl DatabaseBackend for FalkorDbDatabase {
     fn get_detailed_stats(&self) -> Result<DetailedStats> {
         let (total_nodes, total_edges) = self.get_stats()?;
 
-        // Get counts by label
-        let rows =
-            self.execute_query("MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count")?;
+        // Get counts by label (filter out Base which is a secondary label on all nodes)
+        let rows = self.execute_query(
+            "MATCH (n) WITH [l IN labels(n) WHERE l <> 'Base'][0] AS label \
+             RETURN label, count(*) AS count",
+        )?;
 
         let mut type_counts: HashMap<String, usize> = HashMap::new();
         for row in rows {
