@@ -93,6 +93,8 @@ export interface ImportProgressEvent {
   current_file?: string;
   nodes_imported: number;
   edges_imported: number;
+  bytes_processed: number;
+  bytes_total: number;
   error?: string;
 }
 

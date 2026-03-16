@@ -31,6 +31,10 @@ pub struct ImportProgress {
     pub nodes_imported: usize,
     /// Number of relationships imported
     pub edges_imported: usize,
+    /// Bytes processed so far (for weighted progress)
+    pub bytes_processed: u64,
+    /// Total bytes across all files (for weighted progress)
+    pub bytes_total: u64,
     /// Error message if status is Failed
     pub error: Option<String>,
 }
@@ -45,12 +49,19 @@ impl ImportProgress {
             total_files: 0,
             nodes_imported: 0,
             edges_imported: 0,
+            bytes_processed: 0,
+            bytes_total: 0,
             error: None,
         }
     }
 
     pub fn with_total_files(mut self, total: usize) -> Self {
         self.total_files = total;
+        self
+    }
+
+    pub fn with_bytes_total(mut self, total: u64) -> Self {
+        self.bytes_total = total;
         self
     }
 

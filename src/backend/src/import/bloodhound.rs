@@ -155,24 +155,28 @@ impl BloodHoundImporter {
             format!("Failed to open ZIP: {e}")
         })?;
 
-        // Collect JSON file names
-        let json_files: Vec<String> = (0..archive.len())
+        // Collect JSON file names and their uncompressed sizes
+        let json_files: Vec<(String, u64)> = (0..archive.len())
             .filter_map(|i| {
                 let file = archive.by_index(i).ok()?;
                 let name = file.name().to_string();
+                let size = file.size();
                 if name.ends_with(".json") {
-                    Some(name)
+                    Some((name, size))
                 } else {
                     None
                 }
             })
             .collect();
 
-        info!(file_count = json_files.len(), "Found JSON files in ZIP");
+        let bytes_total: u64 = json_files.iter().map(|(_, size)| size).sum();
+
+        info!(file_count = json_files.len(), bytes_total, "Found JSON files in ZIP");
         debug!(files = ?json_files, "JSON files to process");
 
-        let mut progress =
-            ImportProgress::new(job_id.to_string()).with_total_files(json_files.len());
+        let mut progress = ImportProgress::new(job_id.to_string())
+            .with_total_files(json_files.len())
+            .with_bytes_total(bytes_total);
         self.send_progress(&progress);
 
         // Clear existing data for fresh import
@@ -182,7 +186,7 @@ impl BloodHoundImporter {
             format!("Failed to clear database: {e}")
         })?;
 
-        for file_name in &json_files {
+        for (file_name, file_size) in &json_files {
             debug!(file = %file_name, "Processing file");
             progress.set_current_file(file_name.clone());
             self.send_progress(&progress);
@@ -209,11 +213,13 @@ impl BloodHoundImporter {
                         "File processed"
                     );
                     progress.files_processed += 1;
+                    progress.bytes_processed += file_size;
                     self.send_progress(&progress);
                 }
                 Err(e) => {
                     warn!(file = %file_name, error = %e, "Error importing file, continuing");
                     progress.files_processed += 1;
+                    progress.bytes_processed += file_size;
                 }
             }
         }
@@ -229,16 +235,20 @@ impl BloodHoundImporter {
         path: P,
         job_id: &str,
     ) -> Result<ImportProgress, String> {
+        let file_size = std::fs::metadata(&path).map_or(0, |m| m.len());
         let contents =
             std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))?;
 
-        let mut progress = ImportProgress::new(job_id.to_string()).with_total_files(1);
+        let mut progress = ImportProgress::new(job_id.to_string())
+            .with_total_files(1)
+            .with_bytes_total(file_size);
         progress.set_current_file(path.as_ref().display().to_string());
         self.send_progress(&progress);
 
         self.import_json_str(&contents, &mut progress)?;
 
         progress.files_processed = 1;
+        progress.bytes_processed = file_size;
         progress.complete();
         self.send_progress(&progress);
         Ok(progress)
@@ -252,7 +262,16 @@ impl BloodHoundImporter {
     ) -> Result<ImportProgress, String> {
         info!(file_count = paths.len(), "Importing multiple JSON files");
 
-        let mut progress = ImportProgress::new(job_id.to_string()).with_total_files(paths.len());
+        // Calculate total bytes across all files for weighted progress
+        let bytes_total: u64 = paths
+            .iter()
+            .filter_map(|(_, path)| std::fs::metadata(path).ok())
+            .map(|m| m.len())
+            .sum();
+
+        let mut progress = ImportProgress::new(job_id.to_string())
+            .with_total_files(paths.len())
+            .with_bytes_total(bytes_total);
         self.send_progress(&progress);
 
         // Clear existing data for fresh import
@@ -266,6 +285,9 @@ impl BloodHoundImporter {
             debug!(file = %filename, "Processing file");
             progress.set_current_file(filename.clone());
             self.send_progress(&progress);
+
+            let metadata = std::fs::metadata(path).ok();
+            let file_size = metadata.map_or(0, |m| m.len());
 
             let contents = std::fs::read_to_string(path).map_err(|e| {
                 error!(file = %filename, error = %e, "Failed to read file");
@@ -281,11 +303,13 @@ impl BloodHoundImporter {
                         "File processed"
                     );
                     progress.files_processed += 1;
+                    progress.bytes_processed += file_size;
                     self.send_progress(&progress);
                 }
                 Err(e) => {
                     warn!(file = %filename, error = %e, "Error importing file, continuing");
                     progress.files_processed += 1;
+                    progress.bytes_processed += file_size;
                 }
             }
         }
