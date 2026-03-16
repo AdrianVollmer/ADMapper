@@ -605,6 +605,8 @@ pub fn import_from_paths(
         current_file: None,
         nodes_imported: 0,
         edges_imported: 0,
+        bytes_processed: 0,
+        bytes_total: 0,
         error: None,
     };
     state_clone.emit_import_progress(&job_id, &initial_progress);
@@ -652,6 +654,8 @@ pub fn import_from_paths(
                 current_file: Some(filename.clone()),
                 nodes_imported: total_nodes,
                 edges_imported: total_edges,
+                bytes_processed: 0,
+                bytes_total: 0,
                 error: None,
             };
             state_clone.emit_import_progress(&job_id_clone, &progress);
@@ -677,6 +681,8 @@ pub fn import_from_paths(
                         current_file: Some(filename),
                         nodes_imported: total_nodes,
                         edges_imported: total_edges,
+                        bytes_processed: 0,
+                        bytes_total: 0,
                         error: Some(e),
                     };
                     state_clone.emit_import_progress(&job_id_clone, &error_progress);
@@ -720,6 +726,8 @@ pub fn import_from_paths(
                             current_file: None,
                             nodes_imported: total_nodes,
                             edges_imported: total_edges,
+                            bytes_processed: 0,
+                            bytes_total: 0,
                             error: Some(e),
                         };
                         state_clone.emit_import_progress(&job_id_clone, &error_progress);
@@ -738,6 +746,8 @@ pub fn import_from_paths(
             current_file: None,
             nodes_imported: total_nodes,
             edges_imported: total_edges,
+            bytes_processed: 0,
+            bytes_total: 0,
             error: None,
         };
         state_clone.emit_import_progress(&job_id_clone, &final_progress);
