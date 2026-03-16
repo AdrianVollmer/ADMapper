@@ -1,6 +1,6 @@
 [package]
 name = "admapper"
-version = "0.1.13"
+version = "0.1.14"
 description = "BloodHound frontend for visualizing Active Directory permissions"
 authors = ["ADMapper Contributors"]
 license = "MIT"
