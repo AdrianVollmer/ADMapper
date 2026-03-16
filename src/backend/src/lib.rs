@@ -26,6 +26,7 @@ use axum::{
     Router,
 };
 use rust_embed::Embed;
+use std::future::IntoFuture;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
@@ -365,12 +366,21 @@ pub async fn run_service(bind: &str, port: u16, database_url: Option<&str>) {
     println!("Press Ctrl+C to stop");
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .unwrap();
 
-    info!("Shutting down gracefully");
+    // Don't use with_graceful_shutdown() — it waits for in-flight connections
+    // (like browser SSE streams) to finish, which blocks shutdown indefinitely.
+    // Instead, race the server against the shutdown signal and drop immediately.
+    tokio::select! {
+        result = axum::serve(listener, app).into_future() => {
+            if let Err(e) = result {
+                error!(error = %e, "Server error");
+            }
+        }
+        _ = shutdown_signal() => {
+            info!("Shutting down");
+        }
+    }
+
     // `state` is dropped here, which triggers Database::drop() -> WAL checkpoint
 }
 
