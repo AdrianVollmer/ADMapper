@@ -6,7 +6,7 @@ use crate::graph::{Node, Relationship};
 use crate::query::operators::{ExpandRequest, VariableLengthExpandRequest};
 use crate::query::planner::{ExpandDirection, TargetPropertyFilter};
 use crate::storage::{EntityCache, SqliteStorage};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 pub(super) fn execute_expand(
     bindings: Vec<Binding>,
@@ -305,35 +305,27 @@ pub(super) fn execute_shortest_path(
             .get_node(source_variable)
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", source_variable)))?;
 
-        // BFS for shortest paths
+        // BFS using parent pointers instead of cloning path vectors.
+        // Each queue entry is just (node_id, depth) — O(1) per entry.
+        // The parent map records how we reached each node for path reconstruction.
+        let mut parent: HashMap<i64, (i64, i64)> = HashMap::new(); // child -> (parent, rel_id)
         let mut visited: HashSet<i64> = HashSet::new();
-        let mut found_paths: Vec<(Node, Vec<i64>, Vec<i64>)> = Vec::new();
-        let mut found_specific_target = false;
+        let mut found_targets: Vec<i64> = Vec::new();
 
-        let mut queue: VecDeque<(i64, Vec<i64>, Vec<i64>)> = VecDeque::new();
-        queue.push_back((source_node.id, vec![source_node.id], Vec::new()));
+        let mut queue: VecDeque<(i64, u32)> = VecDeque::new();
+        queue.push_back((source_node.id, 0));
         visited.insert(source_node.id);
 
-        while let Some((current_id, path_nodes, path_rel_ids)) = queue.pop_front() {
-            let depth = path_rel_ids.len() as u32;
-
-            // Stop BFS at max depth
+        while let Some((current_id, depth)) = queue.pop_front() {
             if depth > max_hops {
                 continue;
-            }
-
-            // Early termination: if we found the specific target, stop exploring
-            if found_specific_target {
-                break;
             }
 
             // Check if we reached a valid target
             if depth >= min_hops && current_id != source_node.id {
                 let is_target = if let Some(specific_id) = specific_target_id {
-                    // We have a specific target - check if this is it
                     current_id == specific_id
                 } else {
-                    // Check against label-based target set
                     target_ids
                         .as_ref()
                         .map(|ids| ids.contains(&current_id))
@@ -341,21 +333,12 @@ pub(super) fn execute_shortest_path(
                 };
 
                 if is_target {
-                    if let Some(target_node) =
-                        get_node_cached(current_id, storage, cache.as_deref_mut())?
-                    {
-                        found_paths.push((target_node, path_nodes.clone(), path_rel_ids.clone()));
-                        // If we have a specific target, we found it - can terminate early
-                        if specific_target_id.is_some() {
-                            found_specific_target = true;
-                        }
+                    found_targets.push(current_id);
+                    // Early termination for specific target
+                    if specific_target_id.is_some() {
+                        break;
                     }
                 }
-            }
-
-            // Don't expand if we already found our specific target
-            if found_specific_target {
-                break;
             }
 
             // Expand
@@ -365,36 +348,36 @@ pub(super) fn execute_shortest_path(
             for relationship in relationships {
                 let next_id = get_target_id(&relationship, current_id, direction);
 
-                // Use global visited set for efficiency when we only need shortest paths
-                // (all paths at shortest depth are equally valid)
                 if visited.contains(&next_id) {
                     continue;
                 }
                 visited.insert(next_id);
+                parent.insert(next_id, (current_id, relationship.id));
 
-                let mut new_path_nodes = path_nodes.clone();
-                new_path_nodes.push(next_id);
-
-                let mut new_path_rel_ids = path_rel_ids.clone();
-                new_path_rel_ids.push(relationship.id);
-
-                queue.push_back((next_id, new_path_nodes, new_path_rel_ids));
+                queue.push_back((next_id, depth + 1));
                 ctx.check_frontier(queue.len())?;
             }
         }
 
-        // Convert found paths to bindings
-        for (target_node, path_node_ids, path_rel_ids) in found_paths {
+        // Reconstruct paths from parent pointers and convert to bindings
+        for target_id in found_targets {
+            let target_node = match get_node_cached(target_id, storage, cache.as_deref_mut())? {
+                Some(n) => n,
+                None => continue,
+            };
             let mut new_binding = binding.clone().with_node(target_variable, target_node);
 
             if let Some(pv) = path_variable {
-                let mut nodes = Vec::new();
+                let (path_node_ids, path_rel_ids) =
+                    reconstruct_path(source_node.id, target_id, &parent);
+
+                let mut nodes = Vec::with_capacity(path_node_ids.len());
                 for &nid in &path_node_ids {
                     if let Some(n) = get_node_cached(nid, storage, cache.as_deref_mut())? {
                         nodes.push(n);
                     }
                 }
-                let mut relationships = Vec::new();
+                let mut relationships = Vec::with_capacity(path_rel_ids.len());
                 for &eid in &path_rel_ids {
                     if let Some(e) = get_relationship_cached(eid, storage, cache.as_deref_mut())? {
                         relationships.push(e);
@@ -467,4 +450,31 @@ pub(super) fn get_target_id(
             }
         }
     }
+}
+
+/// Reconstruct a path from parent pointers.
+///
+/// Walks backward from `target` to `source` using the parent map,
+/// then reverses to get source-to-target order.
+/// Returns (node_ids, relationship_ids) for the path.
+fn reconstruct_path(
+    source: i64,
+    target: i64,
+    parent: &HashMap<i64, (i64, i64)>,
+) -> (Vec<i64>, Vec<i64>) {
+    let mut node_ids = vec![target];
+    let mut rel_ids = Vec::new();
+    let mut current = target;
+    while current != source {
+        if let Some(&(parent_id, rel_id)) = parent.get(&current) {
+            rel_ids.push(rel_id);
+            node_ids.push(parent_id);
+            current = parent_id;
+        } else {
+            break;
+        }
+    }
+    node_ids.reverse();
+    rel_ids.reverse();
+    (node_ids, rel_ids)
 }
