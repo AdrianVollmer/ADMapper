@@ -5,7 +5,7 @@ use crate::import::types::ImportProgress;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use serde_json::Value as JsonValue;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek};
 use std::path::Path;
 use std::sync::Arc;
@@ -227,6 +227,17 @@ impl BloodHoundImporter {
             }
         }
 
+        // Resolve placeholder node names using domain SID-to-name mappings
+        match self.resolve_orphan_names() {
+            Ok(count) if count > 0 => {
+                info!(updated = count, "Resolved orphan node names");
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to resolve orphan node names");
+            }
+            _ => {}
+        }
+
         progress.complete();
         self.send_progress(&progress);
         Ok(progress)
@@ -252,6 +263,18 @@ impl BloodHoundImporter {
 
         progress.files_processed = 1;
         progress.bytes_processed = file_size;
+
+        // Resolve placeholder node names using domain SID-to-name mappings
+        match self.resolve_orphan_names() {
+            Ok(count) if count > 0 => {
+                info!(updated = count, "Resolved orphan node names");
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to resolve orphan node names");
+            }
+            _ => {}
+        }
+
         progress.complete();
         self.send_progress(&progress);
         Ok(progress)
@@ -315,6 +338,17 @@ impl BloodHoundImporter {
                     progress.bytes_processed += file_size;
                 }
             }
+        }
+
+        // Resolve placeholder node names using domain SID-to-name mappings
+        match self.resolve_orphan_names() {
+            Ok(count) if count > 0 => {
+                info!(updated = count, "Resolved orphan node names");
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to resolve orphan node names");
+            }
+            _ => {}
         }
 
         progress.complete();
@@ -1050,6 +1084,88 @@ impl BloodHoundImporter {
         );
         self.edge_buffer.clear();
         Ok(())
+    }
+
+    /// Resolve placeholder node names using domain SID-to-name mappings.
+    ///
+    /// After import, placeholder nodes have `name = objectid` (a raw SID like
+    /// `S-1-5-21-xxx-512`). This builds a domain SID → name map from Domain
+    /// nodes, then updates matching placeholders to `{DOMAIN}-{RID}` format
+    /// (e.g. `CONTOSO.LOCAL-512`).
+    fn resolve_orphan_names(&self) -> Result<usize, String> {
+        // Step 1: Build domain SID → name map from Domain nodes
+        let all_nodes = self
+            .db
+            .get_all_nodes()
+            .map_err(|e| format!("Failed to get nodes for orphan name resolution: {e}"))?;
+
+        let mut domain_map: HashMap<String, String> = HashMap::new();
+        for node in &all_nodes {
+            if node.label == "Domain"
+                && !node.name.is_empty()
+                && node.name != node.id
+                && !node.name.starts_with("S-1-")
+            {
+                domain_map.insert(node.id.clone(), node.name.clone());
+            }
+        }
+
+        if domain_map.is_empty() {
+            debug!("No domain name mappings found, skipping orphan name resolution");
+            return Ok(0);
+        }
+
+        info!(
+            domain_count = domain_map.len(),
+            "Built domain SID-to-name map for orphan resolution"
+        );
+
+        // Step 2: Find nodes whose name is their raw SID and resolve them
+        let mut updated = 0;
+        for node in &all_nodes {
+            if node.name != node.id {
+                continue;
+            }
+
+            // Extract domain SID prefix: S-1-5-21-X-Y-Z-RID → S-1-5-21-X-Y-Z
+            if let Some(last_dash) = node.id.rfind('-') {
+                let domain_sid = &node.id[..last_dash];
+                let rid = &node.id[last_dash..]; // e.g. "-512"
+
+                if let Some(domain_name) = domain_map.get(domain_sid) {
+                    let friendly_name = format!("{}{}", domain_name, rid);
+                    let escaped_objectid = node.id.replace('\'', "\\'");
+                    let escaped_name = friendly_name.replace('\'', "\\'");
+                    let query = format!(
+                        "MATCH (n) WHERE n.objectid = '{}' SET n.name = '{}'",
+                        escaped_objectid, escaped_name
+                    );
+                    match self.db.run_custom_query(&query) {
+                        Ok(_) => {
+                            updated += 1;
+                            trace!(
+                                objectid = %node.id,
+                                new_name = %friendly_name,
+                                "Resolved orphan node name"
+                            );
+                        }
+                        Err(e) => {
+                            debug!(
+                                objectid = %node.id,
+                                error = %e,
+                                "Failed to update orphan node name"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if updated > 0 {
+            info!(updated, "Resolved orphan node names with domain context");
+        }
+
+        Ok(updated)
     }
 
     fn send_progress(&self, progress: &ImportProgress) {
