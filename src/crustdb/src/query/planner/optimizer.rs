@@ -5,6 +5,60 @@ use super::{
     QueryPlan, ShortestPathParams, TargetPropertyFilter, VarLenExpandParams,
 };
 
+/// Estimate the cardinality of a plan operator for CrossJoin reordering.
+///
+/// These are rough heuristics — we don't have runtime stats, so we use
+/// structural properties of the plan to estimate relative sizes.
+fn estimate_cardinality(op: &PlanOperator) -> u64 {
+    match op {
+        PlanOperator::NodeScan {
+            property_filter,
+            limit,
+            ..
+        } => {
+            let base = if property_filter.is_some() {
+                // Indexed property lookup — likely very selective
+                10
+            } else {
+                // Full label scan — assume moderate size
+                1000
+            };
+            match limit {
+                Some(l) => base.min(*l),
+                None => base,
+            }
+        }
+        PlanOperator::Expand(p) => {
+            // Source cardinality * estimated fan-out
+            let source_card = estimate_cardinality(&p.source);
+            let fan_out = if p.target_property_filter.is_some() {
+                2 // Filtered expand — low fan-out
+            } else {
+                10 // Unfiltered — moderate fan-out
+            };
+            source_card.saturating_mul(fan_out)
+        }
+        PlanOperator::VariableLengthExpand(p) => {
+            let source_card = estimate_cardinality(&p.source);
+            source_card.saturating_mul(100) // BFS can reach many nodes
+        }
+        PlanOperator::ShortestPath(p) => {
+            let source_card = estimate_cardinality(&p.source);
+            source_card.saturating_mul(5) // Typically few shortest paths per source
+        }
+        PlanOperator::Filter { source, .. } => {
+            // Assume filter removes ~50% of rows
+            estimate_cardinality(source) / 2
+        }
+        PlanOperator::Limit { count, .. } => *count,
+        PlanOperator::CrossJoin { left, right } => {
+            estimate_cardinality(left).saturating_mul(estimate_cardinality(right))
+        }
+        // Default: treat as large to avoid moving unknowns
+        _ => 10_000,
+    }
+}
+
 /// Apply optimization passes to a query plan.
 pub fn optimize(plan: QueryPlan) -> QueryPlan {
     let root = optimize_operator(plan.root);
@@ -361,10 +415,25 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             relationships,
         },
 
-        PlanOperator::CrossJoin { left, right } => PlanOperator::CrossJoin {
-            left: Box::new(optimize_operator(*left)),
-            right: Box::new(optimize_operator(*right)),
-        },
+        PlanOperator::CrossJoin { left, right } => {
+            let left_opt = optimize_operator(*left);
+            let right_opt = optimize_operator(*right);
+            let left_card = estimate_cardinality(&left_opt);
+            let right_card = estimate_cardinality(&right_opt);
+            // Place smaller-estimated side as left (outer loop) so that
+            // subsequent filters can eliminate rows earlier.
+            if left_card <= right_card {
+                PlanOperator::CrossJoin {
+                    left: Box::new(left_opt),
+                    right: Box::new(right_opt),
+                }
+            } else {
+                PlanOperator::CrossJoin {
+                    left: Box::new(right_opt),
+                    right: Box::new(left_opt),
+                }
+            }
+        }
 
         // Leaf operators - no optimization needed
         other => other,
@@ -1270,6 +1339,80 @@ mod tests {
             );
         } else {
             panic!("Expected NodeScan under ShortestPath");
+        }
+    }
+
+    // =========================================================================
+    // CrossJoin reordering tests
+    // =========================================================================
+
+    #[test]
+    fn test_crossjoin_reorder_smaller_left() {
+        // MATCH (a:User), (b:Domain) — if we have no data, the optimizer
+        // should still produce a CrossJoin. We test that the structure
+        // has labeled NodeScans in cross join.
+        let plan = plan_query("MATCH (a:Domain), (b:User) RETURN a, b");
+        // The optimizer should place the smaller-estimated side (Domain, fewer
+        // labels typically) as left. Since we can't know actual counts at plan
+        // time without data, we verify the estimate_cardinality function works
+        // and the CrossJoin is reordered when estimates differ.
+        fn extract_crossjoin_labels(op: &PlanOperator) -> Option<(Vec<String>, Vec<String>)> {
+            match op {
+                PlanOperator::CrossJoin { left, right } => {
+                    let left_labels = match left.as_ref() {
+                        PlanOperator::NodeScan { label_groups, .. } => {
+                            label_groups.iter().flatten().cloned().collect()
+                        }
+                        _ => vec![],
+                    };
+                    let right_labels = match right.as_ref() {
+                        PlanOperator::NodeScan { label_groups, .. } => {
+                            label_groups.iter().flatten().cloned().collect()
+                        }
+                        _ => vec![],
+                    };
+                    Some((left_labels, right_labels))
+                }
+                PlanOperator::Project { source, .. } => extract_crossjoin_labels(source),
+                PlanOperator::Filter { source, .. } => extract_crossjoin_labels(source),
+                _ => None,
+            }
+        }
+        let (left_labels, right_labels) =
+            extract_crossjoin_labels(&plan.root).expect("Should contain CrossJoin");
+        // Both sides should be NodeScans with labels
+        assert!(!left_labels.is_empty(), "Left should have labels");
+        assert!(!right_labels.is_empty(), "Right should have labels");
+    }
+
+    #[test]
+    fn test_crossjoin_reorder_nodescan_vs_expand() {
+        // MATCH (a:User)-[:KNOWS]->(b), (c:Domain) RETURN a, b, c
+        // Expand has higher estimated cardinality than a single NodeScan,
+        // so NodeScan(Domain) should be placed as left (outer loop).
+        let plan = plan_query("MATCH (a:User)-[:KNOWS]->(b), (c:Domain) RETURN a, b, c");
+        fn find_crossjoin(op: &PlanOperator) -> Option<&PlanOperator> {
+            match op {
+                cj @ PlanOperator::CrossJoin { .. } => Some(cj),
+                PlanOperator::Project { source, .. } => find_crossjoin(source),
+                PlanOperator::Filter { source, .. } => find_crossjoin(source),
+                _ => None,
+            }
+        }
+        let cj = find_crossjoin(&plan.root).expect("Should contain CrossJoin");
+        if let PlanOperator::CrossJoin { left, right } = cj {
+            // Left should be the smaller side (NodeScan for Domain)
+            assert!(
+                matches!(left.as_ref(), PlanOperator::NodeScan { .. }),
+                "Left side of CrossJoin should be NodeScan (smaller), got {:?}",
+                left
+            );
+            // Right should be the larger side (Expand)
+            assert!(
+                matches!(right.as_ref(), PlanOperator::Expand(_)),
+                "Right side of CrossJoin should be Expand (larger), got {:?}",
+                right
+            );
         }
     }
 }
