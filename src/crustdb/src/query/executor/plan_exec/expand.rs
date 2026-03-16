@@ -7,6 +7,7 @@ use crate::query::operators::{ExpandRequest, VariableLengthExpandRequest};
 use crate::query::planner::{ExpandDirection, TargetPropertyFilter};
 use crate::storage::{EntityCache, SqliteStorage};
 use std::collections::{HashMap, HashSet, VecDeque};
+use tracing::trace;
 
 pub(super) fn execute_expand(
     bindings: Vec<Binding>,
@@ -105,6 +106,17 @@ pub(super) fn execute_variable_length_expand(
     mut cache: Option<&mut EntityCache>,
     ctx: &mut ExecutionContext,
 ) -> Result<ExecutionResult> {
+    trace!(
+        source = req.source_variable,
+        target = req.target_variable,
+        min_hops = req.min_hops,
+        max_hops = req.max_hops,
+        types = ?req.types,
+        direction = ?req.direction,
+        bindings = bindings.len(),
+        "variable_length_expand: starting"
+    );
+
     let mut result = Vec::new();
 
     // Resolve target_property_filter to node IDs for early termination
@@ -151,12 +163,29 @@ pub(super) fn execute_variable_length_expand(
         // leading to O(relationships^depth) complexity instead of O(V+E).
         let mut queue: VecDeque<(i64, Vec<i64>, Vec<Relationship>)> = VecDeque::new();
         let mut visited: HashSet<i64> = HashSet::new();
+        let mut prev_depth: u32 = 0;
 
         queue.push_back((source_node.id, vec![source_node.id], Vec::new()));
         visited.insert(source_node.id);
 
+        trace!(
+            source_id = source_node.id,
+            "variable_length_expand: starting BFS from source"
+        );
+
         'bfs: while let Some((current_id, path_nodes, path_rels)) = queue.pop_front() {
             let depth = path_rels.len() as u32;
+
+            if depth > prev_depth {
+                trace!(
+                    depth,
+                    queue_len = queue.len(),
+                    visited = visited.len(),
+                    results = result.len(),
+                    "variable_length_expand: advancing to next depth"
+                );
+                prev_depth = depth;
+            }
 
             // Early termination: check if we've reached the limit
             if let Some(lim) = limit {
@@ -251,7 +280,19 @@ pub(super) fn execute_variable_length_expand(
                 ctx.check_frontier(queue.len())?;
             }
         }
+
+        trace!(
+            source_id = source_node.id,
+            visited = visited.len(),
+            results = result.len(),
+            "variable_length_expand: finished BFS from source"
+        );
     }
+
+    trace!(
+        total_results = result.len(),
+        "variable_length_expand: complete"
+    );
 
     Ok(ExecutionResult::Bindings(result))
 }
@@ -273,18 +314,33 @@ pub(super) fn execute_shortest_path(
     mut cache: Option<&mut EntityCache>,
     ctx: &mut ExecutionContext,
 ) -> Result<ExecutionResult> {
+    trace!(
+        source = source_variable,
+        target = target_variable,
+        min_hops,
+        max_hops,
+        types = ?types,
+        direction = ?direction,
+        bindings = bindings.len(),
+        target_labels = ?target_labels,
+        has_target_filter = target_property_filter.is_some(),
+        "shortest_path: starting"
+    );
+
     let mut result = Vec::new();
 
     // If we have a specific target property filter, look up the target node directly
     // This enables early termination when we find this specific node
-    let specific_target_id: Option<i64> =
-        if let Some((ref prop, ref value)) = target_property_filter {
-            // Look up node(s) matching the property filter
-            let nodes = storage.find_nodes_by_property(prop, value, target_labels, Some(1))?;
-            nodes.first().map(|n| n.id)
-        } else {
-            None
-        };
+    let specific_target_id: Option<i64> = if let Some((ref prop, ref value)) =
+        target_property_filter
+    {
+        // Look up node(s) matching the property filter
+        let nodes = storage.find_nodes_by_property(prop, value, target_labels, Some(1))?;
+        trace!(specific_target_id = ?nodes.first().map(|n| n.id), "shortest_path: resolved target filter");
+        nodes.first().map(|n| n.id)
+    } else {
+        None
+    };
 
     // Pre-scan target nodes if we have label constraints (and no specific target)
     let target_ids: Option<HashSet<i64>> =
@@ -300,6 +356,13 @@ pub(super) fn execute_shortest_path(
             None
         };
 
+    if let Some(ref ids) = target_ids {
+        trace!(
+            candidate_targets = ids.len(),
+            "shortest_path: pre-scanned target nodes by label"
+        );
+    }
+
     for binding in bindings {
         let source_node = binding
             .get_node(source_variable)
@@ -311,14 +374,31 @@ pub(super) fn execute_shortest_path(
         let mut parent: HashMap<i64, (i64, i64)> = HashMap::new(); // child -> (parent, rel_id)
         let mut visited: HashSet<i64> = HashSet::new();
         let mut found_targets: Vec<i64> = Vec::new();
+        let mut prev_depth: u32 = 0;
 
         let mut queue: VecDeque<(i64, u32)> = VecDeque::new();
         queue.push_back((source_node.id, 0));
         visited.insert(source_node.id);
 
+        trace!(
+            source_id = source_node.id,
+            "shortest_path: starting BFS from source"
+        );
+
         while let Some((current_id, depth)) = queue.pop_front() {
             if depth > max_hops {
                 continue;
+            }
+
+            if depth > prev_depth {
+                trace!(
+                    depth,
+                    queue_len = queue.len(),
+                    visited = visited.len(),
+                    found = found_targets.len(),
+                    "shortest_path: advancing to next depth"
+                );
+                prev_depth = depth;
             }
 
             // Check if we reached a valid target
@@ -359,6 +439,15 @@ pub(super) fn execute_shortest_path(
             }
         }
 
+        trace!(
+            source_id = source_node.id,
+            visited = visited.len(),
+            found = found_targets.len(),
+            final_queue_len = queue.len(),
+            parent_map_len = parent.len(),
+            "shortest_path: BFS complete from source"
+        );
+
         // Reconstruct paths from parent pointers and convert to bindings
         for target_id in found_targets {
             let target_node = match get_node_cached(target_id, storage, cache.as_deref_mut())? {
@@ -396,6 +485,8 @@ pub(super) fn execute_shortest_path(
             ctx.track_bindings(1)?;
         }
     }
+
+    trace!(total_results = result.len(), "shortest_path: complete");
 
     Ok(ExecutionResult::Bindings(result))
 }
