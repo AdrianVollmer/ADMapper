@@ -47,6 +47,9 @@ class TestRunner:
         self.query_counts: dict[str, int] = {}
         # Populated by test_stats() for cross-backend import validation
         self.graph_stats: dict[str, int] = {}
+        # Populated by test_graph_data() for cross-backend node/edge comparison
+        self.all_nodes: list[tuple[str, ...]] = []
+        self.all_edges: list[tuple[str, ...]] = []
 
     @property
     def expected_stats(self) -> dict[str, Any]:
@@ -553,6 +556,32 @@ class TestRunner:
         """
         result_data = self._body_get(body, "results", {})
         return self._extract_count(result_data, column)
+
+    def _extract_rows(
+        self,
+        body: dict[str, Any] | list[Any],
+        columns: list[str],
+    ) -> list[tuple[str, ...]]:
+        """Extract all rows from a query response as tuples of strings.
+
+        Handles the various result formats returned by different backends.
+        Returns a list of tuples, one per row, with values stringified.
+        """
+        results = self._body_get(body, "results", body)
+
+        rows: list[list[Any]] = []
+
+        # Format: {"rows": [[v1, v2, ...], ...], "headers": [...]}
+        if isinstance(results, dict) and "rows" in results:
+            rows = results["rows"]
+        # Format: [{"col1": v1, "col2": v2}, ...]
+        elif isinstance(results, list) and results and isinstance(results[0], dict):
+            rows = [[row.get(c) for c in columns] for row in results]
+        # Format: [[v1, v2], ...] - nested lists (FalkorDB)
+        elif isinstance(results, list) and results and isinstance(results[0], list):
+            rows = results
+
+        return [tuple(str(v) if v is not None else "" for v in row) for row in rows]
 
     # =========================================================================
     # Search Tests
@@ -1705,6 +1734,56 @@ class TestRunner:
 
         result = f"{before_return} WITH {sv}, {ev}, {sp_expr} WHERE p IS NOT NULL {return_clause}"
         return result
+
+    def test_graph_data(self) -> list[TestResult]:
+        """Fetch all nodes and edges for cross-backend comparison.
+
+        Queries every node (label + objectid) and every edge (source objectid,
+        relationship type, target objectid), sorts them, and stores the results
+        on ``self.all_nodes`` / ``self.all_edges``.  The E2E runner compares
+        these across backends after all backends complete.
+        """
+        results: list[TestResult] = []
+
+        # -- Collect all nodes --
+        def collect_nodes():
+            response = self.api.query(
+                "MATCH (n) RETURN labels(n) AS labels, n.objectid AS objectid"
+                " ORDER BY objectid",
+                timeout=120,
+            )
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Node query failed: {response.body}", proof
+            rows = self._extract_rows(response.body, ["labels", "objectid"])
+            if not rows:
+                return False, "No node rows returned", proof
+            self.all_nodes = sorted(rows)
+            self.logger.info(f"Collected {len(self.all_nodes)} nodes for cross-backend comparison")
+            return True, "", proof
+
+        results.append(self._run_test("Collect all nodes", collect_nodes))
+
+        # -- Collect all edges --
+        def collect_edges():
+            response = self.api.query(
+                "MATCH (n)-[r]->(m) RETURN n.objectid AS src, type(r) AS rel,"
+                " m.objectid AS tgt ORDER BY src, rel, tgt",
+                timeout=120,
+            )
+            proof = self._to_proof(response.body)
+            if not response.ok:
+                return False, f"Edge query failed: {response.body}", proof
+            rows = self._extract_rows(response.body, ["src", "rel", "tgt"])
+            if not rows:
+                return False, "No edge rows returned", proof
+            self.all_edges = sorted(rows)
+            self.logger.info(f"Collected {len(self.all_edges)} edges for cross-backend comparison")
+            return True, "", proof
+
+        results.append(self._run_test("Collect all edges", collect_edges))
+
+        return results
 
     def test_query_consistency(self) -> list[TestResult]:
         """Run all built-in and high-value path queries, recording result counts.

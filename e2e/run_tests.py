@@ -131,6 +131,9 @@ class TestSuite:
     query_counts: dict[str, int] = field(default_factory=dict)
     # Graph stats (total_nodes, total_edges) for cross-backend import validation
     graph_stats: dict[str, int] = field(default_factory=dict)
+    # All nodes/edges for cross-backend data comparison
+    all_nodes: list[tuple[str, ...]] = field(default_factory=list)
+    all_edges: list[tuple[str, ...]] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -277,6 +280,7 @@ class E2ETestRunner:
             ("Shortest Path", runner.test_shortest_path),
             ("Cache and Settings", runner.test_cache_and_settings),
             ("Query Consistency", runner.test_query_consistency),
+            ("Graph Data Collection", runner.test_graph_data),
             ("Performance", runner.test_performance),
         ]
 
@@ -307,6 +311,8 @@ class E2ETestRunner:
         # Store query consistency counts and graph stats
         suite.query_counts = runner.query_counts
         suite.graph_stats = runner.graph_stats
+        suite.all_nodes = runner.all_nodes
+        suite.all_edges = runner.all_edges
 
         # Save server logs to report directory
         if self.server_process:
@@ -1134,6 +1140,129 @@ proof::before {
         self.logger.info(f"Cross-backend: {matches} matched, {mismatches} mismatched")
         return results
 
+    def _compare_graph_data(self, suites: list[TestSuite]) -> list[TestResult]:
+        """Compare all nodes and all edges across backends.
+
+        Every backend must produce identical sorted lists of nodes
+        (labels + objectid) and edges (source objectid, relationship type,
+        target objectid).  Mismatches are reported with the first differing
+        entry for easier debugging.
+        """
+        results: list[TestResult] = []
+        suites_with_nodes = [s for s in suites if s.all_nodes]
+        suites_with_edges = [s for s in suites if s.all_edges]
+
+        if len(suites_with_nodes) < 2 and len(suites_with_edges) < 2:
+            return results
+
+        self.logger.info("=" * 42)
+        self.logger.info("Cross-backend graph data")
+        self.logger.info("=" * 42)
+
+        # -- Compare nodes --
+        if len(suites_with_nodes) >= 2:
+            ref = suites_with_nodes[0]
+            all_match = True
+            for other in suites_with_nodes[1:]:
+                if ref.all_nodes == other.all_nodes:
+                    continue
+                all_match = False
+                # Find first difference for diagnostic output
+                diff_msg = self._first_diff(
+                    ref.backend, ref.all_nodes,
+                    other.backend, other.all_nodes,
+                )
+                msg = (
+                    f"Nodes differ between {ref.backend} ({len(ref.all_nodes)})"
+                    f" and {other.backend} ({len(other.all_nodes)}): {diff_msg}"
+                )
+                log_fail(self.logger, f"  nodes: {msg}")
+                results.append(
+                    TestResult(
+                        name=f"Cross-backend: all nodes ({ref.backend} vs {other.backend})",
+                        passed=False,
+                        duration_ms=0,
+                        message=msg,
+                        proof=msg,
+                    )
+                )
+            if all_match:
+                backends_str = ", ".join(s.backend for s in suites_with_nodes)
+                msg = f"{len(ref.all_nodes)} nodes match across {backends_str}"
+                log_pass(self.logger, f"  nodes: {msg}")
+                results.append(
+                    TestResult(
+                        name="Cross-backend: all nodes",
+                        passed=True,
+                        duration_ms=0,
+                        message="",
+                        proof=msg,
+                    )
+                )
+
+        # -- Compare edges --
+        if len(suites_with_edges) >= 2:
+            ref = suites_with_edges[0]
+            all_match = True
+            for other in suites_with_edges[1:]:
+                if ref.all_edges == other.all_edges:
+                    continue
+                all_match = False
+                diff_msg = self._first_diff(
+                    ref.backend, ref.all_edges,
+                    other.backend, other.all_edges,
+                )
+                msg = (
+                    f"Edges differ between {ref.backend} ({len(ref.all_edges)})"
+                    f" and {other.backend} ({len(other.all_edges)}): {diff_msg}"
+                )
+                log_fail(self.logger, f"  edges: {msg}")
+                results.append(
+                    TestResult(
+                        name=f"Cross-backend: all edges ({ref.backend} vs {other.backend})",
+                        passed=False,
+                        duration_ms=0,
+                        message=msg,
+                        proof=msg,
+                    )
+                )
+            if all_match:
+                backends_str = ", ".join(s.backend for s in suites_with_edges)
+                msg = f"{len(ref.all_edges)} edges match across {backends_str}"
+                log_pass(self.logger, f"  edges: {msg}")
+                results.append(
+                    TestResult(
+                        name="Cross-backend: all edges",
+                        passed=True,
+                        duration_ms=0,
+                        message="",
+                        proof=msg,
+                    )
+                )
+
+        return results
+
+    @staticmethod
+    def _first_diff(
+        name_a: str,
+        list_a: list[tuple[str, ...]],
+        name_b: str,
+        list_b: list[tuple[str, ...]],
+    ) -> str:
+        """Return a human-readable description of the first difference."""
+        set_a = set(list_a)
+        set_b = set(list_b)
+        only_a = sorted(set_a - set_b)
+        only_b = sorted(set_b - set_a)
+        parts: list[str] = []
+        if only_a:
+            sample = only_a[0]
+            parts.append(f"only in {name_a} (e.g. {sample}), {len(only_a)} total")
+        if only_b:
+            sample = only_b[0]
+            parts.append(f"only in {name_b} (e.g. {sample}), {len(only_b)} total")
+        return "; ".join(parts) if parts else "order differs"
+
     def run(self, backends: list[str]) -> int:
         """Run tests for specified backends."""
         self.logger.info("ADMapper E2E Test Suite")
@@ -1158,6 +1287,7 @@ proof::before {
         # Cross-backend comparisons
         if len(suites) > 1:
             comparison_results = self._compare_graph_stats(suites)
+            comparison_results += self._compare_graph_data(suites)
             comparison_results += self._compare_query_counts(suites)
             if comparison_results:
                 # Add comparison results to a virtual "cross-backend" suite
