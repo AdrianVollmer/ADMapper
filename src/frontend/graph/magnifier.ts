@@ -13,7 +13,6 @@ import { BACKGROUND_COLOR, LABEL_COLOR, DEFAULT_EDGE_COLOR } from "./theme";
 import { getHiddenNodeIds } from "./collapse";
 import { getLabelParts } from "./label-visibility";
 
-
 /** Lens diameter in pixels */
 const LENS_SIZE = 250;
 
@@ -26,6 +25,7 @@ const LENS_NODE_SCALE = 0.2;
 // Module state
 // eslint-disable-next-line no-undef
 let lensContainer: HTMLDivElement | null = null;
+// eslint-disable-next-line no-undef
 let sigmaContainer: HTMLDivElement | null = null;
 let lensSigma: Sigma | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -119,7 +119,7 @@ function initLensSigma(): void {
   function drawLensLabel(
     context: CanvasRenderingContext2D,
     data: { label: string | null; x: number; y: number; size: number; color: string },
-    settings: { labelSize: number; labelWeight: string; labelColor: { color?: string } },
+    settings: { labelSize: number; labelWeight: string; labelColor: { color?: string } }
   ): void {
     const parts = getLabelParts(data.label);
     if (!parts) return;
