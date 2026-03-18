@@ -1029,6 +1029,16 @@ impl DatabaseBackend for Neo4jDatabase {
                         serde_json::Number::from_f64(val).map(JsonValue::Number)
                     } else if let Ok(val) = row.get::<bool>(col) {
                         Some(JsonValue::Bool(val))
+                    } else if let Ok(val) = row.get::<Vec<String>>(col) {
+                        Some(JsonValue::Array(
+                            val.into_iter().map(JsonValue::String).collect(),
+                        ))
+                    } else if let Ok(val) = row.get::<Vec<i64>>(col) {
+                        Some(JsonValue::Array(
+                            val.into_iter()
+                                .map(|v| JsonValue::Number(v.into()))
+                                .collect(),
+                        ))
                     } else {
                         None
                     };

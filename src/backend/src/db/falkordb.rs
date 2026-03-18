@@ -47,18 +47,30 @@ impl FalkorDbDatabase {
             .build()
             .map_err(|e| DbError::Database(format!("Failed to build client: {}", e)))?;
 
+        // Remove the default 10,000-row result set cap so unbounded queries
+        // return all rows (important for cross-backend consistency).
+        // -1 means unlimited; 0 would mean "return zero results".
+        client
+            .config_set("RESULTSET_SIZE", -1_i64)
+            .map_err(|e| {
+                DbError::Database(format!("Failed to set RESULTSET_SIZE: {}", e))
+            })?;
+
         // Use "admapper" as the default graph name
         let graph = client.select_graph("admapper");
 
-        info!("Connected to FalkorDB");
+        info!("Connected to FalkorDB (RESULTSET_SIZE=unlimited)");
 
         Ok(Self {
             graph: Mutex::new(graph),
         })
     }
 
-    /// Execute a query and parse the results.
-    fn execute_query(&self, cypher: &str) -> Result<Vec<Vec<JsonValue>>> {
+    /// Execute a query and parse the results, returning headers and rows.
+    fn execute_query_full(
+        &self,
+        cypher: &str,
+    ) -> Result<(Vec<String>, Vec<Vec<JsonValue>>)> {
         let mut graph = self
             .graph
             .lock()
@@ -69,6 +81,7 @@ impl FalkorDbDatabase {
             .execute()
             .map_err(|e| DbError::Database(e.to_string()))?;
 
+        let headers = result.header.clone();
         let mut rows = Vec::new();
         for record in result.data {
             let mut row = Vec::new();
@@ -78,6 +91,12 @@ impl FalkorDbDatabase {
             rows.push(row);
         }
 
+        Ok((headers, rows))
+    }
+
+    /// Execute a query and parse the results (rows only).
+    fn execute_query(&self, cypher: &str) -> Result<Vec<Vec<JsonValue>>> {
+        let (_, rows) = self.execute_query_full(cypher)?;
         Ok(rows)
     }
 
@@ -1097,9 +1116,8 @@ impl DatabaseBackend for FalkorDbDatabase {
     fn run_custom_query(&self, cypher: &str) -> Result<JsonValue> {
         debug!(query = %cypher, "Running custom Cypher query");
 
-        let rows = self.execute_query(cypher)?;
+        let (headers, rows) = self.execute_query_full(cypher)?;
 
-        // Return in expected format with rows array
-        Ok(json!({ "rows": rows }))
+        Ok(json!({ "headers": headers, "rows": rows }))
     }
 }

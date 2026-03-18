@@ -566,6 +566,8 @@ class TestRunner:
 
         Handles the various result formats returned by different backends.
         Returns a list of tuples, one per row, with values stringified.
+        When headers are present, columns are reordered to match the
+        requested ``columns`` order so results are comparable across backends.
         """
         results = self._body_get(body, "results", body)
 
@@ -573,15 +575,38 @@ class TestRunner:
 
         # Format: {"rows": [[v1, v2, ...], ...], "headers": [...]}
         if isinstance(results, dict) and "rows" in results:
-            rows = results["rows"]
+            raw_rows = results["rows"]
+            headers = results.get("headers")
+            if headers and columns and set(columns).issubset(set(headers)):
+                # Reorder each row so column values match the requested order
+                indices = [headers.index(c) for c in columns]
+                rows = [[r[i] for i in indices] for r in raw_rows]
+            else:
+                rows = raw_rows
         # Format: [{"col1": v1, "col2": v2}, ...]
         elif isinstance(results, list) and results and isinstance(results[0], dict):
             rows = [[row.get(c) for c in columns] for row in results]
-        # Format: [[v1, v2], ...] - nested lists (FalkorDB)
+        # Format: [[v1, v2], ...] - nested lists
         elif isinstance(results, list) and results and isinstance(results[0], list):
             rows = results
 
         return [tuple(str(v) if v is not None else "" for v in row) for row in rows]
+
+    @staticmethod
+    def _normalize_labels(labels_str: str) -> str:
+        """Normalize a stringified label list for cross-backend comparison.
+
+        Sorts labels so ordering is deterministic across backends.
+        """
+        try:
+            import ast
+
+            labels = ast.literal_eval(labels_str)
+            if isinstance(labels, list):
+                return str(sorted(labels))
+        except (ValueError, SyntaxError):
+            pass
+        return labels_str
 
     # =========================================================================
     # Search Tests
@@ -1758,7 +1783,12 @@ class TestRunner:
             rows = self._extract_rows(response.body, ["labels", "objectid"])
             if not rows:
                 return False, "No node rows returned", proof
-            self.all_nodes = sorted(rows)
+            # Normalize labels for cross-backend comparison: sort and strip
+            # the "Base" label which some backends (Neo4j, FalkorDB) add
+            # implicitly while CrustDB does not.
+            self.all_nodes = sorted(
+                (self._normalize_labels(row[0]), *row[1:]) for row in rows
+            )
             self.logger.info(f"Collected {len(self.all_nodes)} nodes for cross-backend comparison")
             return True, "", proof
 
