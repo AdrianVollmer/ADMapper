@@ -23,6 +23,7 @@ const LENS_ZOOM_FACTOR = 0.25;
 // Module state
 // eslint-disable-next-line no-undef
 let lensContainer: HTMLDivElement | null = null;
+let sigmaContainer: HTMLDivElement | null = null;
 let lensSigma: Sigma | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let mainSigmaRef: Sigma<any, any, any> | null = null;
@@ -80,47 +81,19 @@ export function destroyMagnifier(): void {
     lensContainer.remove();
     lensContainer = null;
   }
+  sigmaContainer = null;
 
   mainSigmaRef = null;
   active = false;
 }
 
-/** Create the magnifier lens */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createMagnifier(mainSigma: Sigma<any, any, any>): void {
-  mainSigmaRef = mainSigma;
-  const graph = mainSigma.getGraph();
-  const mainContainer = mainSigma.getContainer();
+/** Initialize the lens Sigma instance. Called once on the first mousemove,
+ *  when the container is visible and has real dimensions for WebGL. */
+function initLensSigma(): void {
+  if (lensSigma || !mainSigmaRef || !sigmaContainer) return;
 
-  // Detect current theme from background color
-  const bg = mainContainer.style.backgroundColor;
-  currentTheme = bg === BACKGROUND_COLOR.light ? "light" : "dark";
+  const graph = mainSigmaRef.getGraph();
 
-  // Create lens container
-  lensContainer = document.createElement("div");
-  lensContainer.style.cssText = `
-    position: fixed;
-    width: ${LENS_SIZE}px;
-    height: ${LENS_SIZE}px;
-    border-radius: 50%;
-    overflow: hidden;
-    pointer-events: none;
-    z-index: 1000;
-    border: 2px solid rgba(255, 255, 255, 0.4);
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
-    display: none;
-  `;
-
-  // Create inner container for sigma (must be rectangular for WebGL)
-  const sigmaContainer = document.createElement("div");
-  sigmaContainer.style.cssText = `
-    width: 100%;
-    height: 100%;
-  `;
-  lensContainer.appendChild(sigmaContainer);
-  document.body.appendChild(lensContainer);
-
-  // Create node image program matching the main renderer
   const NodeImageProgram = createNodeImageProgram({
     size: { mode: "force", value: 512 },
     drawingMode: "background",
@@ -175,9 +148,7 @@ function createMagnifier(mainSigma: Sigma<any, any, any>): void {
     }
   }
 
-  // Create lens Sigma instance sharing the same graph
   lensSigma = new Sigma(graph, sigmaContainer, {
-    allowInvalidContainer: false,
     renderLabels: true,
     renderEdgeLabels: true,
     labelDensity: 1,
@@ -229,20 +200,63 @@ function createMagnifier(mainSigma: Sigma<any, any, any>): void {
     },
   });
 
-  // Disable camera interactions on the lens
-  lensSigma.getCamera().disable();
+  // User interaction is already blocked by pointer-events: none on the container.
+  // Do NOT call camera.disable() -- it prevents programmatic setState() too.
 
-  // Set initial background
   sigmaContainer.style.backgroundColor = BACKGROUND_COLOR[currentTheme];
+}
 
-  // Mouse move handler: position lens and sync camera
+/** Create the magnifier lens */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createMagnifier(mainSigma: Sigma<any, any, any>): void {
+  mainSigmaRef = mainSigma;
+  const mainContainer = mainSigma.getContainer();
+
+  // Detect current theme from background color
+  const bg = mainContainer.style.backgroundColor;
+  currentTheme = bg === BACKGROUND_COLOR.light ? "light" : "dark";
+
+  // Create lens container (starts hidden)
+  lensContainer = document.createElement("div");
+  lensContainer.style.cssText = `
+    position: fixed;
+    width: ${LENS_SIZE}px;
+    height: ${LENS_SIZE}px;
+    border-radius: 50%;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 1000;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    display: none;
+  `;
+
+  // Create inner container for sigma (must be rectangular for WebGL)
+  sigmaContainer = document.createElement("div");
+  sigmaContainer.style.cssText = `
+    width: 100%;
+    height: 100%;
+  `;
+  lensContainer.appendChild(sigmaContainer);
+  document.body.appendChild(lensContainer);
+
+  // Sigma is NOT created here -- it's deferred to the first mousemove so that
+  // the container is visible and has real dimensions for the WebGL context.
+
+  // Mouse move handler: position lens, lazy-init Sigma, sync camera
   mouseMoveHandler = (e: MouseEvent) => {
-    if (!lensContainer || !lensSigma || !mainSigmaRef) return;
+    if (!lensContainer || !mainSigmaRef) return;
 
-    // Position the lens centered on the cursor
+    // Make the lens visible and position it
     lensContainer.style.left = `${e.clientX - LENS_SIZE / 2}px`;
     lensContainer.style.top = `${e.clientY - LENS_SIZE / 2}px`;
     lensContainer.style.display = "block";
+
+    // Lazy-init: create Sigma on first mousemove when the container is visible
+    if (!lensSigma) {
+      initLensSigma();
+      if (!lensSigma) return;
+    }
 
     // Throttle camera updates to animation frames
     if (pendingFrame !== null) return;
@@ -250,11 +264,12 @@ function createMagnifier(mainSigma: Sigma<any, any, any>): void {
       pendingFrame = null;
       if (!lensSigma || !mainSigmaRef) return;
 
-      // Convert mouse position to graph coordinates
+      // Convert mouse position to framed-graph coordinates (the coordinate
+      // system the camera uses, NOT raw graph node coordinates).
       const rect = mainContainer.getBoundingClientRect();
       const viewportX = e.clientX - rect.left;
       const viewportY = e.clientY - rect.top;
-      const graphPos = mainSigmaRef.viewportToGraph({ x: viewportX, y: viewportY });
+      const graphPos = mainSigmaRef.viewportToFramedGraph({ x: viewportX, y: viewportY });
 
       // Set lens camera: same position, much tighter zoom
       const mainRatio = mainSigmaRef.getCamera().ratio;
