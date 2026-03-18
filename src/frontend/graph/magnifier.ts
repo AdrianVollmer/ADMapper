@@ -271,7 +271,9 @@ function createMagnifier(mainSigma: Sigma<any, any, any>): void {
     if (pendingFrame !== null) return;
     pendingFrame = requestAnimationFrame(() => {
       pendingFrame = null;
-      if (!lensSigma || !mainSigmaRef) return;
+      if (!lensSigma || !mainSigmaRef || !lensContainer) return;
+      // Skip if the container is hidden (no dimensions for WebGL)
+      if (lensContainer.style.display === "none") return;
 
       // Convert mouse position to framed-graph coordinates (the coordinate
       // system the camera uses, NOT raw graph node coordinates).
@@ -293,12 +295,12 @@ function createMagnifier(mainSigma: Sigma<any, any, any>): void {
 
   // Hide lens when mouse leaves the graph
   mouseLeaveHandler = () => {
-    if (lensContainer) {
-      lensContainer.style.display = "none";
-    }
     if (pendingFrame !== null) {
       cancelAnimationFrame(pendingFrame); // eslint-disable-line no-undef
       pendingFrame = null;
+    }
+    if (lensContainer) {
+      lensContainer.style.display = "none";
     }
   };
 
