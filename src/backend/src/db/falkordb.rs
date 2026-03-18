@@ -52,9 +52,7 @@ impl FalkorDbDatabase {
         // -1 means unlimited; 0 would mean "return zero results".
         client
             .config_set("RESULTSET_SIZE", -1_i64)
-            .map_err(|e| {
-                DbError::Database(format!("Failed to set RESULTSET_SIZE: {}", e))
-            })?;
+            .map_err(|e| DbError::Database(format!("Failed to set RESULTSET_SIZE: {}", e)))?;
 
         // Use "admapper" as the default graph name
         let graph = client.select_graph("admapper");
@@ -67,10 +65,7 @@ impl FalkorDbDatabase {
     }
 
     /// Execute a query and parse the results, returning headers and rows.
-    fn execute_query_full(
-        &self,
-        cypher: &str,
-    ) -> Result<(Vec<String>, Vec<Vec<JsonValue>>)> {
+    fn execute_query_full(&self, cypher: &str) -> Result<(Vec<String>, Vec<Vec<JsonValue>>)> {
         let mut graph = self
             .graph
             .lock()

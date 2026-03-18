@@ -129,11 +129,17 @@ impl CrustDatabase {
             return Ok(0);
         }
 
-        // Convert DbNodes to the format expected by CrustDB batch upsert
+        // Convert DbNodes to the format expected by CrustDB batch upsert.
+        // Every node gets a "Base" label in addition to its type-specific
+        // label, matching Neo4j/FalkorDB conventions.
         let batch: Vec<(Vec<String>, serde_json::Value)> = nodes
             .iter()
             .map(|node| {
-                let labels = vec![node.label.clone()];
+                let labels = if node.label == "Base" {
+                    vec!["Base".to_string()]
+                } else {
+                    vec![node.label.clone(), "Base".to_string()]
+                };
                 // Flatten BloodHound properties into top-level fields
                 let props = Self::flatten_node_properties(node);
                 (labels, props)
@@ -166,7 +172,13 @@ impl CrustDatabase {
             let props_str = Self::json_to_cypher_props(&props);
             let cypher_label = node.label.replace('\'', "''");
 
-            let query = format!("CREATE (n:{} {})", cypher_label, props_str);
+            // Add :Base as a secondary label (matching Neo4j/FalkorDB)
+            let label_clause = if cypher_label == "Base" {
+                "Base".to_string()
+            } else {
+                format!("{}:Base", cypher_label)
+            };
+            let query = format!("CREATE (n:{} {})", label_clause, props_str);
 
             if self.execute(&query).is_ok() {
                 count += 1;
