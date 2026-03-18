@@ -12,13 +12,16 @@ import { TaperedEdgeProgram } from "./TaperedEdgeProgram";
 import { BACKGROUND_COLOR, LABEL_COLOR, DEFAULT_EDGE_COLOR } from "./theme";
 import { getHiddenNodeIds } from "./collapse";
 import { getLabelParts } from "./label-visibility";
-import { getFixedNodeSizes } from "../components/settings";
+
 
 /** Lens diameter in pixels */
 const LENS_SIZE = 250;
 
 /** How much more zoomed the lens is vs the main camera (lower = more zoomed) */
-const LENS_ZOOM_FACTOR = 0.25;
+const LENS_ZOOM_FACTOR = 0.08;
+
+/** Scale factor for node sizes inside the lens (smaller = more readable spacing) */
+const LENS_NODE_SCALE = 0.2;
 
 // Module state
 // eslint-disable-next-line no-undef
@@ -151,6 +154,7 @@ function initLensSigma(): void {
   lensSigma = new Sigma(graph, sigmaContainer, {
     renderLabels: true,
     renderEdgeLabels: true,
+    labelSize: 8,
     labelDensity: 1,
     labelGridCellSize: 50,
     labelRenderedSizeThreshold: 2,
@@ -173,15 +177,20 @@ function initLensSigma(): void {
     maxCameraRatio: 10,
     enableEdgeEvents: false,
     stagePadding: 0,
-    itemSizesReference: getFixedNodeSizes() ? "screen" : "positions",
+    // Always use screen-space sizing so zooming in spreads nodes apart
+    // without enlarging them, letting the user see clustered detail.
+    itemSizesReference: "screen",
 
-    // Node reducer: hide collapsed children (same as main renderer)
+    // Node reducer: hide collapsed children + shrink nodes so the zoomed-in
+    // view emphasises spacing rather than making everything bigger.
     nodeReducer: (nodeId, data) => {
       const res: Record<string, unknown> = { ...data };
       const hiddenNodes = getHiddenNodeIds();
       if (hiddenNodes.has(nodeId)) {
         res.hidden = true;
       }
+      const size = (data.size as number | undefined) ?? 3;
+      res.size = size * LENS_NODE_SCALE;
       return res;
     },
 
