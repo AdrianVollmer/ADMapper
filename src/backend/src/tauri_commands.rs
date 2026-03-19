@@ -203,7 +203,7 @@ pub fn graph_path(
 
 /// Find paths to domain admins.
 #[tauri::command]
-pub fn paths_to_domain_admins(
+pub async fn paths_to_domain_admins(
     state: State<'_, AppState>,
     exclude: Option<String>,
 ) -> Result<core::PathsToDaResponse, String> {
@@ -219,7 +219,9 @@ pub fn paths_to_domain_admins(
         .unwrap_or_default();
 
     debug!(exclude = ?exclude_types, "Finding paths to DA (IPC)");
-    core::paths_to_domain_admins(db.as_ref(), &exclude_types)
+    tokio::task::spawn_blocking(move || core::paths_to_domain_admins(db.as_ref(), &exclude_types))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
 }
 
 // ============================================================================
@@ -332,15 +334,16 @@ pub async fn graph_choke_points(
 // Query Commands
 // ============================================================================
 
-/// Execute a query synchronously via Tauri IPC.
+/// Execute a query via Tauri IPC.
 ///
 /// Unlike the HTTP handler which supports async mode with SSE progress events,
 /// Tauri commands execute the query inline and return results directly. This
 /// avoids a race condition where the query completes and emits a Tauri event
 /// before the frontend has registered its event listener (late subscriber
-/// problem). Since Tauri commands run on a thread pool, blocking is fine.
+/// problem). The actual query execution is moved to a blocking task so that
+/// concurrent queries (e.g. from Security Insights) don't freeze the UI.
 #[tauri::command]
-pub fn graph_query(
+pub async fn graph_query(
     state: State<'_, AppState>,
     query: String,
     language: Option<String>,
@@ -357,7 +360,6 @@ pub fn graph_query(
     let extract_graph = extract_graph.unwrap_or(true);
     let background = background.unwrap_or(false);
 
-    let started_at = std::time::Instant::now();
     let started_at_unix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -381,47 +383,60 @@ pub fn graph_query(
         }
     }
 
-    // Execute query synchronously
-    let result = core::execute_query(db, &query, language.as_deref(), extract_graph);
+    // Execute query on a blocking thread so it doesn't freeze the UI
+    let query_clone = query.clone();
+    let query_id_clone = query_id.clone();
+    let history_clone = history.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let started_at = std::time::Instant::now();
+        let result = core::execute_query(db, &query_clone, language.as_deref(), extract_graph);
+        let duration_ms = started_at.elapsed().as_millis() as u64;
 
-    let duration_ms = started_at.elapsed().as_millis() as u64;
-
-    match result {
-        Ok(query_result) => {
-            // Update history with completed status
-            if let Some(ref h) = history {
-                if let Err(e) = h.update_status(
-                    &query_id,
-                    "completed",
-                    Some(duration_ms),
-                    query_result.result_count,
-                    None,
-                ) {
-                    debug!(error = %e, "Failed to update query history status");
+        match result {
+            Ok(query_result) => {
+                // Update history with completed status
+                if let Some(ref h) = history_clone {
+                    if let Err(e) = h.update_status(
+                        &query_id_clone,
+                        "completed",
+                        Some(duration_ms),
+                        query_result.result_count,
+                        None,
+                    ) {
+                        debug!(error = %e, "Failed to update query history status");
+                    }
                 }
-            }
 
-            Ok(crate::api::types::QueryStartResponse::Sync {
-                query_id,
-                duration_ms,
-                result_count: query_result.result_count,
-                results: query_result.results,
-                graph: query_result.graph,
-            })
-        }
-        Err(e) => {
-            // Update history with failed status
-            if let Some(ref h) = history {
-                if let Err(e2) =
-                    h.update_status(&query_id, "failed", Some(duration_ms), None, Some(&e))
-                {
-                    debug!(error = %e2, "Failed to update query history status");
+                Ok(crate::api::types::QueryStartResponse::Sync {
+                    query_id: query_id_clone,
+                    duration_ms,
+                    result_count: query_result.result_count,
+                    results: query_result.results,
+                    graph: query_result.graph,
+                })
+            }
+            Err(e) => {
+                // Update history with failed status
+                if let Some(ref h) = history_clone {
+                    if let Err(e2) = h.update_status(
+                        &query_id_clone,
+                        "failed",
+                        Some(duration_ms),
+                        None,
+                        Some(&e),
+                    ) {
+                        debug!(error = %e2, "Failed to update query history status");
+                    }
                 }
-            }
 
-            Err(e)
+                Err(e)
+            }
         }
-    }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?;
+
+    result
 }
 
 // ============================================================================
