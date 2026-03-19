@@ -13,6 +13,7 @@ import { destroyMagnifier } from "../graph/magnifier";
 import { dispatchAction, type Action } from "./actions";
 import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-visibility";
 import { getDefaultLayout } from "./settings";
+import { getCurrentTheme } from "../utils/theme";
 import { showConfirm } from "../utils/notifications";
 
 let renderer: ADGraphRenderer | null = null;
@@ -251,7 +252,7 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
   renderer = createRenderer({
     container,
     graph,
-    theme: "dark",
+    theme: getCurrentTheme(),
     onNodeClick: (nodeId, attrs) => {
       updateDetailPanel(nodeId, attrs);
       renderer?.selectNode(nodeId);
