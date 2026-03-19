@@ -22,6 +22,15 @@ const LENS_ZOOM_FACTOR = 0.08;
 /** Scale factor for node sizes inside the lens (smaller = more readable spacing) */
 const LENS_NODE_SCALE = 0.2;
 
+/** Scroll sensitivity: how much each wheel tick changes the zoom */
+const WHEEL_ZOOM_SPEED = 0.15;
+
+/** Minimum lens zoom factor (most zoomed in) */
+const MIN_LENS_ZOOM = 0.005;
+
+/** Maximum lens zoom factor (least zoomed in, must still be tighter than main) */
+const MAX_LENS_ZOOM = 0.5;
+
 // Module state
 // eslint-disable-next-line no-undef
 let lensContainer: HTMLDivElement | null = null;
@@ -33,11 +42,13 @@ let mainSigmaRef: Sigma<any, any, any> | null = null;
 let active = false;
 let currentTheme: "light" | "dark" = "dark";
 let pendingFrame: number | null = null;
+let lensZoomFactor = LENS_ZOOM_FACTOR;
 
 // Event handler references for cleanup
 let mouseMoveHandler: ((e: MouseEvent) => void) | null = null;
 let mouseLeaveHandler: (() => void) | null = null;
 let themeChangeHandler: ((e: Event) => void) | null = null;
+let wheelHandler: ((e: WheelEvent) => void) | null = null;
 
 /** Toggle the magnifier on/off */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,6 +77,7 @@ export function destroyMagnifier(): void {
     const container = mainSigmaRef.getContainer();
     if (mouseMoveHandler) container.removeEventListener("mousemove", mouseMoveHandler);
     if (mouseLeaveHandler) container.removeEventListener("mouseleave", mouseLeaveHandler);
+    if (wheelHandler) container.removeEventListener("wheel", wheelHandler);
   }
   if (themeChangeHandler) {
     window.removeEventListener("themechange", themeChangeHandler);
@@ -74,6 +86,8 @@ export function destroyMagnifier(): void {
   mouseMoveHandler = null;
   mouseLeaveHandler = null;
   themeChangeHandler = null;
+  wheelHandler = null;
+  lensZoomFactor = LENS_ZOOM_FACTOR;
 
   if (lensSigma) {
     lensSigma.kill();
@@ -287,9 +301,34 @@ function createMagnifier(mainSigma: Sigma<any, any, any>): void {
       lensSigma.getCamera().setState({
         x: graphPos.x,
         y: graphPos.y,
-        ratio: mainRatio * LENS_ZOOM_FACTOR,
+        ratio: mainRatio * lensZoomFactor,
         angle: mainSigmaRef.getCamera().angle,
       });
+    });
+  };
+
+  // Mouse wheel handler: adjust lens zoom level instead of zooming the main graph
+  wheelHandler = (e: WheelEvent) => {
+    if (!lensSigma || !mainSigmaRef || !lensContainer) return;
+    // Only intercept when the lens is visible
+    if (lensContainer.style.display === "none") return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    // deltaY > 0 = scroll down = zoom out (increase factor), < 0 = zoom in (decrease)
+    const direction = Math.sign(e.deltaY);
+    lensZoomFactor *= 1 + direction * WHEEL_ZOOM_SPEED;
+    lensZoomFactor = Math.max(MIN_LENS_ZOOM, Math.min(MAX_LENS_ZOOM, lensZoomFactor));
+
+    // Immediately update the lens camera with new zoom
+    const mainCamera = mainSigmaRef.getCamera();
+    const lensCamera = lensSigma.getCamera();
+    lensCamera.setState({
+      x: lensCamera.x,
+      y: lensCamera.y,
+      ratio: mainCamera.ratio * lensZoomFactor,
+      angle: mainCamera.angle,
     });
   };
 
@@ -318,6 +357,7 @@ function createMagnifier(mainSigma: Sigma<any, any, any>): void {
 
   mainContainer.addEventListener("mousemove", mouseMoveHandler);
   mainContainer.addEventListener("mouseleave", mouseLeaveHandler);
+  mainContainer.addEventListener("wheel", wheelHandler, { passive: false });
   window.addEventListener("themechange", themeChangeHandler);
 
   active = true;
