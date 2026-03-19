@@ -206,8 +206,17 @@ pub fn run_desktop(database_url: Option<&str>) {
             // File operations
             tauri_commands::write_file,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Explicitly disconnect before Tauri calls std::process::exit(),
+                // which does NOT run Drop implementations. Without this,
+                // WAL files survive because Database::drop() never runs.
+                let state: tauri::State<AppState> = app.state();
+                state.disconnect();
+            }
+        });
 }
 
 #[cfg(not(feature = "desktop"))]

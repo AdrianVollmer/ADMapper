@@ -143,6 +143,14 @@ impl SqliteHistoryStorage {
     }
 }
 
+impl Drop for SqliteHistoryStorage {
+    fn drop(&mut self) {
+        // Checkpoint WAL so -wal files don't survive after shutdown.
+        let conn = self.conn.lock();
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
+}
+
 impl HistoryStorage for SqliteHistoryStorage {
     fn add(&self, entry: NewQueryHistoryEntry<'_>) -> Result<()> {
         let conn = self.conn.lock();
@@ -469,5 +477,29 @@ mod tests {
             assert_eq!(total, 1);
             assert_eq!(entries[0].id, "1");
         }
+    }
+
+    #[test]
+    fn test_sqlite_wal_cleanup_on_drop() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test_wal.db");
+        let wal_path = dir.path().join("test_wal.db-wal");
+
+        {
+            let service = QueryHistoryService::new_sqlite(&db_path).unwrap();
+            service.add(create_test_entry("1")).unwrap();
+        }
+
+        // After drop, WAL file should be cleaned up via checkpoint
+        assert!(
+            !wal_path.exists(),
+            "WAL file should be cleaned up after SqliteHistoryStorage::drop()"
+        );
+
+        // Data should survive
+        let service = QueryHistoryService::new_sqlite(&db_path).unwrap();
+        let (entries, total) = service.get(10, 0).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(entries[0].id, "1");
     }
 }
