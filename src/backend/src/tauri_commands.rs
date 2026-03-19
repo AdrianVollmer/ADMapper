@@ -228,9 +228,13 @@ pub fn paths_to_domain_admins(
 
 /// Get security insights.
 #[tauri::command]
-pub fn graph_insights(state: State<'_, AppState>) -> Result<crate::db::SecurityInsights, String> {
+pub async fn graph_insights(
+    state: State<'_, AppState>,
+) -> Result<crate::db::SecurityInsights, String> {
     let db = state.db().ok_or("Not connected to database")?;
-    core::graph_insights(db.as_ref())
+    tokio::task::spawn_blocking(move || core::graph_insights(db.as_ref()))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
 }
 
 /// Get relationship types.
@@ -314,12 +318,14 @@ pub fn delete_edge(
 
 /// Get choke points in the graph.
 #[tauri::command]
-pub fn graph_choke_points(
+pub async fn graph_choke_points(
     state: State<'_, AppState>,
 ) -> Result<crate::db::ChokePointsResponse, String> {
     let db = state.db().ok_or("Not connected to database")?;
     debug!("Getting choke points (IPC)");
-    core::graph_choke_points(db.as_ref(), 50)
+    tokio::task::spawn_blocking(move || core::graph_choke_points(db.as_ref(), 50))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
 }
 
 // ============================================================================
