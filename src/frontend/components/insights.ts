@@ -25,7 +25,8 @@ type TabId =
   | "stale-objects"
   | "account-exposure"
   | "choke-points"
-  | "unexpected-choke-points";
+  | "unexpected-choke-points"
+  | "tier-violations";
 
 /** Domain Admin Analysis data */
 interface DAAnalysisData {
@@ -54,6 +55,13 @@ interface StaleObjectsData {
   users: number;
   computers: number;
   thresholdDays: number;
+}
+
+/** Tier Violations data */
+interface TierViolationsData {
+  tier1to0: number;
+  tier2to1: number;
+  tier3to2: number;
 }
 
 /** Choke Point data */
@@ -104,6 +112,7 @@ let reachabilityState: TabState<ReachabilityData[]> = { loading: false, error: n
 let staleState: TabState<StaleObjectsData> = { loading: false, error: null, data: null };
 let accountExposureState: TabState<AccountExposureData> = { loading: false, error: null, data: null };
 let chokePointsState: TabState<ChokePointsData> = { loading: false, error: null, data: null };
+let tierViolationsState: TabState<TierViolationsData> = { loading: false, error: null, data: null };
 
 /** Stale threshold in days */
 let staleThresholdDays = 90;
@@ -125,6 +134,7 @@ export async function openInsights(): Promise<void> {
   staleState = { loading: true, error: null, data: null };
   accountExposureState = { loading: true, error: null, data: null };
   chokePointsState = { loading: true, error: null, data: null };
+  tierViolationsState = { loading: true, error: null, data: null };
   chokePointsPage = 0;
   unexpectedChokePointsPage = 0;
   modalExpanded = false;
@@ -140,6 +150,7 @@ export async function openInsights(): Promise<void> {
   loadStaleObjects();
   loadAccountExposure();
   loadChokePoints();
+  loadTierViolations();
 }
 
 /** Close the modal */
@@ -235,6 +246,9 @@ function renderModal(): void {
       <button class="db-type-tab ${activeTab === "unexpected-choke-points" ? "active" : ""}" data-tab="unexpected-choke-points">
         Unexpected Choke Points
       </button>
+      <button class="db-type-tab ${activeTab === "tier-violations" ? "active" : ""}" data-tab="tier-violations">
+        Tier Violations
+      </button>
     </div>
     <div class="insight-tab-content" ${activeTab !== "da-analysis" ? "hidden" : ""} id="tab-da-analysis">
       ${renderDAAnalysisTab()}
@@ -253,6 +267,9 @@ function renderModal(): void {
     </div>
     <div class="insight-tab-content" ${activeTab !== "unexpected-choke-points" ? "hidden" : ""} id="tab-unexpected-choke-points">
       ${renderUnexpectedChokePointsTab()}
+    </div>
+    <div class="insight-tab-content" ${activeTab !== "tier-violations" ? "hidden" : ""} id="tab-tier-violations">
+      ${renderTierViolationsTab()}
     </div>
   `;
 }
@@ -603,6 +620,54 @@ function renderUnexpectedChokePointsTab(): string {
   `;
 }
 
+/** Render Tier Violations tab */
+function renderTierViolationsTab(): string {
+  if (tierViolationsState.loading) {
+    return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing tier violations...</span></div>`;
+  }
+  if (tierViolationsState.error) {
+    return `<div class="insight-error">${escapeHtml(tierViolationsState.error)}</div>`;
+  }
+  if (!tierViolationsState.data) {
+    return `<div class="insight-error">No data available</div>`;
+  }
+
+  const { tier1to0, tier2to1, tier3to2 } = tierViolationsState.data;
+  const total = tier1to0 + tier2to1 + tier3to2;
+
+  return `
+    <div class="insights-container">
+      <div class="insight-section">
+        <h3 class="insight-section-title">Tier Violations</h3>
+        <p class="insight-desc">
+          Direct relationships that cross tier boundaries. Each count represents
+          a relationship from a lower-privilege tier to a higher-privilege tier,
+          indicating a potential attack path that violates the tiered administration model.
+          ${total.toLocaleString()} total violation${total === 1 ? "" : "s"}.
+        </p>
+        <div class="insight-cards">
+          <div class="insight-card insight-card-primary">
+            <div class="insight-card-value ${tier1to0 > 0 ? "clickable" : ""}" ${tier1to0 > 0 ? `data-query="tier-violation" data-sid="1-0" title="Click to view graph"` : ""}>${tier1to0.toLocaleString()}</div>
+            <div class="insight-card-label">Tier 1 &rarr; Tier 0</div>
+            <div class="insight-card-desc">Server admins reaching domain admins</div>
+          </div>
+          <div class="insight-card insight-card-secondary">
+            <div class="insight-card-value ${tier2to1 > 0 ? "clickable" : ""}" ${tier2to1 > 0 ? `data-query="tier-violation" data-sid="2-1" title="Click to view graph"` : ""}>${tier2to1.toLocaleString()}</div>
+            <div class="insight-card-label">Tier 2 &rarr; Tier 1</div>
+            <div class="insight-card-desc">Workstations reaching server admins</div>
+          </div>
+          <div class="insight-card">
+            <div class="insight-card-value ${tier3to2 > 0 ? "clickable" : ""}" ${tier3to2 > 0 ? `data-query="tier-violation" data-sid="3-2" title="Click to view graph"` : ""}>${tier3to2.toLocaleString()}</div>
+            <div class="insight-card-label">Tier 3 &rarr; Tier 2</div>
+            <div class="insight-card-desc">Default objects reaching workstations</div>
+          </div>
+        </div>
+        <p class="text-xs text-gray-500 mt-2">Click on a number to visualize the graph</p>
+      </div>
+    </div>
+  `;
+}
+
 /** Load Domain Admin Analysis data */
 async function loadDAAnalysis(): Promise<void> {
   daState = { loading: true, error: null, data: null };
@@ -799,6 +864,48 @@ async function loadChokePoints(): Promise<void> {
   renderModal();
 }
 
+/** Load Tier Violations data */
+async function loadTierViolations(): Promise<void> {
+  tierViolationsState = { loading: true, error: null, data: null };
+  renderModal();
+
+  try {
+    // Count direct relationships where source tier > target tier (tier boundary crossing)
+    // Lower tier number = more privileged, so a tier 1 node having a direct relationship
+    // to a tier 0 node is a violation (unexpected cross-tier access).
+    const countQuery = (sourceTier: number, targetTier: number) =>
+      `MATCH (a)-[r]->(b) WHERE a.tier = ${sourceTier} AND b.tier = ${targetTier} RETURN count(r) AS cnt`;
+
+    const [r1to0, r2to1, r3to2] = await Promise.all([
+      executeQuery(countQuery(1, 0), { extractGraph: false, background: true }),
+      executeQuery(countQuery(2, 1), { extractGraph: false, background: true }),
+      executeQuery(countQuery(3, 2), { extractGraph: false, background: true }),
+    ]);
+
+    const extractCount = (result: { results?: { rows: unknown[][] } }): number => {
+      const row = result.results?.rows?.[0];
+      if (!row || row.length === 0) return 0;
+      return typeof row[0] === "number" ? row[0] : 0;
+    };
+
+    tierViolationsState = {
+      loading: false,
+      error: null,
+      data: {
+        tier1to0: extractCount(r1to0),
+        tier2to1: extractCount(r2to1),
+        tier3to2: extractCount(r3to2),
+      },
+    };
+  } catch (err) {
+    if (err instanceof QueryAbortedError) return;
+    const message = err instanceof Error ? err.message : "Failed to load tier violations";
+    tierViolationsState = { loading: false, error: message, data: null };
+  }
+
+  renderModal();
+}
+
 /** Execute a choke point graph query using direct IDs */
 async function executeChokePointQuery(sourceId: string, targetId: string, relType: string): Promise<void> {
   const query = `MATCH p=(a)-[r]->(b) WHERE a.objectid = '${sourceId}' AND b.objectid = '${targetId}' AND type(r) = '${relType}' RETURN p`;
@@ -853,6 +960,11 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
     case "stale-computers": {
       const threshold = daysToWindowsFileTime(staleThresholdDays);
       query = `MATCH (c:Computer) WHERE c.enabled = true AND c.lastlogon < ${threshold} RETURN c LIMIT 500`;
+      break;
+    }
+    case "tier-violation": {
+      const [sourceTier, targetTier] = (extraData ?? "1-0").split("-");
+      query = `MATCH p=(a)-[r]->(b) WHERE a.tier = ${sourceTier} AND b.tier = ${targetTier} RETURN p LIMIT 500`;
       break;
     }
     default:
@@ -945,6 +1057,7 @@ function handleClick(e: Event): void {
       loadStaleObjects();
       loadAccountExposure();
       loadChokePoints();
+      loadTierViolations();
       break;
     case "choke-page-prev":
       if (chokePointsPage > 0) {
