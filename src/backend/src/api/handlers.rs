@@ -2,11 +2,12 @@
 
 use super::core;
 use crate::api::types::{
-    AddEdgeRequest, AddHistoryRequest, AddNodeRequest, ApiError, BrowseEntry, BrowseParams,
-    BrowseResponse, ConnectRequest, DatabaseStatus, GenerateRequest, GenerateResponse,
-    HistoryParams, NodeCounts, NodeStatus, PathParams, PathResponse, PathStep, PathsToDaEntry,
-    PathsToDaParams, PathsToDaResponse, QueryActivity, QueryHistoryEntry, QueryHistoryResponse,
-    QueryProgress, QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
+    AddEdgeRequest, AddHistoryRequest, AddNodeRequest, ApiError, BatchSetTierRequest,
+    BatchSetTierResponse, BrowseEntry, BrowseParams, BrowseResponse, ConnectRequest,
+    DatabaseStatus, GenerateRequest, GenerateResponse, HistoryParams, NodeCounts, NodeStatus,
+    PathParams, PathResponse, PathStep, PathsToDaEntry, PathsToDaParams, PathsToDaResponse,
+    QueryActivity, QueryHistoryEntry, QueryHistoryResponse, QueryProgress, QueryRequest,
+    QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
 };
 use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, NewQueryHistoryEntry, QueryLanguage};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
@@ -927,6 +928,73 @@ pub async fn node_set_owned(
 
     info!(node_id = %node_id, owned = %body.owned, "Set node owned status");
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Batch-set the tier property on nodes matching the given filters.
+#[instrument(skip(state))]
+pub async fn batch_set_tier(
+    State(state): State<AppState>,
+    Json(body): Json<BatchSetTierRequest>,
+) -> Result<Json<BatchSetTierResponse>, ApiError> {
+    let db = state.require_db()?;
+
+    if !(0..=3).contains(&body.tier) {
+        return Err(ApiError::BadRequest("Tier must be between 0 and 3".into()));
+    }
+
+    let tier = body.tier;
+    let node_type = body.node_type.clone();
+    let name_regex = body.name_regex.clone();
+
+    let updated = run_db(db, move |db| {
+        // Fetch all nodes (we filter in Rust since the DB trait doesn't expose regex filtering)
+        let all_nodes = db.get_all_nodes()?;
+        let regex = name_regex
+            .as_deref()
+            .filter(|r| !r.is_empty())
+            .map(|r| regex::Regex::new(r))
+            .transpose()
+            .map_err(|e| crate::db::DbError::Database(format!("Invalid regex: {e}")))?;
+
+        let matching_ids: Vec<String> = all_nodes
+            .iter()
+            .filter(|n| {
+                if let Some(ref nt) = node_type {
+                    if !n.label.eq_ignore_ascii_case(nt) {
+                        return false;
+                    }
+                }
+                if let Some(ref re) = regex {
+                    if !re.is_match(&n.name) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .map(|n| n.id.clone())
+            .collect();
+
+        let count = matching_ids.len();
+        // Update in batches using Cypher SET
+        for chunk in matching_ids.chunks(500) {
+            let ids_list: Vec<String> = chunk
+                .iter()
+                .map(|id| format!("'{}'", id.replace('\'', "\\'")))
+                .collect();
+            let query = format!(
+                "MATCH (n) WHERE n.objectid IN [{}] SET n.tier = {}",
+                ids_list.join(", "),
+                tier
+            );
+            db.run_custom_query(&query)?;
+        }
+
+        Ok(count)
+    })
+    .await?;
+
+    info!(tier = tier, updated = updated, "Batch set tier");
+    Ok(Json(BatchSetTierResponse { updated }))
 }
 
 // ============================================================================

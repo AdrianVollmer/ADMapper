@@ -23,6 +23,7 @@ import { escapeHtml } from "../utils/html";
 import { openSettings, toggleTheme } from "./settings";
 import { openListView } from "./list-view";
 import { openGenerateData } from "./generate-data";
+import { openEditTiers } from "./edit-tiers";
 
 /** Action name constants for type-safe dispatch */
 export const Actions = {
@@ -38,6 +39,7 @@ export const Actions = {
   // Edit menu
   ADD_NODE: "add-node",
   ADD_EDGE: "add-relationship",
+  EDIT_TIERS: "edit-tiers",
   CLEAR_DISABLED: "clear-disabled",
   CLEAR_DB: "clear-db",
   CLEAR_CACHE: "clear-cache",
@@ -107,6 +109,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   // Edit menu
   "add-node": () => openAddNode(),
   "add-relationship": () => openAddEdge(),
+  "edit-tiers": () => openEditTiers(),
   "clear-disabled": () => clearDisabledObjects(),
   "clear-db": () => clearDatabase(),
   "clear-cache": () => clearCache(),

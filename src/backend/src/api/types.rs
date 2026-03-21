@@ -202,6 +202,30 @@ pub struct NodeStatus {
 }
 
 // ============================================================================
+// Tier Types
+// ============================================================================
+
+/// Request body for batch-setting tier on filtered nodes.
+#[derive(Debug, Deserialize)]
+pub struct BatchSetTierRequest {
+    /// Tier value to assign (0-3)
+    pub tier: i64,
+    /// Node type filter (e.g., "User", "Group", "Computer"). Empty = all types.
+    #[serde(default)]
+    pub node_type: Option<String>,
+    /// Regex filter applied to node name. Empty = no filter.
+    #[serde(default)]
+    pub name_regex: Option<String>,
+}
+
+/// Response for batch tier update.
+#[derive(Debug, Serialize)]
+pub struct BatchSetTierResponse {
+    /// Number of nodes updated
+    pub updated: usize,
+}
+
+// ============================================================================
 // Path Types
 // ============================================================================
 
