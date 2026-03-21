@@ -600,8 +600,13 @@ impl BloodHoundImporter {
         }
     }
 
+    /// Well-known RIDs that should receive tier 2.
+    const TIER_TWO_RIDS: &'static [&'static str] = &[
+        "-515", // Domain Computers
+    ];
+
     /// Assign tier based on the object's SID.
-    /// Sets tier=0 for objects with well-known privileged RIDs, default is 3.
+    /// Sets tier=0 for privileged RIDs, tier=2 for well-known non-privileged groups.
     fn assign_tier(props: &mut serde_json::Map<String, JsonValue>, objectid: &str) {
         // Skip if already assigned
         if props.contains_key("tier") {
@@ -615,6 +620,16 @@ impl BloodHoundImporter {
 
         if is_tier_zero {
             props.insert("tier".to_string(), JsonValue::Number(0.into()));
+            return;
+        }
+
+        // Check if the object's SID ends with a tier-2 RID
+        let is_tier_two = Self::TIER_TWO_RIDS
+            .iter()
+            .any(|rid| objectid.ends_with(rid));
+
+        if is_tier_two {
+            props.insert("tier".to_string(), JsonValue::Number(2.into()));
         }
     }
 
@@ -1489,6 +1504,22 @@ mod tests {
 
         let node = importer.extract_node("users", &entity).unwrap();
         assert!(node.properties.get("tier").is_none());
+    }
+
+    #[test]
+    fn test_extract_node_marks_domain_computers_tier_two() {
+        let importer = test_importer();
+
+        // Domain Computers group (SID ends with -515)
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234567890-515",
+            "Properties": {
+                "name": "DOMAIN COMPUTERS@CORP.LOCAL"
+            }
+        });
+
+        let node = importer.extract_node("groups", &entity).unwrap();
+        assert_eq!(node.properties["tier"], 2);
     }
 
     #[test]
