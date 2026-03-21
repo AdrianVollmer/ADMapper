@@ -49,7 +49,7 @@ const PROPERTY_PRIORITY: Record<string, number> = {
   // Account status
   enabled: 50,
   admincount: 51,
-  highvalue: 52,
+  tier: 52,
   sensitive: 53,
 
   // Computer info
@@ -126,7 +126,7 @@ const PROPERTY_LABELS: Record<string, string> = {
   mail: "Email",
 
   // Misc
-  highvalue: "High Value",
+  tier: "Tier",
   hasspn: "Has SPN",
   serviceprincipalnames: "SPNs",
   owned: "Owned",
@@ -260,17 +260,17 @@ const USER_INDICATORS = {
     </svg>`,
     tooltip: "Domain Admin",
   },
-  highValue: {
+  tierZero: {
     icon: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 text-orange-500">
       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
     </svg>`,
-    tooltip: "High Value Target",
+    tooltip: "Tier 0",
   },
   hasPath: {
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4 text-blue-500">
       <path d="M13 17l5-5-5-5M6 17l5-5-5-5"/>
     </svg>`,
-    tooltip: "Has Path to High Value",
+    tooltip: "Has Path to Tier 0",
   },
   checking: {
     icon: `<span class="spinner-sm"></span>`,
@@ -281,7 +281,7 @@ const USER_INDICATORS = {
       <circle cx="12" cy="12" r="10"/>
       <path d="M8 12h8"/>
     </svg>`,
-    tooltip: "No path to high value targets",
+    tooltip: "No path to tier-0 targets",
   },
 };
 
@@ -1086,8 +1086,8 @@ interface NodeStatusResponse {
   owned: boolean;
   isEnterpriseAdmin: boolean;
   isDomainAdmin: boolean;
-  isHighValue: boolean;
-  hasPathToHighValue: boolean;
+  tier: number;
+  hasPathToHighTier: boolean;
   pathLength?: number;
 }
 
@@ -1109,14 +1109,14 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
       indicators.push(renderIndicator("owned"));
     }
 
-    // Admin/high-value indicators (mutually exclusive hierarchy)
+    // Admin/tier indicators (mutually exclusive hierarchy)
     if (status.isEnterpriseAdmin) {
       indicators.push(renderIndicator("enterpriseAdmin"));
     } else if (status.isDomainAdmin) {
       indicators.push(renderIndicator("domainAdmin"));
-    } else if (status.isHighValue) {
-      indicators.push(renderIndicator("highValue"));
-    } else if (status.hasPathToHighValue) {
+    } else if (status.tier === 0) {
+      indicators.push(renderIndicator("tierZero"));
+    } else if (status.hasPathToHighTier) {
       const hops = status.pathLength ?? 0;
       indicators.push(
         `<span class="user-indicator cursor-pointer" data-action="show-path-to-hv" data-node-id="${nodeId}" title="${USER_INDICATORS.hasPath.tooltip} (${hops} hops) - click to show path">${USER_INDICATORS.hasPath.icon}</span>`
@@ -1129,10 +1129,10 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
 
     container.innerHTML = indicators.join("");
 
-    // Attach click handler for "path to high value" indicator
+    // Attach click handler for "path to tier 0" indicator
     const pathIndicator = container.querySelector('[data-action="show-path-to-hv"]');
     if (pathIndicator) {
-      pathIndicator.addEventListener("click", () => showPathToHighValue(nodeId));
+      pathIndicator.addEventListener("click", () => showPathToTierZero(nodeId));
     }
 
     // Update the overflow menu button text based on owned status
@@ -1151,8 +1151,8 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
   }
 }
 
-/** Show path to high-value target when indicator is clicked */
-async function showPathToHighValue(nodeId: string): Promise<void> {
+/** Show path to tier-0 target when indicator is clicked */
+async function showPathToTierZero(nodeId: string): Promise<void> {
   const escapedId = nodeId.replace(/'/g, "\\'");
   const query = `MATCH p = shortestPath((a)-[*1..]->(b)) WHERE a.objectid = '${escapedId}' AND (${ridWhereClause("b", HIGH_VALUE_RIDS)}) RETURN p`;
 
@@ -1190,8 +1190,8 @@ async function showPathToHighValue(nodeId: string): Promise<void> {
       console.debug("Path query was aborted:", err.message);
       return;
     }
-    console.error("Failed to show path to high-value target:", err);
-    showError("Failed to load path to high-value target");
+    console.error("Failed to show path to tier-0 target:", err);
+    showError("Failed to load path to tier-0 target");
   }
 }
 

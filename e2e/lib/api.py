@@ -152,7 +152,7 @@ class APIClient:
         return self.get(f"/api/graph/node/{node_id}")
 
     def node_status(self, node_id: str) -> APIResponse:
-        """Get status for a node (high-value, paths to HVT, etc)."""
+        """Get status for a node (tier, paths to tier-0, etc)."""
         return self.get(f"/api/graph/node/{node_id}/status")
 
     def node_set_owned(self, node_id: str, owned: bool = True) -> APIResponse:
@@ -164,7 +164,7 @@ class APIClient:
         return self.get("/api/graph/choke-points")
 
     def insights(self) -> APIResponse:
-        """Get security insights (high-value targets, kerberoastable, etc)."""
+        """Get security insights (tier-0 targets, kerberoastable, etc)."""
         return self.get("/api/graph/insights")
 
     def shortest_path(

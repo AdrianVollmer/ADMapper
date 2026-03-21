@@ -1291,7 +1291,7 @@ class TestRunner:
 
         results.append(self._run_test("Node get API works", check_node_get))
 
-        # Test node_status API (high-value detection)
+        # Test node_status API (tier detection)
         def check_node_status():
             start = time.time()
             response = self.api.node_status(test_node_id)
@@ -1304,15 +1304,15 @@ class TestRunner:
             body = response.body
             if not isinstance(body, dict):
                 return False, f"Expected dict, got {type(body)}", proof
-            # Should have isHighValue and hasPathToHighValue fields (camelCase)
-            if "isHighValue" not in body:
-                return False, "Missing isHighValue field", proof
-            if "hasPathToHighValue" not in body:
-                return False, "Missing hasPathToHighValue field", proof
+            # Should have tier and hasPathToHighTier fields (camelCase)
+            if "tier" not in body:
+                return False, "Missing tier field", proof
+            if "hasPathToHighTier" not in body:
+                return False, "Missing hasPathToHighTier field", proof
             self.logger.info(
                 f"Node status: {elapsed_ms:.0f}ms, "
-                f"isHighValue={body.get('isHighValue')}, "
-                f"hasPath={body.get('hasPathToHighValue')}"
+                f"tier={body.get('tier')}, "
+                f"hasPath={body.get('hasPathToHighTier')}"
             )
             return True, "", proof
 
@@ -1363,7 +1363,7 @@ class TestRunner:
                 return False, f"Expected dict, got {type(body)}", proof
             # Check expected fields exist
             expected_fields = [
-                "high_value_targets",
+                "tier_zero_targets",
                 "kerberoastable",
                 "asrep_roastable",
                 "unconstrained_delegation",
@@ -1373,7 +1373,7 @@ class TestRunner:
                     self.logger.warning(f"Missing field in insights: {field}")
             self.logger.info(
                 f"Insights: {elapsed_ms:.0f}ms, "
-                f"high_value={len(body.get('high_value_targets', []))}, "
+                f"tier_zero={len(body.get('tier_zero_targets', []))}, "
                 f"kerberoastable={len(body.get('kerberoastable', []))}"
             )
             return True, "", proof
@@ -1596,7 +1596,7 @@ class TestRunner:
     # =========================================================================
 
     # Additional queries not in builtin-queries.ts (from insights.ts and
-    # high-value path analysis). These are the only queries defined here;
+    # tier-0 path analysis). These are the only queries defined here;
     # all built-in queries are parsed from the frontend source files.
     EXTRA_CONSISTENCY_QUERIES: list[tuple[str, str]] = [
         (
@@ -1816,7 +1816,7 @@ class TestRunner:
         return results
 
     def test_query_consistency(self) -> list[TestResult]:
-        """Run all built-in and high-value path queries, recording result counts.
+        """Run all built-in and tier-0 path queries, recording result counts.
 
         Queries are parsed from the frontend source files to maintain a single
         source of truth. The counts are stored in self.query_counts for

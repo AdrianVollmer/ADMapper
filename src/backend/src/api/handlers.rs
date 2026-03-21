@@ -616,10 +616,10 @@ pub async fn node_connections(
 /// 1. Independent properties: owned, disabled
 /// 2. Membership in Enterprise Admins (-519)
 /// 3. Membership in Domain Admins (-512)
-/// 4. Membership in other high-value groups
+/// 4. Membership in other tier-0 groups
 /// 5. Path to Enterprise Admins
 /// 6. Path to Domain Admins
-/// 7. Path to other high-value groups
+/// 7. Path to other tier-0 groups
 #[instrument(skip(state))]
 pub async fn node_status(
     State(state): State<AppState>,
@@ -628,7 +628,7 @@ pub async fn node_status(
     let db = state.require_db()?;
     info!(node_id = %node_id, "Checking node security status");
 
-    // Well-known high-value SID suffixes (excluding -512 DA and -519 EA which are checked separately):
+    // Well-known tier-0 SID suffixes (excluding -512 DA and -519 EA which are checked separately):
     //   -518: Schema Admins
     //   -516: Domain Controllers
     //   -498: Enterprise Read-Only Domain Controllers
@@ -637,7 +637,7 @@ pub async fn node_status(
     //   -548: Account Operators
     //   -549: Server Operators
     //   -551: Backup Operators
-    const OTHER_HIGH_VALUE_RIDS: &[&str] = &[
+    const OTHER_TIER_ZERO_RIDS: &[&str] = &[
         "-518", "-516", "-498", "-S-1-5-9", "-544", "-548", "-549", "-551",
     ];
 
@@ -687,8 +687,8 @@ pub async fn node_status(
             is_disabled: false, // Not applicable to domains, OUs, etc.
             is_enterprise_admin: false,
             is_domain_admin: false,
-            is_high_value: false,
-            has_path_to_high_value: false,
+            tier: 3,
+            has_path_to_high_tier: false,
             path_length: None,
         }));
     }
@@ -709,8 +709,8 @@ pub async fn node_status(
             is_disabled,
             is_enterprise_admin: true,
             is_domain_admin: false,
-            is_high_value: true,
-            has_path_to_high_value: false,
+            tier: 0,
+            has_path_to_high_tier: false,
             path_length: None,
         }));
     }
@@ -731,85 +731,76 @@ pub async fn node_status(
             is_disabled,
             is_enterprise_admin: false,
             is_domain_admin: true,
-            is_high_value: true,
-            has_path_to_high_value: false,
+            tier: 0,
+            has_path_to_high_tier: false,
             path_length: None,
         }));
     }
 
-    // === Step 4: Check membership in other high-value groups ===
+    // === Step 4: Check tier property and membership in other tier-0 groups ===
     let node_id_clone = node_id.clone();
-    let db_for_hv = db.clone();
-    let is_high_value = run_db(db_for_hv, move |db| {
-        // Check highvalue property first
+    let db_for_tier = db.clone();
+    let (is_tier_zero, node_tier) = run_db(db_for_tier, move |db| {
+        // Check tier property first
         let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
-        if let Some(node) = nodes.first() {
-            let props = &node.properties;
-            let high_value_prop = props
-                .get("highvalue")
-                .or(props.get("HighValue"))
-                .or(props.get("highValue"))
-                .and_then(|v| {
-                    v.as_bool()
-                        .or_else(|| v.as_i64().map(|i| i == 1))
-                        .or_else(|| v.as_str().map(|s| s == "true"))
-                })
-                .unwrap_or(false);
-            if high_value_prop {
-                return Ok(true);
-            }
+        let tier = nodes
+            .first()
+            .and_then(|n| n.properties.get("tier").and_then(|v| v.as_i64()))
+            .unwrap_or(3);
+
+        if tier == 0 {
+            return Ok((true, tier));
         }
 
-        // Check membership in other high-value groups
-        for rid in OTHER_HIGH_VALUE_RIDS {
+        // Check membership in other tier-0 groups
+        for rid in OTHER_TIER_ZERO_RIDS {
             if db
                 .find_membership_by_sid_suffix(&node_id_clone, rid)?
                 .is_some()
             {
-                return Ok(true);
+                return Ok((true, tier));
             }
         }
-        Ok(false)
+        Ok((false, tier))
     })
     .await?;
 
-    if is_high_value {
+    if is_tier_zero {
         return Ok(Json(NodeStatus {
             owned,
             is_disabled,
             is_enterprise_admin: false,
             is_domain_admin: false,
-            is_high_value: true,
-            has_path_to_high_value: false,
+            tier: 0,
+            has_path_to_high_tier: false,
             path_length: None,
         }));
     }
 
-    // === Step 5: Check path to any high-value target ===
-    // Uses is_highvalue property set at import time for all privileged groups and domains
-    let path_to_hv =
-        check_path_to_condition(&state, &db, &node_id, "b.is_highvalue = true", "high-value")
-            .await?;
-    if let Some(hops) = path_to_hv {
+    // === Step 5: Check path to any tier-0 target ===
+    // Uses tier property set at import time for all privileged groups and domains
+    let path_to_tier0 =
+        check_path_to_condition(&state, &db, &node_id, "b.tier = 0", "tier-0").await?;
+    if let Some(hops) = path_to_tier0 {
         return Ok(Json(NodeStatus {
             owned,
             is_disabled,
             is_enterprise_admin: false,
             is_domain_admin: false,
-            is_high_value: false,
-            has_path_to_high_value: true,
+            tier: node_tier,
+            has_path_to_high_tier: true,
             path_length: Some(hops),
         }));
     }
 
-    // No high-value status or paths found
+    // No tier-0 status or paths found
     Ok(Json(NodeStatus {
         owned,
         is_disabled,
         is_enterprise_admin: false,
         is_domain_admin: false,
-        is_high_value: false,
-        has_path_to_high_value: false,
+        tier: node_tier,
+        has_path_to_high_tier: false,
         path_length: None,
     }))
 }

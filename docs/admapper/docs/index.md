@@ -11,7 +11,7 @@ ADMapper is an interactive graph visualization tool for Active Directory securit
 - **Fast Graph Rendering**: GPU-accelerated visualization handles large AD environments
 - **Multiple Database Backends**: CrustDB (embedded), Neo4j, FalkorDB
 - **Cypher Queries**: Run custom queries to explore the permission graph
-- **Security Insights**: Automatic detection of high-value targets, kerberoastable accounts, and choke points
+- **Security Insights**: Automatic detection of tier-0 targets, kerberoastable accounts, and choke points
 - **Desktop and Headless Modes**: Run as a native app or deploy as a web service
 - **BloodHound Compatible**: Import data collected by SharpHound or BloodHound.py
 

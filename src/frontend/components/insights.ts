@@ -66,7 +66,7 @@ interface ChokePointData {
   target_label: string;
   rel_type: string;
   betweenness: number;
-  source_highvalue: boolean;
+  source_tier: number;
 }
 
 /** Choke Points response */
@@ -576,7 +576,7 @@ function renderUnexpectedChokePointsTab(): string {
       <div class="insights-container">
         <div class="insight-section">
           <h3 class="insight-section-title">Unexpected Choke Points</h3>
-          <p class="text-gray-500">No unexpected choke points found. All high-centrality relationships originate from high-value or domain objects.</p>
+          <p class="text-gray-500">No unexpected choke points found. All high-centrality relationships originate from tier-0 or domain objects.</p>
         </div>
       </div>
     `;
@@ -587,7 +587,7 @@ function renderUnexpectedChokePointsTab(): string {
       <div class="insight-section">
         <h3 class="insight-section-title">Unexpected Choke Points</h3>
         <p class="insight-desc">
-          Choke points where the source is neither a high-value target nor a domain object &mdash;
+          Choke points where the source is neither a tier-0 target nor a domain object &mdash;
           these represent surprising attack paths from low-privilege entities.
           ${unexpected_choke_points.length} results
           (${total_nodes.toLocaleString()} nodes, ${total_edges.toLocaleString()} relationships analyzed).

@@ -1011,8 +1011,7 @@ mod tests {
     #[test]
     fn test_plan_boolean_target_filter_pushdown() {
         // Boolean target property filters should be pushed into VariableLengthExpand
-        let plan =
-            plan_query("MATCH (a)-[*1..20]->(b) WHERE b.is_highvalue = true RETURN b.objectid");
+        let plan = plan_query("MATCH (a)-[*1..20]->(b) WHERE b.tier = 0 RETURN b.objectid");
         if let PlanOperator::Project { source, .. } = plan.root {
             if let PlanOperator::VariableLengthExpand(ref p) = *source {
                 assert!(
@@ -1024,8 +1023,8 @@ mod tests {
                     ref value,
                 }) = p.target_property_filter
                 {
-                    assert_eq!(property, "is_highvalue");
-                    assert_eq!(*value, serde_json::Value::Bool(true));
+                    assert_eq!(property, "tier");
+                    assert_eq!(*value, serde_json::Value::Number(0.into()));
                 } else {
                     panic!("Expected Eq filter");
                 }

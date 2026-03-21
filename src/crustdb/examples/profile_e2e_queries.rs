@@ -98,7 +98,7 @@ fn build_e2e_graph(db: &Database) -> (usize, usize) {
             "name": format!("Group{}", i),
         });
         if i < 5 {
-            props["is_highvalue"] = serde_json::json!(true);
+            props["tier"] = serde_json::json!(0);
         }
         nodes.push((vec!["Group".to_string()], props));
     }

@@ -28,7 +28,7 @@ fn build_e2e_scale_graph(db: &Database) -> (usize, usize) {
         .unwrap();
     }
     for i in 0..group_count {
-        let hv = if i < 5 { ", is_highvalue: true" } else { "" };
+        let hv = if i < 5 { ", tier: 0" } else { "" };
         db.execute(&format!(
             "CREATE (:Group {{objectid: 'G_{i}', name: 'Group{i}'{hv}}})"
         ))

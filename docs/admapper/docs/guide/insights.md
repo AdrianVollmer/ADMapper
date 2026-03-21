@@ -55,7 +55,7 @@ Results are cached and recomputed when the graph changes.
 
 ## Unexpected Choke Points
 
-A filtered view of choke points where the source node is neither a high-value
+A filtered view of choke points where the source node is neither a tier-0
 target nor a domain infrastructure object (Domain, OU, GPO, Container, etc.).
 These represent surprising attack paths from low-privilege entities and are
 often the most actionable findings, since they highlight relationships that

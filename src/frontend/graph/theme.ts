@@ -12,7 +12,7 @@ export const NODE_COLORS: Record<ADNodeType, string> = {
   User: "#22b8cf", // Cyan - users are common, approachable color
   Group: "#fab005", // Golden yellow - groups connect users to permissions
   Computer: "#f03e3e", // Vibrant red - computers are attack targets
-  Domain: "#7950f2", // Vivid purple - domains are high-value
+  Domain: "#7950f2", // Vivid purple - domains are tier 0
   GPO: "#fd7e14", // Bright orange - GPOs control configuration
   OU: "#20c997", // Mint green - organizational containers
   Container: "#db2777", // Pink - generic containers (matches CSS bg-pink-600)

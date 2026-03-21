@@ -191,13 +191,12 @@ pub struct NodeStatus {
     /// Is the node a member of Domain Admins (SID -512)
     #[serde(rename = "isDomainAdmin")]
     pub is_domain_admin: bool,
-    /// Is the node marked as high value or in a high-value group
-    #[serde(rename = "isHighValue")]
-    pub is_high_value: bool,
-    /// Does the node have a path to a high-value target (if not already high value)
-    #[serde(rename = "hasPathToHighValue")]
-    pub has_path_to_high_value: bool,
-    /// Number of hops to the nearest high-value target (if hasPathToHighValue)
+    /// Tier level (0 = most critical, 3 = default)
+    pub tier: i64,
+    /// Does the node have a path to a tier-0 target
+    #[serde(rename = "hasPathToHighTier")]
+    pub has_path_to_high_tier: bool,
+    /// Number of hops to the nearest tier-0 target (if hasPathToHighTier)
     #[serde(rename = "pathLength", skip_serializing_if = "Option::is_none")]
     pub path_length: Option<usize>,
 }

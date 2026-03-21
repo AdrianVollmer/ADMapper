@@ -5,7 +5,7 @@
 import type { QueryCategory } from "./types";
 
 /**
- * Well-known high-value group RIDs in Active Directory.
+ * Well-known tier-0 group RIDs in Active Directory.
  * Used across insights, sidebar, and built-in queries.
  */
 export const HIGH_VALUE_RIDS = [
@@ -174,25 +174,25 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
     ],
   },
   {
-    id: "high-value",
-    name: "High Value Targets",
+    id: "tier-zero",
+    name: "Tier 0 Targets",
     queries: [
       {
-        id: "high-value-groups",
-        name: "High Value Groups",
+        id: "tier-zero-groups",
+        name: "Tier 0 Groups",
         description: "Privileged groups by well-known SID",
         query: `MATCH (g:Group) WHERE ${ridWhereClause("g", [...HIGH_VALUE_RIDS, "-S-1-5-9"])} RETURN g`,
       },
       {
-        id: "high-value-users",
-        name: "High Value Users",
-        description: "Users who are members of high-value groups",
+        id: "tier-zero-users",
+        name: "Tier 0 Users",
+        description: "Users who are members of tier-0 groups",
         query: `MATCH p = (u:User)-[:MemberOf]->(g:Group) WHERE ${ridWhereClause("g", [...HIGH_VALUE_RIDS, "-S-1-5-9"])} RETURN p`,
       },
       {
-        id: "high-value-computers",
-        name: "High Value Computers",
-        description: "Computers who are members of high-value groups (e.g., Domain Controllers)",
+        id: "tier-zero-computers",
+        name: "Tier 0 Computers",
+        description: "Computers who are members of tier-0 groups (e.g., Domain Controllers)",
         query: `MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE ${ridWhereClause("g", ["-516", "-498", "-521", "-S-1-5-9"])} RETURN p`,
       },
     ],

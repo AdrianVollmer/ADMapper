@@ -1,13 +1,13 @@
-//! Integration test for "path to high-value" queries.
+//! Integration test for "path to tier-0" queries.
 //!
 //! This test isolates the performance bottleneck seen in the ADMapper
 //! "Node status API works" e2e test, which runs a variable-length path
-//! query to find paths from a source node to any high-value target.
+//! query to find paths from a source node to any tier-0 target.
 //!
 //! The query pattern is:
 //! ```cypher
 //! MATCH p = (a)-[*1..20]->(b)
-//! WHERE a.objectid = '...' AND b.is_highvalue = true
+//! WHERE a.objectid = '...' AND b.tier = 0
 //! RETURN length(p) AS hops
 //! LIMIT 1
 //! ```
@@ -37,13 +37,13 @@ fn create_relationship(db: &Database, source_oid: &str, target_oid: &str, rel_ty
 
 /// Create a test graph that mimics a BloodHound AD structure:
 /// - Multiple "User" nodes
-/// - Some "Group" nodes (some marked as high-value)
+/// - Some "Group" nodes (some marked as tier-0)
 /// - MemberOf relationships forming a hierarchy
 fn setup_ad_like_graph(db: &Database, num_users: usize, num_groups: usize, chain_length: usize) {
-    // Create high-value groups (Domain Admins, Enterprise Admins, etc.)
+    // Create tier-0 groups (Domain Admins, Enterprise Admins, etc.)
     for i in 0..3 {
         db.execute(&format!(
-            "CREATE (:Group {{objectid: 'HV_GROUP_{}', name: 'HighValueGroup{}', is_highvalue: true}})",
+            "CREATE (:Group {{objectid: 'HV_GROUP_{}', name: 'HighValueGroup{}', tier: 0}})",
             i, i
         ))
         .unwrap();
@@ -77,7 +77,7 @@ fn setup_ad_like_graph(db: &Database, num_users: usize, num_groups: usize, chain
         );
     }
 
-    // Connect last group in chain to high-value group
+    // Connect last group in chain to tier-0 group
     if chain_length > 0 {
         let last_group = chain_length.saturating_sub(1);
         create_relationship(
@@ -104,11 +104,11 @@ fn setup_ad_like_graph(db: &Database, num_users: usize, num_groups: usize, chain
     }
 }
 
-/// The slow query from node_status: find path to high-value node
-fn run_path_to_highvalue_query(db: &Database, source_objectid: &str) -> (bool, u128) {
+/// The slow query from node_status: find path to tier-0 node
+fn run_path_to_tier_zero_query(db: &Database, source_objectid: &str) -> (bool, u128) {
     let query = format!(
         "MATCH (a)-[*1..20]->(b) \
-         WHERE a.objectid = '{}' AND b.is_highvalue = true \
+         WHERE a.objectid = '{}' AND b.tier = 0 \
          RETURN b.objectid",
         source_objectid
     );
@@ -126,7 +126,7 @@ fn run_path_to_highvalue_query(db: &Database, source_objectid: &str) -> (bool, u
 fn run_exact_e2e_query(db: &Database, source_objectid: &str) -> (Option<i64>, u128) {
     let query = format!(
         "MATCH p = (a)-[*1..20]->(b) \
-         WHERE a.objectid = '{}' AND (b.is_highvalue = true) \
+         WHERE a.objectid = '{}' AND (b.tier = 0) \
          RETURN length(p) AS hops LIMIT 1",
         source_objectid
     );
@@ -143,7 +143,7 @@ fn run_exact_e2e_query(db: &Database, source_objectid: &str) -> (Option<i64>, u1
 }
 
 #[test]
-fn test_path_to_highvalue_small_graph() {
+fn test_path_to_tier_zero_small_graph() {
     let db = Database::in_memory().unwrap();
     db.set_entity_cache(EntityCacheConfig::with_capacity(10_000));
 
@@ -163,9 +163,9 @@ fn test_path_to_highvalue_small_graph() {
     println!("GROUP_0 connects to: {:?}", chain_check.rows);
 
     let hv_check = db
-        .execute("MATCH (a:Group {is_highvalue: true}) RETURN a.objectid")
+        .execute("MATCH (a:Group {tier: 0}) RETURN a.objectid")
         .unwrap();
-    println!("High-value groups: {:?}", hv_check.rows);
+    println!("Tier-0 groups: {:?}", hv_check.rows);
 
     let user0_check = db
         .execute("MATCH (u:User {objectid: 'USER_0'})-[:MemberOf]->(g) RETURN g.objectid")
@@ -173,20 +173,20 @@ fn test_path_to_highvalue_small_graph() {
     println!("USER_0 is member of: {:?}", user0_check.rows);
 
     // Test from a user that HAS a path (USER_0 -> GROUP_0 -> ... -> HV_GROUP_0)
-    let (found, elapsed) = run_path_to_highvalue_query(&db, "USER_0");
+    let (found, elapsed) = run_path_to_tier_zero_query(&db, "USER_0");
     println!("USER_0 (has path): found={}, elapsed={}ms", found, elapsed);
-    assert!(found, "USER_0 should have path to high-value");
+    assert!(found, "USER_0 should have path to tier-0");
     assert!(elapsed < 500, "Query took too long: {}ms", elapsed);
 
     // Test from a user that has NO path (USER_1 is not connected)
-    let (found, elapsed) = run_path_to_highvalue_query(&db, "USER_1");
+    let (found, elapsed) = run_path_to_tier_zero_query(&db, "USER_1");
     println!("USER_1 (no path): found={}, elapsed={}ms", found, elapsed);
-    assert!(!found, "USER_1 should NOT have path to high-value");
+    assert!(!found, "USER_1 should NOT have path to tier-0");
     assert!(elapsed < 500, "Query took too long: {}ms", elapsed);
 }
 
 #[test]
-fn test_path_to_highvalue_medium_graph() {
+fn test_path_to_tier_zero_medium_graph() {
     let db = Database::in_memory().unwrap();
     db.set_entity_cache(EntityCacheConfig::with_capacity(100_000));
 
@@ -200,15 +200,15 @@ fn test_path_to_highvalue_medium_graph() {
     );
 
     // Warm up cache
-    let _ = run_path_to_highvalue_query(&db, "USER_0");
+    let _ = run_path_to_tier_zero_query(&db, "USER_0");
 
     // Test query performance
-    let (found, elapsed) = run_path_to_highvalue_query(&db, "USER_0");
+    let (found, elapsed) = run_path_to_tier_zero_query(&db, "USER_0");
     println!("USER_0 (has path): found={}, elapsed={}ms", found, elapsed);
     assert!(found);
     assert!(elapsed < 1000, "Query took too long: {}ms", elapsed);
 
-    let (found, elapsed) = run_path_to_highvalue_query(&db, "USER_1");
+    let (found, elapsed) = run_path_to_tier_zero_query(&db, "USER_1");
     println!("USER_1 (no path): found={}, elapsed={}ms", found, elapsed);
     assert!(!found);
     assert!(elapsed < 1000, "Query took too long: {}ms", elapsed);
@@ -224,7 +224,7 @@ fn test_path_to_highvalue_medium_graph() {
 }
 
 #[test]
-fn test_path_to_highvalue_large_graph() {
+fn test_path_to_tier_zero_large_graph() {
     let db = Database::in_memory().unwrap();
     db.set_entity_cache(EntityCacheConfig::with_capacity(500_000));
 
@@ -238,13 +238,13 @@ fn test_path_to_highvalue_large_graph() {
     );
 
     // Warm up
-    let _ = run_path_to_highvalue_query(&db, "USER_0");
+    let _ = run_path_to_tier_zero_query(&db, "USER_0");
 
     // Run multiple queries to test cache effectiveness
     let mut total_elapsed = 0;
     for i in (0..100).step_by(10) {
         let source = format!("USER_{}", i);
-        let (found, elapsed) = run_path_to_highvalue_query(&db, &source);
+        let (found, elapsed) = run_path_to_tier_zero_query(&db, &source);
         total_elapsed += elapsed;
         if i == 0 {
             assert!(found, "USER_0 should have path");
@@ -282,7 +282,7 @@ fn test_path_to_highvalue_large_graph() {
 ///
 /// The e2e test runs check_path_to_condition which executes:
 ///   MATCH p = (a)-[*1..20]->(b)
-///   WHERE a.objectid = '...' AND (b.is_highvalue = true)
+///   WHERE a.objectid = '...' AND (b.tier = 0)
 ///   RETURN length(p) AS hops LIMIT 1
 ///
 /// The e2e test failed at 16.9s against a 3s timeout with 1,480 nodes and
@@ -335,10 +335,10 @@ fn test_exact_e2e_node_status_query() {
     // Warm up cache (mirrors real-world: the server has been running)
     let _ = run_exact_e2e_query(&db, "USER_0");
 
-    // Test 1: Source with a path to high-value (USER_0 -> GROUP_0 -> ... -> HV_GROUP_0)
+    // Test 1: Source with a path to tier-0 (USER_0 -> GROUP_0 -> ... -> HV_GROUP_0)
     let (hops, elapsed) = run_exact_e2e_query(&db, "USER_0");
     println!("USER_0 (has path): hops={:?}, elapsed={}ms", hops, elapsed);
-    assert!(hops.is_some(), "USER_0 should have path to high-value");
+    assert!(hops.is_some(), "USER_0 should have path to tier-0");
     assert!(
         hops.unwrap() > 0,
         "Path length should be positive, got {}",
@@ -355,7 +355,7 @@ fn test_exact_e2e_node_status_query() {
     // This is the worst case -- must explore nothing or everything reachable.
     let (hops, elapsed) = run_exact_e2e_query(&db, "USER_1");
     println!("USER_1 (no path): hops={:?}, elapsed={}ms", hops, elapsed);
-    assert!(hops.is_none(), "USER_1 should have no path to high-value");
+    assert!(hops.is_none(), "USER_1 should have no path to tier-0");
     assert!(
         elapsed < 2000,
         "Query without path took {}ms, exceeds 2s budget (e2e timeout is 3s)",
@@ -512,7 +512,7 @@ fn test_limit_with_varlen_path_and_where_clause() {
     let without_limit = db
         .execute(
             "MATCH (a)-[*1..20]->(b) \
-             WHERE a.objectid = 'USER_0' AND b.is_highvalue = true \
+             WHERE a.objectid = 'USER_0' AND b.tier = 0 \
              RETURN b.objectid",
         )
         .unwrap();
@@ -525,7 +525,7 @@ fn test_limit_with_varlen_path_and_where_clause() {
     let with_limit = db
         .execute(
             "MATCH (a)-[*1..20]->(b) \
-             WHERE a.objectid = 'USER_0' AND b.is_highvalue = true \
+             WHERE a.objectid = 'USER_0' AND b.tier = 0 \
              RETURN b.objectid LIMIT 1",
         )
         .unwrap();
@@ -540,7 +540,7 @@ fn test_limit_with_varlen_path_and_where_clause() {
     let with_limit_10 = db
         .execute(
             "MATCH (a)-[*1..20]->(b) \
-             WHERE a.objectid = 'USER_0' AND b.is_highvalue = true \
+             WHERE a.objectid = 'USER_0' AND b.tier = 0 \
              RETURN b.objectid LIMIT 10",
         )
         .unwrap();
@@ -557,7 +557,7 @@ fn test_limit_with_varlen_path_and_where_clause() {
     let no_path = db
         .execute(
             "MATCH (a)-[*1..20]->(b) \
-             WHERE a.objectid = 'USER_1' AND b.is_highvalue = true \
+             WHERE a.objectid = 'USER_1' AND b.tier = 0 \
              RETURN b.objectid LIMIT 1",
         )
         .unwrap();
@@ -577,7 +577,7 @@ fn test_inline_source_filter_with_where_target_filter() {
     db.set_entity_cache(EntityCacheConfig::with_capacity(10_000));
 
     // Minimal graph matching the exact issue reproduction
-    db.execute("CREATE (:Group {objectid: 'HV_GROUP', is_highvalue: true})")
+    db.execute("CREATE (:Group {objectid: 'HV_GROUP', tier: 0})")
         .unwrap();
     db.execute("CREATE (:Group {objectid: 'GROUP_0'})").unwrap();
     db.execute("CREATE (:User {objectid: 'USER_0'})").unwrap();
@@ -615,7 +615,7 @@ fn test_inline_source_filter_with_where_target_filter() {
     let baseline = db
         .execute(
             "MATCH (a)-[*1..20]->(b) \
-             WHERE a.objectid = 'USER_0' AND b.is_highvalue = true \
+             WHERE a.objectid = 'USER_0' AND b.tier = 0 \
              RETURN b.objectid",
         )
         .unwrap();
@@ -628,7 +628,7 @@ fn test_inline_source_filter_with_where_target_filter() {
     let inline_source = db
         .execute(
             "MATCH (a {objectid: 'USER_0'})-[*1..20]->(b) \
-             WHERE b.is_highvalue = true \
+             WHERE b.tier = 0 \
              RETURN b.objectid",
         )
         .unwrap();
@@ -646,7 +646,7 @@ fn test_inline_source_filter_with_where_target_filter() {
     let with_label = db
         .execute(
             "MATCH (a:User {objectid: 'USER_0'})-[*1..20]->(b) \
-             WHERE b.is_highvalue = true \
+             WHERE b.tier = 0 \
              RETURN b.objectid",
         )
         .unwrap();
@@ -659,7 +659,7 @@ fn test_inline_source_filter_with_where_target_filter() {
     // And: inline filters on both source and target
     let inline_both = db
         .execute(
-            "MATCH (a {objectid: 'USER_0'})-[*1..20]->(b {is_highvalue: true}) \
+            "MATCH (a {objectid: 'USER_0'})-[*1..20]->(b {tier: 0}) \
              RETURN b.objectid",
         )
         .unwrap();
@@ -672,7 +672,7 @@ fn test_inline_source_filter_with_where_target_filter() {
     let inline_with_limit = db
         .execute(
             "MATCH (a {objectid: 'USER_0'})-[*1..20]->(b) \
-             WHERE b.is_highvalue = true \
+             WHERE b.tier = 0 \
              RETURN b.objectid LIMIT 1",
         )
         .unwrap();
@@ -685,23 +685,23 @@ fn test_inline_source_filter_with_where_target_filter() {
 
 /// Test the worst case: no path exists, must explore entire reachable graph
 #[test]
-fn test_path_to_highvalue_no_path_worst_case() {
+fn test_path_to_tier_zero_no_path_worst_case() {
     let db = Database::in_memory().unwrap();
     db.set_entity_cache(EntityCacheConfig::with_capacity(100_000));
 
-    // Create a graph where no path to high-value exists
+    // Create a graph where no path to tier-0 exists
     // This is the worst case as BFS must explore everything
 
-    // Create isolated high-value groups (not connected to anything)
+    // Create isolated tier-0 groups (not connected to anything)
     for i in 0..3 {
         db.execute(&format!(
-            "CREATE (g:Group {{objectid: 'ISOLATED_HV_{}', is_highvalue: true}})",
+            "CREATE (g:Group {{objectid: 'ISOLATED_HV_{}', tier: 0}})",
             i
         ))
         .unwrap();
     }
 
-    // Create a dense connected component with no path to high-value
+    // Create a dense connected component with no path to tier-0
     for i in 0..500 {
         db.execute(&format!("CREATE (u:User {{objectid: 'DENSE_USER_{}'}})", i))
             .unwrap();
@@ -745,7 +745,7 @@ fn test_path_to_highvalue_no_path_worst_case() {
     );
 
     // This query must explore the entire reachable subgraph before concluding no path
-    let (found, elapsed) = run_path_to_highvalue_query(&db, "DENSE_USER_0");
+    let (found, elapsed) = run_path_to_tier_zero_query(&db, "DENSE_USER_0");
     println!(
         "DENSE_USER_0 (no path, worst case): found={}, elapsed={}ms",
         found, elapsed

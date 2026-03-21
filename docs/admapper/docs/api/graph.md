@@ -245,7 +245,7 @@ well-known principals.
 
 Get relationships with high betweenness centrality. Returns the top 50 choke
 points and the top 50 unexpected choke points (where the source is neither a
-high-value target nor a domain infrastructure object).
+tier-0 target nor a domain infrastructure object).
 
 **Response:**
 
@@ -261,7 +261,7 @@ high-value target nor a domain infrastructure object).
       "target_label": "Computer",
       "rel_type": "AdminTo",
       "betweenness": 4250.5,
-      "source_highvalue": false
+      "source_tier": 3
     }
   ],
   "unexpected_choke_points": [],

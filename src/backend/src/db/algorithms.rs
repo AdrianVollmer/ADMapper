@@ -190,11 +190,11 @@ pub fn relationship_betweenness_centrality(
             _ => continue,
         };
 
-        let source_highvalue = src
+        let source_tier = src
             .properties
-            .get("is_highvalue")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+            .get("tier")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(3);
 
         let cp = ChokePoint {
             source_id: src.id.clone(),
@@ -205,7 +205,7 @@ pub fn relationship_betweenness_centrality(
             target_label: tgt.label.clone(),
             rel_type: edge.rel_type.clone(),
             betweenness: score,
-            source_highvalue,
+            source_tier,
         };
 
         if unexpected_choke_points.len() < top_k && !cp.is_expected_source() {

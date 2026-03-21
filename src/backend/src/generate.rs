@@ -19,6 +19,16 @@ enum Tier {
     Two,  // Workstations, regular users
 }
 
+impl Tier {
+    fn as_i64(self) -> i64 {
+        match self {
+            Tier::Zero => 0,
+            Tier::One => 1,
+            Tier::Two => 2,
+        }
+    }
+}
+
 /// Domain information.
 #[allow(dead_code)]
 struct Domain {
@@ -271,23 +281,23 @@ impl Generator {
         let domain = &self.domains[domain_idx];
         let domain_name = domain.name.to_uppercase();
 
-        // Well-known groups with their RIDs
+        // Well-known groups with their RIDs and tier
         let groups = [
-            ("Domain Admins", 512, true, Tier::Zero),
-            ("Domain Users", 513, false, Tier::Two),
-            ("Domain Computers", 515, false, Tier::Two),
-            ("Domain Controllers", 516, true, Tier::Zero),
-            ("Enterprise Admins", 519, true, Tier::Zero), // Only in root
-            ("Schema Admins", 518, true, Tier::Zero),     // Only in root
-            ("Administrators", 544, true, Tier::Zero),
-            ("Server Operators", 549, false, Tier::One),
-            ("Account Operators", 548, false, Tier::One),
-            ("Backup Operators", 551, false, Tier::One),
-            ("Print Operators", 550, false, Tier::One),
-            ("Remote Desktop Users", 555, false, Tier::Two),
+            ("Domain Admins", 512, Tier::Zero),
+            ("Domain Users", 513, Tier::Two),
+            ("Domain Computers", 515, Tier::Two),
+            ("Domain Controllers", 516, Tier::Zero),
+            ("Enterprise Admins", 519, Tier::Zero), // Only in root
+            ("Schema Admins", 518, Tier::Zero),     // Only in root
+            ("Administrators", 544, Tier::Zero),
+            ("Server Operators", 549, Tier::One),
+            ("Account Operators", 548, Tier::One),
+            ("Backup Operators", 551, Tier::One),
+            ("Print Operators", 550, Tier::One),
+            ("Remote Desktop Users", 555, Tier::Two),
         ];
 
-        for (name, rid, high_value, _tier) in groups {
+        for (name, rid, tier) in groups {
             // Enterprise/Schema Admins only in root domain
             if (rid == 519 || rid == 518) && !domain.is_root {
                 continue;
@@ -303,8 +313,8 @@ impl Generator {
                     "objectid": group_sid,
                     "name": format!("{}@{}", name.to_uppercase(), domain_name),
                     "domain": domain_name,
-                    "highvalue": high_value,
-                    "admincount": high_value,
+                    "tier": tier.as_i64(),
+                    "admincount": tier.as_i64() == 0,
                 }),
             };
 
@@ -345,8 +355,7 @@ impl Generator {
                     "objectid": edc_sid,
                     "name": format!("ENTERPRISE DOMAIN CONTROLLERS@{}", domain_name),
                     "domain": domain_name,
-                    "highvalue": true,
-                    "is_highvalue": true,
+                    "tier": 0,
                     "admincount": true,
                 }),
             });
@@ -376,7 +385,7 @@ impl Generator {
             ("VPN-USERS", Tier::Two),
         ];
 
-        for (name, _tier) in custom_groups {
+        for (name, tier) in custom_groups {
             let group_sid = format!("{}-{}", domain_sid, self.next_group_id);
             self.next_group_id += 1;
 
@@ -388,6 +397,7 @@ impl Generator {
                     "objectid": group_sid,
                     "name": format!("{}@{}", name, domain_name),
                     "domain": domain_name,
+                    "tier": tier.as_i64(),
                 }),
             };
 
@@ -412,7 +422,7 @@ impl Generator {
                 "domain": domain.name.to_uppercase(),
                 "operatingsystem": "Windows Server 2022 Datacenter",
                 "enabled": true,
-                "highvalue": true,
+                "tier": 0,
                 "unconstraineddelegation": true,
             }),
         };
@@ -870,7 +880,7 @@ impl Generator {
                     "name": format!("{}@{}", name.to_uppercase(), domain_name),
                     "domain": domain_name,
                     "gpcpath": format!("\\\\{}\\sysvol\\{}\\Policies\\{}", domain.name, domain.name, gpo_guid),
-                    "highvalue": is_default,
+                    "tier": if is_default { 0 } else { 3 },
                 }),
             };
 

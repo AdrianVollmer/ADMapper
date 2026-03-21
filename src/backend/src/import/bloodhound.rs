@@ -16,10 +16,10 @@ use zip::ZipArchive;
 /// Batch size for database inserts.
 const BATCH_SIZE: usize = 2000;
 
-/// Well-known high-value RIDs in Active Directory.
+/// Well-known tier-0 RIDs in Active Directory.
 /// These are built-in privileged groups that attackers typically target.
 /// See: https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
-mod high_value_rids {
+mod tier_zero_rids {
     // Domain-relative RIDs
     pub const DOMAIN_ADMINS: &str = "-512";
     pub const DOMAIN_CONTROLLERS: &str = "-516";
@@ -46,7 +46,7 @@ mod high_value_rids {
     // See: https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
     pub const ENTERPRISE_DOMAIN_CONTROLLERS: &str = "-S-1-5-9";
 
-    /// All high-value SID suffixes (works via ends_with matching).
+    /// All tier-0 SID suffixes (works via ends_with matching).
     /// Includes both domain-relative RIDs (e.g. "-512") and well-known SIDs (e.g. "S-1-5-9").
     pub const ALL: &[&str] = &[
         DOMAIN_ADMINS,
@@ -467,8 +467,8 @@ impl BloodHoundImporter {
             // Expand useraccountcontrol into individual boolean properties
             Self::expand_uac_flags(props);
 
-            // Mark high-value objects based on SID
-            Self::mark_high_value(props, &id);
+            // Assign tier based on SID (tier 0 for privileged groups)
+            Self::assign_tier(props, &id);
         }
 
         let label = properties
@@ -479,11 +479,11 @@ impl BloodHoundImporter {
 
         let node_type = self.normalize_type(data_type);
 
-        // Domains are always high-value targets
+        // Domains are always tier 0
         if node_type == "Domain" {
             if let Some(props) = properties.as_object_mut() {
-                if !props.contains_key("is_highvalue") {
-                    props.insert("is_highvalue".to_string(), JsonValue::Bool(true));
+                if !props.contains_key("tier") {
+                    props.insert("tier".to_string(), JsonValue::Number(0.into()));
                 }
             }
         }
@@ -600,21 +600,21 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Mark high-value objects based on their SID.
-    /// Sets is_highvalue=true for objects with well-known privileged RIDs.
-    fn mark_high_value(props: &mut serde_json::Map<String, JsonValue>, objectid: &str) {
-        // Skip if already marked
-        if props.contains_key("is_highvalue") {
+    /// Assign tier based on the object's SID.
+    /// Sets tier=0 for objects with well-known privileged RIDs, default is 3.
+    fn assign_tier(props: &mut serde_json::Map<String, JsonValue>, objectid: &str) {
+        // Skip if already assigned
+        if props.contains_key("tier") {
             return;
         }
 
-        // Check if the object's SID ends with a high-value RID
-        let is_high_value = high_value_rids::ALL
+        // Check if the object's SID ends with a tier-0 RID
+        let is_tier_zero = tier_zero_rids::ALL
             .iter()
             .any(|rid| objectid.ends_with(rid));
 
-        if is_high_value {
-            props.insert("is_highvalue".to_string(), JsonValue::Bool(true));
+        if is_tier_zero {
+            props.insert("tier".to_string(), JsonValue::Number(0.into()));
         }
     }
 
@@ -1392,11 +1392,11 @@ mod tests {
     }
 
     // ========================================================================
-    // High Value Detection Tests
+    // Tier Assignment Tests
     // ========================================================================
 
     #[test]
-    fn test_extract_node_marks_domain_admins_high_value() {
+    fn test_extract_node_marks_domain_admins_tier_zero() {
         let importer = test_importer();
 
         // Domain Admins group (SID ends with -512)
@@ -1408,11 +1408,11 @@ mod tests {
         });
 
         let node = importer.extract_node("groups", &entity).unwrap();
-        assert_eq!(node.properties["is_highvalue"], true);
+        assert_eq!(node.properties["tier"], 0);
     }
 
     #[test]
-    fn test_extract_node_marks_enterprise_admins_high_value() {
+    fn test_extract_node_marks_enterprise_admins_tier_zero() {
         let importer = test_importer();
 
         // Enterprise Admins group (SID ends with -519)
@@ -1424,11 +1424,11 @@ mod tests {
         });
 
         let node = importer.extract_node("groups", &entity).unwrap();
-        assert_eq!(node.properties["is_highvalue"], true);
+        assert_eq!(node.properties["tier"], 0);
     }
 
     #[test]
-    fn test_extract_node_marks_builtin_administrators_high_value() {
+    fn test_extract_node_marks_builtin_administrators_tier_zero() {
         let importer = test_importer();
 
         // Builtin Administrators (SID ends with -544)
@@ -1440,11 +1440,11 @@ mod tests {
         });
 
         let node = importer.extract_node("groups", &entity).unwrap();
-        assert_eq!(node.properties["is_highvalue"], true);
+        assert_eq!(node.properties["tier"], 0);
     }
 
     #[test]
-    fn test_extract_node_marks_enterprise_domain_controllers_high_value() {
+    fn test_extract_node_marks_enterprise_domain_controllers_tier_zero() {
         let importer = test_importer();
 
         // Enterprise Domain Controllers (SID ends with -S-1-5-9)
@@ -1456,14 +1456,14 @@ mod tests {
         });
 
         let node = importer.extract_node("groups", &entity).unwrap();
-        assert_eq!(node.properties["is_highvalue"], true);
+        assert_eq!(node.properties["tier"], 0);
     }
 
     #[test]
-    fn test_extract_node_marks_domain_high_value() {
+    fn test_extract_node_marks_domain_tier_zero() {
         let importer = test_importer();
 
-        // Domain objects should be high value
+        // Domain objects should be tier 0
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-1234567890",
             "Properties": {
@@ -1472,14 +1472,14 @@ mod tests {
         });
 
         let node = importer.extract_node("domains", &entity).unwrap();
-        assert_eq!(node.properties["is_highvalue"], true);
+        assert_eq!(node.properties["tier"], 0);
     }
 
     #[test]
-    fn test_extract_node_regular_user_not_high_value() {
+    fn test_extract_node_regular_user_default_tier() {
         let importer = test_importer();
 
-        // Regular user should NOT be high value
+        // Regular user should NOT have tier set (defaults to 3 at query time)
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-1234567890-1001",
             "Properties": {
@@ -1488,24 +1488,24 @@ mod tests {
         });
 
         let node = importer.extract_node("users", &entity).unwrap();
-        assert!(node.properties.get("is_highvalue").is_none());
+        assert!(node.properties.get("tier").is_none());
     }
 
     #[test]
-    fn test_extract_node_preserves_existing_highvalue() {
+    fn test_extract_node_preserves_existing_tier() {
         let importer = test_importer();
 
-        // If BloodHound already marks as high value, preserve it
+        // If tier is already set, preserve it
         let entity = serde_json::json!({
             "ObjectIdentifier": "S-1-5-21-1234567890-1001",
             "Properties": {
                 "name": "specialuser@corp.local",
-                "is_highvalue": true
+                "tier": 1
             }
         });
 
         let node = importer.extract_node("users", &entity).unwrap();
-        assert_eq!(node.properties["is_highvalue"], true);
+        assert_eq!(node.properties["tier"], 1);
     }
 
     // ========================================================================

@@ -66,8 +66,9 @@ pub struct NodeStatus {
     pub is_disabled: bool,
     pub is_enterprise_admin: bool,
     pub is_domain_admin: bool,
-    pub is_high_value: bool,
-    pub has_path_to_high_value: bool,
+    /// Tier level (0 = most critical, 3 = default)
+    pub tier: i64,
+    pub has_path_to_high_tier: bool,
     pub path_length: Option<usize>,
 }
 
@@ -368,8 +369,8 @@ pub fn node_status_full(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeS
             is_disabled: false,
             is_enterprise_admin: false,
             is_domain_admin: false,
-            is_high_value: false,
-            has_path_to_high_value: false,
+            tier: 3,
+            has_path_to_high_tier: false,
             path_length: None,
         });
     }
@@ -388,8 +389,8 @@ pub fn node_status_full(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeS
             is_disabled,
             is_enterprise_admin: true,
             is_domain_admin: false,
-            is_high_value: true,
-            has_path_to_high_value: false,
+            tier: 0,
+            has_path_to_high_tier: false,
             path_length: None,
         });
     }
@@ -406,87 +407,74 @@ pub fn node_status_full(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeS
             is_disabled,
             is_enterprise_admin: false,
             is_domain_admin: true,
-            is_high_value: true,
-            has_path_to_high_value: false,
+            tier: 0,
+            has_path_to_high_tier: false,
             path_length: None,
         });
     }
 
-    // Check if the node has highvalue property or is member of other high-value groups
-    let is_high_value_property = node
-        .and_then(|n| {
-            let props = &n.properties;
-            props
-                .get("highvalue")
-                .or(props.get("HighValue"))
-                .or(props.get("highValue"))
-                .or(props.get("is_highvalue"))
-                .and_then(|v| {
-                    v.as_bool()
-                        .or_else(|| v.as_i64().map(|i| i == 1))
-                        .or_else(|| v.as_str().map(|s| s == "true"))
-                })
-        })
-        .unwrap_or(false);
+    // Check if the node has a tier property set
+    let node_tier = node
+        .and_then(|n| n.properties.get("tier").and_then(|v| v.as_i64()))
+        .unwrap_or(3);
 
-    // Other high-value RIDs (excluding -512 DA and -519 EA which are checked above)
-    const OTHER_HIGH_VALUE_RIDS: &[&str] =
-        &["-518", "-516", "-498", "-544", "-548", "-549", "-551"];
+    // Other tier-0 RIDs (excluding -512 DA and -519 EA which are checked above)
+    const OTHER_TIER_ZERO_RIDS: &[&str] = &["-518", "-516", "-498", "-544", "-548", "-549", "-551"];
 
-    let mut is_high_value = is_high_value_property;
-    if !is_high_value {
-        // Check if the node itself IS a high-value group (by its own objectid)
-        is_high_value = OTHER_HIGH_VALUE_RIDS
+    let mut is_tier_zero = node_tier == 0;
+    if !is_tier_zero {
+        // Check if the node itself IS a tier-0 group (by its own objectid)
+        is_tier_zero = OTHER_TIER_ZERO_RIDS
             .iter()
             .any(|rid| node_id.ends_with(rid));
     }
-    if !is_high_value {
-        for rid in OTHER_HIGH_VALUE_RIDS {
+    if !is_tier_zero {
+        for rid in OTHER_TIER_ZERO_RIDS {
             if db
                 .find_membership_by_sid_suffix(node_id, rid)
                 .map_err(|e| e.to_string())?
                 .is_some()
             {
-                is_high_value = true;
+                is_tier_zero = true;
                 break;
             }
         }
     }
 
-    if is_high_value {
+    if is_tier_zero {
         return Ok(NodeStatus {
             owned,
             is_disabled,
             is_enterprise_admin: false,
             is_domain_admin: false,
-            is_high_value: true,
-            has_path_to_high_value: false,
+            tier: 0,
+            has_path_to_high_tier: false,
             path_length: None,
         });
     }
 
-    // Check path to any high-value target using the is_highvalue property
+    // Check path to any tier-0 target using the tier property
     // (set at import time for all privileged groups and domains)
-    if let Some(hops) = check_path_to_condition(db, node_id, "b.is_highvalue = true")? {
+    if let Some(hops) = check_path_to_condition(db, node_id, "b.tier = 0")? {
         return Ok(NodeStatus {
             owned,
             is_disabled,
             is_enterprise_admin: false,
             is_domain_admin: false,
-            is_high_value: false,
-            has_path_to_high_value: true,
+            tier: node_tier,
+            has_path_to_high_tier: true,
             path_length: Some(hops),
         });
     }
 
-    // No high-value status or paths found
+    // No tier-0 status or paths found
     Ok(NodeStatus {
         owned,
         is_disabled,
         is_enterprise_admin: false,
         is_domain_admin: false,
-        is_high_value: false,
-        has_path_to_high_value: false,
+        tier: node_tier,
+        has_path_to_high_tier: false,
         path_length: None,
     })
 }

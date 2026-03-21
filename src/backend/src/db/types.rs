@@ -158,8 +158,8 @@ pub struct ChokePoint {
     pub rel_type: String,
     /// Betweenness centrality score (higher = more paths pass through)
     pub betweenness: f64,
-    /// Whether the source node is marked as high-value
-    pub source_highvalue: bool,
+    /// Tier of the source node (0 = most critical, 3 = default)
+    pub source_tier: i64,
 }
 
 /// Labels considered domain/infrastructure objects for filtering.
@@ -176,9 +176,9 @@ const DOMAIN_OBJECT_LABELS: &[&str] = &[
 ];
 
 impl ChokePoint {
-    /// Whether the source is an "expected" high-centrality node (high-value or domain object).
+    /// Whether the source is an "expected" high-centrality node (tier 0 or domain object).
     pub fn is_expected_source(&self) -> bool {
-        self.source_highvalue || DOMAIN_OBJECT_LABELS.contains(&self.source_label.as_str())
+        self.source_tier == 0 || DOMAIN_OBJECT_LABELS.contains(&self.source_label.as_str())
     }
 }
 
@@ -187,7 +187,7 @@ impl ChokePoint {
 pub struct ChokePointsResponse {
     /// Top choke point relationships, sorted by betweenness (highest first)
     pub choke_points: Vec<ChokePoint>,
-    /// Top choke points where source is neither high-value nor a domain object
+    /// Top choke points where source is neither tier 0 nor a domain object
     pub unexpected_choke_points: Vec<ChokePoint>,
     /// Total number of relationships analyzed
     pub total_edges: usize,
