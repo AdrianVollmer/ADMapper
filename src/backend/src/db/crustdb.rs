@@ -600,10 +600,11 @@ impl CrustDatabase {
     /// Uses direct SQL query on the normalized node_labels table for O(distinct_labels)
     /// performance instead of O(nodes) full scan via Cypher.
     pub fn get_node_types(&self) -> Result<Vec<String>> {
-        // Use the optimized storage method that queries node_labels table directly
-        // This is O(distinct_labels) instead of O(nodes)
+        // Use the optimized storage method that queries node_labels table directly.
+        // Filter out "Base" which is a generic super-label, not a real node type.
         self.db
             .get_all_labels()
+            .map(|labels| labels.into_iter().filter(|l| l != "Base").collect())
             .map_err(|e| DbError::Database(e.to_string()))
     }
 

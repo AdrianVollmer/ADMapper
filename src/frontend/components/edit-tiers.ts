@@ -177,14 +177,14 @@ function render(): void {
       <div class="flex gap-3 items-end flex-wrap">
         <div class="flex flex-col gap-1">
           <label class="text-xs text-gray-400 uppercase tracking-wide">Node Type</label>
-          <select id="tier-filter-type" class="input input-sm" style="min-width: 140px">
+          <select id="tier-filter-type" class="form-select" style="min-width: 140px">
             <option value="">All types</option>
             ${availableTypes.map((t) => `<option value="${escapeHtml(t)}" ${filters.nodeType === t ? "selected" : ""}>${escapeHtml(t)}</option>`).join("")}
           </select>
         </div>
         <div class="flex flex-col gap-1 flex-1">
           <label class="text-xs text-gray-400 uppercase tracking-wide">Name (regex)</label>
-          <input id="tier-filter-regex" type="text" class="input input-sm" placeholder="e.g. ADMIN|SERVER" value="${escapeHtml(filters.nameRegex)}" />
+          <input id="tier-filter-regex" type="text" class="form-input" placeholder="e.g. ADMIN|SERVER" value="${escapeHtml(filters.nameRegex)}" />
         </div>
         <button class="btn btn-sm btn-secondary" data-action="apply-filters">Filter</button>
       </div>
@@ -243,7 +243,7 @@ function render(): void {
         <div class="flex gap-3 items-end">
           <div class="flex flex-col gap-1">
             <label class="text-xs text-gray-400 uppercase tracking-wide">Tier</label>
-            <select id="tier-batch-value" class="input input-sm" style="width: 80px">
+            <select id="tier-batch-value" class="form-select" style="width: 80px">
               <option value="0">0</option>
               <option value="1">1</option>
               <option value="2">2</option>

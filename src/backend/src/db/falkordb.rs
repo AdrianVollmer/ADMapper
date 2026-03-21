@@ -132,7 +132,11 @@ impl FalkorDbDatabase {
         let label = obj
             .get("labels")
             .and_then(|l| l.as_array())
-            .and_then(|arr| arr.first())
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|v| v.as_str() != Some("Base"))
+                    .or_else(|| arr.first())
+            })
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
@@ -774,7 +778,12 @@ impl DatabaseBackend for FalkorDbDatabase {
     }
 
     fn get_node_types(&self) -> Result<Vec<String>> {
-        let rows = self.execute_query("MATCH (n) RETURN DISTINCT labels(n)[0] AS label")?;
+        // Use UNWIND + DISTINCT to get all labels, filtering out "Base"
+        let rows = self.execute_query(
+            "MATCH (n) UNWIND labels(n) AS label \
+             WITH DISTINCT label WHERE label <> 'Base' \
+             RETURN label ORDER BY label",
+        )?;
 
         let types: Vec<String> = rows
             .iter()
