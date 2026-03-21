@@ -226,6 +226,41 @@ pub struct BatchSetTierResponse {
 }
 
 // ============================================================================
+// Tier Violation Types
+// ============================================================================
+
+/// A single tier boundary violation category.
+#[derive(Debug, Serialize, Clone)]
+pub struct TierViolationCategory {
+    /// Source zone tier (the lower-privilege side)
+    pub source_zone: i64,
+    /// Target zone tier (the higher-privilege side)
+    pub target_zone: i64,
+    /// Number of direct relationships crossing this tier boundary
+    pub count: usize,
+    /// Sample of violating edges (source_id, target_id, rel_type), capped
+    pub edges: Vec<TierViolationEdge>,
+}
+
+/// A single violating edge.
+#[derive(Debug, Serialize, Clone)]
+pub struct TierViolationEdge {
+    pub source_id: String,
+    pub target_id: String,
+    pub rel_type: String,
+}
+
+/// Response for the tier violations analysis.
+#[derive(Debug, Serialize)]
+pub struct TierViolationsResponse {
+    pub violations: Vec<TierViolationCategory>,
+    /// Total nodes in graph
+    pub total_nodes: usize,
+    /// Total edges in graph
+    pub total_edges: usize,
+}
+
+// ============================================================================
 // Path Types
 // ============================================================================
 

@@ -57,11 +57,26 @@ interface StaleObjectsData {
   thresholdDays: number;
 }
 
-/** Tier Violations data */
+/** A single tier violation edge */
+interface TierViolationEdge {
+  source_id: string;
+  target_id: string;
+  rel_type: string;
+}
+
+/** A single tier violation category */
+interface TierViolationCategory {
+  source_zone: number;
+  target_zone: number;
+  count: number;
+  edges: TierViolationEdge[];
+}
+
+/** Tier Violations response from API */
 interface TierViolationsData {
-  tier1to0: number;
-  tier2to1: number;
-  tier3to2: number;
+  violations: TierViolationCategory[];
+  total_nodes: number;
+  total_edges: number;
 }
 
 /** Choke Point data */
@@ -632,35 +647,53 @@ function renderTierViolationsTab(): string {
     return `<div class="insight-error">No data available</div>`;
   }
 
-  const { tier1to0, tier2to1, tier3to2 } = tierViolationsState.data;
-  const total = tier1to0 + tier2to1 + tier3to2;
+  const { violations, total_nodes, total_edges } = tierViolationsState.data;
+
+  // Find each violation category (may be absent if backend returns fewer)
+  const v1to0 = violations.find((v) => v.source_zone === 1 && v.target_zone === 0);
+  const v2to1 = violations.find((v) => v.source_zone === 2 && v.target_zone === 1);
+  const v3to2 = violations.find((v) => v.source_zone === 3 && v.target_zone === 2);
+
+  const total = violations.reduce((sum, v) => sum + v.count, 0);
+
+  const descriptions: Record<string, string> = {
+    "1-0": "Server admin zone reaching domain admin zone",
+    "2-1": "Workstation zone reaching server admin zone",
+    "3-2": "Default zone reaching workstation zone",
+  };
+
+  const renderCard = (
+    v: TierViolationCategory | undefined,
+    srcZone: number,
+    tgtZone: number,
+    cardClass: string
+  ): string => {
+    const count = v?.count ?? 0;
+    const key = `${srcZone}-${tgtZone}`;
+    return `
+      <div class="insight-card ${cardClass}">
+        <div class="insight-card-value ${count > 0 ? "clickable" : ""}" ${count > 0 ? `data-query="tier-violation" data-sid="${key}" title="Click to view graph"` : ""}>${count.toLocaleString()}</div>
+        <div class="insight-card-label">Zone ${srcZone} &rarr; Zone ${tgtZone}</div>
+        <div class="insight-card-desc">${descriptions[key]}</div>
+      </div>
+    `;
+  };
 
   return `
     <div class="insights-container">
       <div class="insight-section">
         <h3 class="insight-section-title">Tier Violations</h3>
         <p class="insight-desc">
-          Direct relationships that cross tier boundaries. Each count represents
-          a relationship from a lower-privilege tier to a higher-privilege tier,
-          indicating a potential attack path that violates the tiered administration model.
-          ${total.toLocaleString()} total violation${total === 1 ? "" : "s"}.
+          Relationships crossing tier zone boundaries. Nodes are assigned to the
+          most privileged zone they can reach (zone 0 = can reach tier-0 nodes, etc.).
+          Edges from a lower-privilege zone to a higher-privilege zone are violations.
+          ${total.toLocaleString()} total violation${total === 1 ? "" : "s"}
+          (${total_nodes.toLocaleString()} nodes, ${total_edges.toLocaleString()} relationships analyzed).
         </p>
         <div class="insight-cards">
-          <div class="insight-card insight-card-primary">
-            <div class="insight-card-value ${tier1to0 > 0 ? "clickable" : ""}" ${tier1to0 > 0 ? `data-query="tier-violation" data-sid="1-0" title="Click to view graph"` : ""}>${tier1to0.toLocaleString()}</div>
-            <div class="insight-card-label">Tier 1 &rarr; Tier 0</div>
-            <div class="insight-card-desc">Server admins reaching domain admins</div>
-          </div>
-          <div class="insight-card insight-card-secondary">
-            <div class="insight-card-value ${tier2to1 > 0 ? "clickable" : ""}" ${tier2to1 > 0 ? `data-query="tier-violation" data-sid="2-1" title="Click to view graph"` : ""}>${tier2to1.toLocaleString()}</div>
-            <div class="insight-card-label">Tier 2 &rarr; Tier 1</div>
-            <div class="insight-card-desc">Workstations reaching server admins</div>
-          </div>
-          <div class="insight-card">
-            <div class="insight-card-value ${tier3to2 > 0 ? "clickable" : ""}" ${tier3to2 > 0 ? `data-query="tier-violation" data-sid="3-2" title="Click to view graph"` : ""}>${tier3to2.toLocaleString()}</div>
-            <div class="insight-card-label">Tier 3 &rarr; Tier 2</div>
-            <div class="insight-card-desc">Default objects reaching workstations</div>
-          </div>
+          ${renderCard(v1to0, 1, 0, "insight-card-primary")}
+          ${renderCard(v2to1, 2, 1, "insight-card-secondary")}
+          ${renderCard(v3to2, 3, 2, "")}
         </div>
         <p class="text-xs text-gray-500 mt-2">Click on a number to visualize the graph</p>
       </div>
@@ -870,35 +903,9 @@ async function loadTierViolations(): Promise<void> {
   renderModal();
 
   try {
-    // Count direct relationships where source tier > target tier (tier boundary crossing)
-    // Lower tier number = more privileged, so a tier 1 node having a direct relationship
-    // to a tier 0 node is a violation (unexpected cross-tier access).
-    const countQuery = (sourceTier: number, targetTier: number) =>
-      `MATCH (a)-[r]->(b) WHERE a.tier = ${sourceTier} AND b.tier = ${targetTier} RETURN count(r) AS cnt`;
-
-    const [r1to0, r2to1, r3to2] = await Promise.all([
-      executeQuery(countQuery(1, 0), { extractGraph: false, background: true }),
-      executeQuery(countQuery(2, 1), { extractGraph: false, background: true }),
-      executeQuery(countQuery(3, 2), { extractGraph: false, background: true }),
-    ]);
-
-    const extractCount = (result: { results?: { rows: unknown[][] } }): number => {
-      const row = result.results?.rows?.[0];
-      if (!row || row.length === 0) return 0;
-      return typeof row[0] === "number" ? row[0] : 0;
-    };
-
-    tierViolationsState = {
-      loading: false,
-      error: null,
-      data: {
-        tier1to0: extractCount(r1to0),
-        tier2to1: extractCount(r2to1),
-        tier3to2: extractCount(r3to2),
-      },
-    };
+    const data = await api.get<TierViolationsData>("/api/graph/tier-violations");
+    tierViolationsState = { loading: false, error: null, data };
   } catch (err) {
-    if (err instanceof QueryAbortedError) return;
     const message = err instanceof Error ? err.message : "Failed to load tier violations";
     tierViolationsState = { loading: false, error: message, data: null };
   }
@@ -917,6 +924,43 @@ async function executeChokePointQuery(sourceId: string, targetId: string, relTyp
   } catch (err) {
     if (!(err instanceof QueryAbortedError)) {
       console.error("Failed to execute choke point query:", err);
+    }
+  }
+}
+
+/** Show tier violation edges as a graph using pre-fetched edge data */
+async function executeTierViolationGraph(sid: string): Promise<void> {
+  const data = tierViolationsState.data;
+  if (!data) return;
+
+  const [srcStr, tgtStr] = sid.split("-");
+  const srcZone = parseInt(srcStr, 10);
+  const tgtZone = parseInt(tgtStr, 10);
+
+  const violation = data.violations.find((v) => v.source_zone === srcZone && v.target_zone === tgtZone);
+  if (!violation || violation.edges.length === 0) return;
+
+  // Build a query using the actual violating edge IDs
+  const pairs = violation.edges.slice(0, 500);
+  const conditions = pairs
+    .map(
+      (e) =>
+        `(a.objectid = '${e.source_id.replace(/'/g, "\\'")}' AND b.objectid = '${e.target_id.replace(/'/g, "\\'")}' AND type(r) = '${e.rel_type}')`
+    )
+    .join(" OR ");
+
+  const query = `MATCH p=(a)-[r]->(b) WHERE ${conditions} RETURN p`;
+
+  closeModal();
+
+  try {
+    const result = await executeQuery(query, { extractGraph: true });
+    if (result.graph && result.graph.nodes.length > 0) {
+      loadGraphData(result.graph as unknown as RawADGraph);
+    }
+  } catch (err) {
+    if (!(err instanceof QueryAbortedError)) {
+      console.error("Failed to load tier violation graph:", err);
     }
   }
 }
@@ -960,11 +1004,6 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
     case "stale-computers": {
       const threshold = daysToWindowsFileTime(staleThresholdDays);
       query = `MATCH (c:Computer) WHERE c.enabled = true AND c.lastlogon < ${threshold} RETURN c LIMIT 500`;
-      break;
-    }
-    case "tier-violation": {
-      const [sourceTier, targetTier] = (extraData ?? "1-0").split("-");
-      query = `MATCH p=(a)-[r]->(b) WHERE a.tier = ${sourceTier} AND b.tier = ${targetTier} RETURN p LIMIT 500`;
       break;
     }
     default:
@@ -1017,6 +1056,13 @@ function handleClick(e: Event): void {
   const clickableValue = target.closest("[data-query]") as HTMLElement;
   if (clickableValue) {
     const queryType = clickableValue.getAttribute("data-query");
+    if (queryType === "tier-violation") {
+      const sid = clickableValue.getAttribute("data-sid");
+      if (sid) {
+        executeTierViolationGraph(sid);
+      }
+      return;
+    }
     if (queryType === "choke-point") {
       const sourceId = clickableValue.getAttribute("data-source-id");
       const targetId = clickableValue.getAttribute("data-target-id");

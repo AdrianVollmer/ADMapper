@@ -7,7 +7,8 @@ use crate::api::types::{
     DatabaseStatus, GenerateRequest, GenerateResponse, HistoryParams, NodeCounts, NodeStatus,
     PathParams, PathResponse, PathStep, PathsToDaEntry, PathsToDaParams, PathsToDaResponse,
     QueryActivity, QueryHistoryEntry, QueryHistoryResponse, QueryProgress, QueryRequest,
-    QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
+    QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase, TierViolationCategory,
+    TierViolationEdge, TierViolationsResponse,
 };
 use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, NewQueryHistoryEntry, QueryLanguage};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
@@ -1284,6 +1285,154 @@ pub async fn graph_choke_points(
         total_edges = result.total_edges,
         "Choke points retrieved"
     );
+    Ok(Json(result))
+}
+
+/// Compute tier violations: direct relationships crossing tier zone boundaries.
+///
+/// For each adjacent tier pair (1→0, 2→1, 3→2), we:
+/// 1. Find all nodes that can reach a tier-N node (zone N) via reverse BFS
+/// 2. Find all nodes that can reach a tier-M node (zone M), excluding zone N
+/// 3. Count direct relationships from zone N to zone M
+#[instrument(skip(state))]
+pub async fn tier_violations(
+    State(state): State<AppState>,
+) -> Result<Json<TierViolationsResponse>, ApiError> {
+    let db = state.require_db()?;
+
+    let result = run_db(db, |db| {
+        use std::collections::{HashMap, HashSet, VecDeque};
+
+        let nodes = db.get_all_nodes()?;
+        let edges = db.get_all_edges()?;
+        let total_nodes = nodes.len();
+        let total_edges = edges.len();
+
+        // Build tier map (node_id -> tier, default 3)
+        let tier_map: HashMap<&str, i64> = nodes
+            .iter()
+            .map(|n| {
+                let tier = n
+                    .properties
+                    .get("tier")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(3);
+                (n.id.as_str(), tier)
+            })
+            .collect();
+
+        // Build reversed adjacency: for each edge A->B, store B->[A]
+        // This lets us BFS backwards from tier-N nodes to find all nodes that can reach them.
+        let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        for edge in &edges {
+            reverse_adj
+                .entry(edge.target.as_str())
+                .or_default()
+                .push(edge.source.as_str());
+        }
+
+        // Compute zones: for each tier, find all nodes that can reach a node of that tier.
+        // We do reverse BFS from all nodes of tier T.
+        let compute_zone = |target_tier: i64| -> HashSet<&str> {
+            let mut zone = HashSet::new();
+            let mut queue = VecDeque::new();
+            // Seed with all nodes of this tier
+            for node in &nodes {
+                if *tier_map.get(node.id.as_str()).unwrap_or(&3) == target_tier {
+                    if zone.insert(node.id.as_str()) {
+                        queue.push_back(node.id.as_str());
+                    }
+                }
+            }
+            // Reverse BFS
+            while let Some(current) = queue.pop_front() {
+                if let Some(predecessors) = reverse_adj.get(current) {
+                    for &pred in predecessors {
+                        if zone.insert(pred) {
+                            queue.push_back(pred);
+                        }
+                    }
+                }
+            }
+            zone
+        };
+
+        let zone0 = compute_zone(0);
+        let zone1_raw = compute_zone(1);
+        let zone2_raw = compute_zone(2);
+
+        // Assign each node to its most privileged (lowest) zone.
+        // zone0 wins over zone1, zone1 wins over zone2, etc.
+        let zone1: HashSet<&str> = zone1_raw.difference(&zone0).copied().collect();
+        let zone2: HashSet<&str> = zone2_raw
+            .difference(&zone0)
+            .copied()
+            .collect::<HashSet<&str>>()
+            .difference(&zone1)
+            .copied()
+            .collect();
+        // zone3 is everything else (nodes not in zone 0, 1, or 2)
+        let all_assigned: HashSet<&str> = zone0
+            .union(&zone1)
+            .copied()
+            .collect::<HashSet<&str>>()
+            .union(&zone2)
+            .copied()
+            .collect();
+        let zone3: HashSet<&str> = nodes
+            .iter()
+            .map(|n| n.id.as_str())
+            .filter(|id| !all_assigned.contains(id))
+            .collect();
+
+        // Count and collect cross-zone edges
+        let max_edges = 500;
+        let mut violations = Vec::new();
+
+        for (src_zone, tgt_zone, src_label, tgt_label) in [
+            (&zone1, &zone0, 1i64, 0i64),
+            (&zone2, &zone1, 2, 1),
+            (&zone3, &zone2, 3, 2),
+        ] {
+            let mut count = 0usize;
+            let mut sample_edges = Vec::new();
+
+            for edge in &edges {
+                if src_zone.contains(edge.source.as_str())
+                    && tgt_zone.contains(edge.target.as_str())
+                {
+                    count += 1;
+                    if sample_edges.len() < max_edges {
+                        sample_edges.push(TierViolationEdge {
+                            source_id: edge.source.clone(),
+                            target_id: edge.target.clone(),
+                            rel_type: edge.rel_type.clone(),
+                        });
+                    }
+                }
+            }
+
+            violations.push(TierViolationCategory {
+                source_zone: src_label,
+                target_zone: tgt_label,
+                count,
+                edges: sample_edges,
+            });
+        }
+
+        Ok(TierViolationsResponse {
+            violations,
+            total_nodes,
+            total_edges,
+        })
+    })
+    .await?;
+
+    info!(
+        violations = result.violations.iter().map(|v| v.count).sum::<usize>(),
+        "Tier violations computed"
+    );
+
     Ok(Json(result))
 }
 
