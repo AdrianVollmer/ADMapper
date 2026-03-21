@@ -688,7 +688,138 @@ async fn test_graph_path_nonexistent_node() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-/// Debug test to examine actual database contents
+// ============================================================================
+// Node Status Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_node_status_domain_admin_member() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // Create DA group and a user that is a direct member via Cypher
+    db.run_custom_query(
+        "CREATE (:Group {name: 'Domain Admins', objectid: 'S-1-5-21-123-512', tier: 0})",
+    )
+    .unwrap();
+    db.run_custom_query(
+        "CREATE (:User {name: 'AdminUser', objectid: 'S-1-5-21-123-1001', enabled: true})",
+    )
+    .unwrap();
+    db.run_custom_query(
+        "MATCH (u {objectid: 'S-1-5-21-123-1001'}), (g {objectid: 'S-1-5-21-123-512'}) CREATE (u)-[:MemberOf]->(g)",
+    ).unwrap();
+
+    let (status, body) = get_json(app.router(), "/api/graph/node/S-1-5-21-123-1001/status").await;
+
+    println!("DA member status response: {}", body);
+    assert_eq!(status, StatusCode::OK, "Response: {:?}", body);
+    assert_eq!(
+        body["isDomainAdmin"], true,
+        "Should be detected as DA member. Full response: {}",
+        body
+    );
+}
+
+#[tokio::test]
+async fn test_node_status_transitive_da_member() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // Create a tier-0 node and a user 2 hops away via Cypher
+    db.run_custom_query(
+        "CREATE (:Group {name: 'Domain Admins', objectid: 'S-1-5-21-123-512', tier: 0})",
+    )
+    .unwrap();
+    db.run_custom_query("CREATE (:Group {name: 'IT Group', objectid: 'G-IT'})")
+        .unwrap();
+    db.run_custom_query("CREATE (:User {name: 'Bob', objectid: 'U-BOB', enabled: true})")
+        .unwrap();
+    // Bob -> IT Group -> DA
+    db.run_custom_query(
+        "MATCH (u {objectid: 'U-BOB'}), (g {objectid: 'G-IT'}) CREATE (u)-[:MemberOf]->(g)",
+    )
+    .unwrap();
+    db.run_custom_query(
+        "MATCH (u {objectid: 'G-IT'}), (g {objectid: 'S-1-5-21-123-512'}) CREATE (u)-[:MemberOf]->(g)",
+    ).unwrap();
+
+    // Bob has a transitive path to DA (2 hops), so should be detected as DA member
+    let (status, body) = get_json(app.router(), "/api/graph/node/U-BOB/status").await;
+
+    println!("Transitive DA member status response: {}", body);
+    assert_eq!(status, StatusCode::OK, "Response: {:?}", body);
+    // Bob is transitively a DA member through IT Group
+    assert_eq!(
+        body["isDomainAdmin"], true,
+        "Should detect transitive DA membership. Full response: {}",
+        body
+    );
+}
+
+#[tokio::test]
+async fn test_node_status_with_base_label() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // Create nodes with Base as a secondary label (matching import convention)
+    db.run_custom_query(
+        "CREATE (:Group:Base {name: 'Domain Admins', objectid: 'S-1-5-21-123-512', tier: 0})",
+    )
+    .unwrap();
+    db.run_custom_query(
+        "CREATE (:User:Base {name: 'AdminUser', objectid: 'S-1-5-21-123-1001', enabled: true})",
+    )
+    .unwrap();
+    db.run_custom_query(
+        "MATCH (u {objectid: 'S-1-5-21-123-1001'}), (g {objectid: 'S-1-5-21-123-512'}) CREATE (u)-[:MemberOf]->(g)",
+    ).unwrap();
+
+    let (status, body) = get_json(app.router(), "/api/graph/node/S-1-5-21-123-1001/status").await;
+
+    println!("Base-label DA member status response: {}", body);
+    assert_eq!(status, StatusCode::OK, "Response: {:?}", body);
+    // Should still detect DA membership even with Base label
+    assert_eq!(
+        body["isDomainAdmin"], true,
+        "Should detect DA member with :Base label. Full response: {}",
+        body
+    );
+}
+
+#[tokio::test]
+async fn test_node_status_non_memberof_path_to_tier_zero() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // User has AdminTo path to a tier-0 Computer (not MemberOf, so DA check won't catch it)
+    db.run_custom_query(
+        "CREATE (:Computer {name: 'DC01', objectid: 'C-DC01', tier: 0, enabled: true})",
+    )
+    .unwrap();
+    db.run_custom_query("CREATE (:User {name: 'Eve', objectid: 'U-EVE', enabled: true})")
+        .unwrap();
+    db.run_custom_query(
+        "MATCH (u {objectid: 'U-EVE'}), (c {objectid: 'C-DC01'}) CREATE (u)-[:AdminTo]->(c)",
+    )
+    .unwrap();
+
+    let (status, body) = get_json(app.router(), "/api/graph/node/U-EVE/status").await;
+
+    println!("Non-MemberOf path to tier-0 status response: {}", body);
+    assert_eq!(status, StatusCode::OK, "Response: {:?}", body);
+    // Eve has a path to tier-0 via AdminTo (not MemberOf)
+    assert_eq!(
+        body["hasPathToHighTier"], true,
+        "Should detect path to tier-0. Full response: {}",
+        body
+    );
+    assert_eq!(
+        body["pathLength"], 1,
+        "Path should be 1 hop. Full response: {}",
+        body
+    );
+}
 /// Run with: cargo test --no-default-features test_debug_actual_db -- --nocapture --ignored
 #[tokio::test]
 #[ignore] // Only run manually for debugging

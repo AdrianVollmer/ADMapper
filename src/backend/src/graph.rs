@@ -251,7 +251,11 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
         })
         .unwrap_or_default();
 
-    let node_type_from_labels = labels.first().cloned();
+    let node_type_from_labels = labels
+        .iter()
+        .find(|l| l.as_str() != "Base")
+        .cloned()
+        .or_else(|| labels.first().cloned());
     let node_type_from_props = value
         .get("properties")
         .and_then(|p| p.get("node_type"))

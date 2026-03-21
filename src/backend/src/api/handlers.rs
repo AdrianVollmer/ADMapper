@@ -825,10 +825,11 @@ async fn check_path_to_condition(
 
     let escaped_id = node_id.replace('\'', "\\'");
     let query_name = format!("Path to {}: {}", target_name, node_id);
-    // Use standard Cypher variable-length path syntax (1 to 20 hops)
-    // -[*1..20]-> is supported by all backends (CrustDB, Neo4j, FalkorDB)
+    // Use shortestPath for efficient BFS traversal.
+    // Plain variable-length paths like (a)-[*1..20]->(b) enumerate all paths
+    // and can be prohibitively expensive on real AD graphs.
     let query_text = format!(
-        "MATCH p = (a)-[*1..20]->(b) WHERE a.objectid = '{}' AND ({}) RETURN length(p) AS hops LIMIT 1",
+        "MATCH p = shortestPath((a)-[*1..20]->(b)) WHERE a.objectid = '{}' AND ({}) RETURN length(p) AS hops",
         escaped_id, condition
     );
 
