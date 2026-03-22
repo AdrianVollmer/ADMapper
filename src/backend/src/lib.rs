@@ -177,6 +177,8 @@ pub fn run_desktop(database_url: Option<&str>) {
             // Mutations
             tauri_commands::add_node,
             tauri_commands::add_edge,
+            tauri_commands::update_node,
+            tauri_commands::update_edge,
             tauri_commands::delete_node,
             tauri_commands::delete_edge,
             // Insights (additional)
@@ -286,10 +288,13 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/node-types", get(handlers::graph_node_types))
         .route("/api/graph/node", post(handlers::add_node))
         .route("/api/graph/relationship", post(handlers::add_edge))
-        .route("/api/graph/nodes/:id", delete(handlers::delete_node))
+        .route(
+            "/api/graph/nodes/:id",
+            delete(handlers::delete_node).put(handlers::update_node),
+        )
         .route(
             "/api/graph/relationships/:source/:target/:rel_type",
-            delete(handlers::delete_edge),
+            delete(handlers::delete_edge).put(handlers::update_edge),
         )
         .route("/api/graph/insights", get(handlers::graph_insights))
         .route("/api/graph/choke-points", get(handlers::graph_choke_points))

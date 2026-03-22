@@ -14,6 +14,7 @@ import { getRenderer, loadGraphData } from "./graph-view";
 import { showError, showConfirm } from "../utils/notifications";
 import { executeQuery, QueryAbortedError } from "../utils/query";
 import { HIGH_VALUE_RIDS, ridWhereClause } from "./queries/builtin-queries";
+import { openEditNode, openEditEdge } from "./add-node-edge";
 
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
@@ -230,6 +231,13 @@ const OVERFLOW_ACTIONS = [
     </svg>`,
   },
   {
+    id: "edit-node",
+    label: "Edit Properties",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+    </svg>`,
+  },
+  {
     id: "delete-node",
     label: "Delete Node",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -418,6 +426,26 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
       setPathEnd(nodeId, nodeLabel);
       break;
 
+    case "edit-node": {
+      // Get node properties (from graph or fetch)
+      const nodeProps = graph?.getNodeAttribute(nodeId, "properties") as Record<string, unknown> | undefined;
+      if (nodeProps) {
+        openEditNode(nodeId, nodeProps);
+      } else {
+        // Fetch properties if not in graph
+        try {
+          const node = await api.get<{ properties: Record<string, unknown> }>(
+            `/api/graph/node/${encodeURIComponent(nodeId)}`
+          );
+          openEditNode(nodeId, node.properties || {});
+        } catch (err) {
+          console.error("Failed to fetch node for editing:", err);
+          showError("Failed to load node properties");
+        }
+      }
+      break;
+    }
+
     case "delete-node": {
       const confirmed = await showConfirm(`Delete node "${nodeLabel}"?`, {
         title: "Delete Node",
@@ -463,6 +491,13 @@ async function handleEdgeAction(
   const graph = renderer?.sigma.getGraph();
 
   switch (action) {
+    case "edit-relationship": {
+      // Get edge properties from graph or use empty object
+      const edgeProps = (graph?.getEdgeAttribute(edgeId, "properties") as Record<string, unknown>) || {};
+      openEditEdge(edgeId, sourceId, targetId, edgeType, edgeProps);
+      break;
+    }
+
     case "delete-relationship": {
       const confirmed = await showConfirm(`Delete relationship "${edgeType}" from "${sourceId}" to "${targetId}"?`, {
         title: "Delete Relationship",
@@ -1008,7 +1043,7 @@ export function updateDetailPanelForEdge(
     </div>
   `;
 
-  // Relationship types list with individual delete buttons
+  // Relationship types list with edit and delete buttons
   const typesHtml = types
     .map((type) => {
       const color = EDGE_COLORS[type] || "#6c757d";
@@ -1017,22 +1052,39 @@ export function updateDetailPanelForEdge(
         <span class="detail-node-type relationship-badge" style="background-color: ${color}; font-size: 0.75rem">
           ${escapeHtml(type)}
         </span>
-        <button
-          class="detail-action-btn danger"
-          data-action="delete-relationship"
-          data-relationship-id="${escapeHtml(edgeId)}"
-          data-source-id="${escapeHtml(sourceId)}"
-          data-target-id="${escapeHtml(targetId)}"
-          data-relationship-type="${escapeHtml(type)}"
-          title="Delete ${escapeHtml(type)}"
-          aria-label="Delete ${escapeHtml(type)}"
-          style="flex-shrink:0; width:28px; height:28px; padding:4px"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/>
-            <path d="M10 11v6M14 11v6"/>
-          </svg>
-        </button>
+        <div style="display:flex; gap:4px; flex-shrink:0">
+          <button
+            class="detail-action-btn"
+            data-action="edit-relationship"
+            data-relationship-id="${escapeHtml(edgeId)}"
+            data-source-id="${escapeHtml(sourceId)}"
+            data-target-id="${escapeHtml(targetId)}"
+            data-relationship-type="${escapeHtml(type)}"
+            title="Edit ${escapeHtml(type)}"
+            aria-label="Edit ${escapeHtml(type)}"
+            style="width:28px; height:28px; padding:4px"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+            </svg>
+          </button>
+          <button
+            class="detail-action-btn danger"
+            data-action="delete-relationship"
+            data-relationship-id="${escapeHtml(edgeId)}"
+            data-source-id="${escapeHtml(sourceId)}"
+            data-target-id="${escapeHtml(targetId)}"
+            data-relationship-type="${escapeHtml(type)}"
+            title="Delete ${escapeHtml(type)}"
+            aria-label="Delete ${escapeHtml(type)}"
+            style="width:28px; height:28px; padding:4px"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/>
+              <path d="M10 11v6M14 11v6"/>
+            </svg>
+          </button>
+        </div>
       </div>
     `;
     })

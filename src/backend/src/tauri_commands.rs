@@ -297,6 +297,46 @@ pub fn add_edge(
     )
 }
 
+/// Update a node's properties.
+#[tauri::command]
+pub fn update_node(
+    state: State<'_, AppState>,
+    id: String,
+    name: Option<String>,
+    label: Option<String>,
+    #[allow(unused_variables)] properties: Option<JsonValue>,
+) -> Result<(), String> {
+    let db = state.db().ok_or("Not connected to database")?;
+    info!(id = %id, "Updating node (IPC)");
+    core::update_node(
+        db.as_ref(),
+        &id,
+        name,
+        label,
+        properties.unwrap_or(JsonValue::Null),
+    )
+}
+
+/// Update an edge's properties.
+#[tauri::command]
+pub fn update_edge(
+    state: State<'_, AppState>,
+    source: String,
+    target: String,
+    rel_type: String,
+    #[allow(unused_variables)] properties: Option<JsonValue>,
+) -> Result<(), String> {
+    let db = state.db().ok_or("Not connected to database")?;
+    info!(source = %source, target = %target, rel_type = %rel_type, "Updating edge (IPC)");
+    core::update_edge(
+        db.as_ref(),
+        &source,
+        &target,
+        &rel_type,
+        properties.unwrap_or(JsonValue::Null),
+    )
+}
+
 /// Delete a node from the graph.
 #[tauri::command]
 pub fn delete_node(state: State<'_, AppState>, id: String) -> Result<(), String> {

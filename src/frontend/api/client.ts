@@ -102,6 +102,8 @@ const COMMAND_MAPPING: Record<string, string> = {
   // Mutations
   "POST /api/graph/node": "add_node",
   "POST /api/graph/relationship": "add_edge",
+  "PUT /api/graph/nodes/:id": "update_node",
+  "PUT /api/graph/relationships/:source/:target/:rel_type": "update_edge",
   "DELETE /api/graph/nodes/:id": "delete_node",
   "DELETE /api/graph/relationships/:source/:target/:rel_type": "delete_edge",
   // Query
