@@ -933,9 +933,9 @@ async function executeTierViolationGraph(sid: string): Promise<void> {
   const data = tierViolationsState.data;
   if (!data) return;
 
-  const [srcStr, tgtStr] = sid.split("-");
-  const srcZone = parseInt(srcStr, 10);
-  const tgtZone = parseInt(tgtStr, 10);
+  const parts = sid.split("-");
+  const srcZone = parseInt(parts[0] ?? "", 10);
+  const tgtZone = parseInt(parts[1] ?? "", 10);
 
   const violation = data.violations.find((v) => v.source_zone === srcZone && v.target_zone === tgtZone);
   if (!violation || violation.edges.length === 0) return;

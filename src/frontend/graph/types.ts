@@ -96,6 +96,8 @@ export interface ADEdgeAttributes {
   curvature?: number;
   /** When multiple relationships between same nodes are collapsed, stores all edge types */
   collapsedTypes?: ADEdgeType[];
+  /** Original relationship properties */
+  properties?: Record<string, unknown>;
 }
 
 /** Raw node data as received from server */

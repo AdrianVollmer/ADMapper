@@ -493,7 +493,7 @@ async function handleEdgeAction(
   switch (action) {
     case "edit-relationship": {
       // Get edge properties from graph or use empty object
-      const edgeProps = (graph?.getEdgeAttribute(edgeId, "properties") as Record<string, unknown>) || {};
+      const edgeProps = graph?.getEdgeAttribute(edgeId, "properties") ?? {};
       openEditEdge(edgeId, sourceId, targetId, edgeType, edgeProps);
       break;
     }
