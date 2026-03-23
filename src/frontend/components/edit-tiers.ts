@@ -354,11 +354,9 @@ function render(): void {
             ${filters.ouId ? `<button class="btn btn-sm btn-secondary" data-action="clear-ou" title="Clear OU filter" style="padding: 4px 8px">&times;</button>` : ""}
           </div>
         </div>
-        ${hasVisibleNodes ? `
-          <button class="btn btn-sm ${filters.visibleOnly ? "btn-primary" : "btn-secondary"}" data-action="load-visible" title="Filter to nodes currently visible in the graph">
-            ${filters.visibleOnly ? "Showing visible" : "Load Visible Nodes"}
-          </button>
-        ` : ""}
+        <button class="btn btn-sm ${filters.visibleOnly ? "btn-primary" : "btn-secondary"}" data-action="load-visible" title="Filter to nodes currently visible in the graph" ${!hasVisibleNodes ? "disabled" : ""}>
+          ${filters.visibleOnly ? "Showing visible" : "Load Visible Nodes"}
+        </button>
       </div>
 
       ${filters.groupId ? `<div class="text-xs text-blue-400">Group filter: ${escapeHtml(filters.groupName)}</div>` : ""}
