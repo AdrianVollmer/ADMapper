@@ -10,6 +10,9 @@ import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import { showSuccess, showError, showConfirm } from "../utils/notifications";
 import { getRenderer } from "./graph-view";
+import { NODE_COLORS } from "../graph/theme";
+import { getNodeIconPath } from "../graph/icons";
+import type { ADNodeType } from "../graph/types";
 
 /** A node entry in the tier editor list */
 interface TierNodeEntry {
@@ -41,13 +44,14 @@ interface FilterState {
   groupName: string; // display name
   ouId: string; // selected OU ID for containment filter
   ouName: string; // display name
+  visibleOnly: boolean; // show only nodes currently visible in graph
 }
 
 /** All fetched nodes (filtered in-memory for pagination) */
 let allNodes: TierNodeEntry[] = [];
 let filteredNodes: TierNodeEntry[] = [];
 let pagination: PaginationState = { page: 1, perPage: 50, total: 0 };
-let filters: FilterState = { nodeType: "", nameRegex: "", groupId: "", groupName: "", ouId: "", ouName: "" };
+let filters: FilterState = { nodeType: "", nameRegex: "", groupId: "", groupName: "", ouId: "", ouName: "", visibleOnly: false };
 let availableTypes: string[] = [];
 let isLoading = false;
 let modalEl: HTMLElement | null = null;
@@ -55,6 +59,35 @@ let modalEl: HTMLElement | null = null;
 /** Debounce timer for search inputs */
 let groupSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let ouSearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Search result dropdown containers (portaled to document.body like sidebar search) */
+let groupResultsEl: HTMLElement | null = null;
+let ouResultsEl: HTMLElement | null = null;
+
+/** Pending onSelect callbacks for suggestion dropdowns */
+let groupOnSelect: ((s: SearchSuggestion) => void) | null = null;
+let ouOnSelect: ((s: SearchSuggestion) => void) | null = null;
+
+/** Create a search-results container portaled to document.body */
+function getOrCreateResultsContainer(id: string): HTMLElement {
+  let container = document.getElementById(id);
+  if (!container) {
+    container = document.createElement("div");
+    container.id = id;
+    container.className = "search-results";
+    container.hidden = true;
+    document.body.appendChild(container);
+  }
+  return container;
+}
+
+/** Position a results popover below its input */
+function positionPopover(input: HTMLInputElement, resultsEl: HTMLElement): void {
+  const rect = input.getBoundingClientRect();
+  resultsEl.style.top = `${rect.bottom}px`;
+  resultsEl.style.left = `${rect.left}px`;
+  resultsEl.style.minWidth = `${rect.width}px`;
+}
 
 /** Create the modal element and append to body */
 function createModalElement(): void {
@@ -86,6 +119,32 @@ function createModalElement(): void {
   modal.addEventListener("click", handleModalClick);
   document.body.appendChild(modal);
   modalEl = modal;
+
+  // Create search result containers (portaled to body, like sidebar search)
+  groupResultsEl = getOrCreateResultsContainer("tier-group-results");
+  ouResultsEl = getOrCreateResultsContainer("tier-ou-results");
+
+  // Handle clicks on search results
+  groupResultsEl.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    const item = (e.target as HTMLElement).closest(".search-result-item") as HTMLElement;
+    if (item && groupOnSelect) {
+      const id = item.dataset.nodeId ?? "";
+      const name = item.dataset.nodeLabel ?? "";
+      const type = item.dataset.nodeType ?? "";
+      groupOnSelect({ id, name, type });
+    }
+  });
+  ouResultsEl.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    const item = (e.target as HTMLElement).closest(".search-result-item") as HTMLElement;
+    if (item && ouOnSelect) {
+      const id = item.dataset.nodeId ?? "";
+      const name = item.dataset.nodeLabel ?? "";
+      const type = item.dataset.nodeType ?? "";
+      ouOnSelect({ id, name, type });
+    }
+  });
 }
 
 /** Open the edit tiers modal */
@@ -93,7 +152,7 @@ export async function openEditTiers(): Promise<void> {
   createModalElement();
   if (!modalEl) return;
 
-  filters = { nodeType: "", nameRegex: "", groupId: "", groupName: "", ouId: "", ouName: "" };
+  filters = { nodeType: "", nameRegex: "", groupId: "", groupName: "", ouId: "", ouName: "", visibleOnly: false };
   pagination = { page: 1, perPage: 50, total: 0 };
 
   modalEl.removeAttribute("hidden");
@@ -104,6 +163,9 @@ export async function openEditTiers(): Promise<void> {
 function closeModal(): void {
   if (!modalEl) return;
   modalEl.setAttribute("hidden", "");
+  // Hide any open dropdowns
+  if (groupResultsEl) groupResultsEl.hidden = true;
+  if (ouResultsEl) ouResultsEl.hidden = true;
 }
 
 /** Fetch all nodes from the backend */
@@ -138,6 +200,18 @@ async function loadNodes(): Promise<void> {
   }
 }
 
+/** Get all currently visible node IDs from the graph renderer */
+function getVisibleNodeIds(): Set<string> {
+  const renderer = getRenderer();
+  if (!renderer) return new Set();
+  try {
+    const graph = renderer.sigma.getGraph();
+    return new Set(graph.nodes());
+  } catch {
+    return new Set();
+  }
+}
+
 /** Apply filters and update pagination */
 function applyFilters(): void {
   let regex: RegExp | null = null;
@@ -154,12 +228,17 @@ function applyFilters(): void {
     }
   }
 
-  // Client-side filtering for type and regex (group/OU filtering is server-side)
+  const visibleIds = filters.visibleOnly ? getVisibleNodeIds() : null;
+
+  // Client-side filtering for type, regex, and visible-only
   filteredNodes = allNodes.filter((n) => {
     if (filters.nodeType && n.type.toLowerCase() !== filters.nodeType.toLowerCase()) {
       return false;
     }
     if (regex && !regex.test(n.name)) {
+      return false;
+    }
+    if (visibleIds && !visibleIds.has(n.id)) {
       return false;
     }
     return true;
@@ -176,7 +255,7 @@ function getCurrentPage(): TierNodeEntry[] {
   return filteredNodes.slice(start, start + pagination.perPage);
 }
 
-/** Search for groups or OUs */
+/** Search for groups or OUs via the API */
 async function searchEntities(query: string, type: string): Promise<SearchSuggestion[]> {
   if (query.length < 2) return [];
   try {
@@ -198,16 +277,31 @@ async function searchEntities(query: string, type: string): Promise<SearchSugges
   }
 }
 
-/** Get all currently visible node IDs from the graph renderer */
-function getVisibleNodeIds(): string[] {
-  const renderer = getRenderer();
-  if (!renderer) return [];
-  try {
-    const graph = renderer.sigma.getGraph();
-    return graph.nodes();
-  } catch {
-    return [];
+/** Show search suggestions in a search-results dropdown (same style as sidebar search) */
+function showSuggestions(input: HTMLInputElement, resultsEl: HTMLElement, suggestions: SearchSuggestion[]): void {
+  if (suggestions.length === 0) {
+    resultsEl.hidden = true;
+    return;
   }
+
+  resultsEl.innerHTML = suggestions
+    .map((s) => {
+      const nodeType = s.type as ADNodeType;
+      const color = NODE_COLORS[nodeType] || "#6c757d";
+      const iconPath = getNodeIconPath(nodeType);
+      return `
+        <div class="search-result-item" data-node-id="${escapeHtml(s.id)}" data-node-label="${escapeHtml(s.name)}" data-node-type="${escapeHtml(s.type)}">
+          <span class="node-type-icon" style="background-color: ${color}" title="${escapeHtml(s.type)}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>
+          </span>
+          <span class="node-name">${escapeHtml(s.name)}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  positionPopover(input, resultsEl);
+  resultsEl.hidden = false;
 }
 
 /** Render the modal body */
@@ -222,15 +316,15 @@ function render(): void {
 
   const totalPages = Math.max(1, Math.ceil(pagination.total / pagination.perPage));
   const page = getCurrentPage();
-  const hasVisibleNodes = getVisibleNodeIds().length > 0;
+  const hasVisibleNodes = getVisibleNodeIds().size > 0;
 
   body.innerHTML = `
     <div class="space-y-4">
-      <!-- Filters -->
-      <div class="flex gap-3 items-end flex-wrap">
-        <div class="flex flex-col gap-1">
+      <!-- Row 1: Node Type + Name Regex + Filter button -->
+      <div class="flex gap-3 items-end">
+        <div class="flex flex-col gap-1" style="min-width: 140px">
           <label class="text-xs text-gray-400 uppercase tracking-wide">Node Type</label>
-          <select id="tier-filter-type" class="form-select" style="min-width: 140px">
+          <select id="tier-filter-type" class="form-select">
             <option value="">All types</option>
             ${availableTypes.map((t) => `<option value="${escapeHtml(t)}" ${filters.nodeType === t ? "selected" : ""}>${escapeHtml(t)}</option>`).join("")}
           </select>
@@ -242,23 +336,29 @@ function render(): void {
         <button class="btn btn-sm btn-secondary" data-action="apply-filters">Filter</button>
       </div>
 
-      <!-- Group / OU / Visible Nodes filters -->
-      <div class="flex gap-3 items-end flex-wrap">
-        <div class="flex flex-col gap-1" style="min-width: 220px; position: relative;">
+      <!-- Row 2: Group + OU + Load Visible -->
+      <div class="flex gap-3 items-end">
+        <div class="flex flex-col gap-1 flex-1">
           <label class="text-xs text-gray-400 uppercase tracking-wide">Group Membership</label>
-          <input id="tier-filter-group" type="text" class="form-input" placeholder="Search group..."
-            value="${escapeHtml(filters.groupName)}" autocomplete="off" />
-          <div id="tier-group-suggestions" class="search-suggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 10; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; max-height: 200px; overflow-y: auto;"></div>
-          ${filters.groupId ? `<button class="text-xs text-gray-500 hover:text-gray-300" data-action="clear-group" style="align-self: flex-start;">&times; Clear</button>` : ""}
+          <div class="flex gap-2 items-center">
+            <input id="tier-filter-group" type="text" class="form-input flex-1" placeholder="Search group..."
+              value="${escapeHtml(filters.groupName)}" autocomplete="off" />
+            ${filters.groupId ? `<button class="btn btn-sm btn-secondary" data-action="clear-group" title="Clear group filter" style="padding: 4px 8px">&times;</button>` : ""}
+          </div>
         </div>
-        <div class="flex flex-col gap-1" style="min-width: 220px; position: relative;">
+        <div class="flex flex-col gap-1 flex-1">
           <label class="text-xs text-gray-400 uppercase tracking-wide">OU Containment</label>
-          <input id="tier-filter-ou" type="text" class="form-input" placeholder="Search OU..."
-            value="${escapeHtml(filters.ouName)}" autocomplete="off" />
-          <div id="tier-ou-suggestions" class="search-suggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 10; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; max-height: 200px; overflow-y: auto;"></div>
-          ${filters.ouId ? `<button class="text-xs text-gray-500 hover:text-gray-300" data-action="clear-ou" style="align-self: flex-start;">&times; Clear</button>` : ""}
+          <div class="flex gap-2 items-center">
+            <input id="tier-filter-ou" type="text" class="form-input flex-1" placeholder="Search OU..."
+              value="${escapeHtml(filters.ouName)}" autocomplete="off" />
+            ${filters.ouId ? `<button class="btn btn-sm btn-secondary" data-action="clear-ou" title="Clear OU filter" style="padding: 4px 8px">&times;</button>` : ""}
+          </div>
         </div>
-        ${hasVisibleNodes ? `<button class="btn btn-sm btn-secondary" data-action="tag-visible" title="Use currently visible graph nodes">Tag Visible Nodes</button>` : ""}
+        ${hasVisibleNodes ? `
+          <button class="btn btn-sm ${filters.visibleOnly ? "btn-primary" : "btn-secondary"}" data-action="load-visible" title="Filter to nodes currently visible in the graph">
+            ${filters.visibleOnly ? "Showing visible" : "Load Visible Nodes"}
+          </button>
+        ` : ""}
       </div>
 
       ${filters.groupId ? `<div class="text-xs text-blue-400">Group filter: ${escapeHtml(filters.groupName)}</div>` : ""}
@@ -347,79 +447,60 @@ function render(): void {
 
   // Group search with debounce
   const groupInput = document.getElementById("tier-filter-group") as HTMLInputElement;
-  if (groupInput) {
+  if (groupInput && groupResultsEl) {
+    groupOnSelect = (s) => {
+      filters.groupId = s.id;
+      filters.groupName = s.name;
+      if (groupResultsEl) groupResultsEl.hidden = true;
+      render();
+    };
     groupInput.addEventListener("input", () => {
       if (groupSearchTimer) clearTimeout(groupSearchTimer);
       groupSearchTimer = setTimeout(async () => {
         const suggestions = await searchEntities(groupInput.value, "Group");
-        showSuggestions("tier-group-suggestions", suggestions, (s) => {
-          filters.groupId = s.id;
-          filters.groupName = s.name;
-          render();
-        });
+        showSuggestions(groupInput, groupResultsEl!, suggestions);
       }, 300);
     });
+    groupInput.addEventListener("focus", () => {
+      // Re-search if there's already text
+      if (groupInput.value.length >= 2) {
+        searchEntities(groupInput.value, "Group").then((suggestions) => {
+          showSuggestions(groupInput, groupResultsEl!, suggestions);
+        });
+      }
+    });
     groupInput.addEventListener("blur", () => {
-      // Delay hiding to allow click on suggestion
-      setTimeout(() => hideSuggestions("tier-group-suggestions"), 200);
+      setTimeout(() => { if (groupResultsEl) groupResultsEl.hidden = true; }, 150);
     });
   }
 
   // OU search with debounce
   const ouInput = document.getElementById("tier-filter-ou") as HTMLInputElement;
-  if (ouInput) {
+  if (ouInput && ouResultsEl) {
+    ouOnSelect = (s) => {
+      filters.ouId = s.id;
+      filters.ouName = s.name;
+      if (ouResultsEl) ouResultsEl.hidden = true;
+      render();
+    };
     ouInput.addEventListener("input", () => {
       if (ouSearchTimer) clearTimeout(ouSearchTimer);
       ouSearchTimer = setTimeout(async () => {
         const suggestions = await searchEntities(ouInput.value, "OU");
-        showSuggestions("tier-ou-suggestions", suggestions, (s) => {
-          filters.ouId = s.id;
-          filters.ouName = s.name;
-          render();
-        });
+        showSuggestions(ouInput, ouResultsEl!, suggestions);
       }, 300);
     });
+    ouInput.addEventListener("focus", () => {
+      if (ouInput.value.length >= 2) {
+        searchEntities(ouInput.value, "OU").then((suggestions) => {
+          showSuggestions(ouInput, ouResultsEl!, suggestions);
+        });
+      }
+    });
     ouInput.addEventListener("blur", () => {
-      setTimeout(() => hideSuggestions("tier-ou-suggestions"), 200);
+      setTimeout(() => { if (ouResultsEl) ouResultsEl.hidden = true; }, 150);
     });
   }
-}
-
-/** Show search suggestions in a dropdown */
-function showSuggestions(containerId: string, suggestions: SearchSuggestion[], onSelect: (s: SearchSuggestion) => void): void {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-
-  if (suggestions.length === 0) {
-    container.style.display = "none";
-    return;
-  }
-
-  container.innerHTML = suggestions
-    .map(
-      (s, i) =>
-        `<div class="search-suggestion-item" data-index="${i}" style="padding: 6px 10px; cursor: pointer; font-size: 0.85rem; border-bottom: 1px solid var(--border-color);">
-          <span class="text-xs px-1 py-0.5 rounded bg-gray-700 text-gray-400">${escapeHtml(s.type)}</span>
-          ${escapeHtml(s.name)}
-        </div>`
-    )
-    .join("");
-  container.style.display = "block";
-
-  // Attach click handlers
-  container.querySelectorAll(".search-suggestion-item").forEach((el, i) => {
-    el.addEventListener("mousedown", (e) => {
-      e.preventDefault(); // Prevent blur from firing first
-      const suggestion = suggestions[i];
-      if (suggestion) onSelect(suggestion);
-    });
-  });
-}
-
-/** Hide suggestion dropdown */
-function hideSuggestions(containerId: string): void {
-  const container = document.getElementById(containerId);
-  if (container) container.style.display = "none";
 }
 
 /** Read filter values from the UI and apply */
@@ -446,13 +527,19 @@ async function batchAssignTier(): Promise<void> {
   if (!confirmed) return;
 
   try {
-    const result = await api.post<{ updated: number }>("/api/graph/batch-set-tier", {
+    // If we're showing visible-only nodes, send the explicit IDs
+    const payload: Record<string, unknown> = {
       tier,
       node_type: filters.nodeType || null,
       name_regex: filters.nameRegex || null,
       group_id: filters.groupId || null,
       ou_id: filters.ouId || null,
-    });
+    };
+    if (filters.visibleOnly) {
+      payload.node_ids = filteredNodes.map((n) => n.id);
+    }
+
+    const result = await api.post<{ updated: number }>("/api/graph/batch-set-tier", payload);
 
     showSuccess(`Updated tier to ${tier} on ${result.updated.toLocaleString()} node${result.updated === 1 ? "" : "s"}`);
 
@@ -460,37 +547,6 @@ async function batchAssignTier(): Promise<void> {
     await loadNodes();
   } catch (err) {
     console.error("Batch tier update failed:", err);
-    showError("Failed to update tiers");
-  }
-}
-
-/** Tag visible nodes: sends all visible graph node IDs for batch tier assignment */
-async function tagVisibleNodes(): Promise<void> {
-  const selectEl = document.getElementById("tier-batch-value") as HTMLSelectElement;
-  if (!selectEl) return;
-  const tier = parseInt(selectEl.value, 10);
-
-  const visibleIds = getVisibleNodeIds();
-  if (visibleIds.length === 0) {
-    showError("No visible nodes in graph");
-    return;
-  }
-
-  const confirmed = await showConfirm(
-    `This will set tier ${tier} on ${visibleIds.length.toLocaleString()} currently visible graph node${visibleIds.length === 1 ? "" : "s"}.\n\nContinue?`
-  );
-  if (!confirmed) return;
-
-  try {
-    const result = await api.post<{ updated: number }>("/api/graph/batch-set-tier", {
-      tier,
-      node_ids: visibleIds,
-    });
-
-    showSuccess(`Updated tier to ${tier} on ${result.updated.toLocaleString()} node${result.updated === 1 ? "" : "s"}`);
-    await loadNodes();
-  } catch (err) {
-    console.error("Tag visible nodes failed:", err);
     showError("Failed to update tiers");
   }
 }
@@ -533,8 +589,9 @@ function handleModalClick(e: Event): void {
     case "batch-assign":
       batchAssignTier();
       break;
-    case "tag-visible":
-      tagVisibleNodes();
+    case "load-visible":
+      filters.visibleOnly = !filters.visibleOnly;
+      applyFilters();
       break;
     case "clear-group":
       filters.groupId = "";
