@@ -5,11 +5,12 @@ E2E Test Runner for ADMapper
 Runs integration tests against all supported database backends.
 
 Usage:
-    ./e2e/run_tests.py <test_data.zip> [backend]
+    ./e2e/run_tests.py <test_data.zip> [backend] [--with-bloodhound]
 
 Arguments:
-    test_data.zip - Path to BloodHound data zip file (required)
-    backend       - Backend to test: crustdb, neo4j, falkordb, or all (default: all)
+    test_data.zip      - Path to BloodHound data zip file (required)
+    backend            - Backend to test: crustdb, neo4j, falkordb, or all (default: all)
+    --with-bloodhound  - Also import into BloodHound CE and compare graphs
 
 Environment variables:
     ADMAPPER_BIN  - Path to admapper binary (default: target/release/admapper)
@@ -29,6 +30,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -332,6 +334,86 @@ class E2ETestRunner:
             shutil.rmtree(self.temp_db_dir, ignore_errors=True)
             self.temp_db_dir = None
 
+        return suite
+
+    def _run_bloodhound_comparison(self) -> TestSuite | None:
+        """Load the BloodHound CE graph dump for cross-backend comparison.
+
+        The shell script (e2e-test.sh) runs dockerhound, imports data,
+        queries Neo4j, and writes the result to a JSON file.  This method
+        reads that file and populates ``all_nodes`` / ``all_edges`` so the
+        cross-backend comparison can include BloodHound CE.
+        """
+        suite = TestSuite(backend="bloodhound-ce")
+        results: list[TestResult] = []
+
+        self.logger.info("=" * 42)
+        self.logger.info("BloodHound CE comparison")
+        self.logger.info("=" * 42)
+
+        graph_file = os.environ.get("BH_GRAPH_FILE", "")
+        if not graph_file or not Path(graph_file).exists():
+            self.logger.error("BH_GRAPH_FILE not found: %s", graph_file)
+            results.append(
+                TestResult(
+                    name="BH CE: load graph",
+                    passed=False,
+                    duration_ms=0,
+                    message=f"BH_GRAPH_FILE not found: {graph_file}",
+                )
+            )
+            suite.results = results
+            return suite
+
+        t0 = time.monotonic()
+        try:
+            with open(graph_file) as fh:
+                data = json.load(fh)
+
+            # Nodes: normalize labels (strip "Base", sort) to match ADMapper
+            nodes: list[tuple[str, ...]] = []
+            for item in data["nodes"]:
+                labels = sorted(
+                    lbl for lbl in item["labels"] if lbl != "Base"
+                )
+                nodes.append((str(labels), str(item["objectid"])))
+            suite.all_nodes = sorted(nodes)
+
+            # Edges
+            edges: list[tuple[str, ...]] = []
+            for item in data["edges"]:
+                edges.append(
+                    (str(item["src"]), str(item["rel"]), str(item["tgt"]))
+                )
+            suite.all_edges = sorted(edges)
+
+            msg = (
+                f"Loaded {len(suite.all_nodes)} nodes, "
+                f"{len(suite.all_edges)} edges from {graph_file}"
+            )
+            self.logger.info(msg)
+            results.append(
+                TestResult(
+                    name="BH CE: load graph",
+                    passed=True,
+                    duration_ms=int((time.monotonic() - t0) * 1000),
+                    message="",
+                    proof=msg,
+                )
+            )
+        except Exception as exc:
+            self.logger.error("Failed to load BH graph: %s", exc)
+            results.append(
+                TestResult(
+                    name="BH CE: load graph",
+                    passed=False,
+                    duration_ms=int((time.monotonic() - t0) * 1000),
+                    message=f"Failed to load graph: {exc}",
+                )
+            )
+
+        suite.results = results
+        self._generate_xml_report(suite)
         return suite
 
     def _get_db_url(self, backend: str, db_dir: Path, port: int) -> str | None:
@@ -1263,7 +1345,11 @@ proof::before {
             parts.append(f"only in {name_b} (e.g. {sample}), {len(only_b)} total")
         return "; ".join(parts) if parts else "order differs"
 
-    def run(self, backends: list[str]) -> int:
+    def run(
+        self,
+        backends: list[str],
+        with_bloodhound: bool = False,
+    ) -> int:
         """Run tests for specified backends."""
         self.logger.info("ADMapper E2E Test Suite")
         self.logger.info("=" * 23)
@@ -1283,6 +1369,14 @@ proof::before {
             suites.append(suite)
             if suite.failed > 0:
                 overall_failed = True
+
+        # BloodHound CE reference comparison (opt-in)
+        if with_bloodhound:
+            bh_suite = self._run_bloodhound_comparison()
+            if bh_suite:
+                suites.append(bh_suite)
+                if bh_suite.failed > 0:
+                    overall_failed = True
 
         # Cross-backend comparisons
         if len(suites) > 1:
@@ -1340,12 +1434,16 @@ Backends:
 Environment variables:
   ADMAPPER_BIN  - Path to admapper binary
   DEBUG         - Enable debug output
+  WITH_BLOODHOUND - Enable BloodHound CE comparison (same as --with-bloodhound)
   NEO4J_HOST    - Neo4j host (default: localhost)
   NEO4J_PORT    - Neo4j port (default: 7687)
   NEO4J_USER    - Neo4j user (default: neo4j)
   NEO4J_PASSWORD - Neo4j password (default: neo4j123)
   FALKORDB_HOST - FalkorDB host (default: localhost)
   FALKORDB_PORT - FalkorDB port (default: 6379)
+
+BloodHound CE comparison (--with-bloodhound):
+  BH_GRAPH_FILE       - Path to pre-dumped BH CE graph JSON (set by e2e-test.sh)
         """,
     )
     parser.add_argument(
@@ -1365,6 +1463,12 @@ Environment variables:
         action="store_true",
         default=bool(os.environ.get("DEBUG")),
         help="Enable debug output",
+    )
+    parser.add_argument(
+        "--with-bloodhound",
+        action="store_true",
+        default=bool(os.environ.get("WITH_BLOODHOUND")),
+        help="Compare CrustDB import against BloodHound CE reference",
     )
 
     args = parser.parse_args()
@@ -1409,7 +1513,7 @@ Environment variables:
         debug=args.debug,
     )
 
-    return runner.run(backends)
+    return runner.run(backends, with_bloodhound=args.with_bloodhound)
 
 
 if __name__ == "__main__":
