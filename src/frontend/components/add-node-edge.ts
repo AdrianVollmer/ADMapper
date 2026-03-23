@@ -6,6 +6,8 @@
 
 import { api } from "../api/client";
 import { escapeHtml } from "../utils/html";
+import { getRenderer } from "./graph-view";
+import { updateDetailPanel, updateDetailPanelForEdge } from "./sidebars";
 
 /** Available relationship types */
 const COMMON_EDGE_TYPES = [
@@ -494,4 +496,446 @@ function resetAddNodeForm(): void {
 
   const error = document.getElementById("add-node-error");
   if (error) error.hidden = true;
+}
+
+// ============================================================================
+// Edit Node Modal
+// ============================================================================
+
+/** Edit Node modal element */
+let editNodeModal: HTMLElement | null = null;
+
+/** Current node being edited */
+let editingNodeId: string | null = null;
+
+/** Open the Edit Node modal with current properties */
+export function openEditNode(nodeId: string, properties: Record<string, unknown>): void {
+  if (!editNodeModal) {
+    createEditNodeModal();
+  }
+  editingNodeId = nodeId;
+  editNodeModal!.hidden = false;
+  populateEditNodeForm(properties);
+}
+
+/** Close Edit Node modal */
+function closeEditNodeModal(): void {
+  if (editNodeModal) {
+    editNodeModal.hidden = true;
+  }
+  editingNodeId = null;
+}
+
+/** Create the Edit Node modal */
+function createEditNodeModal(): void {
+  editNodeModal = document.createElement("div");
+  editNodeModal.id = "edit-node-modal";
+  editNodeModal.className = "modal-overlay";
+
+  editNodeModal.innerHTML = `
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">Edit Node</h2>
+        <button class="modal-close" data-action="close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="edit-node-form" class="add-form">
+          <div id="edit-node-properties" class="edit-properties-list"></div>
+
+          <button type="button" class="btn btn-secondary btn-sm" data-action="add-property" style="margin-top: 8px">
+            + Add Property
+          </button>
+
+          <div id="edit-node-error" class="form-error" hidden></div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-action="close">Cancel</button>
+        <button class="btn btn-primary" data-action="submit-edit-node">Save</button>
+      </div>
+    </div>
+  `;
+
+  editNodeModal.addEventListener("click", handleEditNodeClick);
+  document.body.appendChild(editNodeModal);
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && editNodeModal && !editNodeModal.hidden) {
+      closeEditNodeModal();
+    }
+  });
+}
+
+/** Populate the edit node form with current properties */
+function populateEditNodeForm(properties: Record<string, unknown>): void {
+  const container = document.getElementById("edit-node-properties");
+  if (!container) return;
+
+  const error = document.getElementById("edit-node-error");
+  if (error) error.hidden = true;
+
+  container.innerHTML = "";
+
+  const entries = Object.entries(properties);
+  for (const [key, value] of entries) {
+    addPropertyRow(container, key, formatPropertyValue(value), false);
+  }
+
+  if (entries.length === 0) {
+    addPropertyRow(container, "", "", true);
+  }
+}
+
+/** Format a property value for the edit form */
+function formatPropertyValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+/** Add a property key-value row to the edit form */
+function addPropertyRow(container: HTMLElement, key: string, value: string, isNew: boolean): void {
+  const row = document.createElement("div");
+  row.className = "edit-property-row";
+
+  row.innerHTML = `
+    <input
+      type="text"
+      class="form-input edit-prop-key"
+      placeholder="Property name"
+      value="${escapeHtml(key)}"
+      ${!isNew ? 'data-original-key="' + escapeHtml(key) + '"' : ""}
+    />
+    <input
+      type="text"
+      class="form-input edit-prop-value"
+      placeholder="Value"
+      value="${escapeHtml(value)}"
+    />
+    <button type="button" class="btn-icon-sm danger" data-action="remove-property" title="Remove property" aria-label="Remove property">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+        <path d="M18 6L6 18M6 6l12 12"/>
+      </svg>
+    </button>
+  `;
+
+  container.appendChild(row);
+}
+
+/** Handle clicks in Edit Node modal */
+function handleEditNodeClick(e: Event): void {
+  const target = e.target as HTMLElement;
+
+  if (target.classList.contains("modal-overlay")) {
+    closeEditNodeModal();
+    return;
+  }
+
+  const actionEl = target.closest("[data-action]") as HTMLElement;
+  if (!actionEl) return;
+
+  const action = actionEl.getAttribute("data-action");
+
+  switch (action) {
+    case "close":
+      closeEditNodeModal();
+      break;
+    case "submit-edit-node":
+      submitEditNode();
+      break;
+    case "add-property": {
+      const container = document.getElementById("edit-node-properties");
+      if (container) {
+        addPropertyRow(container, "", "", true);
+        // Focus the new key input
+        const lastRow = container.lastElementChild;
+        const keyInput = lastRow?.querySelector(".edit-prop-key") as HTMLInputElement;
+        keyInput?.focus();
+      }
+      break;
+    }
+    case "remove-property": {
+      const row = actionEl.closest(".edit-property-row");
+      row?.remove();
+      break;
+    }
+  }
+}
+
+/** Collect properties from the edit form rows */
+function collectPropertiesFromForm(containerId: string): Record<string, unknown> {
+  const container = document.getElementById(containerId);
+  if (!container) return {};
+
+  const properties: Record<string, unknown> = {};
+  const rows = container.querySelectorAll(".edit-property-row");
+
+  for (const row of rows) {
+    const keyInput = row.querySelector(".edit-prop-key") as HTMLInputElement;
+    const valueInput = row.querySelector(".edit-prop-value") as HTMLInputElement;
+    const key = keyInput?.value.trim();
+    const rawValue = valueInput?.value;
+
+    if (!key) continue;
+
+    properties[key] = parsePropertyValue(rawValue);
+  }
+
+  return properties;
+}
+
+/** Parse a property value string into its appropriate type */
+function parsePropertyValue(raw: string): unknown {
+  if (raw === "") return "";
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  if (raw === "null") return null;
+
+  // Try as number
+  const num = Number(raw);
+  if (!isNaN(num) && raw.trim() !== "") return num;
+
+  // Try as JSON (for arrays/objects)
+  if ((raw.startsWith("[") && raw.endsWith("]")) || (raw.startsWith("{") && raw.endsWith("}"))) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      // Not valid JSON, return as string
+    }
+  }
+
+  return raw;
+}
+
+/** Submit the edit node form */
+async function submitEditNode(): Promise<void> {
+  if (!editingNodeId) return;
+
+  const errorEl = document.getElementById("edit-node-error");
+  const properties = collectPropertiesFromForm("edit-node-properties");
+
+  // Extract name and label from properties if present
+  const name = properties.name !== undefined ? String(properties.name) : undefined;
+  const label = properties.label !== undefined ? String(properties.label) : undefined;
+
+  try {
+    await api.put(`/api/graph/nodes/${encodeURIComponent(editingNodeId)}`, {
+      name,
+      label,
+      properties,
+    });
+
+    // Update the graph view locally
+    const renderer = getRenderer();
+    const graph = renderer?.sigma.getGraph();
+    if (graph?.hasNode(editingNodeId)) {
+      if (name !== undefined) {
+        graph.setNodeAttribute(editingNodeId, "label", name);
+      }
+      const existingProps = graph.getNodeAttribute(editingNodeId, "properties") || {};
+      graph.setNodeAttribute(editingNodeId, "properties", { ...existingProps, ...properties });
+      renderer?.refresh();
+
+      // Refresh the detail panel
+      const attrs = graph.getNodeAttributes(editingNodeId);
+      updateDetailPanel(editingNodeId, attrs as Parameters<typeof updateDetailPanel>[1]);
+    }
+
+    closeEditNodeModal();
+  } catch (err) {
+    showError(errorEl, `Failed to update node: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+// ============================================================================
+// Edit Edge Modal
+// ============================================================================
+
+/** Edit Edge modal element */
+let editEdgeModal: HTMLElement | null = null;
+
+/** Current edge being edited */
+let editingEdgeContext: {
+  edgeId: string;
+  sourceId: string;
+  targetId: string;
+  edgeType: string;
+} | null = null;
+
+/** Open the Edit Edge modal with current properties */
+export function openEditEdge(
+  edgeId: string,
+  sourceId: string,
+  targetId: string,
+  edgeType: string,
+  properties: Record<string, unknown>
+): void {
+  if (!editEdgeModal) {
+    createEditEdgeModal();
+  }
+  editingEdgeContext = { edgeId, sourceId, targetId, edgeType };
+  editEdgeModal!.hidden = false;
+
+  // Update the title to show relationship type
+  const titleEl = editEdgeModal!.querySelector(".modal-title");
+  if (titleEl) titleEl.textContent = `Edit ${edgeType} Relationship`;
+
+  populateEditEdgeForm(properties);
+}
+
+/** Close Edit Edge modal */
+function closeEditEdgeModal(): void {
+  if (editEdgeModal) {
+    editEdgeModal.hidden = true;
+  }
+  editingEdgeContext = null;
+}
+
+/** Create the Edit Edge modal */
+function createEditEdgeModal(): void {
+  editEdgeModal = document.createElement("div");
+  editEdgeModal.id = "edit-edge-modal";
+  editEdgeModal.className = "modal-overlay";
+
+  editEdgeModal.innerHTML = `
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">Edit Relationship</h2>
+        <button class="modal-close" data-action="close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="edit-edge-form" class="add-form">
+          <div id="edit-edge-properties" class="edit-properties-list"></div>
+
+          <button type="button" class="btn btn-secondary btn-sm" data-action="add-edge-property" style="margin-top: 8px">
+            + Add Property
+          </button>
+
+          <div id="edit-edge-error" class="form-error" hidden></div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-action="close">Cancel</button>
+        <button class="btn btn-primary" data-action="submit-edit-edge">Save</button>
+      </div>
+    </div>
+  `;
+
+  editEdgeModal.addEventListener("click", handleEditEdgeClick);
+  document.body.appendChild(editEdgeModal);
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && editEdgeModal && !editEdgeModal.hidden) {
+      closeEditEdgeModal();
+    }
+  });
+}
+
+/** Populate the edit edge form with current properties */
+function populateEditEdgeForm(properties: Record<string, unknown>): void {
+  const container = document.getElementById("edit-edge-properties");
+  if (!container) return;
+
+  const error = document.getElementById("edit-edge-error");
+  if (error) error.hidden = true;
+
+  container.innerHTML = "";
+
+  const entries = Object.entries(properties);
+  for (const [key, value] of entries) {
+    addPropertyRow(container, key, formatPropertyValue(value), false);
+  }
+
+  if (entries.length === 0) {
+    addPropertyRow(container, "", "", true);
+  }
+}
+
+/** Handle clicks in Edit Edge modal */
+function handleEditEdgeClick(e: Event): void {
+  const target = e.target as HTMLElement;
+
+  if (target.classList.contains("modal-overlay")) {
+    closeEditEdgeModal();
+    return;
+  }
+
+  const actionEl = target.closest("[data-action]") as HTMLElement;
+  if (!actionEl) return;
+
+  const action = actionEl.getAttribute("data-action");
+
+  switch (action) {
+    case "close":
+      closeEditEdgeModal();
+      break;
+    case "submit-edit-edge":
+      submitEditEdge();
+      break;
+    case "add-edge-property": {
+      const container = document.getElementById("edit-edge-properties");
+      if (container) {
+        addPropertyRow(container, "", "", true);
+        const lastRow = container.lastElementChild;
+        const keyInput = lastRow?.querySelector(".edit-prop-key") as HTMLInputElement;
+        keyInput?.focus();
+      }
+      break;
+    }
+    case "remove-property": {
+      const row = actionEl.closest(".edit-property-row");
+      row?.remove();
+      break;
+    }
+  }
+}
+
+/** Submit the edit edge form */
+async function submitEditEdge(): Promise<void> {
+  if (!editingEdgeContext) return;
+
+  const { edgeId, sourceId, targetId, edgeType } = editingEdgeContext;
+  const errorEl = document.getElementById("edit-edge-error");
+  const properties = collectPropertiesFromForm("edit-edge-properties");
+
+  try {
+    await api.put(
+      `/api/graph/relationships/${encodeURIComponent(sourceId)}/${encodeURIComponent(targetId)}/${encodeURIComponent(edgeType)}`,
+      { properties }
+    );
+
+    // Update the graph view locally
+    const renderer = getRenderer();
+    const graph = renderer?.sigma.getGraph();
+    if (graph?.hasEdge(edgeId)) {
+      const existingProps = graph.getEdgeAttribute(edgeId, "properties") || {};
+      graph.setEdgeAttribute(edgeId, "properties", { ...existingProps, ...properties });
+      renderer?.refresh();
+
+      // Refresh the detail panel
+      const attrs = graph.getEdgeAttributes(edgeId);
+      const sourceLabel = graph.getNodeAttribute(sourceId, "label") || sourceId;
+      const targetLabel = graph.getNodeAttribute(targetId, "label") || targetId;
+      updateDetailPanelForEdge(
+        edgeId,
+        attrs as Parameters<typeof updateDetailPanelForEdge>[1],
+        sourceId,
+        targetId,
+        sourceLabel,
+        targetLabel
+      );
+    }
+
+    closeEditEdgeModal();
+  } catch (err) {
+    showError(errorEl, `Failed to update relationship: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }

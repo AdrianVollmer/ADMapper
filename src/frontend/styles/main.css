@@ -1747,6 +1747,26 @@
            max-h-32 overflow-y-auto;
   }
 
+  .edit-properties-list {
+    @apply space-y-2 max-h-[400px] overflow-y-auto;
+  }
+
+  .edit-property-row {
+    @apply flex items-center gap-2;
+  }
+
+  .edit-property-row .edit-prop-key {
+    @apply flex-[2] min-w-0;
+  }
+
+  .edit-property-row .edit-prop-value {
+    @apply flex-[3] min-w-0;
+  }
+
+  .edit-property-row .btn-icon-sm.danger {
+    @apply hover:text-red-400 hover:bg-red-900/30;
+  }
+
   .search-input-wrapper {
     @apply relative;
   }

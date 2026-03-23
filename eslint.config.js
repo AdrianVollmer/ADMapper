@@ -60,6 +60,7 @@ export default [
         // Web Worker globals
         Worker: "readonly",
         MessageEvent: "readonly",
+        WheelEvent: "readonly",
         DedicatedWorkerGlobalScope: "readonly",
         self: "readonly",
       },

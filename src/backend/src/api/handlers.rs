@@ -8,7 +8,8 @@ use crate::api::types::{
     NodeStatus, PathParams, PathResponse, PathStep, PathsToDaEntry, PathsToDaParams,
     PathsToDaResponse, QueryActivity, QueryHistoryEntry, QueryHistoryResponse, QueryProgress,
     QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
-    TierViolationCategory, TierViolationEdge, TierViolationsResponse,
+    TierViolationCategory, TierViolationEdge, TierViolationsResponse, UpdateEdgeRequest,
+    UpdateNodeRequest,
 };
 use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, NewQueryHistoryEntry, QueryLanguage};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
@@ -1688,6 +1689,46 @@ pub async fn add_edge(
         target: body.target,
         rel_type: body.rel_type,
     }))
+}
+
+/// Update a node's properties.
+#[instrument(skip(state, body))]
+pub async fn update_node(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateNodeRequest>,
+) -> Result<StatusCode, ApiError> {
+    let db = state.require_db()?;
+    let id_for_log = id.clone();
+    let name = body.name;
+    let label = body.label;
+    let properties = body.properties;
+    run_db(db, move |db| {
+        core::update_node(db, &id, name, label, properties).map_err(DbError::Database)
+    })
+    .await?;
+    info!(id = %id_for_log, "Node updated");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Update an edge's properties.
+#[instrument(skip(state, body))]
+pub async fn update_edge(
+    State(state): State<AppState>,
+    Path((source, target, rel_type)): Path<(String, String, String)>,
+    Json(body): Json<UpdateEdgeRequest>,
+) -> Result<StatusCode, ApiError> {
+    let db = state.require_db()?;
+    let source_for_log = source.clone();
+    let target_for_log = target.clone();
+    let rel_type_for_log = rel_type.clone();
+    let properties = body.properties;
+    run_db(db, move |db| {
+        core::update_edge(db, &source, &target, &rel_type, properties).map_err(DbError::Database)
+    })
+    .await?;
+    info!(source = %source_for_log, target = %target_for_log, rel_type = %rel_type_for_log, "Relationship updated");
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Delete a node from the graph.

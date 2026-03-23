@@ -354,6 +354,28 @@ pub struct AddEdgeRequest {
     pub properties: JsonValue,
 }
 
+/// Request body for updating a node's properties.
+#[derive(Deserialize)]
+pub struct UpdateNodeRequest {
+    /// New display name (optional).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// New node label/type (optional).
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Properties to set (merged with existing).
+    #[serde(default)]
+    pub properties: JsonValue,
+}
+
+/// Request body for updating an edge's properties.
+#[derive(Deserialize)]
+pub struct UpdateEdgeRequest {
+    /// Properties to set (merged with existing).
+    #[serde(default)]
+    pub properties: JsonValue,
+}
+
 // ============================================================================
 // Query Types
 // ============================================================================
