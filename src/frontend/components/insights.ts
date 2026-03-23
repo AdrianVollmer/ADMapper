@@ -635,6 +635,10 @@ function renderUnexpectedChokePointsTab(): string {
   `;
 }
 
+/** State for effective tier computation */
+let computingEffectiveTiers = false;
+let effectiveTiersResult: { computed: number; violations: number } | null = null;
+
 /** Render Tier Violations tab */
 function renderTierViolationsTab(): string {
   if (tierViolationsState.loading) {
@@ -679,6 +683,14 @@ function renderTierViolationsTab(): string {
     `;
   };
 
+  const computeButton = computingEffectiveTiers
+    ? `<button class="btn btn-sm btn-secondary" disabled><span class="spinner spinner-sm"></span> Computing...</button>`
+    : `<button class="btn btn-sm btn-primary" data-action="compute-effective-tiers">Analyze Tier Violations</button>`;
+
+  const computeResult = effectiveTiersResult
+    ? `<div class="text-sm text-green-400 mt-2">Computed effective tiers for ${effectiveTiersResult.computed.toLocaleString()} nodes. Found ${effectiveTiersResult.violations.toLocaleString()} violation${effectiveTiersResult.violations === 1 ? "" : "s"}.</div>`
+    : "";
+
   return `
     <div class="insights-container">
       <div class="insight-section">
@@ -695,10 +707,38 @@ function renderTierViolationsTab(): string {
           ${renderCard(v2to1, 2, 1, "insight-card-secondary")}
           ${renderCard(v3to2, 3, 2, "")}
         </div>
+        <div class="flex items-center gap-3 mt-3">
+          ${computeButton}
+          <span class="text-xs text-gray-500">Compute effective tiers via reverse BFS to update violation analysis</span>
+        </div>
+        ${computeResult}
         <p class="text-xs text-gray-500 mt-2">Click on a number to visualize the graph</p>
       </div>
     </div>
   `;
+}
+
+/** Compute effective tiers and reload violations */
+async function computeEffectiveTiers(): Promise<void> {
+  computingEffectiveTiers = true;
+  effectiveTiersResult = null;
+  renderModal();
+
+  try {
+    const result = await api.post<{ computed: number; violations: number }>("/api/graph/compute-effective-tiers", {});
+    effectiveTiersResult = result;
+    computingEffectiveTiers = false;
+    renderModal();
+
+    // Reload tier violations to reflect updated effective tiers
+    await loadTierViolations();
+  } catch (err) {
+    computingEffectiveTiers = false;
+    const message = err instanceof Error ? err.message : "Failed to compute effective tiers";
+    effectiveTiersResult = null;
+    tierViolationsState = { loading: false, error: message, data: tierViolationsState.data };
+    renderModal();
+  }
 }
 
 /** Load Domain Admin Analysis data */
@@ -933,9 +973,9 @@ async function executeTierViolationGraph(sid: string): Promise<void> {
   const data = tierViolationsState.data;
   if (!data) return;
 
-  const [srcStr, tgtStr] = sid.split("-");
-  const srcZone = parseInt(srcStr, 10);
-  const tgtZone = parseInt(tgtStr, 10);
+  const parts = sid.split("-");
+  const srcZone = parseInt(parts[0] ?? "0", 10);
+  const tgtZone = parseInt(parts[1] ?? "0", 10);
 
   const violation = data.violations.find((v) => v.source_zone === srcZone && v.target_zone === tgtZone);
   if (!violation || violation.edges.length === 0) return;
@@ -1135,6 +1175,9 @@ function handleClick(e: Event): void {
       }
       break;
     }
+    case "compute-effective-tiers":
+      computeEffectiveTiers();
+      break;
   }
 }
 

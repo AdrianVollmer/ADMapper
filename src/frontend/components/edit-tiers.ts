@@ -3,11 +3,13 @@
  *
  * Modal for viewing and batch-editing node tier assignments.
  * Shows a paginated, filterable list of nodes with their type, name, and tier.
+ * Supports filtering by group membership, OU containment, and visible graph nodes.
  */
 
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import { showSuccess, showError, showConfirm } from "../utils/notifications";
+import { getRenderer } from "./graph-view";
 
 /** A node entry in the tier editor list */
 interface TierNodeEntry {
@@ -15,6 +17,13 @@ interface TierNodeEntry {
   name: string;
   type: string;
   tier: number;
+}
+
+/** Search suggestion for group/OU pickers */
+interface SearchSuggestion {
+  id: string;
+  name: string;
+  type: string;
 }
 
 /** Pagination state */
@@ -28,16 +37,24 @@ interface PaginationState {
 interface FilterState {
   nodeType: string; // "" = all
   nameRegex: string;
+  groupId: string; // selected group ID for membership filter
+  groupName: string; // display name
+  ouId: string; // selected OU ID for containment filter
+  ouName: string; // display name
 }
 
 /** All fetched nodes (filtered in-memory for pagination) */
 let allNodes: TierNodeEntry[] = [];
 let filteredNodes: TierNodeEntry[] = [];
 let pagination: PaginationState = { page: 1, perPage: 50, total: 0 };
-let filters: FilterState = { nodeType: "", nameRegex: "" };
+let filters: FilterState = { nodeType: "", nameRegex: "", groupId: "", groupName: "", ouId: "", ouName: "" };
 let availableTypes: string[] = [];
 let isLoading = false;
 let modalEl: HTMLElement | null = null;
+
+/** Debounce timer for search inputs */
+let groupSearchTimer: ReturnType<typeof setTimeout> | null = null;
+let ouSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Create the modal element and append to body */
 function createModalElement(): void {
@@ -76,7 +93,7 @@ export async function openEditTiers(): Promise<void> {
   createModalElement();
   if (!modalEl) return;
 
-  filters = { nodeType: "", nameRegex: "" };
+  filters = { nodeType: "", nameRegex: "", groupId: "", groupName: "", ouId: "", ouName: "" };
   pagination = { page: 1, perPage: 50, total: 0 };
 
   modalEl.removeAttribute("hidden");
@@ -137,6 +154,7 @@ function applyFilters(): void {
     }
   }
 
+  // Client-side filtering for type and regex (group/OU filtering is server-side)
   filteredNodes = allNodes.filter((n) => {
     if (filters.nodeType && n.type.toLowerCase() !== filters.nodeType.toLowerCase()) {
       return false;
@@ -158,6 +176,40 @@ function getCurrentPage(): TierNodeEntry[] {
   return filteredNodes.slice(start, start + pagination.perPage);
 }
 
+/** Search for groups or OUs */
+async function searchEntities(query: string, type: string): Promise<SearchSuggestion[]> {
+  if (query.length < 2) return [];
+  try {
+    const results = await api.get<Array<{ id: string; name: string; type?: string; labels?: string[] }>>(
+      `/api/graph/search?q=${encodeURIComponent(query)}&limit=10`
+    );
+    return results
+      .filter((r) => {
+        const rType = (r.type || r.labels?.[0] || "").toLowerCase();
+        return rType === type.toLowerCase();
+      })
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: r.type || r.labels?.[0] || type,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/** Get all currently visible node IDs from the graph renderer */
+function getVisibleNodeIds(): string[] {
+  const renderer = getRenderer();
+  if (!renderer) return [];
+  try {
+    const graph = renderer.sigma.getGraph();
+    return graph.nodes();
+  } catch {
+    return [];
+  }
+}
+
 /** Render the modal body */
 function render(): void {
   const body = document.getElementById("edit-tiers-body");
@@ -170,6 +222,7 @@ function render(): void {
 
   const totalPages = Math.max(1, Math.ceil(pagination.total / pagination.perPage));
   const page = getCurrentPage();
+  const hasVisibleNodes = getVisibleNodeIds().length > 0;
 
   body.innerHTML = `
     <div class="space-y-4">
@@ -188,6 +241,28 @@ function render(): void {
         </div>
         <button class="btn btn-sm btn-secondary" data-action="apply-filters">Filter</button>
       </div>
+
+      <!-- Group / OU / Visible Nodes filters -->
+      <div class="flex gap-3 items-end flex-wrap">
+        <div class="flex flex-col gap-1" style="min-width: 220px; position: relative;">
+          <label class="text-xs text-gray-400 uppercase tracking-wide">Group Membership</label>
+          <input id="tier-filter-group" type="text" class="form-input" placeholder="Search group..."
+            value="${escapeHtml(filters.groupName)}" autocomplete="off" />
+          <div id="tier-group-suggestions" class="search-suggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 10; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; max-height: 200px; overflow-y: auto;"></div>
+          ${filters.groupId ? `<button class="text-xs text-gray-500 hover:text-gray-300" data-action="clear-group" style="align-self: flex-start;">&times; Clear</button>` : ""}
+        </div>
+        <div class="flex flex-col gap-1" style="min-width: 220px; position: relative;">
+          <label class="text-xs text-gray-400 uppercase tracking-wide">OU Containment</label>
+          <input id="tier-filter-ou" type="text" class="form-input" placeholder="Search OU..."
+            value="${escapeHtml(filters.ouName)}" autocomplete="off" />
+          <div id="tier-ou-suggestions" class="search-suggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 10; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; max-height: 200px; overflow-y: auto;"></div>
+          ${filters.ouId ? `<button class="text-xs text-gray-500 hover:text-gray-300" data-action="clear-ou" style="align-self: flex-start;">&times; Clear</button>` : ""}
+        </div>
+        ${hasVisibleNodes ? `<button class="btn btn-sm btn-secondary" data-action="tag-visible" title="Use currently visible graph nodes">Tag Visible Nodes</button>` : ""}
+      </div>
+
+      ${filters.groupId ? `<div class="text-xs text-blue-400">Group filter: ${escapeHtml(filters.groupName)}</div>` : ""}
+      ${filters.ouId ? `<div class="text-xs text-blue-400">OU filter: ${escapeHtml(filters.ouName)}</div>` : ""}
 
       <!-- Results summary -->
       <div class="text-sm text-gray-400">
@@ -269,6 +344,82 @@ function render(): void {
   if (typeSelect) {
     typeSelect.addEventListener("change", () => applyFiltersFromUI());
   }
+
+  // Group search with debounce
+  const groupInput = document.getElementById("tier-filter-group") as HTMLInputElement;
+  if (groupInput) {
+    groupInput.addEventListener("input", () => {
+      if (groupSearchTimer) clearTimeout(groupSearchTimer);
+      groupSearchTimer = setTimeout(async () => {
+        const suggestions = await searchEntities(groupInput.value, "Group");
+        showSuggestions("tier-group-suggestions", suggestions, (s) => {
+          filters.groupId = s.id;
+          filters.groupName = s.name;
+          render();
+        });
+      }, 300);
+    });
+    groupInput.addEventListener("blur", () => {
+      // Delay hiding to allow click on suggestion
+      setTimeout(() => hideSuggestions("tier-group-suggestions"), 200);
+    });
+  }
+
+  // OU search with debounce
+  const ouInput = document.getElementById("tier-filter-ou") as HTMLInputElement;
+  if (ouInput) {
+    ouInput.addEventListener("input", () => {
+      if (ouSearchTimer) clearTimeout(ouSearchTimer);
+      ouSearchTimer = setTimeout(async () => {
+        const suggestions = await searchEntities(ouInput.value, "OU");
+        showSuggestions("tier-ou-suggestions", suggestions, (s) => {
+          filters.ouId = s.id;
+          filters.ouName = s.name;
+          render();
+        });
+      }, 300);
+    });
+    ouInput.addEventListener("blur", () => {
+      setTimeout(() => hideSuggestions("tier-ou-suggestions"), 200);
+    });
+  }
+}
+
+/** Show search suggestions in a dropdown */
+function showSuggestions(containerId: string, suggestions: SearchSuggestion[], onSelect: (s: SearchSuggestion) => void): void {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (suggestions.length === 0) {
+    container.style.display = "none";
+    return;
+  }
+
+  container.innerHTML = suggestions
+    .map(
+      (s, i) =>
+        `<div class="search-suggestion-item" data-index="${i}" style="padding: 6px 10px; cursor: pointer; font-size: 0.85rem; border-bottom: 1px solid var(--border-color);">
+          <span class="text-xs px-1 py-0.5 rounded bg-gray-700 text-gray-400">${escapeHtml(s.type)}</span>
+          ${escapeHtml(s.name)}
+        </div>`
+    )
+    .join("");
+  container.style.display = "block";
+
+  // Attach click handlers
+  container.querySelectorAll(".search-suggestion-item").forEach((el, i) => {
+    el.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // Prevent blur from firing first
+      const suggestion = suggestions[i];
+      if (suggestion) onSelect(suggestion);
+    });
+  });
+}
+
+/** Hide suggestion dropdown */
+function hideSuggestions(containerId: string): void {
+  const container = document.getElementById(containerId);
+  if (container) container.style.display = "none";
 }
 
 /** Read filter values from the UI and apply */
@@ -299,6 +450,8 @@ async function batchAssignTier(): Promise<void> {
       tier,
       node_type: filters.nodeType || null,
       name_regex: filters.nameRegex || null,
+      group_id: filters.groupId || null,
+      ou_id: filters.ouId || null,
     });
 
     showSuccess(`Updated tier to ${tier} on ${result.updated.toLocaleString()} node${result.updated === 1 ? "" : "s"}`);
@@ -307,6 +460,37 @@ async function batchAssignTier(): Promise<void> {
     await loadNodes();
   } catch (err) {
     console.error("Batch tier update failed:", err);
+    showError("Failed to update tiers");
+  }
+}
+
+/** Tag visible nodes: sends all visible graph node IDs for batch tier assignment */
+async function tagVisibleNodes(): Promise<void> {
+  const selectEl = document.getElementById("tier-batch-value") as HTMLSelectElement;
+  if (!selectEl) return;
+  const tier = parseInt(selectEl.value, 10);
+
+  const visibleIds = getVisibleNodeIds();
+  if (visibleIds.length === 0) {
+    showError("No visible nodes in graph");
+    return;
+  }
+
+  const confirmed = await showConfirm(
+    `This will set tier ${tier} on ${visibleIds.length.toLocaleString()} currently visible graph node${visibleIds.length === 1 ? "" : "s"}.\n\nContinue?`
+  );
+  if (!confirmed) return;
+
+  try {
+    const result = await api.post<{ updated: number }>("/api/graph/batch-set-tier", {
+      tier,
+      node_ids: visibleIds,
+    });
+
+    showSuccess(`Updated tier to ${tier} on ${result.updated.toLocaleString()} node${result.updated === 1 ? "" : "s"}`);
+    await loadNodes();
+  } catch (err) {
+    console.error("Tag visible nodes failed:", err);
     showError("Failed to update tiers");
   }
 }
@@ -348,6 +532,19 @@ function handleModalClick(e: Event): void {
     }
     case "batch-assign":
       batchAssignTier();
+      break;
+    case "tag-visible":
+      tagVisibleNodes();
+      break;
+    case "clear-group":
+      filters.groupId = "";
+      filters.groupName = "";
+      render();
+      break;
+    case "clear-ou":
+      filters.ouId = "";
+      filters.ouName = "";
+      render();
       break;
   }
 }

@@ -50,7 +50,8 @@ const PROPERTY_PRIORITY: Record<string, number> = {
   enabled: 50,
   admincount: 51,
   tier: 52,
-  sensitive: 53,
+  effective_tier: 53,
+  sensitive: 54,
 
   // Computer info
   operatingsystem: 60,
@@ -94,6 +95,8 @@ const PROPERTY_LABELS: Record<string, string> = {
   whencreated: "Created",
   whenchanged: "Changed",
   admincount: "Admin Count",
+  tier: "Tier (Assigned)",
+  effective_tier: "Tier (Effective)",
   sensitive: "Sensitive",
 
   // Computer
@@ -126,7 +129,6 @@ const PROPERTY_LABELS: Record<string, string> = {
   mail: "Email",
 
   // Misc
-  tier: "Tier",
   hasspn: "Has SPN",
   serviceprincipalnames: "SPNs",
   owned: "Owned",

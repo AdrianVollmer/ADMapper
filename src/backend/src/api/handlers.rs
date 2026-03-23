@@ -3,12 +3,12 @@
 use super::core;
 use crate::api::types::{
     AddEdgeRequest, AddHistoryRequest, AddNodeRequest, ApiError, BatchSetTierRequest,
-    BatchSetTierResponse, BrowseEntry, BrowseParams, BrowseResponse, ConnectRequest,
-    DatabaseStatus, GenerateRequest, GenerateResponse, HistoryParams, NodeCounts, NodeStatus,
-    PathParams, PathResponse, PathStep, PathsToDaEntry, PathsToDaParams, PathsToDaResponse,
-    QueryActivity, QueryHistoryEntry, QueryHistoryResponse, QueryProgress, QueryRequest,
-    QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase, TierViolationCategory,
-    TierViolationEdge, TierViolationsResponse,
+    BatchSetTierResponse, BrowseEntry, BrowseParams, BrowseResponse, ComputeEffectiveTiersResponse,
+    ConnectRequest, DatabaseStatus, GenerateRequest, GenerateResponse, HistoryParams, NodeCounts,
+    NodeStatus, PathParams, PathResponse, PathStep, PathsToDaEntry, PathsToDaParams,
+    PathsToDaResponse, QueryActivity, QueryHistoryEntry, QueryHistoryResponse, QueryProgress,
+    QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
+    TierViolationCategory, TierViolationEdge, TierViolationsResponse,
 };
 use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, NewQueryHistoryEntry, QueryLanguage};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
@@ -932,8 +932,48 @@ pub async fn node_set_owned(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Reverse BFS from `root_id`, following edges of `edge_type` in reverse
+/// (target -> source), returning all reached node IDs (excluding root).
+fn expand_transitive(
+    edges: &[DbEdge],
+    root_id: &str,
+    edge_type: &str,
+) -> std::collections::HashSet<String> {
+    use std::collections::{HashMap, HashSet, VecDeque};
+
+    // Build reverse adjacency for the specific edge type only
+    let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
+    for edge in edges {
+        if edge.rel_type.eq_ignore_ascii_case(edge_type) {
+            reverse_adj
+                .entry(edge.target.as_str())
+                .or_default()
+                .push(edge.source.as_str());
+        }
+    }
+
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    visited.insert(root_id.to_string());
+    queue.push_back(root_id.to_string());
+
+    while let Some(current) = queue.pop_front() {
+        if let Some(predecessors) = reverse_adj.get(current.as_str()) {
+            for &pred in predecessors {
+                if visited.insert(pred.to_string()) {
+                    queue.push_back(pred.to_string());
+                }
+            }
+        }
+    }
+
+    // Remove the root itself — we want members, not the group/OU
+    visited.remove(root_id);
+    visited
+}
+
 /// Batch-set the tier property on nodes matching the given filters.
-#[instrument(skip(state))]
+#[instrument(skip(state, body))]
 pub async fn batch_set_tier(
     State(state): State<AppState>,
     Json(body): Json<BatchSetTierRequest>,
@@ -947,8 +987,13 @@ pub async fn batch_set_tier(
     let tier = body.tier;
     let node_type = body.node_type.clone();
     let name_regex = body.name_regex.clone();
+    let group_id = body.group_id.clone();
+    let ou_id = body.ou_id.clone();
+    let node_ids = body.node_ids.clone();
 
     let updated = run_db(db, move |db| {
+        use std::collections::HashSet;
+
         // Fetch all nodes (we filter in Rust since the DB trait doesn't expose regex filtering)
         let all_nodes = db.get_all_nodes()?;
         let regex = name_regex
@@ -958,7 +1003,8 @@ pub async fn batch_set_tier(
             .transpose()
             .map_err(|e| crate::db::DbError::Database(format!("Invalid regex: {e}")))?;
 
-        let matching_ids: Vec<String> = all_nodes
+        // Start with name/type filter matches
+        let mut matching_ids: HashSet<String> = all_nodes
             .iter()
             .filter(|n| {
                 if let Some(ref nt) = node_type {
@@ -976,9 +1022,47 @@ pub async fn batch_set_tier(
             .map(|n| n.id.clone())
             .collect();
 
-        let count = matching_ids.len();
+        // If group_id or ou_id is specified, we need edges for expansion
+        let needs_expansion = group_id.is_some() || ou_id.is_some();
+        let edges = if needs_expansion {
+            db.get_all_edges()?
+        } else {
+            Vec::new()
+        };
+
+        // Expand group membership (reverse MemberOf BFS)
+        if let Some(ref gid) = group_id {
+            let members = expand_transitive(&edges, gid, "MemberOf");
+            // Intersect with existing filter if name/type filters are active
+            if node_type.is_some() || regex.is_some() {
+                matching_ids = matching_ids.intersection(&members).cloned().collect();
+            } else {
+                matching_ids = members;
+            }
+        }
+
+        // Expand OU containment (reverse Contains BFS)
+        if let Some(ref oid) = ou_id {
+            let contained = expand_transitive(&edges, oid, "Contains");
+            if node_type.is_some() || regex.is_some() || group_id.is_some() {
+                matching_ids = matching_ids.intersection(&contained).cloned().collect();
+            } else {
+                matching_ids = contained;
+            }
+        }
+
+        // Union explicit node IDs
+        if let Some(ref ids) = node_ids {
+            for id in ids {
+                matching_ids.insert(id.clone());
+            }
+        }
+
+        let final_ids: Vec<String> = matching_ids.into_iter().collect();
+        let count = final_ids.len();
+
         // Update in batches using Cypher SET
-        for chunk in matching_ids.chunks(500) {
+        for chunk in final_ids.chunks(500) {
             let ids_list: Vec<String> = chunk
                 .iter()
                 .map(|id| format!("'{}'", id.replace('\'', "\\'")))
@@ -1291,10 +1375,13 @@ pub async fn graph_choke_points(
 
 /// Compute tier violations: direct relationships crossing tier zone boundaries.
 ///
-/// For each adjacent tier pair (1→0, 2→1, 3→2), we:
-/// 1. Find all nodes that can reach a tier-N node (zone N) via reverse BFS
-/// 2. Find all nodes that can reach a tier-M node (zone M), excluding zone N
-/// 3. Count direct relationships from zone N to zone M
+/// Analyze tier violations.
+///
+/// Uses stored `effective_tier` property if available (set by compute-effective-tiers).
+/// Falls back to on-the-fly reverse BFS computation if effective_tier is not yet computed.
+///
+/// A violation is an edge from a node in zone N to a node in zone M where N > M
+/// (lower-privilege zone reaching higher-privilege zone).
 #[instrument(skip(state))]
 pub async fn tier_violations(
     State(state): State<AppState>,
@@ -1309,99 +1396,103 @@ pub async fn tier_violations(
         let total_nodes = nodes.len();
         let total_edges = edges.len();
 
-        // Build tier map (node_id -> tier, default 3)
-        let tier_map: HashMap<&str, i64> = nodes
+        // Check if effective_tier has been computed (at least one node has it)
+        let has_effective_tiers = nodes
             .iter()
-            .map(|n| {
-                let tier = n
-                    .properties
-                    .get("tier")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(3);
-                (n.id.as_str(), tier)
-            })
-            .collect();
+            .any(|n| n.properties.get("effective_tier").and_then(|v| v.as_i64()).is_some());
 
-        // Build reversed adjacency: for each edge A->B, store B->[A]
-        // This lets us BFS backwards from tier-N nodes to find all nodes that can reach them.
-        let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
-        for edge in &edges {
-            reverse_adj
-                .entry(edge.target.as_str())
-                .or_default()
-                .push(edge.source.as_str());
-        }
+        // Build zone map: node_id -> effective zone (0, 1, 2, or 3)
+        let zone_map: HashMap<&str, i64> = if has_effective_tiers {
+            // Fast path: use pre-computed effective_tier
+            nodes
+                .iter()
+                .map(|n| {
+                    let eff = n
+                        .properties
+                        .get("effective_tier")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(3);
+                    (n.id.as_str(), eff)
+                })
+                .collect()
+        } else {
+            // Fallback: compute zones via reverse BFS (original algorithm)
+            let tier_map: HashMap<&str, i64> = nodes
+                .iter()
+                .map(|n| {
+                    let tier = n
+                        .properties
+                        .get("tier")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(3);
+                    (n.id.as_str(), tier)
+                })
+                .collect();
 
-        // Compute zones: for each tier, find all nodes that can reach a node of that tier.
-        // We do reverse BFS from all nodes of tier T.
-        let compute_zone = |target_tier: i64| -> HashSet<&str> {
-            let mut zone = HashSet::new();
-            let mut queue = VecDeque::new();
-            // Seed with all nodes of this tier
-            for node in &nodes {
-                if *tier_map.get(node.id.as_str()).unwrap_or(&3) == target_tier {
-                    if zone.insert(node.id.as_str()) {
-                        queue.push_back(node.id.as_str());
-                    }
-                }
+            let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
+            for edge in &edges {
+                reverse_adj
+                    .entry(edge.target.as_str())
+                    .or_default()
+                    .push(edge.source.as_str());
             }
-            // Reverse BFS
-            while let Some(current) = queue.pop_front() {
-                if let Some(predecessors) = reverse_adj.get(current) {
-                    for &pred in predecessors {
-                        if zone.insert(pred) {
-                            queue.push_back(pred);
+
+            let compute_zone = |target_tier: i64| -> HashSet<&str> {
+                let mut zone = HashSet::new();
+                let mut queue = VecDeque::new();
+                for node in &nodes {
+                    if *tier_map.get(node.id.as_str()).unwrap_or(&3) == target_tier {
+                        if zone.insert(node.id.as_str()) {
+                            queue.push_back(node.id.as_str());
                         }
                     }
                 }
+                while let Some(current) = queue.pop_front() {
+                    if let Some(predecessors) = reverse_adj.get(current) {
+                        for &pred in predecessors {
+                            if zone.insert(pred) {
+                                queue.push_back(pred);
+                            }
+                        }
+                    }
+                }
+                zone
+            };
+
+            let zone0 = compute_zone(0);
+            let zone1_raw = compute_zone(1);
+            let zone2_raw = compute_zone(2);
+
+            // Each node gets its most privileged (lowest) zone
+            let mut result_map: HashMap<&str, i64> = HashMap::new();
+            for node in &nodes {
+                let id = node.id.as_str();
+                let zone = if zone0.contains(id) {
+                    0
+                } else if zone1_raw.contains(id) && !zone0.contains(id) {
+                    1
+                } else if zone2_raw.contains(id) && !zone0.contains(id) && !zone1_raw.contains(id) {
+                    2
+                } else {
+                    3
+                };
+                result_map.insert(id, zone);
             }
-            zone
+            result_map
         };
-
-        let zone0 = compute_zone(0);
-        let zone1_raw = compute_zone(1);
-        let zone2_raw = compute_zone(2);
-
-        // Assign each node to its most privileged (lowest) zone.
-        // zone0 wins over zone1, zone1 wins over zone2, etc.
-        let zone1: HashSet<&str> = zone1_raw.difference(&zone0).copied().collect();
-        let zone2: HashSet<&str> = zone2_raw
-            .difference(&zone0)
-            .copied()
-            .collect::<HashSet<&str>>()
-            .difference(&zone1)
-            .copied()
-            .collect();
-        // zone3 is everything else (nodes not in zone 0, 1, or 2)
-        let all_assigned: HashSet<&str> = zone0
-            .union(&zone1)
-            .copied()
-            .collect::<HashSet<&str>>()
-            .union(&zone2)
-            .copied()
-            .collect();
-        let zone3: HashSet<&str> = nodes
-            .iter()
-            .map(|n| n.id.as_str())
-            .filter(|id| !all_assigned.contains(id))
-            .collect();
 
         // Count and collect cross-zone edges
         let max_edges = 500;
         let mut violations = Vec::new();
 
-        for (src_zone, tgt_zone, src_label, tgt_label) in [
-            (&zone1, &zone0, 1i64, 0i64),
-            (&zone2, &zone1, 2, 1),
-            (&zone3, &zone2, 3, 2),
-        ] {
+        for (src_label, tgt_label) in [(1i64, 0i64), (2, 1), (3, 2)] {
             let mut count = 0usize;
             let mut sample_edges = Vec::new();
 
             for edge in &edges {
-                if src_zone.contains(edge.source.as_str())
-                    && tgt_zone.contains(edge.target.as_str())
-                {
+                let src_zone = *zone_map.get(edge.source.as_str()).unwrap_or(&3);
+                let tgt_zone = *zone_map.get(edge.target.as_str()).unwrap_or(&3);
+                if src_zone == src_label && tgt_zone == tgt_label {
                     count += 1;
                     if sample_edges.len() < max_edges {
                         sample_edges.push(TierViolationEdge {
@@ -1432,6 +1523,136 @@ pub async fn tier_violations(
     info!(
         violations = result.violations.iter().map(|v| v.count).sum::<usize>(),
         "Tier violations computed"
+    );
+
+    Ok(Json(result))
+}
+
+/// Compute effective tiers for all nodes using multi-source reverse BFS.
+///
+/// For each tier level (0, 1, 2), finds all nodes that can transitively reach
+/// a node of that tier. Each node's effective tier is the minimum tier it can reach.
+/// Results are stored as the `effective_tier` property on each node.
+pub async fn compute_effective_tiers(
+    State(state): State<AppState>,
+) -> Result<Json<ComputeEffectiveTiersResponse>, ApiError> {
+    let db = state.require_db()?;
+
+    let result = run_db(db, |db| {
+        use std::collections::{HashMap, HashSet, VecDeque};
+
+        let nodes = db.get_all_nodes()?;
+        let edges = db.get_all_edges()?;
+
+        // Build reverse adjacency list
+        let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        for edge in &edges {
+            reverse_adj
+                .entry(edge.target.as_str())
+                .or_default()
+                .push(edge.source.as_str());
+        }
+
+        // Build assigned tier map
+        let tier_map: HashMap<&str, i64> = nodes
+            .iter()
+            .map(|n| {
+                let tier = n
+                    .properties
+                    .get("tier")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(3);
+                (n.id.as_str(), tier)
+            })
+            .collect();
+
+        // Initialize effective tier: everyone starts at 3
+        let mut effective_tier: HashMap<&str, i64> = nodes
+            .iter()
+            .map(|n| (n.id.as_str(), 3i64))
+            .collect();
+
+        // For each tier level (0, 1, 2), do reverse BFS from seed nodes
+        for target_tier in [0i64, 1, 2] {
+            let mut visited = HashSet::new();
+            let mut queue = VecDeque::new();
+
+            // Seed with all nodes assigned to this tier
+            for node in &nodes {
+                if *tier_map.get(node.id.as_str()).unwrap_or(&3) == target_tier {
+                    if visited.insert(node.id.as_str()) {
+                        queue.push_back(node.id.as_str());
+                    }
+                }
+            }
+
+            // Reverse BFS
+            while let Some(current) = queue.pop_front() {
+                // Update effective tier to minimum
+                let eff = effective_tier.entry(current).or_insert(3);
+                if target_tier < *eff {
+                    *eff = target_tier;
+                }
+
+                if let Some(predecessors) = reverse_adj.get(current) {
+                    for &pred in predecessors {
+                        if visited.insert(pred) {
+                            queue.push_back(pred);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Store effective_tier on each node
+        let node_tiers: Vec<(String, i64)> = effective_tier
+            .iter()
+            .map(|(id, tier)| (id.to_string(), *tier))
+            .collect();
+
+        for chunk in node_tiers.chunks(500) {
+            // Build individual SET clauses per effective tier value
+            let mut by_tier: HashMap<i64, Vec<String>> = HashMap::new();
+            for (id, tier) in chunk {
+                by_tier.entry(*tier).or_default().push(id.clone());
+            }
+
+            for (tier_val, ids) in &by_tier {
+                let ids_list: Vec<String> = ids
+                    .iter()
+                    .map(|id| format!("'{}'", id.replace('\'', "\\'")))
+                    .collect();
+                let query = format!(
+                    "MATCH (n) WHERE n.objectid IN [{}] SET n.effective_tier = {}",
+                    ids_list.join(", "),
+                    tier_val
+                );
+                db.run_custom_query(&query)?;
+            }
+        }
+
+        // Count violations: nodes where effective_tier < assigned tier
+        let computed = nodes.len();
+        let violations = nodes
+            .iter()
+            .filter(|n| {
+                let assigned = *tier_map.get(n.id.as_str()).unwrap_or(&3);
+                let effective = *effective_tier.get(n.id.as_str()).unwrap_or(&3);
+                effective < assigned
+            })
+            .count();
+
+        Ok(ComputeEffectiveTiersResponse {
+            computed,
+            violations,
+        })
+    })
+    .await?;
+
+    info!(
+        computed = result.computed,
+        violations = result.violations,
+        "Effective tiers computed"
     );
 
     Ok(Json(result))

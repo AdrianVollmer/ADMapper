@@ -216,6 +216,15 @@ pub struct BatchSetTierRequest {
     /// Regex filter applied to node name. Empty = no filter.
     #[serde(default)]
     pub name_regex: Option<String>,
+    /// Assign to all (transitive) members of this group
+    #[serde(default)]
+    pub group_id: Option<String>,
+    /// Assign to all objects contained in this OU (recursive)
+    #[serde(default)]
+    pub ou_id: Option<String>,
+    /// Assign to an explicit list of node IDs (e.g., visible nodes from graph)
+    #[serde(default)]
+    pub node_ids: Option<Vec<String>>,
 }
 
 /// Response for batch tier update.
@@ -223,6 +232,15 @@ pub struct BatchSetTierRequest {
 pub struct BatchSetTierResponse {
     /// Number of nodes updated
     pub updated: usize,
+}
+
+/// Response for compute-effective-tiers endpoint.
+#[derive(Debug, Serialize)]
+pub struct ComputeEffectiveTiersResponse {
+    /// Number of nodes whose effective tier was computed
+    pub computed: usize,
+    /// Number of nodes where effective_tier < assigned tier (violations)
+    pub violations: usize,
 }
 
 // ============================================================================

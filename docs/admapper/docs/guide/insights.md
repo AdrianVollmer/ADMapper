@@ -61,3 +61,17 @@ These represent surprising attack paths from low-privilege entities and are
 often the most actionable findings, since they highlight relationships that
 should not carry high centrality.
 
+## Tier Violations
+
+Analyzes relationships that cross tier zone boundaries. Each node is placed
+in a zone based on the most privileged (lowest) tier it can transitively
+reach. Edges from a lower-privilege zone to a higher-privilege zone are
+flagged as violations.
+
+Click **Analyze Tier Violations** to compute effective tiers using reverse
+BFS, then view the results broken down by zone crossing (1 to 0, 2 to 1,
+3 to 2). Click on a count to visualize the violating edges in the graph.
+
+For a detailed explanation of the tiering model, see the
+[Tiering Guide](tiering.md).
+

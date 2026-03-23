@@ -99,6 +99,10 @@ const COMMAND_MAPPING: Record<string, string> = {
   "GET /api/graph/relationship-types": "graph_edge_types",
   "GET /api/graph/node-types": "graph_node_types",
   "GET /api/graph/choke-points": "graph_choke_points",
+  // Tier management
+  "POST /api/graph/batch-set-tier": "batch_set_tier",
+  "GET /api/graph/tier-violations": "tier_violations",
+  "POST /api/graph/compute-effective-tiers": "compute_effective_tiers",
   // Mutations
   "POST /api/graph/node": "add_node",
   "POST /api/graph/relationship": "add_edge",

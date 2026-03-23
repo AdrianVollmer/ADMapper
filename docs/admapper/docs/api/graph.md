@@ -271,3 +271,91 @@ tier-0 target nor a domain infrastructure object).
 ```
 
 Higher betweenness values indicate relationships that more shortest paths pass through.
+
+## POST /api/graph/batch-set-tier
+
+Batch-update the tier property on nodes matching the given filters.
+
+**Request Body:**
+
+```json
+{
+  "tier": 0,
+  "node_type": "Group",
+  "name_regex": "ADMIN",
+  "group_id": "S-1-5-21-...-512",
+  "ou_id": "OU=TIER0,DC=CORP,DC=LOCAL",
+  "node_ids": ["id1", "id2"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `tier` | number | Yes | Tier value to assign (0-3) |
+| `node_type` | string | No | Filter by node type (e.g., "User", "Group") |
+| `name_regex` | string | No | Filter by name using regex |
+| `group_id` | string | No | Assign to all transitive members of this group |
+| `ou_id` | string | No | Assign to all objects contained in this OU (recursive) |
+| `node_ids` | string[] | No | Assign to an explicit list of node IDs |
+
+All filters are combined: `node_type` and `name_regex` are intersected,
+`group_id` and `ou_id` further intersect with those, and `node_ids` are
+unioned in.
+
+**Response:**
+
+```json
+{
+  "updated": 42
+}
+```
+
+## GET /api/graph/tier-violations
+
+Analyze cross-tier boundary violations. Uses pre-computed effective tiers
+if available, otherwise falls back to on-the-fly reverse BFS computation.
+
+**Response:**
+
+```json
+{
+  "violations": [
+    {
+      "source_zone": 1,
+      "target_zone": 0,
+      "count": 15,
+      "edges": [
+        {
+          "source_id": "S-1-5-21-...",
+          "target_id": "S-1-5-21-...",
+          "rel_type": "GenericAll"
+        }
+      ]
+    }
+  ],
+  "total_nodes": 1500,
+  "total_edges": 8200
+}
+```
+
+## POST /api/graph/compute-effective-tiers
+
+Compute effective tiers for all nodes using multi-source reverse BFS.
+Each node's effective tier is the minimum tier it can transitively reach.
+Results are stored as the `effective_tier` property on each node.
+
+**Request Body:** Empty object `{}`
+
+**Response:**
+
+```json
+{
+  "computed": 1500,
+  "violations": 23
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `computed` | number | Number of nodes processed |
+| `violations` | number | Number of nodes where effective_tier < assigned tier |
