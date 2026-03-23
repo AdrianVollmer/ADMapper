@@ -820,6 +820,131 @@ async fn test_node_status_non_memberof_path_to_tier_zero() {
         body
     );
 }
+
+/// Tier violations should count edges crossing assigned-tier boundaries.
+///
+/// A tier-2 user with AdminTo a tier-0 DC is a zone 2→0 crossing.
+/// This must show up in the "Zone 1 → Zone 0" bucket (any src > 0, tgt == 0).
+#[tokio::test]
+async fn test_tier_violations_counts_assigned_tier_crossings() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // Tier-0 DC
+    db.run_custom_query(
+        "CREATE (:Computer {name: 'DC01', objectid: 'C-DC01', tier: 0, enabled: true})",
+    )
+    .unwrap();
+    // Tier-2 workstation user
+    db.run_custom_query(
+        "CREATE (:User {name: 'Alice', objectid: 'U-ALICE', tier: 2, enabled: true})",
+    )
+    .unwrap();
+    // Tier-2 user has AdminTo tier-0 DC — a clear violation
+    db.run_custom_query(
+        "MATCH (u {objectid: 'U-ALICE'}), (c {objectid: 'C-DC01'}) CREATE (u)-[:AdminTo]->(c)",
+    )
+    .unwrap();
+
+    let (status, body) = get_json(app.router(), "/api/graph/tier-violations").await;
+    assert_eq!(status, StatusCode::OK);
+
+    let violations = &body["violations"];
+    assert!(violations.is_array(), "violations should be an array");
+
+    // Find the 1→0 bucket (covers any src_tier >= 1 reaching tier 0)
+    let v1to0 = violations
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["source_zone"] == 1 && v["target_zone"] == 0)
+        .expect("Should have a 1→0 violation category");
+
+    assert!(
+        v1to0["count"].as_u64().unwrap() > 0,
+        "Tier-2 user with AdminTo tier-0 DC should produce a zone crossing violation. Got: {}",
+        body
+    );
+}
+
+/// After compute-effective-tiers, tier_violations should still show crossings
+/// based on assigned tiers (not effective tiers, which would zero everything out).
+#[tokio::test]
+async fn test_tier_violations_after_compute_effective_tiers() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // Tier-0 group
+    db.run_custom_query(
+        "CREATE (:Group {name: 'Domain Admins', objectid: 'G-DA', tier: 0})",
+    )
+    .unwrap();
+    // Tier-1 server
+    db.run_custom_query(
+        "CREATE (:Computer {name: 'SRV01', objectid: 'C-SRV01', tier: 1, enabled: true})",
+    )
+    .unwrap();
+    // Tier-2 user
+    db.run_custom_query(
+        "CREATE (:User {name: 'Bob', objectid: 'U-BOB', tier: 2, enabled: true})",
+    )
+    .unwrap();
+    // Bob (tier 2) has GenericAll on SRV01 (tier 1) — violation
+    db.run_custom_query(
+        "MATCH (u {objectid: 'U-BOB'}), (c {objectid: 'C-SRV01'}) CREATE (u)-[:GenericAll]->(c)",
+    )
+    .unwrap();
+    // SRV01 (tier 1) has AdminTo DA (tier 0) — violation
+    db.run_custom_query(
+        "MATCH (c {objectid: 'C-SRV01'}), (g {objectid: 'G-DA'}) CREATE (c)-[:AdminTo]->(g)",
+    )
+    .unwrap();
+
+    // First compute effective tiers
+    let (status, _) = post_json(
+        app.router(),
+        "/api/graph/compute-effective-tiers",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Now check tier violations — should still show crossings by assigned tier
+    let (status, body) = get_json(app.router(), "/api/graph/tier-violations").await;
+    assert_eq!(status, StatusCode::OK);
+
+    let violations = body["violations"].as_array().unwrap();
+    let total: u64 = violations.iter().map(|v| v["count"].as_u64().unwrap()).sum();
+
+    assert!(
+        total > 0,
+        "Should have tier violations after compute-effective-tiers. Got: {}",
+        body
+    );
+
+    // Specifically: SRV01 (tier 1) → DA (tier 0) should be in 1→0 bucket
+    let v1to0 = violations
+        .iter()
+        .find(|v| v["source_zone"] == 1 && v["target_zone"] == 0)
+        .unwrap();
+    assert!(
+        v1to0["count"].as_u64().unwrap() >= 1,
+        "SRV01 (tier 1) → DA (tier 0) should be a 1→0 violation. Got: {}",
+        body
+    );
+
+    // Bob (tier 2) → SRV01 (tier 1) should be in 2→1 bucket
+    let v2to1 = violations
+        .iter()
+        .find(|v| v["source_zone"] == 2 && v["target_zone"] == 1)
+        .unwrap();
+    assert!(
+        v2to1["count"].as_u64().unwrap() >= 1,
+        "Bob (tier 2) → SRV01 (tier 1) should be a 2→1 violation. Got: {}",
+        body
+    );
+}
+
 /// Run with: cargo test --no-default-features test_debug_actual_db -- --nocapture --ignored
 #[tokio::test]
 #[ignore] // Only run manually for debugging

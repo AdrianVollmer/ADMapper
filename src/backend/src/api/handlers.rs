@@ -1389,99 +1389,36 @@ pub async fn tier_violations(
     let db = state.require_db()?;
 
     let result = run_db(db, |db| {
-        use std::collections::{HashMap, HashSet, VecDeque};
+        use std::collections::HashMap;
 
         let nodes = db.get_all_nodes()?;
         let edges = db.get_all_edges()?;
         let total_nodes = nodes.len();
         let total_edges = edges.len();
 
-        // Check if effective_tier has been computed (at least one node has it)
-        let has_effective_tiers = nodes
+        // Use assigned tiers for zone classification. The previous approach
+        // used BFS-computed effective tiers, but that makes crossings impossible
+        // by construction: if A→B and B is in zone 0, the reverse BFS already
+        // pulls A into zone 0, so every edge has src_zone <= tgt_zone.
+        let tier_map: HashMap<&str, i64> = nodes
             .iter()
-            .any(|n| n.properties.get("effective_tier").and_then(|v| v.as_i64()).is_some());
+            .map(|n| {
+                let tier = n
+                    .properties
+                    .get("tier")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(3);
+                (n.id.as_str(), tier)
+            })
+            .collect();
 
-        // Build zone map: node_id -> effective zone (0, 1, 2, or 3)
-        let zone_map: HashMap<&str, i64> = if has_effective_tiers {
-            // Fast path: use pre-computed effective_tier
-            nodes
-                .iter()
-                .map(|n| {
-                    let eff = n
-                        .properties
-                        .get("effective_tier")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(3);
-                    (n.id.as_str(), eff)
-                })
-                .collect()
-        } else {
-            // Fallback: compute zones via reverse BFS (original algorithm)
-            let tier_map: HashMap<&str, i64> = nodes
-                .iter()
-                .map(|n| {
-                    let tier = n
-                        .properties
-                        .get("tier")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(3);
-                    (n.id.as_str(), tier)
-                })
-                .collect();
-
-            let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
-            for edge in &edges {
-                reverse_adj
-                    .entry(edge.target.as_str())
-                    .or_default()
-                    .push(edge.source.as_str());
-            }
-
-            let compute_zone = |target_tier: i64| -> HashSet<&str> {
-                let mut zone = HashSet::new();
-                let mut queue = VecDeque::new();
-                for node in &nodes {
-                    if *tier_map.get(node.id.as_str()).unwrap_or(&3) == target_tier {
-                        if zone.insert(node.id.as_str()) {
-                            queue.push_back(node.id.as_str());
-                        }
-                    }
-                }
-                while let Some(current) = queue.pop_front() {
-                    if let Some(predecessors) = reverse_adj.get(current) {
-                        for &pred in predecessors {
-                            if zone.insert(pred) {
-                                queue.push_back(pred);
-                            }
-                        }
-                    }
-                }
-                zone
-            };
-
-            let zone0 = compute_zone(0);
-            let zone1_raw = compute_zone(1);
-            let zone2_raw = compute_zone(2);
-
-            // Each node gets its most privileged (lowest) zone
-            let mut result_map: HashMap<&str, i64> = HashMap::new();
-            for node in &nodes {
-                let id = node.id.as_str();
-                let zone = if zone0.contains(id) {
-                    0
-                } else if zone1_raw.contains(id) && !zone0.contains(id) {
-                    1
-                } else if zone2_raw.contains(id) && !zone0.contains(id) && !zone1_raw.contains(id) {
-                    2
-                } else {
-                    3
-                };
-                result_map.insert(id, zone);
-            }
-            result_map
-        };
-
-        // Count and collect cross-zone edges
+        // Count and collect cross-zone edges using assigned tiers.
+        // Each bucket captures edges crossing that boundary:
+        //   1→0: any edge where src_tier >= 1 and tgt_tier == 0
+        //   2→1: any edge where src_tier >= 2 and tgt_tier == 1
+        //   3→2: any edge where src_tier >= 3 and tgt_tier == 2
+        // This ensures non-adjacent crossings (e.g. tier 3→0) are counted
+        // in the most severe bucket they cross, without double-counting.
         let max_edges = 500;
         let mut violations = Vec::new();
 
@@ -1490,9 +1427,9 @@ pub async fn tier_violations(
             let mut sample_edges = Vec::new();
 
             for edge in &edges {
-                let src_zone = *zone_map.get(edge.source.as_str()).unwrap_or(&3);
-                let tgt_zone = *zone_map.get(edge.target.as_str()).unwrap_or(&3);
-                if src_zone == src_label && tgt_zone == tgt_label {
+                let src_tier = *tier_map.get(edge.source.as_str()).unwrap_or(&3);
+                let tgt_tier = *tier_map.get(edge.target.as_str()).unwrap_or(&3);
+                if src_tier >= src_label && tgt_tier == tgt_label {
                     count += 1;
                     if sample_edges.len() < max_edges {
                         sample_edges.push(TierViolationEdge {
