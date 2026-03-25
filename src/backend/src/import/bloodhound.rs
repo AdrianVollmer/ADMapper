@@ -757,7 +757,9 @@ impl BloodHoundImporter {
         };
         for group in local_groups {
             let group_name = group.get("Name").and_then(|v| v.as_str()).unwrap_or("");
-            let rel_type = self.local_group_to_edge_type(group_name);
+            let Some(rel_type) = self.local_group_to_edge_type(group_name) else {
+                continue;
+            };
 
             let Some(results) = group.get("Results").and_then(|v| v.as_array()) else {
                 continue;
@@ -796,7 +798,18 @@ impl BloodHoundImporter {
             ) else {
                 continue;
             };
-            let rel_type = self.ace_to_edge_type(right_name);
+
+            // BH CE drops self-referencing ACEs (node granting rights to itself)
+            if principal_sid == objectid {
+                continue;
+            }
+
+            // Only recognized ACE rights produce edges; unknown rights are dropped
+            let Some(rel_type) = self.ace_to_edge_type(right_name) else {
+                trace!(right_name, "Skipping unrecognized ACE right");
+                continue;
+            };
+
             let is_inherited = ace
                 .get("IsInherited")
                 .and_then(|v| v.as_bool())
@@ -897,12 +910,16 @@ impl BloodHoundImporter {
         };
         for link in links {
             if let Some(gpo_id) = link.get("GUID").and_then(|v| v.as_str()) {
+                let enforced = link
+                    .get("IsEnforced")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 // Direction: GPO -> OU/Domain ("this GPO is linked to this OU/Domain")
                 relationships.push(DbEdge {
                     source: gpo_id.to_string(),
                     target: objectid.to_string(),
                     rel_type: "GPLink".to_string(),
-                    properties: JsonValue::Null,
+                    properties: serde_json::json!({"enforced": enforced}),
                     source_type: Some("GPO".to_string()),
                     target_type: Some(source_type.to_string()),
                 });
@@ -1043,13 +1060,23 @@ impl BloodHoundImporter {
     }
 
     /// Map local group name to relationship type.
-    fn local_group_to_edge_type(&self, group_name: &str) -> &'static str {
-        match group_name.to_uppercase().as_str() {
-            s if s.contains("ADMINISTRATORS") => "AdminTo",
-            s if s.contains("REMOTE DESKTOP") => "CanRDP",
-            s if s.contains("REMOTE MANAGEMENT") => "CanPSRemote",
-            s if s.contains("DISTRIBUTED COM") => "ExecuteDCOM",
-            _ => "LocalGroupMember",
+    ///
+    /// Returns `None` for unrecognized group names -- BH CE only creates edges
+    /// for the well-known local group types, not a generic fallback.
+    fn local_group_to_edge_type(&self, group_name: &str) -> Option<&'static str> {
+        let upper = group_name.to_uppercase();
+        if upper.contains("ADMINISTRATORS") {
+            Some("AdminTo")
+        } else if upper.contains("REMOTE DESKTOP") {
+            Some("CanRDP")
+        } else if upper.contains("REMOTE MANAGEMENT") {
+            Some("CanPSRemote")
+        } else if upper.contains("DISTRIBUTED COM") {
+            Some("ExecuteDCOM")
+        } else if upper.contains("REMOTE INTERACTIVE LOGON") {
+            Some("RemoteInteractiveLogonRight")
+        } else {
+            None
         }
     }
 
@@ -1074,27 +1101,45 @@ impl BloodHoundImporter {
     }
 
     /// Map ACE right name to relationship type.
-    fn ace_to_edge_type(&self, right_name: &str) -> &'static str {
-        match right_name {
+    /// Map an ACE right name to its BH CE edge type.
+    ///
+    /// Returns `None` for unrecognized rights -- BH CE never creates generic
+    /// "ACE" edges; only specifically recognized rights produce edges.
+    fn ace_to_edge_type(&self, right_name: &str) -> Option<&'static str> {
+        Some(match right_name {
+            // Core AD permissions
             "GenericAll" => "GenericAll",
             "GenericWrite" => "GenericWrite",
             "WriteOwner" => "WriteOwner",
             "WriteDacl" => "WriteDacl",
             "Owns" => "Owns",
             "AddMember" => "AddMember",
+            "AddSelf" => "AddSelf",
             "ForceChangePassword" => "ForceChangePassword",
             "AllExtendedRights" => "AllExtendedRights",
             "AddKeyCredentialLink" => "AddKeyCredentialLink",
             "AddAllowedToAct" => "AddAllowedToAct",
+            "WriteSPN" => "WriteSPN",
+            "WriteAccountRestrictions" => "WriteAccountRestrictions",
+            // LAPS / gMSA / sMSA
             "ReadLAPSPassword" => "ReadLAPSPassword",
             "ReadGMSAPassword" => "ReadGMSAPassword",
+            "SyncLAPSPassword" => "SyncLAPSPassword",
+            "DumpSMSAPassword" => "DumpSMSAPassword",
+            // DCSync components
             "GetChanges" => "GetChanges",
             "GetChangesAll" => "GetChangesAll",
             "GetChangesInFilteredSet" => "GetChangesInFilteredSet",
-            "WriteSPN" => "WriteSPN",
-            "WriteAccountRestrictions" => "WriteAccountRestrictions",
-            _ => "ACE",
-        }
+            // PKI / ADCS
+            "Enroll" => "Enroll",
+            "ManageCA" => "ManageCA",
+            "ManageCertificates" => "ManageCertificates",
+            "WritePKINameFlag" => "WritePKINameFlag",
+            "WritePKIEnrollmentFlag" => "WritePKIEnrollmentFlag",
+            "HostsCAService" => "HostsCAService",
+            "DelegatedEnrollmentAgent" => "DelegatedEnrollmentAgent",
+            _ => return None,
+        })
     }
 
     fn flush_nodes(
@@ -1294,9 +1339,15 @@ mod tests {
         let (tx, _) = broadcast::channel(1);
         let importer = BloodHoundImporter::new(db, tx);
 
-        assert_eq!(importer.ace_to_edge_type("GenericAll"), "GenericAll");
-        assert_eq!(importer.ace_to_edge_type("WriteDacl"), "WriteDacl");
-        assert_eq!(importer.ace_to_edge_type("Unknown"), "ACE");
+        assert_eq!(importer.ace_to_edge_type("GenericAll"), Some("GenericAll"));
+        assert_eq!(importer.ace_to_edge_type("WriteDacl"), Some("WriteDacl"));
+        assert_eq!(importer.ace_to_edge_type("Enroll"), Some("Enroll"));
+        assert_eq!(importer.ace_to_edge_type("AddSelf"), Some("AddSelf"));
+        assert_eq!(
+            importer.ace_to_edge_type("Unknown"),
+            None,
+            "Unknown rights should return None, not generic ACE"
+        );
     }
 
     #[test]
@@ -1307,12 +1358,17 @@ mod tests {
 
         assert_eq!(
             importer.local_group_to_edge_type("Administrators"),
-            "AdminTo"
+            Some("AdminTo")
         );
         assert_eq!(
             importer.local_group_to_edge_type("Remote Desktop Users"),
-            "CanRDP"
+            Some("CanRDP")
         );
+        assert_eq!(
+            importer.local_group_to_edge_type("Remote Interactive Logon"),
+            Some("RemoteInteractiveLogonRight")
+        );
+        assert_eq!(importer.local_group_to_edge_type("Unknown Group"), None,);
     }
 
     /// Helper to create an importer for testing
@@ -2506,6 +2562,330 @@ mod tests {
                 && e.rel_type == "DCSync"),
             "Missing derived DCSync edge; edge types: {:?}",
             types,
+        );
+    }
+
+    // ========================================================================
+    // BH CE Compatibility: ACE Right Name Mapping (covers 319-edge gap)
+    // ========================================================================
+
+    #[test]
+    fn test_bhce_ace_pki_rights() {
+        let mut importer = test_importer();
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "CERT-TEMPLATE-1",
+            "Aces": [
+                {"PrincipalSID": "S-1-5-21-USER-1", "RightName": "Enroll", "IsInherited": false, "PrincipalType": "Group"},
+                {"PrincipalSID": "S-1-5-21-USER-2", "RightName": "ManageCA", "IsInherited": false, "PrincipalType": "User"},
+                {"PrincipalSID": "S-1-5-21-USER-3", "RightName": "ManageCertificates", "IsInherited": false, "PrincipalType": "User"},
+            ]
+        });
+        let edges = importer.extract_edges("certtemplate", &entity);
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.source == "S-1-5-21-USER-1" && e.rel_type == "Enroll"),
+            "Enroll ACE right must map to Enroll edge type, not generic ACE"
+        );
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.source == "S-1-5-21-USER-2" && e.rel_type == "ManageCA"),
+            "ManageCA ACE right must map to ManageCA edge type"
+        );
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.source == "S-1-5-21-USER-3" && e.rel_type == "ManageCertificates"),
+            "ManageCertificates ACE right must map to ManageCertificates edge type"
+        );
+        assert!(
+            !edges.iter().any(|e| e.rel_type == "ACE"),
+            "No generic ACE edges should exist when right names are recognized"
+        );
+    }
+
+    #[test]
+    fn test_bhce_ace_pki_write_flags() {
+        let mut importer = test_importer();
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "CERT-TEMPLATE-2",
+            "Aces": [
+                {"PrincipalSID": "S-1-5-21-USER-1", "RightName": "WritePKINameFlag", "IsInherited": false, "PrincipalType": "User"},
+                {"PrincipalSID": "S-1-5-21-USER-2", "RightName": "WritePKIEnrollmentFlag", "IsInherited": false, "PrincipalType": "User"},
+                {"PrincipalSID": "S-1-5-21-USER-3", "RightName": "HostsCAService", "IsInherited": false, "PrincipalType": "Computer"},
+                {"PrincipalSID": "S-1-5-21-USER-4", "RightName": "DelegatedEnrollmentAgent", "IsInherited": false, "PrincipalType": "User"},
+            ]
+        });
+        let edges = importer.extract_edges("certtemplate", &entity);
+
+        let types: Vec<&str> = edges.iter().map(|e| e.rel_type.as_str()).collect();
+        assert!(
+            types.contains(&"WritePKINameFlag"),
+            "Missing WritePKINameFlag; got: {types:?}"
+        );
+        assert!(
+            types.contains(&"WritePKIEnrollmentFlag"),
+            "Missing WritePKIEnrollmentFlag; got: {types:?}"
+        );
+        assert!(
+            types.contains(&"HostsCAService"),
+            "Missing HostsCAService; got: {types:?}"
+        );
+        assert!(
+            types.contains(&"DelegatedEnrollmentAgent"),
+            "Missing DelegatedEnrollmentAgent; got: {types:?}"
+        );
+        assert!(
+            !types.contains(&"ACE"),
+            "No generic ACE edges when rights are recognized; got: {types:?}"
+        );
+    }
+
+    #[test]
+    fn test_bhce_ace_additional_security_rights() {
+        let mut importer = test_importer();
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-GROUP-1",
+            "Aces": [
+                {"PrincipalSID": "S-1-5-21-USER-1", "RightName": "AddSelf", "IsInherited": false, "PrincipalType": "User"},
+                {"PrincipalSID": "S-1-5-21-COMP-1", "RightName": "SyncLAPSPassword", "IsInherited": false, "PrincipalType": "Group"},
+                {"PrincipalSID": "S-1-5-21-COMP-2", "RightName": "DumpSMSAPassword", "IsInherited": false, "PrincipalType": "Computer"},
+            ]
+        });
+        let edges = importer.extract_edges("groups", &entity);
+
+        let types: Vec<&str> = edges.iter().map(|e| e.rel_type.as_str()).collect();
+        assert!(
+            types.contains(&"AddSelf"),
+            "Missing AddSelf; got: {types:?}"
+        );
+        assert!(
+            types.contains(&"SyncLAPSPassword"),
+            "Missing SyncLAPSPassword; got: {types:?}"
+        );
+        assert!(
+            types.contains(&"DumpSMSAPassword"),
+            "Missing DumpSMSAPassword; got: {types:?}"
+        );
+        assert!(
+            !types.contains(&"ACE"),
+            "No generic ACE edges when rights are recognized; got: {types:?}"
+        );
+    }
+
+    #[test]
+    fn test_bhce_ace_self_referencing_filtered() {
+        let mut importer = test_importer();
+        // ACE where PrincipalSID == ObjectIdentifier (self-referencing) should be dropped.
+        // BH CE never creates edges from a node to itself.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-SELF-1",
+            "Aces": [
+                {"PrincipalSID": "S-1-5-21-SELF-1", "RightName": "GenericWrite", "IsInherited": false, "PrincipalType": "Group"},
+                {"PrincipalSID": "S-1-5-21-SELF-1", "RightName": "WriteDacl", "IsInherited": false, "PrincipalType": "Group"},
+                {"PrincipalSID": "S-1-5-21-SELF-1", "RightName": "WriteOwner", "IsInherited": false, "PrincipalType": "Group"},
+                {"PrincipalSID": "S-1-5-21-OTHER", "RightName": "GenericWrite", "IsInherited": false, "PrincipalType": "User"},
+            ]
+        });
+        let edges = importer.extract_edges("groups", &entity);
+
+        // Only the non-self-referencing edge should survive
+        assert_eq!(
+            edges.len(),
+            1,
+            "Self-referencing ACE edges should be filtered; got: {:?}",
+            edges
+                .iter()
+                .map(|e| (&e.source, &e.rel_type, &e.target))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(edges[0].source, "S-1-5-21-OTHER");
+    }
+
+    #[test]
+    fn test_bhce_no_local_group_member_fallback() {
+        let mut importer = test_importer();
+        // BH CE only creates edges for recognized local group names (Administrators,
+        // Remote Desktop Users, etc.).  Unrecognized names should not produce a
+        // generic LocalGroupMember edge.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-COMP-1",
+            "LocalGroups": [
+                {
+                    "Name": "Administrators",
+                    "Results": [
+                        {"ObjectIdentifier": "S-1-5-21-ADMIN", "ObjectType": "User"}
+                    ]
+                },
+                {
+                    "Name": "Some Obscure Group",
+                    "Results": [
+                        {"ObjectIdentifier": "S-1-5-21-MEMBER", "ObjectType": "User"}
+                    ]
+                }
+            ]
+        });
+        let edges = importer.extract_edges("computers", &entity);
+
+        let admin_edges: Vec<_> = edges.iter().filter(|e| e.rel_type == "AdminTo").collect();
+        assert_eq!(
+            admin_edges.len(),
+            1,
+            "AdminTo edge for Administrators group"
+        );
+
+        let fallback_edges: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "LocalGroupMember")
+            .collect();
+        assert_eq!(
+            fallback_edges.len(),
+            0,
+            "Unrecognized local group names should not create LocalGroupMember edges; got: {:?}",
+            fallback_edges
+                .iter()
+                .map(|e| (&e.source, &e.target))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_bhce_session_dedup_priv_and_registry() {
+        let mut importer = test_importer();
+        // Same session in PrivilegedSessions AND RegistrySessions should produce
+        // only ONE HasSession edge (dedup at extract_edges level via the import pipeline).
+        // At the extract_edges level, both are emitted; dedup happens upstream.
+        // This test verifies that at least both source correctly as Computer->User.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-COMP-1",
+            "PrivilegedSessions": {
+                "Results": [
+                    {"UserSID": "S-1-5-21-USER-1", "ComputerSID": "S-1-5-21-COMP-1"}
+                ]
+            },
+            "RegistrySessions": {
+                "Results": [
+                    {"UserSID": "S-1-5-21-USER-1", "ComputerSID": "S-1-5-21-COMP-1"}
+                ]
+            }
+        });
+        let edges = importer.extract_edges("computers", &entity);
+
+        let sessions: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "HasSession")
+            .collect();
+        // Both produce Computer->User direction
+        for sess in &sessions {
+            assert_eq!(
+                sess.source, "S-1-5-21-COMP-1",
+                "HasSession source must be the computer"
+            );
+            assert_eq!(
+                sess.target, "S-1-5-21-USER-1",
+                "HasSession target must be the user"
+            );
+        }
+        // extract_edges emits both; pipeline dedup keeps one.
+        // Verify direction is consistent.
+        assert!(sessions.len() >= 1, "At least one HasSession edge expected");
+    }
+
+    #[test]
+    fn test_bhce_gplink_includes_enforced_property() {
+        let mut importer = test_importer();
+        // GPLink objects in SharpHound have an "IsEnforced" boolean property.
+        // BH CE stores this on the edge.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-OU1",
+            "Links": [
+                {"GUID": "GPO-GUID-1", "IsEnforced": true},
+                {"GUID": "GPO-GUID-2", "IsEnforced": false},
+            ]
+        });
+        let edges = importer.extract_edges("ous", &entity);
+
+        let gplinks: Vec<_> = edges.iter().filter(|e| e.rel_type == "GPLink").collect();
+        assert_eq!(gplinks.len(), 2);
+
+        let enforced_edge = gplinks.iter().find(|e| e.source == "GPO-GUID-1").unwrap();
+        assert_eq!(
+            enforced_edge
+                .properties
+                .get("enforced")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "GPLink edge should carry the IsEnforced property"
+        );
+        let non_enforced_edge = gplinks.iter().find(|e| e.source == "GPO-GUID-2").unwrap();
+        assert_eq!(
+            non_enforced_edge
+                .properties
+                .get("enforced")
+                .and_then(|v| v.as_bool()),
+            Some(false),
+            "GPLink edge should carry the IsEnforced property"
+        );
+    }
+
+    #[test]
+    fn test_bhce_ace_no_unknown_fallback() {
+        let mut importer = test_importer();
+        // Verify that a completely unknown ACE right name (not in BH CE's vocabulary)
+        // does NOT create a generic "ACE" edge. Only recognized rights produce edges.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-TARGET",
+            "Aces": [
+                {"PrincipalSID": "S-1-5-21-SRC1", "RightName": "GenericAll", "IsInherited": false, "PrincipalType": "User"},
+                {"PrincipalSID": "S-1-5-21-SRC2", "RightName": "TotallyFakeRight", "IsInherited": false, "PrincipalType": "User"},
+            ]
+        });
+        let edges = importer.extract_edges("groups", &entity);
+
+        // GenericAll should exist
+        assert!(
+            edges.iter().any(|e| e.rel_type == "GenericAll"),
+            "GenericAll should be recognized"
+        );
+        // Unknown right should NOT produce a generic ACE edge
+        assert!(
+            !edges.iter().any(|e| e.rel_type == "ACE"),
+            "Unknown ACE right names should be dropped, not create generic ACE edges; got: {:?}",
+            edges
+                .iter()
+                .map(|e| (&e.source, &e.rel_type))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_bhce_local_group_remote_interactive_logon() {
+        let mut importer = test_importer();
+        // BH CE recognizes "Remote Interactive Logon" as a local group name and
+        // creates RemoteInteractiveLogonRight edges. Our code should do the same.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-COMP-1",
+            "LocalGroups": [
+                {
+                    "Name": "Remote Interactive Logon",
+                    "Results": [
+                        {"ObjectIdentifier": "S-1-5-21-USER-1", "ObjectType": "User"},
+                    ]
+                }
+            ]
+        });
+        let edges = importer.extract_edges("computers", &entity);
+
+        let ril_edges: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "RemoteInteractiveLogonRight")
+            .collect();
+        assert_eq!(
+            ril_edges.len(),
+            1,
+            "Remote Interactive Logon group should create RemoteInteractiveLogonRight edge; got: {:?}",
+            edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
         );
     }
 }
