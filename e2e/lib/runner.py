@@ -595,10 +595,12 @@ class TestRunner:
     # Labels added by BH CE's analysis pipeline that are not present in the
     # raw SharpHound data.  Stripped during cross-backend comparison so that
     # only the imported data is compared.
-    _SYNTHETIC_LABELS: ClassVar[frozenset[str]] = frozenset({
-        "Base",           # implicit supertype in Neo4j
-        "Tag_Tier_Zero",  # BH CE tiering analysis
-    })
+    _SYNTHETIC_LABELS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "Base",  # implicit supertype in Neo4j
+            "Tag_Tier_Zero",  # BH CE tiering analysis
+        }
+    )
 
     @staticmethod
     def _normalize_labels(labels_str: str) -> str:
@@ -614,8 +616,7 @@ class TestRunner:
             labels = ast.literal_eval(labels_str)
             if isinstance(labels, list):
                 cleaned = sorted(
-                    lbl for lbl in labels
-                    if lbl not in TestRunner._SYNTHETIC_LABELS
+                    lbl for lbl in labels if lbl not in TestRunner._SYNTHETIC_LABELS
                 )
                 return str(cleaned)
         except (ValueError, SyntaxError):
@@ -1660,9 +1661,7 @@ class TestRunner:
 
         def rid_where_clause(variable: str, rids: list[str]) -> str:
             """Python equivalent of the TS ridWhereClause function."""
-            return " OR ".join(
-                f"{variable}.objectid ENDS WITH '{rid}'" for rid in rids
-            )
+            return " OR ".join(f"{variable}.objectid ENDS WITH '{rid}'" for rid in rids)
 
         def evaluate_interpolation(expr: str) -> str:
             """Evaluate a JS template literal interpolation expression."""
@@ -1681,9 +1680,7 @@ class TestRunner:
             # Build the RID list by resolving ...HIGH_VALUE_RIDS spreads
             # and string literals
             rids: list[str] = []
-            for token in re.finditer(
-                r'\.\.\.HIGH_VALUE_RIDS|"([^"]+)"', args_str
-            ):
+            for token in re.finditer(r'\.\.\.HIGH_VALUE_RIDS|"([^"]+)"', args_str):
                 if token.group(0) == "...HIGH_VALUE_RIDS":
                     rids.extend(high_value_rids)
                 else:
@@ -1803,7 +1800,9 @@ class TestRunner:
             self.all_nodes = sorted(
                 (self._normalize_labels(row[0]), *row[1:]) for row in rows
             )
-            self.logger.info(f"Collected {len(self.all_nodes)} nodes for cross-backend comparison")
+            self.logger.info(
+                f"Collected {len(self.all_nodes)} nodes for cross-backend comparison"
+            )
             return True, "", proof
 
         results.append(self._run_test("Collect all nodes", collect_nodes))
@@ -1822,7 +1821,9 @@ class TestRunner:
             if not rows:
                 return False, "No edge rows returned", proof
             self.all_edges = sorted(rows)
-            self.logger.info(f"Collected {len(self.all_edges)} edges for cross-backend comparison")
+            self.logger.info(
+                f"Collected {len(self.all_edges)} edges for cross-backend comparison"
+            )
             return True, "", proof
 
         results.append(self._run_test("Collect all edges", collect_edges))

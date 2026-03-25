@@ -375,18 +375,14 @@ class E2ETestRunner:
             _synthetic = {"Base", "Tag_Tier_Zero"}
             nodes: list[tuple[str, ...]] = []
             for item in data["nodes"]:
-                labels = sorted(
-                    lbl for lbl in item["labels"] if lbl not in _synthetic
-                )
+                labels = sorted(lbl for lbl in item["labels"] if lbl not in _synthetic)
                 nodes.append((str(labels), str(item["objectid"])))
             suite.all_nodes = sorted(nodes)
 
             # Edges
             edges: list[tuple[str, ...]] = []
             for item in data["edges"]:
-                edges.append(
-                    (str(item["src"]), str(item["rel"]), str(item["tgt"]))
-                )
+                edges.append((str(item["src"]), str(item["rel"]), str(item["tgt"])))
             suite.all_edges = sorted(edges)
 
             msg = (
@@ -1252,11 +1248,14 @@ proof::before {
                     continue
                 all_match = False
                 diff = self._compute_diff(
-                    ref.backend, ref.all_nodes,
-                    other.backend, other.all_nodes,
+                    ref.backend,
+                    ref.all_nodes,
+                    other.backend,
+                    other.all_nodes,
                 )
                 self._write_diff_report(
-                    f"nodes-{ref.backend}-vs-{other.backend}", diff,
+                    f"nodes-{ref.backend}-vs-{other.backend}",
+                    diff,
                 )
                 msg = (
                     f"Nodes differ between {ref.backend} ({len(ref.all_nodes)})"
@@ -1296,11 +1295,14 @@ proof::before {
                     continue
                 all_match = False
                 diff = self._compute_diff(
-                    ref.backend, ref.all_edges,
-                    other.backend, other.all_edges,
+                    ref.backend,
+                    ref.all_edges,
+                    other.backend,
+                    other.all_edges,
                 )
                 self._write_diff_report(
-                    f"edges-{ref.backend}-vs-{other.backend}", diff,
+                    f"edges-{ref.backend}-vs-{other.backend}",
+                    diff,
                 )
                 msg = (
                     f"Edges differ between {ref.backend} ({len(ref.all_edges)})"
@@ -1363,13 +1365,9 @@ proof::before {
         # Build summary line (same format as before, for log output)
         parts: list[str] = []
         if only_a:
-            parts.append(
-                f"only in {name_a} (e.g. {only_a[0]}), {len(only_a)} total"
-            )
+            parts.append(f"only in {name_a} (e.g. {only_a[0]}), {len(only_a)} total")
         if only_b:
-            parts.append(
-                f"only in {name_b} (e.g. {only_b[0]}), {len(only_b)} total"
-            )
+            parts.append(f"only in {name_b} (e.g. {only_b[0]}), {len(only_b)} total")
         summary = "; ".join(parts) if parts else "order differs"
 
         return {

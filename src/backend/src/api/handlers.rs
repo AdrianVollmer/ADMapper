@@ -1505,10 +1505,8 @@ pub async fn compute_effective_tiers(
             .collect();
 
         // Initialize effective tier: everyone starts at 3
-        let mut effective_tier: HashMap<&str, i64> = nodes
-            .iter()
-            .map(|n| (n.id.as_str(), 3i64))
-            .collect();
+        let mut effective_tier: HashMap<&str, i64> =
+            nodes.iter().map(|n| (n.id.as_str(), 3i64)).collect();
 
         // For each tier level (0, 1, 2), do reverse BFS from seed nodes
         for target_tier in [0i64, 1, 2] {

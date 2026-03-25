@@ -645,6 +645,7 @@ impl BloodHoundImporter {
 
         let mut relationships = Vec::new();
         self.extract_member_edges(entity, &objectid, &node_type, &mut relationships);
+        self.extract_primary_group_edge(entity, &objectid, &node_type, &mut relationships);
         self.extract_session_edges(entity, &objectid, &node_type, &mut relationships);
         self.extract_local_group_edges(entity, &objectid, &node_type, &mut relationships);
         self.extract_ace_edges(entity, &objectid, &node_type, &mut relationships);
@@ -652,6 +653,7 @@ impl BloodHoundImporter {
         self.extract_delegation_edges(entity, &objectid, &node_type, &mut relationships);
         self.extract_gpo_link_edges(entity, &objectid, &node_type, &mut relationships);
         self.extract_trust_edges(entity, &objectid, &mut relationships);
+        self.derive_dcsync_edges(&objectid, &node_type, &mut relationships);
         relationships
     }
 
@@ -681,6 +683,35 @@ impl BloodHoundImporter {
         }
     }
 
+    /// Extract MemberOf edge from PrimaryGroupSID.
+    ///
+    /// Every user and computer in AD has a primary group (typically "Domain
+    /// Users" or "Domain Computers").  This membership is NOT listed in the
+    /// group's `Members` array -- it's stored as `PrimaryGroupSID` on the
+    /// entity itself.
+    fn extract_primary_group_edge(
+        &self,
+        entity: &JsonValue,
+        objectid: &str,
+        source_type: &str,
+        relationships: &mut Vec<DbEdge>,
+    ) {
+        let Some(pg_sid) = entity.get("PrimaryGroupSID").and_then(|v| v.as_str()) else {
+            return;
+        };
+        if pg_sid.is_empty() {
+            return;
+        }
+        relationships.push(DbEdge {
+            source: objectid.to_string(),
+            target: pg_sid.to_string(),
+            rel_type: "MemberOf".to_string(),
+            properties: JsonValue::Null,
+            source_type: Some(source_type.to_string()),
+            target_type: Some("Group".to_string()),
+        });
+    }
+
     /// Extract HasSession relationships from computer sessions.
     fn extract_session_edges(
         &self,
@@ -699,13 +730,14 @@ impl BloodHoundImporter {
             };
             for session in sessions {
                 if let Some(user_sid) = session.get("UserSID").and_then(|v| v.as_str()) {
+                    // Direction: Computer -> User ("this computer has a session for this user")
                     relationships.push(DbEdge {
-                        source: user_sid.to_string(),
-                        target: objectid.to_string(),
+                        source: objectid.to_string(),
+                        target: user_sid.to_string(),
                         rel_type: "HasSession".to_string(),
                         properties: JsonValue::Null,
-                        source_type: Some("User".to_string()),
-                        target_type: Some(target_type.to_string()),
+                        source_type: Some(target_type.to_string()),
+                        target_type: Some("User".to_string()),
                     });
                 }
             }
@@ -865,13 +897,14 @@ impl BloodHoundImporter {
         };
         for link in links {
             if let Some(gpo_id) = link.get("GUID").and_then(|v| v.as_str()) {
+                // Direction: GPO -> OU/Domain ("this GPO is linked to this OU/Domain")
                 relationships.push(DbEdge {
-                    source: objectid.to_string(),
-                    target: gpo_id.to_string(),
+                    source: gpo_id.to_string(),
+                    target: objectid.to_string(),
                     rel_type: "GPLink".to_string(),
                     properties: JsonValue::Null,
-                    source_type: Some(source_type.to_string()),
-                    target_type: Some("GPO".to_string()),
+                    source_type: Some("GPO".to_string()),
+                    target_type: Some(source_type.to_string()),
                 });
             }
         }
@@ -922,13 +955,33 @@ impl BloodHoundImporter {
                 _ => 0,
             };
 
+            // Determine trust edge type from TrustType.
+            // Intra-forest trusts (ParentChild, TreeRoot, Shortcut) use
+            // SameForestTrust; everything else (External, Forest, Unknown)
+            // uses CrossForestTrust.  Matches BloodHound CE semantics.
+            let trust_type_str = trust
+                .get("TrustType")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let rel_type = match trust_type_str.to_lowercase().as_str() {
+                "parentchild" | "treeroot" | "shortcut" => "SameForestTrust",
+                _ => "CrossForestTrust",
+            };
+
+            let props = serde_json::json!({
+                "direction": trust_direction,
+                "trusttype": trust_type_str,
+                "isTransitive": trust.get("IsTransitive").and_then(|v| v.as_bool()).unwrap_or(false),
+                "sidFilteringEnabled": trust.get("SidFilteringEnabled").and_then(|v| v.as_bool()).unwrap_or(false),
+            });
+
             // Bidirectional or outbound trust
             if trust_direction == 2 || trust_direction == 3 {
                 relationships.push(DbEdge {
                     source: target_sid.to_string(),
                     target: objectid.to_string(),
-                    rel_type: "TrustedBy".to_string(),
-                    properties: serde_json::json!({"direction": trust_direction}),
+                    rel_type: rel_type.to_string(),
+                    properties: props.clone(),
                     source_type: Some("Domain".to_string()),
                     target_type: Some("Domain".to_string()),
                 });
@@ -938,12 +991,54 @@ impl BloodHoundImporter {
                 relationships.push(DbEdge {
                     source: objectid.to_string(),
                     target: target_sid.to_string(),
-                    rel_type: "TrustedBy".to_string(),
-                    properties: serde_json::json!({"direction": trust_direction}),
+                    rel_type: rel_type.to_string(),
+                    properties: props,
                     source_type: Some("Domain".to_string()),
                     target_type: Some("Domain".to_string()),
                 });
             }
+        }
+    }
+
+    /// Derive DCSync edges when a principal holds both GetChanges and
+    /// GetChangesAll on the same target (typically a Domain).
+    fn derive_dcsync_edges(
+        &self,
+        objectid: &str,
+        target_type: &str,
+        relationships: &mut Vec<DbEdge>,
+    ) {
+        // Collect principals that have GetChanges on this object
+        let get_changes: HashSet<&str> = relationships
+            .iter()
+            .filter(|e| e.target == objectid && e.rel_type == "GetChanges")
+            .map(|e| e.source.as_str())
+            .collect();
+
+        if get_changes.is_empty() {
+            return;
+        }
+
+        // Find principals that also have GetChangesAll
+        let dcsync_principals: Vec<String> = relationships
+            .iter()
+            .filter(|e| {
+                e.target == objectid
+                    && e.rel_type == "GetChangesAll"
+                    && get_changes.contains(e.source.as_str())
+            })
+            .map(|e| e.source.clone())
+            .collect();
+
+        for principal in dcsync_principals {
+            relationships.push(DbEdge {
+                source: principal,
+                target: objectid.to_string(),
+                rel_type: "DCSync".to_string(),
+                properties: JsonValue::Null,
+                source_type: None,
+                target_type: Some(target_type.to_string()),
+            });
         }
     }
 
@@ -1588,11 +1683,12 @@ mod tests {
         let relationships = importer.extract_edges("computers", &entity);
 
         assert_eq!(relationships.len(), 2);
+        // Direction: Computer -> User
         assert!(relationships
             .iter()
-            .all(|e| e.rel_type == "HasSession" && e.target == "S-1-5-21-COMP1"));
-        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-USER1"));
-        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-ADMIN1"));
+            .all(|e| e.rel_type == "HasSession" && e.source == "S-1-5-21-COMP1"));
+        assert!(relationships.iter().any(|e| e.target == "S-1-5-21-USER1"));
+        assert!(relationships.iter().any(|e| e.target == "S-1-5-21-ADMIN1"));
     }
 
     #[test]
@@ -1658,6 +1754,10 @@ mod tests {
         assert!(relationships
             .iter()
             .any(|e| e.source == "S-1-5-21-DOMAIN1" && e.target == "S-1-5-21-DOMAIN2"));
+        // No TrustType -> defaults to CrossForestTrust
+        assert!(relationships
+            .iter()
+            .all(|e| e.rel_type == "CrossForestTrust"));
     }
 
     #[test]
@@ -1670,15 +1770,18 @@ mod tests {
             "Trusts": [
                 {
                     "TargetDomainSid": "S-1-5-21-DOMAIN2",
-                    "TrustDirection": "Bidirectional"
+                    "TrustDirection": "Bidirectional",
+                    "TrustType": "ParentChild"
                 },
                 {
                     "TargetDomainSid": "S-1-5-21-DOMAIN3",
-                    "TrustDirection": "Outbound"
+                    "TrustDirection": "Outbound",
+                    "TrustType": "External"
                 },
                 {
                     "TargetDomainSid": "S-1-5-21-DOMAIN4",
-                    "TrustDirection": "Inbound"
+                    "TrustDirection": "Inbound",
+                    "TrustType": "ParentChild"
                 }
             ]
         });
@@ -1688,23 +1791,23 @@ mod tests {
         // Bidirectional creates 2 relationships, Outbound creates 1, Inbound creates 1 = 4 total
         assert_eq!(relationships.len(), 4);
 
-        // Bidirectional with DOMAIN2
+        // Bidirectional with DOMAIN2 (ParentChild = SameForestTrust)
         assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN2"
             && e.target == "S-1-5-21-DOMAIN1"
-            && e.rel_type == "TrustedBy"));
+            && e.rel_type == "SameForestTrust"));
         assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
             && e.target == "S-1-5-21-DOMAIN2"
-            && e.rel_type == "TrustedBy"));
+            && e.rel_type == "SameForestTrust"));
 
-        // Outbound to DOMAIN3 (we trust them)
+        // Outbound to DOMAIN3 (External = CrossForestTrust)
         assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN3"
             && e.target == "S-1-5-21-DOMAIN1"
-            && e.rel_type == "TrustedBy"));
+            && e.rel_type == "CrossForestTrust"));
 
-        // Inbound from DOMAIN4 (they trust us)
+        // Inbound from DOMAIN4 (ParentChild = SameForestTrust)
         assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
             && e.target == "S-1-5-21-DOMAIN4"
-            && e.rel_type == "TrustedBy"));
+            && e.rel_type == "SameForestTrust"));
     }
 
     #[test]
@@ -1934,5 +2037,475 @@ mod tests {
         // Should only have 1 edge due to deduplication
         let (_, edge_count) = importer.db.get_stats().unwrap();
         assert_eq!(edge_count, 1);
+    }
+
+    // ========================================================================
+    // BH CE Compatibility Tests
+    //
+    // These tests verify that admapper produces the same edges as BloodHound
+    // CE for the same input data.  Each test targets a specific edge type
+    // where cross-backend comparison revealed discrepancies.
+    // ========================================================================
+
+    /// BH CE creates HasSession edges with direction Computer -> User.
+    /// A session means "this computer has an active session for this user".
+    #[test]
+    fn test_bhce_has_session_direction() {
+        let mut importer = test_importer();
+
+        let computer = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-COMP1",
+            "Sessions": {
+                "Results": [
+                    {"UserSID": "S-1-5-21-USER1", "ComputerSID": "S-1-5-21-COMP1"}
+                ],
+                "Collected": true
+            },
+            "PrivilegedSessions": {
+                "Results": [
+                    {"UserSID": "S-1-5-21-ADMIN1", "ComputerSID": "S-1-5-21-COMP1"}
+                ],
+                "Collected": true
+            },
+            "RegistrySessions": {
+                "Results": [
+                    {"UserSID": "S-1-5-21-USER2", "ComputerSID": "S-1-5-21-COMP1"}
+                ],
+                "Collected": true
+            }
+        });
+
+        let edges = importer.extract_edges("computers", &computer);
+        let sessions: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "HasSession")
+            .collect();
+
+        assert_eq!(sessions.len(), 3);
+        // BH CE direction: Computer (source) -> User (target)
+        for edge in &sessions {
+            assert_eq!(
+                edge.source, "S-1-5-21-COMP1",
+                "HasSession source should be the computer, got {}",
+                edge.source,
+            );
+        }
+        assert!(sessions.iter().any(|e| e.target == "S-1-5-21-USER1"));
+        assert!(sessions.iter().any(|e| e.target == "S-1-5-21-ADMIN1"));
+        assert!(sessions.iter().any(|e| e.target == "S-1-5-21-USER2"));
+    }
+
+    /// BH CE creates GPLink edges with direction GPO -> OU/Domain.
+    /// "This GPO is linked to this OU/Domain."
+    #[test]
+    fn test_bhce_gplink_direction() {
+        let mut importer = test_importer();
+
+        let domain = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN1",
+            "Links": [
+                {"GUID": "GPO-GUID-1", "IsEnforced": false},
+                {"GUID": "GPO-GUID-2", "IsEnforced": true}
+            ]
+        });
+
+        let edges = importer.extract_edges("domains", &domain);
+        let gplinks: Vec<_> = edges.iter().filter(|e| e.rel_type == "GPLink").collect();
+
+        assert_eq!(gplinks.len(), 2);
+        // BH CE direction: GPO (source) -> OU/Domain (target)
+        for edge in &gplinks {
+            assert_eq!(
+                edge.target, "S-1-5-21-DOMAIN1",
+                "GPLink target should be the domain/OU, got {}",
+                edge.target,
+            );
+        }
+        assert!(gplinks.iter().any(|e| e.source == "GPO-GUID-1"));
+        assert!(gplinks.iter().any(|e| e.source == "GPO-GUID-2"));
+    }
+
+    /// BH CE creates MemberOf edges from PrimaryGroupSID for every
+    /// user and computer.  A user with PrimaryGroupSID pointing to
+    /// Domain Users (-513) should get a MemberOf edge to that group.
+    #[test]
+    fn test_bhce_primary_group_creates_memberof() {
+        let mut importer = test_importer();
+
+        let user = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-1001",
+            "PrimaryGroupSID": "S-1-5-21-1234-513",
+            "Properties": {"name": "jdoe@corp.local"}
+        });
+
+        let edges = importer.extract_edges("users", &user);
+        let memberof: Vec<_> = edges.iter().filter(|e| e.rel_type == "MemberOf").collect();
+
+        assert_eq!(
+            memberof.len(),
+            1,
+            "PrimaryGroupSID should produce a MemberOf edge"
+        );
+        assert_eq!(memberof[0].source, "S-1-5-21-1234-1001");
+        assert_eq!(memberof[0].target, "S-1-5-21-1234-513");
+    }
+
+    /// BH CE creates MemberOf edges from PrimaryGroupSID for computers
+    /// too (typically pointing to Domain Computers, RID -515).
+    #[test]
+    fn test_bhce_primary_group_computer() {
+        let mut importer = test_importer();
+
+        let computer = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-1103",
+            "PrimaryGroupSID": "S-1-5-21-1234-515",
+            "Properties": {"name": "DC01.corp.local"}
+        });
+
+        let edges = importer.extract_edges("computers", &computer);
+        let memberof: Vec<_> = edges.iter().filter(|e| e.rel_type == "MemberOf").collect();
+
+        assert_eq!(
+            memberof.len(),
+            1,
+            "Computer PrimaryGroupSID should produce a MemberOf edge"
+        );
+        assert_eq!(memberof[0].source, "S-1-5-21-1234-1103");
+        assert_eq!(memberof[0].target, "S-1-5-21-1234-515");
+    }
+
+    /// BH CE derives a DCSync edge when a principal has both GetChanges
+    /// AND GetChangesAll ACEs on a domain object.  The individual ACE
+    /// edges should still be created too.
+    #[test]
+    fn test_bhce_dcsync_derived_edge() {
+        let mut importer = test_importer();
+
+        let domain = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN1",
+            "Aces": [
+                {
+                    "PrincipalSID": "S-1-5-21-ATTACKER",
+                    "RightName": "GetChanges",
+                    "IsInherited": false
+                },
+                {
+                    "PrincipalSID": "S-1-5-21-ATTACKER",
+                    "RightName": "GetChangesAll",
+                    "IsInherited": false
+                }
+            ]
+        });
+
+        let edges = importer.extract_edges("domains", &domain);
+
+        // Should have GetChanges, GetChangesAll, AND a derived DCSync edge
+        assert!(
+            edges.iter().any(|e| e.source == "S-1-5-21-ATTACKER"
+                && e.target == "S-1-5-21-DOMAIN1"
+                && e.rel_type == "GetChanges"),
+            "Should have GetChanges edge"
+        );
+        assert!(
+            edges.iter().any(|e| e.source == "S-1-5-21-ATTACKER"
+                && e.target == "S-1-5-21-DOMAIN1"
+                && e.rel_type == "GetChangesAll"),
+            "Should have GetChangesAll edge"
+        );
+        assert!(
+            edges.iter().any(|e| e.source == "S-1-5-21-ATTACKER"
+                && e.target == "S-1-5-21-DOMAIN1"
+                && e.rel_type == "DCSync"),
+            "Should have derived DCSync edge when both GetChanges + GetChangesAll exist"
+        );
+    }
+
+    /// DCSync should NOT be created when only one of GetChanges /
+    /// GetChangesAll is present.
+    #[test]
+    fn test_bhce_no_dcsync_without_both_rights() {
+        let mut importer = test_importer();
+
+        let domain = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN1",
+            "Aces": [
+                {
+                    "PrincipalSID": "S-1-5-21-USER1",
+                    "RightName": "GetChanges",
+                    "IsInherited": false
+                }
+            ]
+        });
+
+        let edges = importer.extract_edges("domains", &domain);
+
+        assert!(
+            edges.iter().any(|e| e.rel_type == "GetChanges"),
+            "Should have GetChanges edge"
+        );
+        assert!(
+            !edges.iter().any(|e| e.rel_type == "DCSync"),
+            "Should NOT have DCSync when only GetChanges is present"
+        );
+    }
+
+    /// BH CE uses SameForestTrust / CrossForestTrust instead of generic
+    /// TrustedBy.  A ParentChild trust (intra-forest) should produce
+    /// SameForestTrust edges.
+    #[test]
+    fn test_bhce_trust_types_intra_forest() {
+        let mut importer = test_importer();
+
+        let domain = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-PARENT",
+            "Trusts": [
+                {
+                    "TargetDomainSid": "S-1-5-21-CHILD",
+                    "TargetDomainName": "CHILD.CORP.LOCAL",
+                    "TrustDirection": "Bidirectional",
+                    "TrustType": "ParentChild",
+                    "IsTransitive": true,
+                    "SidFilteringEnabled": false
+                }
+            ]
+        });
+
+        let edges = importer.extract_edges("domains", &domain);
+        let trust_edges: Vec<_> = edges
+            .iter()
+            .filter(|e| {
+                e.rel_type == "TrustedBy"
+                    || e.rel_type == "SameForestTrust"
+                    || e.rel_type == "CrossForestTrust"
+            })
+            .collect();
+
+        // Bidirectional trust should create 2 edges
+        assert_eq!(trust_edges.len(), 2);
+        // Intra-forest (ParentChild) trusts should use SameForestTrust
+        for edge in &trust_edges {
+            assert_eq!(
+                edge.rel_type, "SameForestTrust",
+                "ParentChild trust should produce SameForestTrust, got {}",
+                edge.rel_type,
+            );
+        }
+    }
+
+    /// Cross-forest (External) trusts should produce CrossForestTrust edges.
+    #[test]
+    fn test_bhce_trust_types_cross_forest() {
+        let mut importer = test_importer();
+
+        let domain = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-CORP",
+            "Trusts": [
+                {
+                    "TargetDomainSid": "S-1-5-21-PARTNER",
+                    "TargetDomainName": "PARTNER.COM",
+                    "TrustDirection": "Outbound",
+                    "TrustType": "External",
+                    "IsTransitive": false,
+                    "SidFilteringEnabled": true
+                }
+            ]
+        });
+
+        let edges = importer.extract_edges("domains", &domain);
+        let trust_edges: Vec<_> = edges
+            .iter()
+            .filter(|e| {
+                e.rel_type == "TrustedBy"
+                    || e.rel_type == "SameForestTrust"
+                    || e.rel_type == "CrossForestTrust"
+            })
+            .collect();
+
+        assert_eq!(trust_edges.len(), 1);
+        assert_eq!(
+            trust_edges[0].rel_type, "CrossForestTrust",
+            "External trust should produce CrossForestTrust, got {}",
+            trust_edges[0].rel_type,
+        );
+    }
+
+    /// Full import: a computer with sessions, local groups, and ACEs
+    /// should produce all expected edge types.
+    #[test]
+    fn test_bhce_computer_full_edges() {
+        let mut importer = test_importer();
+
+        let computer = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234-1103",
+            "PrimaryGroupSID": "S-1-5-21-1234-515",
+            "Properties": {"name": "WS01.corp.local"},
+            "Sessions": {
+                "Results": [
+                    {"UserSID": "S-1-5-21-1234-1001", "ComputerSID": "S-1-5-21-1234-1103"}
+                ],
+                "Collected": true
+            },
+            "PrivilegedSessions": {"Results": [], "Collected": true},
+            "RegistrySessions": {"Results": [], "Collected": true},
+            "LocalGroups": [
+                {
+                    "Name": "Administrators",
+                    "Results": [
+                        {"ObjectIdentifier": "S-1-5-21-1234-512", "ObjectType": "Group"}
+                    ]
+                },
+                {
+                    "Name": "Remote Desktop Users",
+                    "Results": [
+                        {"ObjectIdentifier": "S-1-5-21-1234-513", "ObjectType": "Group"}
+                    ]
+                }
+            ],
+            "Aces": [
+                {
+                    "PrincipalSID": "S-1-5-21-1234-512",
+                    "RightName": "GenericAll",
+                    "IsInherited": false
+                }
+            ],
+            "ContainedBy": {
+                "ObjectIdentifier": "OU-GUID-1",
+                "ObjectType": "OU"
+            }
+        });
+
+        let edges = importer.extract_edges("computers", &computer);
+        let types: Vec<&str> = edges.iter().map(|e| e.rel_type.as_str()).collect();
+
+        // Must have MemberOf from PrimaryGroupSID
+        assert!(
+            edges.iter().any(|e| e.source == "S-1-5-21-1234-1103"
+                && e.target == "S-1-5-21-1234-515"
+                && e.rel_type == "MemberOf"),
+            "Missing MemberOf from PrimaryGroupSID; edge types: {:?}",
+            types,
+        );
+
+        // Must have HasSession (Computer -> User direction)
+        assert!(
+            edges.iter().any(|e| e.source == "S-1-5-21-1234-1103"
+                && e.target == "S-1-5-21-1234-1001"
+                && e.rel_type == "HasSession"),
+            "Missing or reversed HasSession; edge types: {:?}",
+            types,
+        );
+
+        // Must have AdminTo
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.rel_type == "AdminTo" && e.target == "S-1-5-21-1234-1103"),
+            "Missing AdminTo; edge types: {:?}",
+            types,
+        );
+
+        // Must have CanRDP
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.rel_type == "CanRDP" && e.target == "S-1-5-21-1234-1103"),
+            "Missing CanRDP; edge types: {:?}",
+            types,
+        );
+
+        // Must have GenericAll ACE
+        assert!(
+            edges.iter().any(|e| e.rel_type == "GenericAll"),
+            "Missing GenericAll ACE; edge types: {:?}",
+            types,
+        );
+
+        // Must have Contains (from ContainedBy)
+        assert!(
+            edges.iter().any(|e| e.source == "OU-GUID-1"
+                && e.target == "S-1-5-21-1234-1103"
+                && e.rel_type == "Contains"),
+            "Missing Contains; edge types: {:?}",
+            types,
+        );
+    }
+
+    /// Full edge extraction for a domain with trusts, GPLinks, and
+    /// DCSync-capable ACEs.
+    #[test]
+    fn test_bhce_domain_full_edges() {
+        let mut importer = test_importer();
+
+        let domain = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-1234",
+            "Properties": {
+                "name": "CORP.LOCAL",
+                "domainsid": "S-1-5-21-1234",
+                "functionallevel": "2016"
+            },
+            "Links": [
+                {"GUID": "GPO-DEFAULT", "IsEnforced": false}
+            ],
+            "Trusts": [
+                {
+                    "TargetDomainSid": "S-1-5-21-5678",
+                    "TargetDomainName": "CHILD.CORP.LOCAL",
+                    "TrustDirection": "Bidirectional",
+                    "TrustType": "ParentChild",
+                    "IsTransitive": true,
+                    "SidFilteringEnabled": false
+                }
+            ],
+            "Aces": [
+                {
+                    "PrincipalSID": "S-1-5-21-1234-512",
+                    "RightName": "GetChanges",
+                    "IsInherited": false
+                },
+                {
+                    "PrincipalSID": "S-1-5-21-1234-512",
+                    "RightName": "GetChangesAll",
+                    "IsInherited": false
+                }
+            ]
+        });
+
+        let edges = importer.extract_edges("domains", &domain);
+        let types: Vec<&str> = edges.iter().map(|e| e.rel_type.as_str()).collect();
+
+        // GPLink: GPO -> Domain
+        assert!(
+            edges.iter().any(|e| e.source == "GPO-DEFAULT"
+                && e.target == "S-1-5-21-1234"
+                && e.rel_type == "GPLink"),
+            "GPLink should point from GPO to Domain; edge types: {:?}",
+            types,
+        );
+
+        // Trust: should be SameForestTrust, not TrustedBy
+        let trust_edges: Vec<_> = edges
+            .iter()
+            .filter(|e| {
+                e.rel_type == "SameForestTrust"
+                    || e.rel_type == "CrossForestTrust"
+                    || e.rel_type == "TrustedBy"
+            })
+            .collect();
+        assert_eq!(trust_edges.len(), 2, "Bidirectional trust = 2 edges");
+        for edge in &trust_edges {
+            assert_ne!(
+                edge.rel_type, "TrustedBy",
+                "Should use SameForestTrust/CrossForestTrust, not TrustedBy"
+            );
+        }
+
+        // DCSync: derived from GetChanges + GetChangesAll
+        assert!(
+            edges.iter().any(|e| e.source == "S-1-5-21-1234-512"
+                && e.target == "S-1-5-21-1234"
+                && e.rel_type == "DCSync"),
+            "Missing derived DCSync edge; edge types: {:?}",
+            types,
+        );
     }
 }

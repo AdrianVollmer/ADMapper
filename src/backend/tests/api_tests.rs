@@ -875,20 +875,16 @@ async fn test_tier_violations_after_compute_effective_tiers() {
     let db = app.db();
 
     // Tier-0 group
-    db.run_custom_query(
-        "CREATE (:Group {name: 'Domain Admins', objectid: 'G-DA', tier: 0})",
-    )
-    .unwrap();
+    db.run_custom_query("CREATE (:Group {name: 'Domain Admins', objectid: 'G-DA', tier: 0})")
+        .unwrap();
     // Tier-1 server
     db.run_custom_query(
         "CREATE (:Computer {name: 'SRV01', objectid: 'C-SRV01', tier: 1, enabled: true})",
     )
     .unwrap();
     // Tier-2 user
-    db.run_custom_query(
-        "CREATE (:User {name: 'Bob', objectid: 'U-BOB', tier: 2, enabled: true})",
-    )
-    .unwrap();
+    db.run_custom_query("CREATE (:User {name: 'Bob', objectid: 'U-BOB', tier: 2, enabled: true})")
+        .unwrap();
     // Bob (tier 2) has GenericAll on SRV01 (tier 1) — violation
     db.run_custom_query(
         "MATCH (u {objectid: 'U-BOB'}), (c {objectid: 'C-SRV01'}) CREATE (u)-[:GenericAll]->(c)",
@@ -914,7 +910,10 @@ async fn test_tier_violations_after_compute_effective_tiers() {
     assert_eq!(status, StatusCode::OK);
 
     let violations = body["violations"].as_array().unwrap();
-    let total: u64 = violations.iter().map(|v| v["count"].as_u64().unwrap()).sum();
+    let total: u64 = violations
+        .iter()
+        .map(|v| v["count"].as_u64().unwrap())
+        .sum();
 
     assert!(
         total > 0,
