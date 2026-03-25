@@ -370,11 +370,13 @@ class E2ETestRunner:
             with open(graph_file) as fh:
                 data = json.load(fh)
 
-            # Nodes: normalize labels (strip "Base", sort) to match ADMapper
+            # Nodes: normalize labels to match ADMapper -- strip synthetic
+            # labels that BH CE adds during analysis (Base, Tag_Tier_Zero)
+            _synthetic = {"Base", "Tag_Tier_Zero"}
             nodes: list[tuple[str, ...]] = []
             for item in data["nodes"]:
                 labels = sorted(
-                    lbl for lbl in item["labels"] if lbl != "Base"
+                    lbl for lbl in item["labels"] if lbl not in _synthetic
                 )
                 nodes.append((str(labels), str(item["objectid"])))
             suite.all_nodes = sorted(nodes)
@@ -1227,8 +1229,8 @@ proof::before {
 
         Every backend must produce identical sorted lists of nodes
         (labels + objectid) and edges (source objectid, relationship type,
-        target objectid).  Mismatches are reported with the first differing
-        entry for easier debugging.
+        target objectid).  Mismatches are written to a detailed diff report
+        in the reports directory.
         """
         results: list[TestResult] = []
         suites_with_nodes = [s for s in suites if s.all_nodes]
@@ -1249,14 +1251,17 @@ proof::before {
                 if ref.all_nodes == other.all_nodes:
                     continue
                 all_match = False
-                # Find first difference for diagnostic output
-                diff_msg = self._first_diff(
+                diff = self._compute_diff(
                     ref.backend, ref.all_nodes,
                     other.backend, other.all_nodes,
                 )
+                self._write_diff_report(
+                    f"nodes-{ref.backend}-vs-{other.backend}", diff,
+                )
                 msg = (
                     f"Nodes differ between {ref.backend} ({len(ref.all_nodes)})"
-                    f" and {other.backend} ({len(other.all_nodes)}): {diff_msg}"
+                    f" and {other.backend} ({len(other.all_nodes)}): "
+                    f"{diff['summary']}"
                 )
                 log_fail(self.logger, f"  nodes: {msg}")
                 results.append(
@@ -1290,13 +1295,17 @@ proof::before {
                 if ref.all_edges == other.all_edges:
                     continue
                 all_match = False
-                diff_msg = self._first_diff(
+                diff = self._compute_diff(
                     ref.backend, ref.all_edges,
                     other.backend, other.all_edges,
                 )
+                self._write_diff_report(
+                    f"edges-{ref.backend}-vs-{other.backend}", diff,
+                )
                 msg = (
                     f"Edges differ between {ref.backend} ({len(ref.all_edges)})"
-                    f" and {other.backend} ({len(other.all_edges)}): {diff_msg}"
+                    f" and {other.backend} ({len(other.all_edges)}): "
+                    f"{diff['summary']}"
                 )
                 log_fail(self.logger, f"  edges: {msg}")
                 results.append(
@@ -1325,25 +1334,61 @@ proof::before {
         return results
 
     @staticmethod
-    def _first_diff(
+    def _compute_diff(
         name_a: str,
         list_a: list[tuple[str, ...]],
         name_b: str,
         list_b: list[tuple[str, ...]],
-    ) -> str:
-        """Return a human-readable description of the first difference."""
+    ) -> dict[str, Any]:
+        """Compute a detailed diff between two tuple lists.
+
+        Returns a dict with:
+          - summary: one-line human-readable description
+          - only_a / only_b: full sorted lists of items unique to each side
+          - by_key_a / by_key_b: items grouped by first element (label or
+            rel type) with counts, for quick categorization
+        """
         set_a = set(list_a)
         set_b = set(list_b)
         only_a = sorted(set_a - set_b)
         only_b = sorted(set_b - set_a)
+
+        def _group_by_first(items: list[tuple[str, ...]]) -> dict[str, int]:
+            counts: dict[str, int] = {}
+            for item in items:
+                key = item[0] if item else "<empty>"
+                counts[key] = counts.get(key, 0) + 1
+            return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+
+        # Build summary line (same format as before, for log output)
         parts: list[str] = []
         if only_a:
-            sample = only_a[0]
-            parts.append(f"only in {name_a} (e.g. {sample}), {len(only_a)} total")
+            parts.append(
+                f"only in {name_a} (e.g. {only_a[0]}), {len(only_a)} total"
+            )
         if only_b:
-            sample = only_b[0]
-            parts.append(f"only in {name_b} (e.g. {sample}), {len(only_b)} total")
-        return "; ".join(parts) if parts else "order differs"
+            parts.append(
+                f"only in {name_b} (e.g. {only_b[0]}), {len(only_b)} total"
+            )
+        summary = "; ".join(parts) if parts else "order differs"
+
+        return {
+            "summary": summary,
+            f"only_in_{name_a}": [list(t) for t in only_a],
+            f"only_in_{name_b}": [list(t) for t in only_b],
+            f"by_key_{name_a}": _group_by_first(only_a),
+            f"by_key_{name_b}": _group_by_first(only_b),
+            "common_count": len(set_a & set_b),
+        }
+
+    def _write_diff_report(self, name: str, diff: dict[str, Any]) -> None:
+        """Write a diff report to the reports directory as JSON."""
+        path = self.report_dir / f"diff-{name}.json"
+        try:
+            path.write_text(json.dumps(diff, indent=2, default=str))
+            self.logger.info("  Diff report written to %s", path)
+        except OSError as exc:
+            self.logger.warning("  Failed to write diff report: %s", exc)
 
     def run(
         self,

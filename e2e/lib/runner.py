@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from api import APIClient
 
@@ -592,18 +592,32 @@ class TestRunner:
 
         return [tuple(str(v) if v is not None else "" for v in row) for row in rows]
 
+    # Labels added by BH CE's analysis pipeline that are not present in the
+    # raw SharpHound data.  Stripped during cross-backend comparison so that
+    # only the imported data is compared.
+    _SYNTHETIC_LABELS: ClassVar[frozenset[str]] = frozenset({
+        "Base",           # implicit supertype in Neo4j
+        "Tag_Tier_Zero",  # BH CE tiering analysis
+    })
+
     @staticmethod
     def _normalize_labels(labels_str: str) -> str:
         """Normalize a stringified label list for cross-backend comparison.
 
-        Sorts labels so ordering is deterministic across backends.
+        Strips synthetic labels (``Base``, ``Tag_Tier_Zero``) that some
+        backends add implicitly and sorts the remainder so ordering is
+        deterministic.
         """
         try:
             import ast
 
             labels = ast.literal_eval(labels_str)
             if isinstance(labels, list):
-                return str(sorted(labels))
+                cleaned = sorted(
+                    lbl for lbl in labels
+                    if lbl not in TestRunner._SYNTHETIC_LABELS
+                )
+                return str(cleaned)
         except (ValueError, SyntaxError):
             pass
         return labels_str
