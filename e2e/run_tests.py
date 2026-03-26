@@ -32,6 +32,7 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -177,6 +178,52 @@ class E2ETestRunner:
         atexit.register(self.cleanup)
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
+
+    def _build_domain_map(self) -> dict[str, str]:
+        """Build a domain name -> domain SID mapping from the test data.
+
+        Reads domain JSON files from the test data zip to establish the
+        canonical mapping between domain names (e.g. ``PHANTOM.CORP``) and
+        domain SIDs (e.g. ``S-1-5-21-...``).  This is used to normalize
+        objectids during cross-backend comparison because CrustDB's orphaned
+        placeholder nodes use domain name prefixes while BloodHound CE may
+        use domain SID prefixes.
+        """
+        name_to_sid: dict[str, str] = {}
+        try:
+            with zipfile.ZipFile(self.test_data) as zf:
+                for entry in zf.namelist():
+                    if "domain" not in entry.lower() or not entry.endswith(".json"):
+                        continue
+                    data = json.loads(zf.read(entry))
+                    for entity in data.get("data", []):
+                        name = entity.get("Properties", {}).get("name", "")
+                        sid = entity.get("ObjectIdentifier", "")
+                        if name and sid and sid.startswith("S-1-5-21-"):
+                            name_to_sid[name.upper()] = sid
+        except Exception as exc:
+            self.logger.debug("Could not build domain map: %s", exc)
+        if name_to_sid:
+            self.logger.info(
+                "Domain map: %s",
+                ", ".join(f"{n}={s}" for n, s in sorted(name_to_sid.items())),
+            )
+        return name_to_sid
+
+    @staticmethod
+    def _normalize_objectid(objectid: str, domain_map: dict[str, str]) -> str:
+        """Normalize an objectid by replacing domain name prefixes with SIDs.
+
+        CrustDB's orphaned nodes use domain name prefixes in their objectids
+        (e.g. ``PHANTOM.CORP-S-1-5-32-544``) while BloodHound CE may use the
+        domain SID.  This normalizes both to the domain SID form so they match
+        during comparison.
+        """
+        for name, sid in domain_map.items():
+            prefix = name + "-"
+            if objectid.startswith(prefix):
+                return sid + "-" + objectid[len(prefix):]
+        return objectid
 
     def _signal_handler(self, signum: int, frame: FrameType | None) -> None:
         """Handle signals gracefully."""
@@ -372,7 +419,7 @@ class E2ETestRunner:
 
             # Nodes: normalize labels to match ADMapper -- strip synthetic
             # labels that BH CE adds during analysis (Base, Tag_Tier_Zero)
-            _synthetic = {"Base", "Tag_Tier_Zero"}
+            _synthetic = {"Base", "Tag_Tier_Zero", "ADLocalGroup"}
             nodes: list[tuple[str, ...]] = []
             for item in data["nodes"]:
                 labels = sorted(lbl for lbl in item["labels"] if lbl not in _synthetic)
@@ -1220,6 +1267,36 @@ proof::before {
         self.logger.info(f"Cross-backend: {matches} matched, {mismatches} mismatched")
         return results
 
+    def _normalize_node_list(
+        self,
+        nodes: list[tuple[str, ...]],
+        domain_map: dict[str, str],
+    ) -> list[tuple[str, ...]]:
+        """Normalize a node list by replacing domain name prefixes with SIDs."""
+        if not domain_map:
+            return nodes
+        return sorted(
+            (labels, self._normalize_objectid(oid, domain_map))
+            for labels, oid, *_ in nodes
+        )
+
+    def _normalize_edge_list(
+        self,
+        edges: list[tuple[str, ...]],
+        domain_map: dict[str, str],
+    ) -> list[tuple[str, ...]]:
+        """Normalize an edge list by replacing domain name prefixes with SIDs."""
+        if not domain_map:
+            return edges
+        return sorted(
+            (
+                self._normalize_objectid(src, domain_map),
+                rel,
+                self._normalize_objectid(tgt, domain_map),
+            )
+            for src, rel, tgt, *_ in edges
+        )
+
     def _compare_graph_data(self, suites: list[TestSuite]) -> list[TestResult]:
         """Compare all nodes and all edges across backends.
 
@@ -1227,6 +1304,11 @@ proof::before {
         (labels + objectid) and edges (source objectid, relationship type,
         target objectid).  Mismatches are written to a detailed diff report
         in the reports directory.
+
+        Objectids are normalized before comparison: domain name prefixes
+        (e.g. ``PHANTOM.CORP-``) are replaced with domain SID prefixes
+        (e.g. ``S-1-5-21-...-``) so orphaned placeholder nodes match
+        regardless of which identifier the backend used.
         """
         results: list[TestResult] = []
         suites_with_nodes = [s for s in suites if s.all_nodes]
@@ -1235,6 +1317,9 @@ proof::before {
         if len(suites_with_nodes) < 2 and len(suites_with_edges) < 2:
             return results
 
+        # Build domain name -> SID mapping for objectid normalization
+        domain_map = self._build_domain_map()
+
         self.logger.info("=" * 42)
         self.logger.info("Cross-backend graph data")
         self.logger.info("=" * 42)
@@ -1242,24 +1327,26 @@ proof::before {
         # -- Compare nodes --
         if len(suites_with_nodes) >= 2:
             ref = suites_with_nodes[0]
+            ref_nodes = self._normalize_node_list(ref.all_nodes, domain_map)
             all_match = True
             for other in suites_with_nodes[1:]:
-                if ref.all_nodes == other.all_nodes:
+                other_nodes = self._normalize_node_list(other.all_nodes, domain_map)
+                if ref_nodes == other_nodes:
                     continue
                 all_match = False
                 diff = self._compute_diff(
                     ref.backend,
-                    ref.all_nodes,
+                    ref_nodes,
                     other.backend,
-                    other.all_nodes,
+                    other_nodes,
                 )
                 self._write_diff_report(
                     f"nodes-{ref.backend}-vs-{other.backend}",
                     diff,
                 )
                 msg = (
-                    f"Nodes differ between {ref.backend} ({len(ref.all_nodes)})"
-                    f" and {other.backend} ({len(other.all_nodes)}): "
+                    f"Nodes differ between {ref.backend} ({len(ref_nodes)})"
+                    f" and {other.backend} ({len(other_nodes)}): "
                     f"{diff['summary']}"
                 )
                 log_fail(self.logger, f"  nodes: {msg}")
@@ -1274,7 +1361,7 @@ proof::before {
                 )
             if all_match:
                 backends_str = ", ".join(s.backend for s in suites_with_nodes)
-                msg = f"{len(ref.all_nodes)} nodes match across {backends_str}"
+                msg = f"{len(ref_nodes)} nodes match across {backends_str}"
                 log_pass(self.logger, f"  nodes: {msg}")
                 results.append(
                     TestResult(
@@ -1289,24 +1376,26 @@ proof::before {
         # -- Compare edges --
         if len(suites_with_edges) >= 2:
             ref = suites_with_edges[0]
+            ref_edges = self._normalize_edge_list(ref.all_edges, domain_map)
             all_match = True
             for other in suites_with_edges[1:]:
-                if ref.all_edges == other.all_edges:
+                other_edges = self._normalize_edge_list(other.all_edges, domain_map)
+                if ref_edges == other_edges:
                     continue
                 all_match = False
                 diff = self._compute_diff(
                     ref.backend,
-                    ref.all_edges,
+                    ref_edges,
                     other.backend,
-                    other.all_edges,
+                    other_edges,
                 )
                 self._write_diff_report(
                     f"edges-{ref.backend}-vs-{other.backend}",
                     diff,
                 )
                 msg = (
-                    f"Edges differ between {ref.backend} ({len(ref.all_edges)})"
-                    f" and {other.backend} ({len(other.all_edges)}): "
+                    f"Edges differ between {ref.backend} ({len(ref_edges)})"
+                    f" and {other.backend} ({len(other_edges)}): "
                     f"{diff['summary']}"
                 )
                 log_fail(self.logger, f"  edges: {msg}")
@@ -1321,7 +1410,7 @@ proof::before {
                 )
             if all_match:
                 backends_str = ", ".join(s.backend for s in suites_with_edges)
-                msg = f"{len(ref.all_edges)} edges match across {backends_str}"
+                msg = f"{len(ref_edges)} edges match across {backends_str}"
                 log_pass(self.logger, f"  edges: {msg}")
                 results.append(
                     TestResult(

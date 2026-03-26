@@ -599,6 +599,7 @@ class TestRunner:
         {
             "Base",  # implicit supertype in Neo4j
             "Tag_Tier_Zero",  # BH CE tiering analysis
+            "ADLocalGroup",  # BH CE local-group model label
         }
     )
 
