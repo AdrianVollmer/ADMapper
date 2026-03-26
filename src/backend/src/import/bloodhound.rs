@@ -126,6 +126,14 @@ pub struct BloodHoundImporter {
     edge_buffer: Vec<DbEdge>,
     /// Buffer domain nodes from trust relationships (for orphaned domains)
     trust_domain_buffer: Vec<DbNode>,
+    /// Per-domain tracking of principals with GetChanges ACE (for deferred DCSync)
+    dcsync_get_changes: HashMap<String, HashSet<String>>,
+    /// Per-domain tracking of principals with GetChangesAll ACE (for deferred DCSync)
+    dcsync_get_changes_all: HashMap<String, HashSet<String>>,
+    /// Group -> members (from Members arrays and PrimaryGroupSID) for DCSync expansion
+    group_members: HashMap<String, HashSet<String>>,
+    /// Domain SID -> domain name (for well-known SID resolution in DCSync)
+    domain_sid_to_name: HashMap<String, String>,
 }
 
 impl BloodHoundImporter {
@@ -140,6 +148,10 @@ impl BloodHoundImporter {
             seen_edges: HashSet::new(),
             edge_buffer: Vec::new(),
             trust_domain_buffer: Vec::new(),
+            dcsync_get_changes: HashMap::new(),
+            dcsync_get_changes_all: HashMap::new(),
+            group_members: HashMap::new(),
+            domain_sid_to_name: HashMap::new(),
         }
     }
 
@@ -227,6 +239,9 @@ impl BloodHoundImporter {
             }
         }
 
+        // Derive deferred edges (DCSync through group membership)
+        self.flush_deferred_dcsync(&mut progress)?;
+
         // Resolve placeholder node names using domain SID-to-name mappings
         match self.resolve_orphan_names() {
             Ok(count) if count > 0 => {
@@ -263,6 +278,9 @@ impl BloodHoundImporter {
 
         progress.files_processed = 1;
         progress.bytes_processed = file_size;
+
+        // Derive deferred edges (DCSync through group membership)
+        self.flush_deferred_dcsync(&mut progress)?;
 
         // Resolve placeholder node names using domain SID-to-name mappings
         match self.resolve_orphan_names() {
@@ -339,6 +357,9 @@ impl BloodHoundImporter {
                 }
             }
         }
+
+        // Derive deferred edges (DCSync through group membership)
+        self.flush_deferred_dcsync(&mut progress)?;
 
         // Resolve placeholder node names using domain SID-to-name mappings
         match self.resolve_orphan_names() {
@@ -653,10 +674,15 @@ impl BloodHoundImporter {
         self.extract_delegation_edges(entity, &objectid, &node_type, &mut relationships);
         self.extract_gpo_link_edges(entity, &objectid, &node_type, &mut relationships);
         self.extract_trust_edges(entity, &objectid, &mut relationships);
+        self.emit_wellknown_memberof(entity, &objectid, &node_type, &mut relationships);
         self.derive_dcsync_edges(&objectid, &node_type, &mut relationships);
         self.extract_pki_edges(entity, &objectid, &node_type, &mut relationships);
         self.extract_domain_sid_edges(entity, &objectid, &node_type, &mut relationships);
         self.extract_coerce_to_tgt(entity, &objectid, &node_type, &mut relationships);
+
+        // Track state for deferred DCSync derivation
+        self.track_dcsync_state(entity, &objectid, &node_type, &relationships);
+
         relationships
     }
 
@@ -995,22 +1021,22 @@ impl BloodHoundImporter {
                 "sidFilteringEnabled": trust.get("SidFilteringEnabled").and_then(|v| v.as_bool()).unwrap_or(false),
             });
 
-            // Bidirectional or outbound trust
+            // Outbound or bidirectional: WE trust THEM. Edge: us -> them.
             if trust_direction == 2 || trust_direction == 3 {
                 relationships.push(DbEdge {
-                    source: target_sid.to_string(),
-                    target: objectid.to_string(),
+                    source: objectid.to_string(),
+                    target: target_sid.to_string(),
                     rel_type: rel_type.to_string(),
                     properties: props.clone(),
                     source_type: Some("Domain".to_string()),
                     target_type: Some("Domain".to_string()),
                 });
             }
-            // Bidirectional or inbound trust
+            // Inbound or bidirectional: THEY trust US. Edge: them -> us.
             if trust_direction == 1 || trust_direction == 3 {
                 relationships.push(DbEdge {
-                    source: objectid.to_string(),
-                    target: target_sid.to_string(),
+                    source: target_sid.to_string(),
+                    target: objectid.to_string(),
                     rel_type: rel_type.to_string(),
                     properties: props,
                     source_type: Some("Domain".to_string()),
@@ -1168,8 +1194,13 @@ impl BloodHoundImporter {
                 if principal_sid == objectid {
                     continue;
                 }
-                let Some(rel_type) = self.ace_to_edge_type(right_name) else {
-                    continue;
+                // CASecurity only produces ManageCA, ManageCertificates, Enroll
+                // in BH CE. Other ACE types (Owns, GenericAll, etc.) are dropped.
+                let rel_type = match right_name {
+                    "ManageCA" => "ManageCA",
+                    "ManageCertificates" => "ManageCertificates",
+                    "Enroll" => "Enroll",
+                    _ => continue,
                 };
                 let is_inherited = ace
                     .get("IsInherited")
@@ -1292,6 +1323,178 @@ impl BloodHoundImporter {
             source_type: Some(node_type.to_string()),
             target_type: Some("Domain".to_string()),
         });
+    }
+
+    /// Emit well-known implicit MemberOf edges for a domain.
+    ///
+    /// BH CE materializes these implicit group memberships that exist in every
+    /// AD domain but are not present in SharpHound's Members arrays:
+    /// - Guest (-501) -> Everyone (S-1-1-0)
+    /// - Domain Users (-513) -> Authenticated Users (S-1-5-11)
+    /// - Domain Computers (-515) -> Authenticated Users (S-1-5-11)
+    /// - Authenticated Users (S-1-5-11) -> Everyone (S-1-1-0)
+    fn emit_wellknown_memberof(
+        &self,
+        _entity: &JsonValue,
+        objectid: &str,
+        node_type: &str,
+        relationships: &mut Vec<DbEdge>,
+    ) {
+        if node_type != "Domain" {
+            return;
+        }
+        let sid = objectid;
+        let pairs: &[(&str, &str, &str, &str)] = &[
+            ("-501", "User", "-S-1-1-0", "Group"),   // Guest -> Everyone
+            ("-513", "Group", "-S-1-5-11", "Group"), // Domain Users -> Auth Users
+            ("-515", "Group", "-S-1-5-11", "Group"), // Domain Computers -> Auth Users
+            ("-S-1-5-11", "Group", "-S-1-1-0", "Group"), // Auth Users -> Everyone
+        ];
+        for &(src_suffix, src_type, tgt_suffix, tgt_type) in pairs {
+            relationships.push(DbEdge {
+                source: format!("{sid}{src_suffix}"),
+                target: format!("{sid}{tgt_suffix}"),
+                rel_type: "MemberOf".to_string(),
+                properties: JsonValue::Null,
+                source_type: Some(src_type.to_string()),
+                target_type: Some(tgt_type.to_string()),
+            });
+        }
+    }
+
+    /// Track state needed for deferred DCSync derivation.
+    ///
+    /// Collects: GetChanges/GetChangesAll principals per domain, group
+    /// memberships, PrimaryGroupSID memberships, and domain name mappings.
+    fn track_dcsync_state(
+        &mut self,
+        entity: &JsonValue,
+        objectid: &str,
+        node_type: &str,
+        relationships: &[DbEdge],
+    ) {
+        // Track domain name -> SID mapping
+        if node_type == "Domain" {
+            if let Some(name) = entity
+                .get("Properties")
+                .and_then(|p| p.get("name"))
+                .and_then(|v| v.as_str())
+            {
+                self.domain_sid_to_name
+                    .insert(objectid.to_string(), name.to_uppercase());
+            }
+        }
+
+        // Track GetChanges / GetChangesAll from emitted edges
+        for edge in relationships {
+            if edge.rel_type == "GetChanges" {
+                self.dcsync_get_changes
+                    .entry(edge.target.clone())
+                    .or_default()
+                    .insert(edge.source.clone());
+            } else if edge.rel_type == "GetChangesAll" {
+                self.dcsync_get_changes_all
+                    .entry(edge.target.clone())
+                    .or_default()
+                    .insert(edge.source.clone());
+            }
+        }
+
+        // Track group memberships from MemberOf edges
+        for edge in relationships {
+            if edge.rel_type == "MemberOf" {
+                self.group_members
+                    .entry(edge.target.clone())
+                    .or_default()
+                    .insert(edge.source.clone());
+            }
+        }
+
+        // Track DC implicit membership in Enterprise Domain Controllers.
+        // DCs have PrimaryGroupSID ending in -516 (Domain Controllers).
+        // All DCs are implicitly members of Enterprise Domain Controllers
+        // ({DomainName}-S-1-5-9), which typically holds GetChanges.
+        if let Some(pg_sid) = entity.get("PrimaryGroupSID").and_then(|v| v.as_str()) {
+            if pg_sid.ends_with("-516") {
+                if let Some(domain_sid) = entity
+                    .get("Properties")
+                    .and_then(|p| p.get("domainsid"))
+                    .and_then(|v| v.as_str())
+                {
+                    if let Some(domain_name) = self.domain_sid_to_name.get(domain_sid) {
+                        let edc_sid = format!("{}-S-1-5-9", domain_name);
+                        self.group_members
+                            .entry(edc_sid)
+                            .or_default()
+                            .insert(objectid.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Derive DCSync edges from transitive group membership.
+    ///
+    /// Called after all entities are processed. Expands group memberships one
+    /// level into the GetChanges/GetChangesAll sets, then creates DCSync edges
+    /// for principals that hold both rights on a domain.
+    pub fn derive_deferred_dcsync(&self) -> Vec<DbEdge> {
+        let mut result = Vec::new();
+
+        // Collect all domain OIDs that have any DCSync ACEs
+        let domains: HashSet<&String> = self
+            .dcsync_get_changes
+            .keys()
+            .chain(self.dcsync_get_changes_all.keys())
+            .collect();
+
+        for domain_oid in domains {
+            let gc = self.dcsync_get_changes.get(domain_oid);
+            let gca = self.dcsync_get_changes_all.get(domain_oid);
+
+            let (Some(gc), Some(gca)) = (gc, gca) else {
+                continue;
+            };
+
+            // Expand one level: for each group in the set, add its members
+            let mut expanded_gc: HashSet<&str> = gc.iter().map(|s| s.as_str()).collect();
+            for principal in gc {
+                if let Some(members) = self.group_members.get(principal) {
+                    for m in members {
+                        expanded_gc.insert(m.as_str());
+                    }
+                }
+            }
+
+            let mut expanded_gca: HashSet<&str> = gca.iter().map(|s| s.as_str()).collect();
+            for principal in gca {
+                if let Some(members) = self.group_members.get(principal) {
+                    for m in members {
+                        expanded_gca.insert(m.as_str());
+                    }
+                }
+            }
+
+            // Intersect: principals with both rights get DCSync
+            for principal in expanded_gc.intersection(&expanded_gca) {
+                // Skip if this principal already has a direct DCSync edge
+                // (those are emitted by derive_dcsync_edges during entity processing)
+                if gc.contains(*principal) && gca.contains(*principal) {
+                    continue;
+                }
+                result.push(DbEdge {
+                    source: principal.to_string(),
+                    target: domain_oid.clone(),
+                    rel_type: "DCSync".to_string(),
+                    properties: JsonValue::Null,
+                    source_type: None,
+                    target_type: Some("Domain".to_string()),
+                });
+            }
+        }
+
+        debug!(count = result.len(), "Derived deferred DCSync edges");
+        result
     }
 
     /// Map local group name to relationship type.
@@ -1474,6 +1677,28 @@ impl BloodHoundImporter {
         );
         self.edge_buffer.clear();
         Ok(())
+    }
+
+    /// Flush deferred DCSync edges into the database.
+    ///
+    /// Called once after all files are processed, before orphan name resolution.
+    fn flush_deferred_dcsync(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
+        let deferred = self.derive_deferred_dcsync();
+        if deferred.is_empty() {
+            return Ok(());
+        }
+        info!(count = deferred.len(), "Flushing deferred DCSync edges");
+        for edge in deferred {
+            let key = (
+                edge.source.clone(),
+                edge.target.clone(),
+                edge.rel_type.clone(),
+            );
+            if self.seen_edges.insert(key) {
+                self.edge_buffer.push(edge);
+            }
+        }
+        self.flush_edge_buffer(progress)
     }
 
     /// Resolve placeholder node names using domain SID-to-name mappings.
@@ -2036,19 +2261,21 @@ mod tests {
         });
 
         let relationships = importer.extract_edges("domains", &entity);
+        let trusts: Vec<_> = relationships
+            .iter()
+            .filter(|e| e.rel_type.ends_with("Trust"))
+            .collect();
 
-        // Bidirectional trust creates 2 relationships
-        assert_eq!(relationships.len(), 2);
-        assert!(relationships
+        // Bidirectional trust creates 2 trust relationships
+        assert_eq!(trusts.len(), 2);
+        assert!(trusts
             .iter()
             .any(|e| e.source == "S-1-5-21-DOMAIN2" && e.target == "S-1-5-21-DOMAIN1"));
-        assert!(relationships
+        assert!(trusts
             .iter()
             .any(|e| e.source == "S-1-5-21-DOMAIN1" && e.target == "S-1-5-21-DOMAIN2"));
         // No TrustType -> defaults to CrossForestTrust
-        assert!(relationships
-            .iter()
-            .all(|e| e.rel_type == "CrossForestTrust"));
+        assert!(trusts.iter().all(|e| e.rel_type == "CrossForestTrust"));
     }
 
     #[test]
@@ -2078,26 +2305,30 @@ mod tests {
         });
 
         let relationships = importer.extract_edges("domains", &entity);
+        let trusts: Vec<_> = relationships
+            .iter()
+            .filter(|e| e.rel_type.ends_with("Trust"))
+            .collect();
 
-        // Bidirectional creates 2 relationships, Outbound creates 1, Inbound creates 1 = 4 total
-        assert_eq!(relationships.len(), 4);
+        // Bidirectional creates 2, Outbound creates 1, Inbound creates 1 = 4 trust edges
+        assert_eq!(trusts.len(), 4);
 
         // Bidirectional with DOMAIN2 (ParentChild = SameForestTrust)
-        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN2"
+        assert!(trusts.iter().any(|e| e.source == "S-1-5-21-DOMAIN2"
             && e.target == "S-1-5-21-DOMAIN1"
             && e.rel_type == "SameForestTrust"));
-        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
+        assert!(trusts.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
             && e.target == "S-1-5-21-DOMAIN2"
             && e.rel_type == "SameForestTrust"));
 
-        // Outbound to DOMAIN3 (External = CrossForestTrust)
-        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN3"
-            && e.target == "S-1-5-21-DOMAIN1"
+        // Outbound to DOMAIN3 (External = CrossForestTrust): we trust them
+        assert!(trusts.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
+            && e.target == "S-1-5-21-DOMAIN3"
             && e.rel_type == "CrossForestTrust"));
 
-        // Inbound from DOMAIN4 (ParentChild = SameForestTrust)
-        assert!(relationships.iter().any(|e| e.source == "S-1-5-21-DOMAIN1"
-            && e.target == "S-1-5-21-DOMAIN4"
+        // Inbound from DOMAIN4 (ParentChild = SameForestTrust): they trust us
+        assert!(trusts.iter().any(|e| e.source == "S-1-5-21-DOMAIN4"
+            && e.target == "S-1-5-21-DOMAIN1"
             && e.rel_type == "SameForestTrust"));
     }
 
@@ -3397,6 +3628,239 @@ mod tests {
         assert!(
             !edges.iter().any(|e| e.rel_type == "CoerceToTGT"),
             "Computer without unconstrained delegation should not have CoerceToTGT"
+        );
+    }
+
+    // ========================================================================
+    // BH CE Parity: Trust direction (CrossForestTrust / SameForestTrust)
+    // ========================================================================
+
+    #[test]
+    fn test_bhce_inbound_trust_direction() {
+        // Inbound trust: the OTHER domain trusts THIS domain.
+        // BH CE convention: edge from trusting -> trusted.
+        // So: target_domain -> this_domain.
+        let mut importer = test_importer();
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-PHANTOM",
+            "Trusts": [{
+                "TargetDomainSid": "S-1-5-21-REVENANT",
+                "TargetDomainName": "REVENANT.CORP",
+                "TrustDirection": "Inbound",
+                "TrustType": "External"
+            }]
+        });
+        let edges = importer.extract_edges("domains", &entity);
+        let trust: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "CrossForestTrust")
+            .collect();
+        assert_eq!(trust.len(), 1);
+        assert_eq!(trust[0].source, "S-1-5-21-REVENANT");
+        assert_eq!(trust[0].target, "S-1-5-21-PHANTOM");
+    }
+
+    #[test]
+    fn test_bhce_outbound_trust_direction() {
+        // Outbound trust: THIS domain trusts the OTHER domain.
+        // BH CE convention: edge from trusting -> trusted.
+        // So: this_domain -> target_domain.
+        let mut importer = test_importer();
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-PHANTOM",
+            "Trusts": [{
+                "TargetDomainSid": "S-1-5-21-WRAITH",
+                "TargetDomainName": "WRAITH.CORP",
+                "TrustDirection": "Outbound",
+                "TrustType": "External"
+            }]
+        });
+        let edges = importer.extract_edges("domains", &entity);
+        let trust: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "CrossForestTrust")
+            .collect();
+        assert_eq!(trust.len(), 1);
+        assert_eq!(trust[0].source, "S-1-5-21-PHANTOM");
+        assert_eq!(trust[0].target, "S-1-5-21-WRAITH");
+    }
+
+    // ========================================================================
+    // BH CE Parity: Well-known implicit MemberOf edges
+    // ========================================================================
+
+    #[test]
+    fn test_bhce_wellknown_memberof_domain() {
+        let mut importer = test_importer();
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN",
+            "Properties": {
+                "name": "TEST.CORP",
+                "domainsid": "S-1-5-21-DOMAIN"
+            }
+        });
+        let edges = importer.extract_edges("domains", &entity);
+        let memberof: Vec<_> = edges.iter().filter(|e| e.rel_type == "MemberOf").collect();
+
+        // Guest -> Everyone
+        assert!(
+            memberof.iter().any(|e| e.source == "S-1-5-21-DOMAIN-501"
+                && e.target == "S-1-5-21-DOMAIN-S-1-1-0"),
+            "Guest should be MemberOf Everyone"
+        );
+        // Domain Users -> Authenticated Users
+        assert!(
+            memberof.iter().any(
+                |e| e.source == "S-1-5-21-DOMAIN-513" && e.target == "S-1-5-21-DOMAIN-S-1-5-11"
+            ),
+            "Domain Users should be MemberOf Authenticated Users"
+        );
+        // Domain Computers -> Authenticated Users
+        assert!(
+            memberof.iter().any(
+                |e| e.source == "S-1-5-21-DOMAIN-515" && e.target == "S-1-5-21-DOMAIN-S-1-5-11"
+            ),
+            "Domain Computers should be MemberOf Authenticated Users"
+        );
+        // Authenticated Users -> Everyone
+        assert!(
+            memberof
+                .iter()
+                .any(|e| e.source == "S-1-5-21-DOMAIN-S-1-5-11"
+                    && e.target == "S-1-5-21-DOMAIN-S-1-1-0"),
+            "Authenticated Users should be MemberOf Everyone"
+        );
+
+        assert_eq!(
+            memberof.len(),
+            4,
+            "Expected exactly 4 well-known MemberOf edges; got: {:?}",
+            memberof
+                .iter()
+                .map(|e| format!("{} -> {}", e.source, e.target))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    // ========================================================================
+    // BH CE Parity: DCSync through group membership
+    // ========================================================================
+
+    #[test]
+    fn test_bhce_dcsync_through_group_membership() {
+        let mut importer = test_importer();
+
+        // Domain with GetChanges on group-A and GetChangesAll on group-B
+        let domain = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN",
+            "Properties": { "name": "TEST.CORP", "domainsid": "S-1-5-21-DOMAIN" },
+            "Aces": [
+                { "PrincipalSID": "S-1-5-21-DOMAIN-GROUP-A", "RightName": "GetChanges", "IsInherited": false, "PrincipalType": "Group" },
+                { "PrincipalSID": "S-1-5-21-DOMAIN-GROUP-B", "RightName": "GetChangesAll", "IsInherited": false, "PrincipalType": "Group" }
+            ]
+        });
+        importer.extract_edges("domains", &domain);
+
+        // Group A has USER1 as member
+        let group_a = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN-GROUP-A",
+            "Members": [{ "ObjectIdentifier": "S-1-5-21-DOMAIN-USER1", "ObjectType": "User" }]
+        });
+        importer.extract_edges("groups", &group_a);
+
+        // Group B also has USER1 as member
+        let group_b = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN-GROUP-B",
+            "Members": [{ "ObjectIdentifier": "S-1-5-21-DOMAIN-USER1", "ObjectType": "User" }]
+        });
+        importer.extract_edges("groups", &group_b);
+
+        let deferred = importer.derive_deferred_dcsync();
+
+        assert!(
+            deferred.iter().any(|e| e.source == "S-1-5-21-DOMAIN-USER1"
+                && e.target == "S-1-5-21-DOMAIN"
+                && e.rel_type == "DCSync"),
+            "User member of both GetChanges group and GetChangesAll group should get DCSync; got: {:?}",
+            deferred
+        );
+    }
+
+    #[test]
+    fn test_bhce_dcsync_dc_via_primary_group() {
+        let mut importer = test_importer();
+
+        // Domain with Enterprise Domain Controllers (S-1-5-9) having GetChanges
+        // and Domain Controllers (-516) having GetChangesAll
+        let domain = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN",
+            "Properties": { "name": "TEST.CORP", "domainsid": "S-1-5-21-DOMAIN" },
+            "Aces": [
+                { "PrincipalSID": "TEST.CORP-S-1-5-9", "RightName": "GetChanges", "IsInherited": false, "PrincipalType": "Group" },
+                { "PrincipalSID": "S-1-5-21-DOMAIN-516", "RightName": "GetChangesAll", "IsInherited": false, "PrincipalType": "Group" }
+            ]
+        });
+        importer.extract_edges("domains", &domain);
+
+        // DC with PrimaryGroupSID = Domain Controllers (-516)
+        let dc = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-DOMAIN-1000",
+            "PrimaryGroupSID": "S-1-5-21-DOMAIN-516",
+            "Properties": {
+                "name": "DC01.TEST.CORP",
+                "domainsid": "S-1-5-21-DOMAIN"
+            }
+        });
+        importer.extract_edges("computers", &dc);
+
+        let deferred = importer.derive_deferred_dcsync();
+
+        assert!(
+            deferred.iter().any(|e| e.source == "S-1-5-21-DOMAIN-1000"
+                && e.target == "S-1-5-21-DOMAIN"
+                && e.rel_type == "DCSync"),
+            "DC should get DCSync through Domain Controllers (GetChangesAll) + Enterprise Domain Controllers (GetChanges); got: {:?}",
+            deferred
+        );
+    }
+
+    // ========================================================================
+    // BH CE Parity: CASecurity ACEs should not emit Owns
+    // ========================================================================
+
+    #[test]
+    fn test_bhce_ca_security_no_owns() {
+        let mut importer = test_importer();
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "ENTERPRISE-CA-1",
+            "CARegistryData": {
+                "CASecurity": {
+                    "Data": [
+                        {
+                            "PrincipalSID": "S-1-5-21-DOMAIN-S-1-5-32-544",
+                            "RightName": "Owns",
+                            "IsInherited": false,
+                            "PrincipalType": "Group"
+                        },
+                        {
+                            "PrincipalSID": "S-1-5-21-DOMAIN-ADMIN",
+                            "RightName": "ManageCA",
+                            "IsInherited": false,
+                            "PrincipalType": "User"
+                        }
+                    ]
+                }
+            }
+        });
+        let edges = importer.extract_edges("enterprisecas", &entity);
+
+        assert!(
+            edges.iter().any(|e| e.rel_type == "ManageCA"),
+            "ManageCA should be emitted from CASecurity"
+        );
+        assert!(
+            !edges.iter().any(|e| e.rel_type == "Owns"),
+            "Owns should NOT be emitted from CASecurity ACEs"
         );
     }
 }
