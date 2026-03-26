@@ -51,7 +51,15 @@ interface FilterState {
 let allNodes: TierNodeEntry[] = [];
 let filteredNodes: TierNodeEntry[] = [];
 let pagination: PaginationState = { page: 1, perPage: 50, total: 0 };
-let filters: FilterState = { nodeType: "", nameRegex: "", groupId: "", groupName: "", ouId: "", ouName: "", visibleOnly: false };
+let filters: FilterState = {
+  nodeType: "",
+  nameRegex: "",
+  groupId: "",
+  groupName: "",
+  ouId: "",
+  ouName: "",
+  visibleOnly: false,
+};
 let availableTypes: string[] = [];
 let isLoading = false;
 let modalEl: HTMLElement | null = null;
@@ -468,7 +476,9 @@ function render(): void {
       }
     });
     groupInput.addEventListener("blur", () => {
-      setTimeout(() => { if (groupResultsEl) groupResultsEl.hidden = true; }, 150);
+      setTimeout(() => {
+        if (groupResultsEl) groupResultsEl.hidden = true;
+      }, 150);
     });
   }
 
@@ -496,7 +506,9 @@ function render(): void {
       }
     });
     ouInput.addEventListener("blur", () => {
-      setTimeout(() => { if (ouResultsEl) ouResultsEl.hidden = true; }, 150);
+      setTimeout(() => {
+        if (ouResultsEl) ouResultsEl.hidden = true;
+      }, 150);
     });
   }
 }
