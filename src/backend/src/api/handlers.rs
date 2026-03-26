@@ -1000,7 +1000,7 @@ pub async fn batch_set_tier(
         let regex = name_regex
             .as_deref()
             .filter(|r| !r.is_empty())
-            .map(|r| regex::Regex::new(r))
+            .map(regex::Regex::new)
             .transpose()
             .map_err(|e| crate::db::DbError::Database(format!("Invalid regex: {e}")))?;
 
@@ -1515,10 +1515,10 @@ pub async fn compute_effective_tiers(
 
             // Seed with all nodes assigned to this tier
             for node in &nodes {
-                if *tier_map.get(node.id.as_str()).unwrap_or(&3) == target_tier {
-                    if visited.insert(node.id.as_str()) {
-                        queue.push_back(node.id.as_str());
-                    }
+                if *tier_map.get(node.id.as_str()).unwrap_or(&3) == target_tier
+                    && visited.insert(node.id.as_str())
+                {
+                    queue.push_back(node.id.as_str());
                 }
             }
 
