@@ -984,8 +984,19 @@ impl CrustDatabase {
 
                 let label = n
                     .labels
-                    .first()
+                    .iter()
+                    .find(|l| l.as_str() != "Base")
                     .cloned()
+                    .or_else(|| n.labels.first().cloned())
+                    .or_else(|| {
+                        n.properties.get("node_type").and_then(|v| {
+                            if let crustdb::PropertyValue::String(s) = v {
+                                Some(s.clone())
+                            } else {
+                                None
+                            }
+                        })
+                    })
                     .unwrap_or_else(|| "Unknown".to_string());
                 let properties = Self::properties_to_json(&n.properties);
 
