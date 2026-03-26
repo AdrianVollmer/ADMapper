@@ -654,6 +654,9 @@ impl BloodHoundImporter {
         self.extract_gpo_link_edges(entity, &objectid, &node_type, &mut relationships);
         self.extract_trust_edges(entity, &objectid, &mut relationships);
         self.derive_dcsync_edges(&objectid, &node_type, &mut relationships);
+        self.extract_pki_edges(entity, &objectid, &node_type, &mut relationships);
+        self.extract_domain_sid_edges(entity, &objectid, &node_type, &mut relationships);
+        self.extract_coerce_to_tgt(entity, &objectid, &node_type, &mut relationships);
         relationships
     }
 
@@ -1057,6 +1060,238 @@ impl BloodHoundImporter {
                 target_type: Some(target_type.to_string()),
             });
         }
+    }
+
+    /// Extract PKI/ADCS topology edges from Enterprise CAs.
+    ///
+    /// Handles: PublishedTo (from EnabledCertTemplates), HostsCAService (from
+    /// HostingComputer), EnterpriseCAFor (from Properties.domainsid),
+    /// IssuedSignedBy (from CARegistryData.CertChain), and CA-specific ACEs
+    /// from CARegistryData.CASecurity.
+    fn extract_pki_edges(
+        &self,
+        entity: &JsonValue,
+        objectid: &str,
+        node_type: &str,
+        relationships: &mut Vec<DbEdge>,
+    ) {
+        if node_type != "EnterpriseCA" {
+            return;
+        }
+
+        // EnabledCertTemplates -> PublishedTo (Template -> CA)
+        if let Some(templates) = entity
+            .get("EnabledCertTemplates")
+            .and_then(|v| v.as_array())
+        {
+            for tmpl in templates {
+                if let Some(tmpl_id) = tmpl.get("ObjectIdentifier").and_then(|v| v.as_str()) {
+                    relationships.push(DbEdge {
+                        source: tmpl_id.to_string(),
+                        target: objectid.to_string(),
+                        rel_type: "PublishedTo".to_string(),
+                        properties: JsonValue::Null,
+                        source_type: Some("CertTemplate".to_string()),
+                        target_type: Some(node_type.to_string()),
+                    });
+                }
+            }
+        }
+
+        // HostingComputer -> HostsCAService (Computer -> CA)
+        if let Some(host_id) = entity.get("HostingComputer").and_then(|v| v.as_str()) {
+            if !host_id.is_empty() {
+                relationships.push(DbEdge {
+                    source: host_id.to_string(),
+                    target: objectid.to_string(),
+                    rel_type: "HostsCAService".to_string(),
+                    properties: JsonValue::Null,
+                    source_type: Some("Computer".to_string()),
+                    target_type: Some(node_type.to_string()),
+                });
+            }
+        }
+
+        // Properties.domainsid -> EnterpriseCAFor (CA -> Domain)
+        if let Some(domain_sid) = entity
+            .get("Properties")
+            .and_then(|v| v.get("domainsid"))
+            .and_then(|v| v.as_str())
+        {
+            if !domain_sid.is_empty() {
+                relationships.push(DbEdge {
+                    source: objectid.to_string(),
+                    target: domain_sid.to_string(),
+                    rel_type: "EnterpriseCAFor".to_string(),
+                    properties: JsonValue::Null,
+                    source_type: Some(node_type.to_string()),
+                    target_type: Some("Domain".to_string()),
+                });
+            }
+        }
+
+        // CARegistryData.CertChain -> IssuedSignedBy (CA -> RootCA)
+        if let Some(chain) = entity
+            .get("CARegistryData")
+            .and_then(|v| v.get("CertChain"))
+            .and_then(|v| v.as_array())
+        {
+            for cert in chain {
+                if let Some(cert_id) = cert.get("ObjectIdentifier").and_then(|v| v.as_str()) {
+                    let cert_type = cert.get("ObjectType").and_then(|v| v.as_str());
+                    relationships.push(DbEdge {
+                        source: objectid.to_string(),
+                        target: cert_id.to_string(),
+                        rel_type: "IssuedSignedBy".to_string(),
+                        properties: JsonValue::Null,
+                        source_type: Some(node_type.to_string()),
+                        target_type: cert_type.map(String::from),
+                    });
+                }
+            }
+        }
+
+        // CARegistryData.CASecurity -> ACE edges (ManageCA, Enroll, etc.)
+        if let Some(aces) = entity
+            .get("CARegistryData")
+            .and_then(|v| v.get("CASecurity"))
+            .and_then(|v| v.get("Data"))
+            .and_then(|v| v.as_array())
+        {
+            for ace in aces {
+                let (Some(principal_sid), Some(right_name)) = (
+                    ace.get("PrincipalSID").and_then(|v| v.as_str()),
+                    ace.get("RightName").and_then(|v| v.as_str()),
+                ) else {
+                    continue;
+                };
+                if principal_sid == objectid {
+                    continue;
+                }
+                let Some(rel_type) = self.ace_to_edge_type(right_name) else {
+                    continue;
+                };
+                let is_inherited = ace
+                    .get("IsInherited")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let principal_type = ace.get("PrincipalType").and_then(|v| v.as_str());
+                relationships.push(DbEdge {
+                    source: principal_sid.to_string(),
+                    target: objectid.to_string(),
+                    rel_type: rel_type.to_string(),
+                    properties: serde_json::json!({"inherited": is_inherited}),
+                    source_type: principal_type.map(String::from),
+                    target_type: Some(node_type.to_string()),
+                });
+            }
+        }
+    }
+
+    /// Extract domain-relationship edges for RootCAs and NTAuth stores.
+    ///
+    /// Handles: RootCAFor (RootCA -> Domain from DomainSID), NTAuthStoreFor
+    /// (NTAuth -> Domain from DomainSID), TrustedForNTAuth (CA -> NTAuth from
+    /// NTAuthCertificates).
+    fn extract_domain_sid_edges(
+        &self,
+        entity: &JsonValue,
+        objectid: &str,
+        node_type: &str,
+        relationships: &mut Vec<DbEdge>,
+    ) {
+        let domain_sid = entity.get("DomainSID").and_then(|v| v.as_str());
+
+        match node_type {
+            "RootCA" => {
+                if let Some(sid) = domain_sid {
+                    if !sid.is_empty() {
+                        relationships.push(DbEdge {
+                            source: objectid.to_string(),
+                            target: sid.to_string(),
+                            rel_type: "RootCAFor".to_string(),
+                            properties: JsonValue::Null,
+                            source_type: Some(node_type.to_string()),
+                            target_type: Some("Domain".to_string()),
+                        });
+                    }
+                }
+            }
+            "NTAuthStore" => {
+                if let Some(sid) = domain_sid {
+                    if !sid.is_empty() {
+                        relationships.push(DbEdge {
+                            source: objectid.to_string(),
+                            target: sid.to_string(),
+                            rel_type: "NTAuthStoreFor".to_string(),
+                            properties: JsonValue::Null,
+                            source_type: Some(node_type.to_string()),
+                            target_type: Some("Domain".to_string()),
+                        });
+                    }
+                }
+
+                // NTAuthCertificates -> TrustedForNTAuth (CA -> NTAuth)
+                if let Some(certs) = entity.get("NTAuthCertificates").and_then(|v| v.as_array()) {
+                    for cert in certs {
+                        if let Some(cert_id) = cert.get("ObjectIdentifier").and_then(|v| v.as_str())
+                        {
+                            let cert_type = cert.get("ObjectType").and_then(|v| v.as_str());
+                            relationships.push(DbEdge {
+                                source: cert_id.to_string(),
+                                target: objectid.to_string(),
+                                rel_type: "TrustedForNTAuth".to_string(),
+                                properties: JsonValue::Null,
+                                source_type: cert_type.map(String::from),
+                                target_type: Some(node_type.to_string()),
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Extract CoerceToTGT edges for computers with unconstrained delegation.
+    ///
+    /// BH CE creates a (Computer)-[CoerceToTGT]->(Domain) edge when a computer
+    /// has `unconstraineddelegation=true` in its properties.
+    fn extract_coerce_to_tgt(
+        &self,
+        entity: &JsonValue,
+        objectid: &str,
+        node_type: &str,
+        relationships: &mut Vec<DbEdge>,
+    ) {
+        if node_type != "Computer" {
+            return;
+        }
+        let props = entity.get("Properties");
+        let unconstrained = props
+            .and_then(|p| p.get("unconstraineddelegation"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !unconstrained {
+            return;
+        }
+        let Some(domain_sid) = props
+            .and_then(|p| p.get("domainsid"))
+            .and_then(|v| v.as_str())
+        else {
+            return;
+        };
+        if domain_sid.is_empty() {
+            return;
+        }
+        relationships.push(DbEdge {
+            source: objectid.to_string(),
+            target: domain_sid.to_string(),
+            rel_type: "CoerceToTGT".to_string(),
+            properties: JsonValue::Null,
+            source_type: Some(node_type.to_string()),
+            target_type: Some("Domain".to_string()),
+        });
     }
 
     /// Map local group name to relationship type.
@@ -2886,6 +3121,282 @@ mod tests {
             1,
             "Remote Interactive Logon group should create RemoteInteractiveLogonRight edge; got: {:?}",
             edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
+        );
+    }
+
+    // ========================================================================
+    // BH CE Compatibility: PKI / ADCS Edge Extraction
+    // ========================================================================
+
+    #[test]
+    fn test_bhce_enterprise_ca_published_to() {
+        let mut importer = test_importer();
+        // BH CE creates PublishedTo edges from EnabledCertTemplates on Enterprise CAs.
+        // Each enabled template gets a (Template)-[PublishedTo]->(CA) edge.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "CA-GUID-1",
+            "EnabledCertTemplates": [
+                {"ObjectIdentifier": "TMPL-1", "ObjectType": "CertTemplate"},
+                {"ObjectIdentifier": "TMPL-2", "ObjectType": "CertTemplate"},
+            ],
+            "Properties": {"name": "MY-CA@CORP.LOCAL"}
+        });
+        let edges = importer.extract_edges("enterprisecas", &entity);
+
+        let published: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "PublishedTo")
+            .collect();
+        assert_eq!(
+            published.len(),
+            2,
+            "Each EnabledCertTemplate should create a PublishedTo edge; got: {:?}",
+            edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
+        );
+        assert!(published.iter().all(|e| e.target == "CA-GUID-1"));
+        assert!(published.iter().any(|e| e.source == "TMPL-1"));
+        assert!(published.iter().any(|e| e.source == "TMPL-2"));
+    }
+
+    #[test]
+    fn test_bhce_enterprise_ca_hosts_ca_service() {
+        let mut importer = test_importer();
+        // BH CE creates a HostsCAService edge from the hosting computer to the CA.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "CA-GUID-1",
+            "HostingComputer": "S-1-5-21-COMP-DC",
+            "Properties": {"name": "MY-CA@CORP.LOCAL"}
+        });
+        let edges = importer.extract_edges("enterprisecas", &entity);
+
+        let hosts: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "HostsCAService")
+            .collect();
+        assert_eq!(
+            hosts.len(),
+            1,
+            "HostingComputer should create a HostsCAService edge; got: {:?}",
+            edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
+        );
+        assert_eq!(hosts[0].source, "S-1-5-21-COMP-DC");
+        assert_eq!(hosts[0].target, "CA-GUID-1");
+    }
+
+    #[test]
+    fn test_bhce_enterprise_ca_registry_aces() {
+        let mut importer = test_importer();
+        // BH CE processes CARegistryData.CASecurity ACEs for ManageCA/ManageCertificates.
+        // These are CA-specific ACEs, separate from the entity's top-level Aces array.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "CA-GUID-1",
+            "CARegistryData": {
+                "CASecurity": {
+                    "Data": [
+                        {"PrincipalSID": "S-1-5-21-ADMIN", "PrincipalType": "Group", "RightName": "ManageCA", "IsInherited": false},
+                        {"PrincipalSID": "S-1-5-21-USER1", "PrincipalType": "User", "RightName": "ManageCertificates", "IsInherited": false},
+                        {"PrincipalSID": "S-1-5-21-GROUP1", "PrincipalType": "Group", "RightName": "Enroll", "IsInherited": false},
+                    ]
+                }
+            },
+            "Properties": {"name": "MY-CA@CORP.LOCAL"}
+        });
+        let edges = importer.extract_edges("enterprisecas", &entity);
+
+        let types: Vec<&str> = edges.iter().map(|e| e.rel_type.as_str()).collect();
+        assert!(
+            types.contains(&"ManageCA"),
+            "CARegistryData ACEs should produce ManageCA edges; got: {types:?}"
+        );
+        assert!(
+            types.contains(&"ManageCertificates"),
+            "CARegistryData ACEs should produce ManageCertificates edges; got: {types:?}"
+        );
+        assert!(
+            types.contains(&"Enroll"),
+            "CARegistryData ACEs should produce Enroll edges; got: {types:?}"
+        );
+    }
+
+    #[test]
+    fn test_bhce_root_ca_for_domain() {
+        let mut importer = test_importer();
+        // BH CE creates RootCAFor edges from Root CAs to their domain.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "ROOTCA-GUID-1",
+            "DomainSID": "S-1-5-21-DOMAIN",
+            "Properties": {"name": "ROOT-CA@CORP.LOCAL"}
+        });
+        let edges = importer.extract_edges("rootcas", &entity);
+
+        let root_for: Vec<_> = edges.iter().filter(|e| e.rel_type == "RootCAFor").collect();
+        assert_eq!(
+            root_for.len(),
+            1,
+            "Root CA should create RootCAFor edge to its domain; got: {:?}",
+            edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
+        );
+        assert_eq!(root_for[0].source, "ROOTCA-GUID-1");
+        assert_eq!(root_for[0].target, "S-1-5-21-DOMAIN");
+    }
+
+    #[test]
+    fn test_bhce_ntauth_store_for_domain() {
+        let mut importer = test_importer();
+        // BH CE creates NTAuthStoreFor edges from NTAuth stores to their domain.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "NTAUTH-GUID-1",
+            "DomainSID": "S-1-5-21-DOMAIN",
+            "Properties": {"name": "NTAUTH@CORP.LOCAL"}
+        });
+        let edges = importer.extract_edges("ntauthstores", &entity);
+
+        let nta_for: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "NTAuthStoreFor")
+            .collect();
+        assert_eq!(
+            nta_for.len(),
+            1,
+            "NTAuth store should create NTAuthStoreFor edge to its domain; got: {:?}",
+            edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
+        );
+        assert_eq!(nta_for[0].source, "NTAUTH-GUID-1");
+        assert_eq!(nta_for[0].target, "S-1-5-21-DOMAIN");
+    }
+
+    #[test]
+    fn test_bhce_enterprise_ca_for_domain() {
+        let mut importer = test_importer();
+        // BH CE creates EnterpriseCAFor edges from Enterprise CAs to their domain.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "CA-GUID-1",
+            "Properties": {
+                "name": "MY-CA@CORP.LOCAL",
+                "domainsid": "S-1-5-21-DOMAIN"
+            }
+        });
+        let edges = importer.extract_edges("enterprisecas", &entity);
+
+        let eca_for: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "EnterpriseCAFor")
+            .collect();
+        assert_eq!(
+            eca_for.len(),
+            1,
+            "Enterprise CA should create EnterpriseCAFor edge to its domain; got: {:?}",
+            edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
+        );
+        assert_eq!(eca_for[0].source, "CA-GUID-1");
+        assert_eq!(eca_for[0].target, "S-1-5-21-DOMAIN");
+    }
+
+    #[test]
+    fn test_bhce_issued_signed_by() {
+        let mut importer = test_importer();
+        // BH CE creates IssuedSignedBy edges from Enterprise CAs to their
+        // Root CA chain.  The CARegistryData contains certificate chain info.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "CA-GUID-1",
+            "CARegistryData": {
+                "CertChain": [
+                    {"ObjectIdentifier": "ROOTCA-1", "ObjectType": "RootCA"},
+                    {"ObjectIdentifier": "ROOTCA-2", "ObjectType": "RootCA"},
+                ]
+            },
+            "Properties": {"name": "MY-CA@CORP.LOCAL"}
+        });
+        let edges = importer.extract_edges("enterprisecas", &entity);
+
+        let issued: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "IssuedSignedBy")
+            .collect();
+        assert_eq!(
+            issued.len(),
+            2,
+            "CertChain entries should create IssuedSignedBy edges; got: {:?}",
+            edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
+        );
+        assert!(issued.iter().all(|e| e.source == "CA-GUID-1"));
+    }
+
+    #[test]
+    fn test_bhce_trusted_for_ntauth() {
+        let mut importer = test_importer();
+        // BH CE creates TrustedForNTAuth edges from NTAuth stores referencing
+        // specific Enterprise CAs.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "NTAUTH-GUID-1",
+            "DomainSID": "S-1-5-21-DOMAIN",
+            "NTAuthCertificates": [
+                {"ObjectIdentifier": "CA-GUID-1", "ObjectType": "EnterpriseCA"},
+                {"ObjectIdentifier": "CA-GUID-2", "ObjectType": "EnterpriseCA"},
+            ],
+            "Properties": {"name": "NTAUTH@CORP.LOCAL"}
+        });
+        let edges = importer.extract_edges("ntauthstores", &entity);
+
+        let trusted: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "TrustedForNTAuth")
+            .collect();
+        assert_eq!(
+            trusted.len(),
+            2,
+            "NTAuthCertificates should create TrustedForNTAuth edges; got: {:?}",
+            edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
+        );
+        assert!(trusted.iter().all(|e| e.target == "NTAUTH-GUID-1"));
+    }
+
+    #[test]
+    fn test_bhce_computer_coerce_to_tgt() {
+        let mut importer = test_importer();
+        // BH CE creates CoerceToTGT edges from computers with unconstrained
+        // delegation (unconstraineddelegation=true) to their domain.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-COMP-1",
+            "Properties": {
+                "name": "DC01.CORP.LOCAL",
+                "domainsid": "S-1-5-21-DOMAIN",
+                "unconstraineddelegation": true
+            }
+        });
+        let edges = importer.extract_edges("computers", &entity);
+
+        let coerce: Vec<_> = edges
+            .iter()
+            .filter(|e| e.rel_type == "CoerceToTGT")
+            .collect();
+        assert_eq!(
+            coerce.len(),
+            1,
+            "Computer with unconstrained delegation should create CoerceToTGT to domain; got: {:?}",
+            edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
+        );
+        assert_eq!(coerce[0].source, "S-1-5-21-COMP-1");
+        assert_eq!(coerce[0].target, "S-1-5-21-DOMAIN");
+    }
+
+    #[test]
+    fn test_bhce_computer_no_coerce_without_delegation() {
+        let mut importer = test_importer();
+        // Computer WITHOUT unconstrained delegation should NOT get CoerceToTGT.
+        let entity = serde_json::json!({
+            "ObjectIdentifier": "S-1-5-21-COMP-2",
+            "Properties": {
+                "name": "SRV01.CORP.LOCAL",
+                "domainsid": "S-1-5-21-DOMAIN",
+                "unconstraineddelegation": false
+            }
+        });
+        let edges = importer.extract_edges("computers", &entity);
+
+        assert!(
+            !edges.iter().any(|e| e.rel_type == "CoerceToTGT"),
+            "Computer without unconstrained delegation should not have CoerceToTGT"
         );
     }
 }
