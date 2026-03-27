@@ -5,8 +5,6 @@
  */
 
 import Sigma from "sigma";
-import { createNodeImageProgram } from "@sigma/node-image";
-import { createEdgeCurveProgram } from "@sigma/edge-curve";
 import { TaperedEdgeProgram } from "./TaperedEdgeProgram";
 import type { ADGraphType } from "./ADGraph";
 import type { ADNodeAttributes, ADEdgeAttributes } from "./types";
@@ -18,7 +16,7 @@ import {
   DEFAULT_EDGE_COLOR,
 } from "./theme";
 import { isNodeCollapsed, getHiddenChildCount, getHiddenNodeIds, toggleNodeCollapse } from "./collapse";
-import { getLabelParts } from "./label-visibility";
+import { createSharedNodeImageProgram, createSharedCurvedArrowProgram, drawNodeLabel } from "./programs";
 import { getFixedNodeSizes, setFixedNodeSizesCallback } from "../components/settings";
 
 export interface RendererOptions {
@@ -179,39 +177,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     settings: { labelSize: number; labelWeight: string; labelColor: { color?: string } },
     nodeId?: string
   ): void {
-    const parts = getLabelParts(data.label);
-    if (!parts) return;
-
-    const size = settings.labelSize;
-    const font = `${settings.labelWeight} ${size}px sans-serif`;
-    const color = settings.labelColor.color ?? LABEL_COLOR[currentTheme];
-
-    context.font = font;
-    context.fillStyle = color;
-    context.textBaseline = "top";
-
-    // Position below the node with a small gap
-    const yOffset = data.size + 4;
-    const y = data.y + yOffset;
-
-    // Calculate total width for centering
-    const clearWidth = parts.clear ? context.measureText(parts.clear).width : 0;
-    const blurredWidth = parts.blurred ? context.measureText(parts.blurred).width : 0;
-    const totalWidth = clearWidth + blurredWidth;
-    let x = data.x - totalWidth / 2;
-
-    // Draw clear part
-    if (parts.clear) {
-      context.textAlign = "left";
-      context.fillText(parts.clear, x, y);
-      x += clearWidth;
-    }
-
-    // Draw masked part (already '#' characters from getLabelParts)
-    if (parts.blurred) {
-      context.textAlign = "left";
-      context.fillText(parts.blurred, x, y);
-    }
+    drawNodeLabel(context, data, settings, currentTheme);
 
     // Draw collapse badge if node is collapsed
     if (nodeId && isNodeCollapsed(nodeId)) {
@@ -277,29 +243,9 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     }
   }
 
-  // Create node image program for rendering icons with high-quality settings
-  // "background" mode draws the node color as a circle behind the icon
-  const BaseNodeImageProgram = createNodeImageProgram({
-    size: { mode: "force", value: 512 }, // Higher resolution for crisp icons
-    drawingMode: "background",
-    colorAttribute: "color",
-    imageAttribute: "image",
-    padding: 0.12, // Slightly less padding for better icon visibility
-    keepWithinCircle: true,
-  });
-
-  // Use the base program directly - texture filtering will be applied after first render
-  const NodeImageProgram = BaseNodeImageProgram;
-
-  // Create curved relationship program with smooth arrows
-  const CurvedArrowProgram = createEdgeCurveProgram({
-    arrowHead: {
-      extremity: "target",
-      lengthToThicknessRatio: 3.5,
-      widenessToThicknessRatio: 3,
-    },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  }) as any;
+  // Create shared node image and curved arrow programs
+  const NodeImageProgram = createSharedNodeImageProgram();
+  const CurvedArrowProgram = createSharedCurvedArrowProgram();
 
   // Create Sigma instance with high-quality rendering settings
   const sigma = new Sigma(graph, containerEl, {

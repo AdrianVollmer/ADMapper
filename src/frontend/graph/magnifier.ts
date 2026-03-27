@@ -6,12 +6,10 @@
  */
 
 import Sigma from "sigma";
-import { createNodeImageProgram } from "@sigma/node-image";
-import { createEdgeCurveProgram } from "@sigma/edge-curve";
 import { TaperedEdgeProgram } from "./TaperedEdgeProgram";
 import { BACKGROUND_COLOR, LABEL_COLOR, DEFAULT_EDGE_COLOR } from "./theme";
 import { getHiddenNodeIds } from "./collapse";
-import { getLabelParts } from "./label-visibility";
+import { createSharedNodeImageProgram, createSharedCurvedArrowProgram, drawNodeLabel } from "./programs";
 
 /** Lens diameter in pixels */
 const LENS_SIZE = 250;
@@ -109,23 +107,8 @@ function initLensSigma(): void {
 
   const graph = mainSigmaRef.getGraph();
 
-  const NodeImageProgram = createNodeImageProgram({
-    size: { mode: "force", value: 512 },
-    drawingMode: "background",
-    colorAttribute: "color",
-    imageAttribute: "image",
-    padding: 0.12,
-    keepWithinCircle: true,
-  });
-
-  const CurvedArrowProgram = createEdgeCurveProgram({
-    arrowHead: {
-      extremity: "target",
-      lengthToThicknessRatio: 3.5,
-      widenessToThicknessRatio: 3,
-    },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  }) as any;
+  const NodeImageProgram = createSharedNodeImageProgram();
+  const CurvedArrowProgram = createSharedCurvedArrowProgram();
 
   // Simple label renderer for the lens (no collapse badges needed)
   function drawLensLabel(
@@ -133,34 +116,7 @@ function initLensSigma(): void {
     data: { label: string | null; x: number; y: number; size: number; color: string },
     settings: { labelSize: number; labelWeight: string; labelColor: { color?: string } }
   ): void {
-    const parts = getLabelParts(data.label);
-    if (!parts) return;
-
-    const size = settings.labelSize;
-    const font = `${settings.labelWeight} ${size}px sans-serif`;
-    const color = settings.labelColor.color ?? LABEL_COLOR[currentTheme];
-
-    context.font = font;
-    context.fillStyle = color;
-    context.textBaseline = "top";
-
-    const yOffset = data.size + 4;
-    const y = data.y + yOffset;
-
-    const clearWidth = parts.clear ? context.measureText(parts.clear).width : 0;
-    const blurredWidth = parts.blurred ? context.measureText(parts.blurred).width : 0;
-    const totalWidth = clearWidth + blurredWidth;
-    let x = data.x - totalWidth / 2;
-
-    if (parts.clear) {
-      context.textAlign = "left";
-      context.fillText(parts.clear, x, y);
-      x += clearWidth;
-    }
-    if (parts.blurred) {
-      context.textAlign = "left";
-      context.fillText(parts.blurred, x, y);
-    }
+    drawNodeLabel(context, data, settings, currentTheme);
   }
 
   lensSigma = new Sigma(graph, sigmaContainer, {
