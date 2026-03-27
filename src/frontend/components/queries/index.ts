@@ -15,6 +15,12 @@ import { BUILTIN_QUERIES } from "./builtin-queries";
 // Re-export types for external use
 export type { Query, QueryCategory } from "./types";
 
+/** localStorage key for custom queries (must match manage-queries.ts) */
+const STORAGE_KEY = "admapper_custom_queries";
+
+/** Old localStorage key (hyphenated) — kept only for migration */
+const OLD_STORAGE_KEY = "admapper-custom-queries";
+
 /** Custom queries loaded from localStorage */
 let customQueries: QueryCategory[] = [];
 
@@ -54,10 +60,20 @@ export function initQueries(): void {
   renderQueryTree();
 }
 
-/** Load custom queries from localStorage */
+/** Load custom queries from localStorage, migrating from the old key if needed */
 function loadCustomQueries(): void {
   try {
-    const stored = localStorage.getItem("admapper-custom-queries");
+    // Migrate data from the old hyphenated key to the canonical underscored key
+    const oldData = localStorage.getItem(OLD_STORAGE_KEY);
+    if (oldData) {
+      // Only migrate if the new key has no data yet (avoid overwriting)
+      if (!localStorage.getItem(STORAGE_KEY)) {
+        localStorage.setItem(STORAGE_KEY, oldData);
+      }
+      localStorage.removeItem(OLD_STORAGE_KEY);
+    }
+
+    const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       customQueries = JSON.parse(stored);
     }
@@ -68,7 +84,7 @@ function loadCustomQueries(): void {
 
 /** Save custom queries to localStorage */
 export function saveCustomQueries(): void {
-  localStorage.setItem("admapper-custom-queries", JSON.stringify(customQueries));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(customQueries));
 }
 
 /** Add a custom query */
