@@ -4,6 +4,7 @@
 
 use crustdb::{Database, EntityCacheConfig};
 use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -721,6 +722,8 @@ impl CrustDatabase {
     }
 
     /// Find paths to Domain Admins.
+    ///
+    /// Uses reverse BFS from DA groups for O(V+E) instead of per-user BFS.
     pub fn find_paths_to_domain_admins(
         &self,
         exclude_edge_types: &[String],
@@ -741,66 +744,37 @@ impl CrustDatabase {
             return Ok(Vec::new());
         }
 
-        // Build adjacency list, filtering excluded relationship types
+        // Build reverse adjacency list, filtering excluded relationship types
         let exclude_set: std::collections::HashSet<&str> =
             exclude_edge_types.iter().map(|s| s.as_str()).collect();
 
-        let mut adj: std::collections::HashMap<String, Vec<(String, String)>> =
-            std::collections::HashMap::new();
-        for relationship in &relationships {
-            if !exclude_set.contains(relationship.rel_type.as_str()) {
-                adj.entry(relationship.source.clone())
+        let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        for rel in &relationships {
+            if !exclude_set.contains(rel.rel_type.as_str()) {
+                reverse_adj
+                    .entry(rel.target.as_str())
                     .or_default()
-                    .push((relationship.target.clone(), relationship.rel_type.clone()));
+                    .push(rel.source.as_str());
             }
         }
 
-        // BFS from each user to find paths to DA
-        let users: Vec<&DbNode> = nodes.iter().filter(|n| n.label == "User").collect();
+        // Single reverse BFS from DA groups
+        let distances = reverse_bfs(&da_groups, &reverse_adj);
 
-        let mut results = Vec::new();
-        for user in users {
-            if let Some(hops) = self.bfs_to_targets(&user.id, &da_groups, &adj) {
-                results.push((user.id.clone(), user.label.clone(), user.name.clone(), hops));
-            }
-        }
+        // Collect users that can reach DA
+        let mut results: Vec<(String, String, String, usize)> = nodes
+            .iter()
+            .filter(|n| n.label == "User")
+            .filter_map(|n| {
+                distances
+                    .get(n.id.as_str())
+                    .map(|&hops| (n.id.clone(), n.label.clone(), n.name.clone(), hops))
+            })
+            .collect();
 
         results.sort_by_key(|r| r.3);
         debug!(result_count = results.len(), "Found users with paths to DA");
         Ok(results)
-    }
-
-    /// BFS to find shortest path to any target.
-    fn bfs_to_targets(
-        &self,
-        start: &str,
-        targets: &[&str],
-        adj: &std::collections::HashMap<String, Vec<(String, String)>>,
-    ) -> Option<usize> {
-        let target_set: std::collections::HashSet<&str> = targets.iter().copied().collect();
-
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = std::collections::VecDeque::new();
-
-        queue.push_back((start.to_string(), 0usize));
-        visited.insert(start.to_string());
-
-        while let Some((current, depth)) = queue.pop_front() {
-            if target_set.contains(current.as_str()) {
-                return Some(depth);
-            }
-
-            if let Some(neighbors) = adj.get(&current) {
-                for (neighbor, _) in neighbors {
-                    if !visited.contains(neighbor) {
-                        visited.insert(neighbor.clone());
-                        queue.push_back((neighbor.clone(), depth + 1));
-                    }
-                }
-            }
-        }
-
-        None
     }
 
     /// Get nodes by IDs.
@@ -1300,6 +1274,10 @@ impl CrustDatabase {
     }
 
     /// Get security insights.
+    ///
+    /// Uses reverse BFS from DA groups instead of per-user forward BFS.
+    /// This reduces complexity from O(Users * V) to O(V) for both real and
+    /// effective DA computation.
     pub fn get_security_insights(&self) -> Result<SecurityInsights> {
         debug!("Computing security insights");
 
@@ -1315,53 +1293,58 @@ impl CrustDatabase {
             .map(|n| n.id.as_str())
             .collect();
 
-        // Build MemberOf adjacency
-        let mut memberof_adj: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
-        for relationship in &relationships {
-            if relationship.rel_type == "MemberOf" {
-                memberof_adj
-                    .entry(relationship.source.clone())
+        // Build reverse adjacency lists (target -> sources).
+        // Reverse BFS from DA groups walks edges backwards to find all
+        // nodes that can reach DA, in a single O(V+E) traversal.
+        let mut reverse_memberof: HashMap<&str, Vec<&str>> = HashMap::new();
+        let mut reverse_full: HashMap<&str, Vec<&str>> = HashMap::new();
+        for rel in &relationships {
+            if rel.rel_type == "MemberOf" {
+                reverse_memberof
+                    .entry(rel.target.as_str())
                     .or_default()
-                    .push(relationship.target.clone());
+                    .push(rel.source.as_str());
             }
-        }
-
-        // Find real DAs (users directly or transitively in DA group via MemberOf)
-        let mut real_das = Vec::new();
-        for user in nodes.iter().filter(|n| n.label == "User") {
-            if self.is_transitive_member(&user.id, &da_groups, &memberof_adj) {
-                real_das.push((user.id.clone(), user.name.clone()));
-            }
-        }
-
-        // Build full adjacency for effective DA paths
-        let mut full_adj: std::collections::HashMap<String, Vec<(String, String)>> =
-            std::collections::HashMap::new();
-        for relationship in &relationships {
-            full_adj
-                .entry(relationship.source.clone())
+            reverse_full
+                .entry(rel.target.as_str())
                 .or_default()
-                .push((relationship.target.clone(), relationship.rel_type.clone()));
+                .push(rel.source.as_str());
         }
 
-        // Find effective DAs (any path to DA group)
-        let mut effective_das = Vec::new();
-        for user in nodes.iter().filter(|n| n.label == "User") {
-            if let Some(hops) = self.bfs_to_targets(&user.id, &da_groups, &full_adj) {
-                effective_das.push((user.id.clone(), user.name.clone(), hops));
-            }
-        }
-
-        // Simplified reachability (placeholder - returns all principals with 0 count)
-        let reachability: Vec<ReachabilityInsight> = WELL_KNOWN_PRINCIPALS
+        // Build a name lookup for users
+        let user_names: HashMap<&str, &str> = nodes
             .iter()
-            .map(|(name, _)| ReachabilityInsight {
-                principal_name: name.to_string(),
-                principal_id: None,
-                reachable_count: 0,
+            .filter(|n| n.label == "User")
+            .map(|n| (n.id.as_str(), n.name.as_str()))
+            .collect();
+
+        // Reverse BFS from DA groups through MemberOf-only edges → real DAs
+        let memberof_distances = reverse_bfs(&da_groups, &reverse_memberof);
+        let mut real_das: Vec<(String, String)> = memberof_distances
+            .iter()
+            .filter(|(&id, _)| user_names.contains_key(id))
+            .map(|(&id, _)| {
+                let name = user_names[id];
+                (id.to_string(), name.to_string())
             })
             .collect();
+        real_das.sort_unstable_by(|a, b| a.1.cmp(&b.1));
+
+        // Reverse BFS from DA groups through all edges → effective DAs
+        let full_distances = reverse_bfs(&da_groups, &reverse_full);
+        let mut effective_das: Vec<(String, String, usize)> = full_distances
+            .iter()
+            .filter(|(&id, _)| user_names.contains_key(id))
+            .map(|(&id, &hops)| {
+                let name = user_names[id];
+                (id.to_string(), name.to_string(), hops)
+            })
+            .collect();
+        effective_das.sort_unstable_by_key(|r| r.2);
+
+        // Reachability from well-known principals: count direct non-MemberOf
+        // neighbors, matching Neo4j/FalkorDB behavior.
+        let reachability = self.compute_reachability(&nodes, &relationships);
 
         Ok(SecurityInsights::from_counts(
             total_users,
@@ -1371,40 +1354,92 @@ impl CrustDatabase {
         ))
     }
 
-    /// Check if a node is transitively member of any target via MemberOf.
-    fn is_transitive_member(
+    /// Compute reachability from well-known principals.
+    ///
+    /// Counts distinct non-MemberOf neighbors of each principal, matching
+    /// the Neo4j/FalkorDB implementation.
+    fn compute_reachability(
         &self,
-        start: &str,
-        targets: &[&str],
-        memberof_adj: &std::collections::HashMap<String, Vec<String>>,
-    ) -> bool {
-        let target_set: std::collections::HashSet<&str> = targets.iter().copied().collect();
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = std::collections::VecDeque::new();
-
-        queue.push_back(start.to_string());
-        visited.insert(start.to_string());
-
-        while let Some(current) = queue.pop_front() {
-            if target_set.contains(current.as_str()) {
-                return true;
-            }
-            if let Some(groups) = memberof_adj.get(&current) {
-                for group in groups {
-                    if !visited.contains(group) {
-                        visited.insert(group.clone());
-                        queue.push_back(group.clone());
-                    }
-                }
+        nodes: &[DbNode],
+        relationships: &[DbEdge],
+    ) -> Vec<ReachabilityInsight> {
+        // Build forward adjacency for non-MemberOf edges from each node
+        let mut non_memberof_targets: HashMap<&str, std::collections::HashSet<&str>> =
+            HashMap::new();
+        for rel in relationships {
+            if rel.rel_type != "MemberOf" {
+                non_memberof_targets
+                    .entry(rel.source.as_str())
+                    .or_default()
+                    .insert(rel.target.as_str());
             }
         }
-        false
+
+        WELL_KNOWN_PRINCIPALS
+            .iter()
+            .map(|(name, sid_pattern)| {
+                // Find the principal node matching this SID pattern
+                let principal = nodes.iter().find(|n| n.id.ends_with(sid_pattern));
+
+                let (principal_id, reachable_count) = match principal {
+                    Some(p) => {
+                        let count = non_memberof_targets
+                            .get(p.id.as_str())
+                            .map(|targets| targets.len())
+                            .unwrap_or(0);
+                        (Some(p.id.clone()), count)
+                    }
+                    None => (None, 0),
+                };
+
+                ReachabilityInsight {
+                    principal_name: name.to_string(),
+                    principal_id,
+                    reachable_count,
+                }
+            })
+            .collect()
     }
 
     // Choke points: uses default DatabaseBackend::get_choke_points() which loads
     // all nodes/edges once and runs Brandes' algorithm in-memory via algorithms.rs.
     // The previous CrustDB-specific override ran per-edge Cypher queries to resolve
     // node metadata, causing O(E) query overhead.
+}
+
+/// BFS backwards from seed nodes through a reverse adjacency list.
+///
+/// Returns a map from every reachable node to its hop distance from the
+/// nearest seed. Runs in O(V + E) -- a single traversal regardless of
+/// how many seeds or how many nodes exist.
+fn reverse_bfs<'a>(
+    seeds: &[&'a str],
+    reverse_adj: &HashMap<&'a str, Vec<&'a str>>,
+) -> HashMap<&'a str, usize> {
+    let mut distances: HashMap<&str, usize> = HashMap::new();
+    let mut queue = std::collections::VecDeque::new();
+
+    for &seed in seeds {
+        if distances.contains_key(seed) {
+            continue;
+        }
+        distances.insert(seed, 0);
+        queue.push_back(seed);
+    }
+
+    while let Some(current) = queue.pop_front() {
+        let depth = distances[current];
+        if let Some(predecessors) = reverse_adj.get(current) {
+            for &pred in predecessors {
+                if !distances.contains_key(pred) {
+                    distances.insert(pred, depth + 1);
+                    queue.push_back(pred);
+                }
+            }
+        }
+    }
+
+    distances
 }
 
 // ============================================================================
@@ -1596,5 +1631,108 @@ impl DatabaseBackend for CrustDatabase {
     fn get_database_size(&self) -> Result<Option<usize>> {
         let size = self.db.database_size()?;
         Ok(Some(size))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reverse_bfs_single_seed() {
+        // A -> B -> C (DA)
+        let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        adj.insert("B", vec!["A"]);
+        adj.insert("C", vec!["B"]);
+
+        let distances = reverse_bfs(&["C"], &adj);
+        assert_eq!(distances.get("C"), Some(&0));
+        assert_eq!(distances.get("B"), Some(&1));
+        assert_eq!(distances.get("A"), Some(&2));
+    }
+
+    #[test]
+    fn reverse_bfs_multiple_seeds() {
+        // A -> DA1, B -> DA2
+        let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        adj.insert("DA1", vec!["A"]);
+        adj.insert("DA2", vec!["B"]);
+
+        let distances = reverse_bfs(&["DA1", "DA2"], &adj);
+        assert_eq!(distances.get("A"), Some(&1));
+        assert_eq!(distances.get("B"), Some(&1));
+        assert_eq!(distances.get("DA1"), Some(&0));
+        assert_eq!(distances.get("DA2"), Some(&0));
+    }
+
+    #[test]
+    fn reverse_bfs_shortest_path_wins() {
+        // A -> X -> DA, A -> DA (direct, shorter)
+        let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        adj.insert("DA", vec!["A", "X"]);
+        adj.insert("X", vec!["A"]);
+
+        let distances = reverse_bfs(&["DA"], &adj);
+        assert_eq!(distances.get("A"), Some(&1)); // Direct, not via X (2)
+    }
+
+    #[test]
+    fn reverse_bfs_unreachable_nodes() {
+        // A -> DA, C is isolated
+        let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        adj.insert("DA", vec!["A"]);
+        // C has no edges
+
+        let distances = reverse_bfs(&["DA"], &adj);
+        assert_eq!(distances.get("A"), Some(&1));
+        assert!(distances.get("C").is_none());
+    }
+
+    #[test]
+    fn reverse_bfs_empty_graph() {
+        let adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        let distances = reverse_bfs(&["DA"], &adj);
+        assert_eq!(distances.len(), 1); // Only the seed itself
+        assert_eq!(distances.get("DA"), Some(&0));
+    }
+
+    #[test]
+    fn reverse_bfs_cycle() {
+        // A -> B -> C -> A (cycle), C is also a DA seed
+        let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        adj.insert("C", vec!["B"]);
+        adj.insert("B", vec!["A"]);
+        adj.insert("A", vec!["C"]); // Back-edge
+
+        let distances = reverse_bfs(&["C"], &adj);
+        assert_eq!(distances.get("C"), Some(&0));
+        assert_eq!(distances.get("B"), Some(&1));
+        assert_eq!(distances.get("A"), Some(&2));
+    }
+
+    #[test]
+    fn reverse_bfs_diamond() {
+        //     B
+        //    / \
+        // A     DA
+        //    \ /
+        //     C
+        let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        adj.insert("DA", vec!["B", "C"]);
+        adj.insert("B", vec!["A"]);
+        adj.insert("C", vec!["A"]);
+
+        let distances = reverse_bfs(&["DA"], &adj);
+        assert_eq!(distances.get("DA"), Some(&0));
+        assert_eq!(distances.get("B"), Some(&1));
+        assert_eq!(distances.get("C"), Some(&1));
+        assert_eq!(distances.get("A"), Some(&2));
+    }
+
+    #[test]
+    fn reverse_bfs_no_seeds() {
+        let adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        let distances = reverse_bfs(&[], &adj);
+        assert!(distances.is_empty());
     }
 }
