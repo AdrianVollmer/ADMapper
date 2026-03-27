@@ -1735,43 +1735,64 @@ impl BloodHoundImporter {
             "Built domain SID-to-name map for orphan resolution"
         );
 
-        // Step 2: Find nodes whose name is their raw SID and resolve them
-        let mut updated = 0;
+        // Step 2: Collect all (objectid, friendly_name) pairs for orphan nodes
+        let mut renames: Vec<(String, String)> = Vec::new();
         for node in &all_nodes {
             if node.name != node.id {
                 continue;
             }
-
-            // Extract domain SID prefix: S-1-5-21-X-Y-Z-RID → S-1-5-21-X-Y-Z
             if let Some(last_dash) = node.id.rfind('-') {
                 let domain_sid = &node.id[..last_dash];
                 let rid = &node.id[last_dash..]; // e.g. "-512"
-
                 if let Some(domain_name) = domain_map.get(domain_sid) {
-                    let friendly_name = format!("{}{}", domain_name, rid);
-                    let escaped_objectid = node.id.replace('\'', "\\'");
-                    let escaped_name = friendly_name.replace('\'', "\\'");
-                    let query = format!(
-                        "MATCH (n) WHERE n.objectid = '{}' SET n.name = '{}'",
-                        escaped_objectid, escaped_name
+                    renames.push((node.id.clone(), format!("{}{}", domain_name, rid)));
+                }
+            }
+        }
+
+        if renames.is_empty() {
+            return Ok(0);
+        }
+
+        // Step 3: Batch-update using CASE expressions to avoid N individual
+        // Cypher parse+plan cycles. Each chunk becomes a single query:
+        //   MATCH (n) WHERE n.objectid IN [...]
+        //   SET n.name = CASE n.objectid WHEN 'SID' THEN 'NAME' ... END
+        let mut updated = 0;
+        for chunk in renames.chunks(500) {
+            let in_list: Vec<String> = chunk
+                .iter()
+                .map(|(id, _)| format!("'{}'", id.replace('\'', "\\'")))
+                .collect();
+
+            let case_arms: Vec<String> = chunk
+                .iter()
+                .map(|(id, name)| {
+                    format!(
+                        "WHEN '{}' THEN '{}'",
+                        id.replace('\'', "\\'"),
+                        name.replace('\'', "\\'")
+                    )
+                })
+                .collect();
+
+            let query = format!(
+                "MATCH (n) WHERE n.objectid IN [{}] SET n.name = CASE n.objectid {} END",
+                in_list.join(", "),
+                case_arms.join(" ")
+            );
+
+            match self.db.run_custom_query(&query) {
+                Ok(_) => {
+                    updated += chunk.len();
+                    trace!(batch_size = chunk.len(), "Resolved orphan name batch");
+                }
+                Err(e) => {
+                    debug!(
+                        error = %e,
+                        batch_size = chunk.len(),
+                        "Failed to update orphan name batch"
                     );
-                    match self.db.run_custom_query(&query) {
-                        Ok(_) => {
-                            updated += 1;
-                            trace!(
-                                objectid = %node.id,
-                                new_name = %friendly_name,
-                                "Resolved orphan node name"
-                            );
-                        }
-                        Err(e) => {
-                            debug!(
-                                objectid = %node.id,
-                                error = %e,
-                                "Failed to update orphan node name"
-                            );
-                        }
-                    }
                 }
             }
         }
@@ -3862,5 +3883,53 @@ mod tests {
             !edges.iter().any(|e| e.rel_type == "Owns"),
             "Owns should NOT be emitted from CASecurity ACEs"
         );
+    }
+
+    #[test]
+    fn test_resolve_orphan_names_batched() {
+        let importer = test_importer();
+        let domain_sid = "S-1-5-21-1111-2222-3333";
+
+        // Insert a Domain node with a proper name
+        importer
+            .db
+            .insert_node(DbNode {
+                id: domain_sid.to_string(),
+                name: "CONTOSO.LOCAL".to_string(),
+                label: "Domain".to_string(),
+                properties: serde_json::json!({}),
+            })
+            .unwrap();
+
+        // Insert orphan nodes whose name == objectid (raw SID)
+        let orphan_rids = ["-512", "-519", "-1001"];
+        for rid in &orphan_rids {
+            let sid = format!("{}{}", domain_sid, rid);
+            importer
+                .db
+                .insert_node(DbNode {
+                    id: sid.clone(),
+                    name: sid.clone(), // name == id triggers resolution
+                    label: "Group".to_string(),
+                    properties: serde_json::json!({}),
+                })
+                .unwrap();
+        }
+
+        let updated = importer.resolve_orphan_names().unwrap();
+        assert_eq!(updated, 3);
+
+        // Verify names were actually updated in the database
+        let all_nodes = importer.db.get_all_nodes().unwrap();
+        for rid in &orphan_rids {
+            let sid = format!("{}{}", domain_sid, rid);
+            let node = all_nodes.iter().find(|n| n.id == sid).unwrap();
+            assert_eq!(
+                node.name,
+                format!("CONTOSO.LOCAL{}", rid),
+                "Orphan {} should have resolved name",
+                sid
+            );
+        }
     }
 }
