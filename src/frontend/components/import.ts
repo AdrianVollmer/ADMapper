@@ -19,6 +19,7 @@ let progressFill: HTMLElement | null = null;
 let progressPercent: HTMLElement | null = null;
 let progressFiles: HTMLElement | null = null;
 let currentFileEl: HTMLElement | null = null;
+let stageEl: HTMLElement | null = null;
 let nodesCountEl: HTMLElement | null = null;
 let edgesCountEl: HTMLElement | null = null;
 let errorEl: HTMLElement | null = null;
@@ -36,6 +37,7 @@ export function initImport(): void {
   progressPercent = document.getElementById("import-progress-percent");
   progressFiles = document.getElementById("import-progress-files");
   currentFileEl = document.getElementById("import-current-file");
+  stageEl = document.getElementById("import-stage");
   nodesCountEl = document.getElementById("import-nodes-count");
   edgesCountEl = document.getElementById("import-edges-count");
   errorEl = document.getElementById("import-error");
@@ -234,6 +236,11 @@ function updateProgressUI(progress: ImportProgressEvent): void {
     currentFileEl.textContent = progress.current_file || "-";
   }
 
+  if (stageEl) {
+    stageEl.textContent = progress.stage || "";
+    stageEl.hidden = !progress.stage;
+  }
+
   if (nodesCountEl) {
     nodesCountEl.textContent = progress.nodes_imported.toLocaleString();
   }
@@ -249,6 +256,10 @@ function resetProgress(): void {
   if (progressPercent) progressPercent.textContent = "0%";
   if (progressFiles) progressFiles.textContent = "0 / 0 files";
   if (currentFileEl) currentFileEl.textContent = "-";
+  if (stageEl) {
+    stageEl.textContent = "";
+    stageEl.hidden = true;
+  }
   if (nodesCountEl) nodesCountEl.textContent = "0";
   if (edgesCountEl) edgesCountEl.textContent = "0";
   if (errorEl) {

@@ -1339,6 +1339,10 @@
     @apply text-gray-300 ml-2 truncate;
   }
 
+  .status-stage {
+    @apply text-gray-500 ml-2 text-xs;
+  }
+
   .import-stats {
     @apply flex gap-8 py-2;
   }

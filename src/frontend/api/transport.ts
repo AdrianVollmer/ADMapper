@@ -91,6 +91,8 @@ export interface ImportProgressEvent {
   total_files: number;
   files_processed: number;
   current_file?: string;
+  /** Current processing stage within the file (e.g., "Extracting nodes") */
+  stage?: string;
   nodes_imported: number;
   edges_imported: number;
   bytes_processed: number;

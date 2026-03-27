@@ -23,6 +23,9 @@ pub struct ImportProgress {
     pub status: ImportStatus,
     /// Current file being processed
     pub current_file: Option<String>,
+    /// Current processing stage within the file (e.g., "Extracting nodes")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
     /// Number of files processed
     pub files_processed: usize,
     /// Total number of files
@@ -45,6 +48,7 @@ impl ImportProgress {
             job_id,
             status: ImportStatus::Running,
             current_file: None,
+            stage: None,
             files_processed: 0,
             total_files: 0,
             nodes_imported: 0,
@@ -67,11 +71,17 @@ impl ImportProgress {
 
     pub fn set_current_file(&mut self, file: String) {
         self.current_file = Some(file);
+        self.stage = None;
+    }
+
+    pub fn set_stage(&mut self, stage: &str) {
+        self.stage = Some(stage.to_string());
     }
 
     pub fn complete(&mut self) {
         self.status = ImportStatus::Completed;
         self.current_file = None;
+        self.stage = None;
     }
 
     /// Mark the import as failed with an error message.

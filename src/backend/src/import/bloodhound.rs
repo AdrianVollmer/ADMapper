@@ -239,22 +239,7 @@ impl BloodHoundImporter {
             }
         }
 
-        // Derive deferred edges (DCSync through group membership)
-        self.flush_deferred_dcsync(&mut progress)?;
-
-        // Resolve placeholder node names using domain SID-to-name mappings
-        match self.resolve_orphan_names() {
-            Ok(count) if count > 0 => {
-                info!(updated = count, "Resolved orphan node names");
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to resolve orphan node names");
-            }
-            _ => {}
-        }
-
-        progress.complete();
-        self.send_progress(&progress);
+        self.finalize(&mut progress)?;
         Ok(progress)
     }
 
@@ -279,22 +264,7 @@ impl BloodHoundImporter {
         progress.files_processed = 1;
         progress.bytes_processed = file_size;
 
-        // Derive deferred edges (DCSync through group membership)
-        self.flush_deferred_dcsync(&mut progress)?;
-
-        // Resolve placeholder node names using domain SID-to-name mappings
-        match self.resolve_orphan_names() {
-            Ok(count) if count > 0 => {
-                info!(updated = count, "Resolved orphan node names");
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to resolve orphan node names");
-            }
-            _ => {}
-        }
-
-        progress.complete();
-        self.send_progress(&progress);
+        self.finalize(&mut progress)?;
         Ok(progress)
     }
 
@@ -358,22 +328,7 @@ impl BloodHoundImporter {
             }
         }
 
-        // Derive deferred edges (DCSync through group membership)
-        self.flush_deferred_dcsync(&mut progress)?;
-
-        // Resolve placeholder node names using domain SID-to-name mappings
-        match self.resolve_orphan_names() {
-            Ok(count) if count > 0 => {
-                info!(updated = count, "Resolved orphan node names");
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to resolve orphan node names");
-            }
-            _ => {}
-        }
-
-        progress.complete();
-        self.send_progress(&progress);
+        self.finalize(&mut progress)?;
         Ok(progress)
     }
 
@@ -423,6 +378,9 @@ impl BloodHoundImporter {
 
         let mut node_batch: Vec<DbNode> = Vec::with_capacity(BATCH_SIZE);
 
+        progress.set_stage("Extracting nodes");
+        self.send_progress(progress);
+
         // Process each entity - parse from RawValue on demand
         for raw_entity in &file.data {
             // Parse this entity now (lazy parsing)
@@ -464,6 +422,10 @@ impl BloodHoundImporter {
         self.flush_nodes(&mut node_batch, progress)?;
 
         // Flush edges for this file - placeholder nodes handle missing targets
+        if !self.edge_buffer.is_empty() {
+            progress.set_stage("Writing relationships");
+            self.send_progress(progress);
+        }
         self.flush_edge_buffer(progress)?;
 
         Ok(())
@@ -1681,6 +1643,30 @@ impl BloodHoundImporter {
 
     /// Flush deferred DCSync edges into the database.
     ///
+    /// Post-processing after all files are imported: derive deferred edges,
+    /// resolve orphan names, and mark completion.
+    fn finalize(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
+        progress.current_file = None;
+        progress.set_stage("Finalizing");
+        self.send_progress(progress);
+
+        self.flush_deferred_dcsync(progress)?;
+
+        match self.resolve_orphan_names() {
+            Ok(count) if count > 0 => {
+                info!(updated = count, "Resolved orphan node names");
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to resolve orphan node names");
+            }
+            _ => {}
+        }
+
+        progress.complete();
+        self.send_progress(progress);
+        Ok(())
+    }
+
     /// Called once after all files are processed, before orphan name resolution.
     fn flush_deferred_dcsync(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
         let deferred = self.derive_deferred_dcsync();
