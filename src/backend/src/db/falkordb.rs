@@ -182,7 +182,6 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
             let objectid = node
                 .properties
                 .get("objectid")
-                .or_else(|| node.properties.get("objectid"))
                 .and_then(|v| {
                     if let falkordb::FalkorValue::String(s) = v {
                         Some(s.clone())
@@ -545,14 +544,14 @@ impl DatabaseBackend for FalkorDbDatabase {
             let cypher = if pattern.starts_with('-') {
                 format!(
                     "MATCH (p) WHERE p.objectid ENDS WITH '{}' \
-                     OPTIONAL MATCH (p)-[]->(t) \
+                     OPTIONAL MATCH (p)-[r]->(t) WHERE type(r) <> 'MemberOf' \
                      RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
                     pattern
                 )
             } else {
                 format!(
                     "MATCH (p {{objectid: '{}'}}) \
-                     OPTIONAL MATCH (p)-[]->(t) \
+                     OPTIONAL MATCH (p)-[r]->(t) WHERE type(r) <> 'MemberOf' \
                      RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
                     pattern
                 )

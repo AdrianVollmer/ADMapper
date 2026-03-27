@@ -89,7 +89,6 @@ impl Neo4jDatabase {
     fn neo4j_node_to_db_node(node: &Neo4jNode) -> DbNode {
         let id = node
             .get::<String>("objectid")
-            .or_else(|_| node.get::<String>("objectid"))
             .or_else(|_| node.get::<i64>("id").map(|id| id.to_string()))
             .unwrap_or_else(|_| format!("node_{}", node.id()));
 
@@ -459,14 +458,14 @@ impl DatabaseBackend for Neo4jDatabase {
             let q = if pattern.starts_with('-') {
                 query(&format!(
                     "MATCH (p) WHERE p.objectid ENDS WITH '{}' \
-                     OPTIONAL MATCH (p)-[]->(t) \
+                     OPTIONAL MATCH (p)-[r]->(t) WHERE type(r) <> 'MemberOf' \
                      RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
                     pattern
                 ))
             } else {
                 query(&format!(
                     "MATCH (p {{objectid: '{}'}}) \
-                     OPTIONAL MATCH (p)-[]->(t) \
+                     OPTIONAL MATCH (p)-[r]->(t) WHERE type(r) <> 'MemberOf' \
                      RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
                     pattern
                 ))
