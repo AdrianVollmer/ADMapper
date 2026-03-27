@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 /// Property value types supported by the graph.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -21,6 +22,44 @@ pub enum PropertyValue {
     List(Vec<PropertyValue>),
     /// Map of values.
     Map(HashMap<String, PropertyValue>),
+    /// A graph node (used in evaluation, not stored as a property).
+    Node(Node),
+    /// A graph relationship (used in evaluation, not stored as a property).
+    Relationship(Relationship),
+    /// A graph path (used in evaluation, not stored as a property).
+    Path(Path),
+}
+
+impl Eq for PropertyValue {}
+
+impl Hash for PropertyValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            PropertyValue::Null => {}
+            PropertyValue::Bool(b) => b.hash(state),
+            PropertyValue::Integer(i) => i.hash(state),
+            PropertyValue::Float(f) => f.to_bits().hash(state),
+            PropertyValue::String(s) => s.hash(state),
+            PropertyValue::List(l) => l.hash(state),
+            PropertyValue::Map(m) => {
+                // Hash map entries in sorted key order for stability.
+                let mut pairs: Vec<_> = m.iter().collect();
+                pairs.sort_by_key(|(k, _)| *k);
+                for (k, v) in pairs {
+                    k.hash(state);
+                    v.hash(state);
+                }
+            }
+            PropertyValue::Node(n) => n.id.hash(state),
+            PropertyValue::Relationship(r) => r.id.hash(state),
+            PropertyValue::Path(p) => {
+                for n in &p.nodes {
+                    n.id.hash(state);
+                }
+            }
+        }
+    }
 }
 
 impl From<bool> for PropertyValue {
@@ -59,8 +98,15 @@ impl From<&str> for PropertyValue {
     }
 }
 
+/// A path through the graph (sequence of nodes and relationships with full data).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Path {
+    pub nodes: Vec<Node>,
+    pub relationships: Vec<Relationship>,
+}
+
 /// A node in the graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     /// Unique node identifier.
     pub id: i64,
@@ -102,7 +148,7 @@ impl Node {
 }
 
 /// An relationship (relationship) in the graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Relationship {
     /// Unique relationship identifier.
     pub id: i64,

@@ -20,12 +20,8 @@ use tracing::{debug, trace};
 // Core Data Structures
 // =============================================================================
 
-/// A path through the graph (sequence of nodes and relationships with full data).
-#[derive(Debug, Clone)]
-pub struct Path {
-    pub nodes: Vec<Node>,
-    pub relationships: Vec<Relationship>,
-}
+/// Re-export Path from graph module.
+pub use crate::graph::Path;
 
 /// A binding represents a matched graph element (node or relationship) with its variable name.
 ///
@@ -482,7 +478,11 @@ fn project_with_bindings(
         }
 
         if let Some(ref mut seen_set) = seen {
-            let key = format!("{:?}", new_binding.scalars);
+            let key: Vec<(String, PropertyValue)> = new_binding
+                .scalars
+                .iter()
+                .cloned()
+                .collect();
             if !seen_set.insert(key) {
                 continue;
             }
@@ -503,13 +503,14 @@ fn execute_union(
 ) -> Result<QueryResult> {
     let mut result = execute_union_all(queries, storage, cache, limits)?;
 
-    // Deduplicate rows by serializing each row to a comparable key.
-    // We use the Debug representation of the sorted key-value pairs.
-    let mut seen = std::collections::HashSet::new();
+    // Deduplicate rows using proper Hash/Eq on ResultValue.
+    let mut seen: std::collections::HashSet<Vec<(String, ResultValue)>> =
+        std::collections::HashSet::new();
     result.rows.retain(|row| {
-        let mut pairs: Vec<_> = row.values.iter().collect();
-        pairs.sort_by_key(|(k, _)| (*k).clone());
-        let key = format!("{:?}", pairs);
+        let mut key: Vec<(String, ResultValue)> = row.values.iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        key.sort_by(|(a, _), (b, _)| a.cmp(b));
         seen.insert(key)
     });
 

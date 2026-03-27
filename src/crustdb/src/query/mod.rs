@@ -9,6 +9,7 @@ pub mod planner;
 use crate::graph::PropertyValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 /// Result of a Cypher query execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,15 +58,23 @@ impl Row {
 }
 
 /// A node in a path result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathNode {
     pub id: i64,
     pub labels: Vec<String>,
     pub properties: HashMap<String, PropertyValue>,
 }
 
+impl Hash for PathNode {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.labels.hash(state);
+        hash_property_map(&self.properties, state);
+    }
+}
+
 /// A relationship in a path result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathRelationship {
     pub id: i64,
     pub source: i64,
@@ -74,8 +83,18 @@ pub struct PathRelationship {
     pub properties: HashMap<String, PropertyValue>,
 }
 
+impl Hash for PathRelationship {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.source.hash(state);
+        self.target.hash(state);
+        self.rel_type.hash(state);
+        hash_property_map(&self.properties, state);
+    }
+}
+
 /// A value in a query result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum ResultValue {
     /// A property value.
@@ -99,6 +118,54 @@ pub enum ResultValue {
         nodes: Vec<PathNode>,
         relationships: Vec<PathRelationship>,
     },
+}
+
+impl Hash for ResultValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            ResultValue::Property(pv) => pv.hash(state),
+            ResultValue::Node {
+                id,
+                labels,
+                properties,
+            } => {
+                id.hash(state);
+                labels.hash(state);
+                hash_property_map(properties, state);
+            }
+            ResultValue::Relationship {
+                id,
+                source,
+                target,
+                rel_type,
+                properties,
+            } => {
+                id.hash(state);
+                source.hash(state);
+                target.hash(state);
+                rel_type.hash(state);
+                hash_property_map(properties, state);
+            }
+            ResultValue::Path {
+                nodes,
+                relationships,
+            } => {
+                nodes.hash(state);
+                relationships.hash(state);
+            }
+        }
+    }
+}
+
+/// Hash a HashMap<String, PropertyValue> in a stable (sorted-key) order.
+fn hash_property_map<H: Hasher>(map: &HashMap<String, PropertyValue>, state: &mut H) {
+    let mut pairs: Vec<_> = map.iter().collect();
+    pairs.sort_by_key(|(k, _)| *k);
+    for (k, v) in pairs {
+        k.hash(state);
+        v.hash(state);
+    }
 }
 
 /// Query execution statistics.

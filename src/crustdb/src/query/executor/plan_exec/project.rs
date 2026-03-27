@@ -1,7 +1,4 @@
-use super::{
-    compare_values, eval_to_property_value, eval_to_result_value, evaluate_expr, Binding,
-    EvalValue, ExecutionResult,
-};
+use super::{compare_values, eval_to_result_value, evaluate_expr, Binding, ExecutionResult};
 use crate::error::Result;
 use crate::graph::PropertyValue;
 use crate::query::planner::{AggregateFunction, ProjectColumn};
@@ -28,11 +25,13 @@ pub(super) fn execute_project(
     }
 
     if distinct {
-        // Simple deduplication based on string representation
-        let mut seen = HashSet::new();
+        let mut seen: HashSet<Vec<(String, ResultValue)>> = HashSet::new();
         let mut unique_rows = Vec::new();
         for row in rows {
-            let key = format!("{:?}", row.values);
+            let mut key: Vec<(String, ResultValue)> = row.values.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            key.sort_by(|(a, _), (b, _)| a.cmp(b));
             if seen.insert(key) {
                 unique_rows.push(row);
             }
@@ -116,7 +115,7 @@ pub(super) fn compute_aggregate(
             let count = if let Some(expr) = arg {
                 bindings
                     .iter()
-                    .filter(|b| !matches!(evaluate_expr(expr, b), Ok(EvalValue::Null)))
+                    .filter(|b| !matches!(evaluate_expr(expr, b), Ok(PropertyValue::Null)))
                     .count()
             } else {
                 bindings.len()
@@ -129,8 +128,8 @@ pub(super) fn compute_aggregate(
             let mut is_int = true;
             for b in bindings {
                 match evaluate_expr(expr, b)? {
-                    EvalValue::Int(i) => sum += i as f64,
-                    EvalValue::Float(f) => {
+                    PropertyValue::Integer(i) => sum += i as f64,
+                    PropertyValue::Float(f) => {
                         sum += f;
                         is_int = false;
                     }
@@ -149,11 +148,11 @@ pub(super) fn compute_aggregate(
             let mut count = 0;
             for b in bindings {
                 match evaluate_expr(expr, b)? {
-                    EvalValue::Int(i) => {
+                    PropertyValue::Integer(i) => {
                         sum += i as f64;
                         count += 1;
                     }
-                    EvalValue::Float(f) => {
+                    PropertyValue::Float(f) => {
                         sum += f;
                         count += 1;
                     }
@@ -170,10 +169,10 @@ pub(super) fn compute_aggregate(
         }
 
         AggregateFunction::Min(expr) => {
-            let mut min: Option<EvalValue> = None;
+            let mut min: Option<PropertyValue> = None;
             for b in bindings {
                 let v = evaluate_expr(expr, b)?;
-                if !matches!(v, EvalValue::Null) {
+                if !matches!(v, PropertyValue::Null) {
                     min = Some(match min {
                         None => v,
                         Some(m) => {
@@ -186,14 +185,14 @@ pub(super) fn compute_aggregate(
                     });
                 }
             }
-            Ok(eval_to_result_value(min.unwrap_or(EvalValue::Null)))
+            Ok(eval_to_result_value(min.unwrap_or(PropertyValue::Null)))
         }
 
         AggregateFunction::Max(expr) => {
-            let mut max: Option<EvalValue> = None;
+            let mut max: Option<PropertyValue> = None;
             for b in bindings {
                 let v = evaluate_expr(expr, b)?;
-                if !matches!(v, EvalValue::Null) {
+                if !matches!(v, PropertyValue::Null) {
                     max = Some(match max {
                         None => v,
                         Some(m) => {
@@ -206,15 +205,15 @@ pub(super) fn compute_aggregate(
                     });
                 }
             }
-            Ok(eval_to_result_value(max.unwrap_or(EvalValue::Null)))
+            Ok(eval_to_result_value(max.unwrap_or(PropertyValue::Null)))
         }
 
         AggregateFunction::Collect(expr) => {
             let mut items = Vec::new();
             for b in bindings {
                 let v = evaluate_expr(expr, b)?;
-                if !matches!(v, EvalValue::Null) {
-                    items.push(eval_to_property_value(v));
+                if !matches!(v, PropertyValue::Null) {
+                    items.push(v);
                 }
             }
             Ok(ResultValue::Property(PropertyValue::List(items)))
