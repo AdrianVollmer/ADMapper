@@ -18,6 +18,7 @@ use filter::*;
 use mutate::*;
 use project::*;
 use scan::*;
+use tracing::warn;
 
 use super::{Binding, Path};
 use crate::error::{Error, Result};
@@ -606,8 +607,18 @@ fn execute_operator_on_bindings(
             Ok(ExecutionResult::Bindings(filtered))
         }
 
-        // Fallback: execute normally (ignoring provided bindings)
-        _ => execute_operator(op, storage, ctx, cache),
+        // Fallback: execute normally (ignoring provided bindings).
+        // This drops the caller-provided bindings which may produce wrong
+        // results if the caller expected them to be threaded through.
+        _ => {
+            warn!(
+                operator = op.variant_name(),
+                num_bindings = bindings.len(),
+                "execute_operator_on_bindings: operator does not support injected bindings; \
+                 falling back to normal execution (bindings dropped)"
+            );
+            execute_operator(op, storage, ctx, cache)
+        }
     }
 }
 
