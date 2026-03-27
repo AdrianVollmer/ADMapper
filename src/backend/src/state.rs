@@ -325,7 +325,7 @@ impl AppState {
         let parsed = DatabaseUrl::parse(url).map_err(|e| e.to_string())?;
 
         // Track the database path for file-based backends
-        #[allow(unused_mut)]
+        #[allow(unused_mut, unused_assignments)]
         let mut db_path: Option<PathBuf> = None;
 
         let backend: Arc<dyn DatabaseBackend> = match parsed.db_type {
