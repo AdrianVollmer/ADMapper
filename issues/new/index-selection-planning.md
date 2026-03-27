@@ -1,5 +1,7 @@
 # Index Selection Planning
 
+**Criticality: Medium** | **Complexity: Medium**
+
 ## Problem
 
 The query executor always scans by the first label in a pattern, ignoring available property indexes. This can result in full scans when an indexed property lookup would be more efficient.

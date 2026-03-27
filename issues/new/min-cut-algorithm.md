@@ -1,5 +1,7 @@
 # Min-Cut Algorithm for Attack Path Analysis
 
+**Criticality: High** | **Complexity: High**
+
 ## Problem
 
 In Active Directory security analysis, a critical question is: "What's the minimum set of permissions to remove to protect high-value targets (like Domain Admins) from all attack paths?"

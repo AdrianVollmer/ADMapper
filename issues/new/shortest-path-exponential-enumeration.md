@@ -1,5 +1,7 @@
 # Shortest Path Exponential Enumeration for k>1
 
+**Criticality: Medium** | **Complexity: Medium**
+
 ## Problem
 
 When finding k shortest paths (where k > 1), the BFS enumeration can grow exponentially. For dense graphs or large k values, this causes performance degradation or memory exhaustion.

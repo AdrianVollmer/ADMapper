@@ -1,6 +1,6 @@
 # Top-N Optimization: LIMIT Pushdown Through Sort
 
-**Impact: Medium** | **Complexity: Medium**
+**Criticality: Medium** | **Complexity: Medium**
 
 ## Problem
 

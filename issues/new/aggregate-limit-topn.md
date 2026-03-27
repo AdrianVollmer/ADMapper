@@ -1,6 +1,6 @@
 # Aggregate + LIMIT Optimization
 
-**Impact: Low** | **Complexity: Low**
+**Criticality: Low** | **Complexity: Low**
 
 ## Problem
 

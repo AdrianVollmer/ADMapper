@@ -1,5 +1,7 @@
 # Async Choke Points Computation
 
+**Criticality: High** | **Complexity: High**
+
 ## Problem
 
 Edge betweenness centrality (choke points) is O(V*E) even with sampling.

@@ -1,5 +1,7 @@
 # Implement UNWIND clause in CrustDB
 
+**Criticality: Medium** | **Complexity: Medium**
+
 ## Context
 
 `UNWIND` is part of the openCypher 9 specification and is supported by Neo4j

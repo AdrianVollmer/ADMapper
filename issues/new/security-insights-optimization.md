@@ -1,5 +1,7 @@
 # Optimize Security Insights Computation
 
+**Criticality: High** | **Complexity: Low**
+
 ## Problem
 
 `get_security_insights()` in `src/backend/src/db/crustdb.rs` loads the

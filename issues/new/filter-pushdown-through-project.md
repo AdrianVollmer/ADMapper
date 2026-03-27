@@ -1,6 +1,6 @@
 # Filter Pushdown Through Intermediate Operators
 
-**Impact: Medium** | **Complexity: Medium**
+**Criticality: Medium** | **Complexity: Medium**
 
 ## Problem
 

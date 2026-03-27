@@ -1,6 +1,6 @@
 # Broader DISTINCT Optimizations
 
-**Impact: Low** | **Complexity: Medium**
+**Criticality: Low** | **Complexity: Medium**
 
 ## Problem
 
