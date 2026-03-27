@@ -1,6 +1,7 @@
 //! Node extraction, UAC flag expansion, tier assignment, and type normalization.
 
 use super::{tier_zero_rids, uac_flags, BloodHoundImporter};
+use crate::db::types::normalize_node_type;
 use crate::db::DbNode;
 use serde_json::Value as JsonValue;
 
@@ -34,7 +35,7 @@ impl BloodHoundImporter {
             .unwrap_or(&id)
             .to_string();
 
-        let node_type = self.normalize_type(data_type);
+        let node_type = normalize_node_type(data_type);
 
         // Domains are always tier 0
         if node_type == "Domain" {
@@ -190,23 +191,4 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Normalize BloodHound type name to standard format.
-    pub(super) fn normalize_type(&self, data_type: &str) -> String {
-        match data_type.to_lowercase().as_str() {
-            "users" | "user" => "User",
-            "groups" | "group" => "Group",
-            "computers" | "computer" => "Computer",
-            "domains" | "domain" => "Domain",
-            "gpos" | "gpo" => "GPO",
-            "ous" | "ou" => "OU",
-            "containers" | "container" => "Container",
-            "certtemplates" | "certtemplate" => "CertTemplate",
-            "enterprisecas" | "enterpriseca" => "EnterpriseCA",
-            "rootcas" | "rootca" => "RootCA",
-            "aiacas" | "aiaca" => "AIACA",
-            "ntauthstores" | "ntauthstore" => "NTAuthStore",
-            _ => "Base", // Unknown types get "Base" label
-        }
-        .to_string()
-    }
 }

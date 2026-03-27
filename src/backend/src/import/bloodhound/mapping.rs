@@ -8,7 +8,7 @@ impl BloodHoundImporter {
     ///
     /// Returns `None` for unrecognized group names -- BH CE only creates edges
     /// for the well-known local group types, not a generic fallback.
-    pub(super) fn local_group_to_edge_type(&self, group_name: &str) -> Option<&'static str> {
+    pub(super) fn local_group_to_edge_type(group_name: &str) -> Option<&'static str> {
         let upper = group_name.to_uppercase();
         if upper.contains("ADMINISTRATORS") {
             Some("AdminTo")
@@ -29,7 +29,7 @@ impl BloodHoundImporter {
     ///
     /// Returns `None` for unrecognized rights -- BH CE never creates generic
     /// "ACE" edges; only specifically recognized rights produce edges.
-    pub(super) fn ace_to_edge_type(&self, right_name: &str) -> Option<&'static str> {
+    pub(super) fn ace_to_edge_type(right_name: &str) -> Option<&'static str> {
         Some(match right_name {
             // Core AD permissions
             "GenericAll" => "GenericAll",

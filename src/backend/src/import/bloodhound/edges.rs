@@ -1,6 +1,7 @@
 //! Edge extraction from BloodHound entities.
 
 use super::BloodHoundImporter;
+use crate::db::types::normalize_node_type;
 use crate::db::DbEdge;
 use serde_json::Value as JsonValue;
 use tracing::trace;
@@ -14,7 +15,7 @@ impl BloodHoundImporter {
         };
 
         // Normalize type name for consistency
-        let node_type = self.normalize_type(data_type);
+        let node_type = normalize_node_type(data_type);
 
         let mut relationships = Vec::new();
         self.extract_member_edges(entity, &objectid, &node_type, &mut relationships);
@@ -138,7 +139,7 @@ impl BloodHoundImporter {
         };
         for group in local_groups {
             let group_name = group.get("Name").and_then(|v| v.as_str()).unwrap_or("");
-            let Some(rel_type) = self.local_group_to_edge_type(group_name) else {
+            let Some(rel_type) = Self::local_group_to_edge_type(group_name) else {
                 continue;
             };
 
@@ -186,7 +187,7 @@ impl BloodHoundImporter {
             }
 
             // Only recognized ACE rights produce edges; unknown rights are dropped
-            let Some(rel_type) = self.ace_to_edge_type(right_name) else {
+            let Some(rel_type) = Self::ace_to_edge_type(right_name) else {
                 trace!(right_name, "Skipping unrecognized ACE right");
                 continue;
             };
