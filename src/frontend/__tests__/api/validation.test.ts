@@ -11,7 +11,6 @@ import {
   isSearchResultArray,
   isPathStep,
   isPathResponse,
-  isQueryResponse,
   isQueryHistoryEntry,
   isPaginatedResponse,
   assertValidResponse,
@@ -207,45 +206,6 @@ describe("isPathResponse", () => {
         found: "yes",
         path: [],
         graph: { nodes: [], relationships: [] },
-      })
-    ).toBe(false);
-  });
-});
-
-// ============================================================================
-// isQueryResponse
-// ============================================================================
-
-describe("isQueryResponse", () => {
-  it("returns true for valid response", () => {
-    expect(
-      isQueryResponse({
-        results: {
-          headers: ["x"],
-          rows: [[1]],
-        },
-      })
-    ).toBe(true);
-  });
-
-  it("returns true for response with graph", () => {
-    expect(
-      isQueryResponse({
-        results: { headers: [], rows: [] },
-        graph: { nodes: [], relationships: [] },
-      })
-    ).toBe(true);
-  });
-
-  it("returns false for missing results", () => {
-    expect(isQueryResponse({})).toBe(false);
-  });
-
-  it("returns false for invalid graph", () => {
-    expect(
-      isQueryResponse({
-        results: { headers: [], rows: [] },
-        graph: { invalid: true },
       })
     ).toBe(false);
   });
