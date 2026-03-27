@@ -6,6 +6,7 @@
  */
 
 import { escapeHtml } from "../utils/html";
+import { createModal, type ModalHandle } from "../utils/modal";
 
 interface LicenseEntry {
   name: string;
@@ -15,7 +16,7 @@ interface LicenseEntry {
   licenseText: string;
 }
 
-let modal: HTMLDivElement | null = null;
+let modal: ModalHandle | null = null;
 let licensesData: LicenseEntry[] | null = null;
 
 /** Fetch license data (cached after first load) */
@@ -46,56 +47,26 @@ function renderEntry(entry: LicenseEntry): string {
   `;
 }
 
-/** Create the modal element */
-function createModal(): HTMLDivElement {
-  const el = document.createElement("div");
-  el.id = "licenses-modal";
-  el.className = "modal-overlay";
-  el.innerHTML = `
-    <div class="modal-content modal-lg">
-      <div class="modal-header">
-        <h2 class="modal-title">Third-Party Licenses</h2>
-        <button class="modal-close" data-action="close-licenses" aria-label="Close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <p class="text-sm text-gray-400">Loading...</p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-primary" data-action="close-licenses">Close</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(el);
-
-  el.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    if (target === el || target.closest("[data-action='close-licenses']")) {
-      el.hidden = true;
-    }
-  });
-
-  return el;
-}
-
 /** Open the licenses modal */
 export async function openLicenses(): Promise<void> {
   if (!modal) {
-    modal = createModal();
+    modal = createModal({
+      id: "licenses-modal",
+      title: "Third-Party Licenses",
+      sizeClass: "modal-lg",
+      buttons: [{ label: "Close", action: "close", className: "btn btn-primary" }],
+    });
   }
-  modal.hidden = false;
-
-  const body = modal.querySelector(".modal-body")!;
+  modal.open();
 
   if (licensesData) return; // Already loaded
 
+  modal.body.innerHTML = `<p class="text-sm text-gray-400">Loading...</p>`;
+
   try {
     const entries = await loadLicenses();
-    body.innerHTML = entries.map(renderEntry).join("");
+    modal.body.innerHTML = entries.map(renderEntry).join("");
   } catch {
-    body.innerHTML = `<p class="text-sm text-red-400">Failed to load license data.</p>`;
+    modal.body.innerHTML = `<p class="text-sm text-red-400">Failed to load license data.</p>`;
   }
 }

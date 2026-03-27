@@ -6,6 +6,7 @@
 
 import { api } from "../api/client";
 import { escapeHtml } from "../utils/html";
+import { createModal, type ModalHandle } from "../utils/modal";
 import { showConfirm } from "../utils/notifications";
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph } from "../graph/types";
@@ -25,8 +26,8 @@ interface DetailedStats {
   cache_size_bytes?: number;
 }
 
-/** Modal element */
-let modalEl: HTMLElement | null = null;
+/** Modal handle */
+let modal: ModalHandle | null = null;
 
 /** Initialize the database manager modal */
 export function initDbManager(): void {
@@ -35,56 +36,26 @@ export function initDbManager(): void {
 
 /** Open the database manager modal */
 export async function openDbManager(): Promise<void> {
-  if (!modalEl) {
-    createModal();
+  if (!modal) {
+    modal = createModal({
+      id: "db-manager-modal",
+      title: "Database Manager",
+      buttons: [{ label: "Close", action: "close", className: "btn btn-secondary" }],
+      onClick: (action) => {
+        if (action === "refresh") {
+          loadStats();
+        }
+      },
+    });
   }
-  modalEl!.hidden = false;
+  modal.open();
   await loadStats();
-}
-
-/** Close the modal */
-function closeModal(): void {
-  if (modalEl) {
-    modalEl.hidden = true;
-  }
-}
-
-/** Create the modal element */
-function createModal(): void {
-  modalEl = document.createElement("div");
-  modalEl.id = "db-manager-modal";
-  modalEl.className = "modal-overlay";
-  modalEl.innerHTML = `
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2 class="modal-title">Database Manager</h2>
-        <button class="modal-close" data-action="close" aria-label="Close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-body" id="db-manager-body">
-        <div class="flex items-center justify-center py-8">
-          <div class="spinner"></div>
-          <span class="ml-3 text-gray-400">Loading stats...</span>
-        </div>
-      </div>
-      <div class="modal-footer" id="db-manager-footer">
-        <button class="btn btn-secondary" data-action="close">Close</button>
-      </div>
-    </div>
-  `;
-
-  modalEl.addEventListener("click", handleClick);
-  document.body.appendChild(modalEl);
 }
 
 /** Load and display stats */
 async function loadStats(): Promise<void> {
-  const body = document.getElementById("db-manager-body");
-  const footer = document.getElementById("db-manager-footer");
-  if (!body || !footer) return;
+  if (!modal) return;
+  const { body, footer } = modal;
 
   // Show loading spinner
   body.innerHTML = `
@@ -186,32 +157,6 @@ function renderStats(body: HTMLElement, footer: HTMLElement, stats: DetailedStat
     <button class="btn btn-secondary" data-action="refresh">Refresh</button>
     <button class="btn btn-primary" data-action="close">Close</button>
   `;
-}
-
-/** Handle click events */
-function handleClick(e: Event): void {
-  const target = e.target as HTMLElement;
-
-  // Close on backdrop click
-  if (target.classList.contains("modal-overlay")) {
-    closeModal();
-    return;
-  }
-
-  const actionEl = target.closest("[data-action]") as HTMLElement;
-  if (!actionEl) return;
-
-  const action = actionEl.getAttribute("data-action");
-
-  switch (action) {
-    case "close":
-      closeModal();
-      break;
-
-    case "refresh":
-      loadStats();
-      break;
-  }
 }
 
 /** Clear the database */
