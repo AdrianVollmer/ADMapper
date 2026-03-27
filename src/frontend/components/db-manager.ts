@@ -7,6 +7,8 @@
 import { api } from "../api/client";
 import { escapeHtml } from "../utils/html";
 import { showConfirm } from "../utils/notifications";
+import { loadGraphData } from "./graph-view";
+import type { RawADGraph } from "../graph/types";
 
 /** Detailed stats response from API */
 interface DetailedStats {
@@ -231,8 +233,9 @@ export async function clearDatabase(): Promise<void> {
 
   try {
     await api.postNoContent("/api/graph/clear");
-    // Refresh the page to reset the graph view
-    window.location.reload();
+    // Refresh the graph programmatically
+    const graphData = await api.get<RawADGraph>("/api/graph/all");
+    await loadGraphData(graphData);
   } catch (err) {
     await showConfirm(`Failed to clear database: ${err instanceof Error ? err.message : String(err)}`, {
       title: "Error",
@@ -254,8 +257,9 @@ export async function clearDisabledObjects(): Promise<void> {
 
   try {
     await api.postNoContent("/api/graph/clear-disabled");
-    // Refresh the page to update the graph view
-    window.location.reload();
+    // Refresh the graph programmatically
+    const graphData = await api.get<RawADGraph>("/api/graph/all");
+    await loadGraphData(graphData);
   } catch (err) {
     await showConfirm(`Failed to clear disabled objects: ${err instanceof Error ? err.message : String(err)}`, {
       title: "Error",

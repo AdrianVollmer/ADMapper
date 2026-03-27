@@ -6,6 +6,8 @@
 
 import { api } from "../api/client";
 import { escapeHtml } from "../utils/html";
+import { loadGraphData } from "./graph-view";
+import type { RawADGraph } from "../graph/types";
 
 /** Data size presets */
 type DataSize = "small" | "medium" | "large";
@@ -233,7 +235,7 @@ function showError(message: string): void {
 }
 
 /** Handle click events */
-function handleClick(e: Event): void {
+async function handleClick(e: Event): Promise<void> {
   const target = e.target as HTMLElement;
 
   // Close on backdrop click
@@ -258,8 +260,13 @@ function handleClick(e: Event): void {
 
     case "done":
       closeModal();
-      // Reload to show the generated data
-      window.location.reload();
+      // Refresh the graph programmatically to show the generated data
+      try {
+        const graphData = await api.get<RawADGraph>("/api/graph/all");
+        await loadGraphData(graphData);
+      } catch (err) {
+        console.error("Failed to reload graph data:", err);
+      }
       break;
 
     case "retry":

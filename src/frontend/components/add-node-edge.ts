@@ -6,8 +6,9 @@
 
 import { api } from "../api/client";
 import { escapeHtml } from "../utils/html";
-import { getRenderer } from "./graph-view";
+import { getRenderer, loadGraphData } from "./graph-view";
 import { updateDetailPanel, updateDetailPanelForEdge } from "./sidebars";
+import type { RawADGraph } from "../graph/types";
 
 /** Available relationship types */
 const COMMON_EDGE_TYPES = [
@@ -418,8 +419,9 @@ async function submitAddEdge(): Promise<void> {
 
     closeAddEdgeModal();
 
-    // Refresh the graph
-    window.location.reload();
+    // Refresh the graph programmatically
+    const graphData = await api.get<RawADGraph>("/api/graph/all");
+    await loadGraphData(graphData);
   } catch (err) {
     showError(errorEl, `Failed to add relationship: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -455,8 +457,9 @@ async function submitAddNode(): Promise<void> {
 
     closeAddNodeModal();
 
-    // Refresh the graph
-    window.location.reload();
+    // Refresh the graph programmatically
+    const graphData = await api.get<RawADGraph>("/api/graph/all");
+    await loadGraphData(graphData);
   } catch (err) {
     showError(errorEl, `Failed to add node: ${err instanceof Error ? err.message : String(err)}`);
   }
