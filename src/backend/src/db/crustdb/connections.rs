@@ -31,7 +31,7 @@ impl CrustDatabase {
         }
 
         // For other directions (admin, memberof, members), use Cypher
-        let escaped_id = node_id.replace('\'', "\\'");
+        let escaped_id = node_id.replace('\'', "''");
         let query = match direction {
             "admin" => format!(
                 "MATCH (a {{objectid: '{}'}})-[r]->(b) \
