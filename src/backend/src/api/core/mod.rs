@@ -10,142 +10,33 @@
 mod database;
 mod mutation;
 mod nodes;
-mod paths;
+pub(crate) mod paths;
 mod query;
 mod tiers;
 
-use crate::db::DbNode;
 use crate::graph::FullGraph;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value as JsonValue;
 
 // ============================================================================
-// Shared Types
+// Re-exported types from api::types (canonical definitions live there)
 // ============================================================================
 
-/// Database connection status.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseStatus {
-    pub connected: bool,
-    pub database_type: Option<String>,
-}
+pub use crate::api::types::{
+    BrowseEntry, BrowseResponse, DatabaseStatus, GenerateResponse, NodeCounts, NodeStatus,
+    PathResponse, PathStep, PathsToDaEntry, PathsToDaResponse, QueryHistoryEntry,
+    QueryHistoryResponse, SupportedDatabase,
+};
 
-/// Supported database info.
-#[derive(Debug, Clone, Serialize)]
-pub struct SupportedDatabase {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub connection_type: &'static str,
-}
+// ============================================================================
+// Types unique to core (not duplicated in api::types)
+// ============================================================================
 
 /// Graph statistics.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct GraphStats {
     pub nodes: usize,
     pub relationships: usize,
-}
-
-/// Node connection counts.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NodeCounts {
-    pub incoming: usize,
-    pub outgoing: usize,
-    pub admin_to: usize,
-    pub member_of: usize,
-    pub members: usize,
-}
-
-/// Node security status.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NodeStatus {
-    pub owned: bool,
-    pub is_disabled: bool,
-    pub is_enterprise_admin: bool,
-    pub is_domain_admin: bool,
-    /// Tier level (0 = most critical, 3 = default)
-    pub tier: i64,
-    pub has_path_to_high_tier: bool,
-    pub path_length: Option<usize>,
-}
-
-/// Path step in shortest path results.
-#[derive(Debug, Clone, Serialize)]
-pub struct PathStep {
-    pub node: DbNode,
-    pub rel_type: Option<String>,
-}
-
-/// Path finding response.
-#[derive(Debug, Clone, Serialize)]
-pub struct PathResponse {
-    pub found: bool,
-    pub path: Vec<PathStep>,
-    pub graph: FullGraph,
-}
-
-/// Entry in paths to DA results.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PathsToDaEntry {
-    pub id: String,
-    pub label: String,
-    pub name: String,
-    pub hops: usize,
-}
-
-/// Paths to Domain Admins response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PathsToDaResponse {
-    pub count: usize,
-    pub entries: Vec<PathsToDaEntry>,
-}
-
-/// Generate data response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerateResponse {
-    pub nodes: usize,
-    pub relationships: usize,
-}
-
-/// Query history entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueryHistoryEntry {
-    pub id: String,
-    pub name: String,
-    pub query: String,
-    pub timestamp: i64,
-    pub result_count: Option<i64>,
-    pub status: String,
-    pub started_at: i64,
-    pub duration_ms: Option<u64>,
-    pub error: Option<String>,
-    pub background: bool,
-}
-
-/// Query history response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueryHistoryResponse {
-    pub entries: Vec<QueryHistoryEntry>,
-    pub total: usize,
-    pub page: usize,
-    pub per_page: usize,
-}
-
-/// Browse entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BrowseEntry {
-    pub name: String,
-    pub path: String,
-    pub is_dir: bool,
-}
-
-/// Browse response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BrowseResponse {
-    pub current: String,
-    pub parent: Option<String>,
-    pub entries: Vec<BrowseEntry>,
 }
 
 /// Query result for custom queries.

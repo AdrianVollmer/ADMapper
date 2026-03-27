@@ -237,6 +237,9 @@ pub async fn paths_to_domain_admins(
 
 /// Helper: Check if there's a path matching a WHERE condition.
 /// Returns Some(hops) if path found, None otherwise.
+///
+/// This is a thin wrapper around `core::paths::check_path_to_condition` that
+/// adds query history tracking and async execution via `spawn_blocking`.
 pub(crate) async fn check_path_to_condition(
     state: &AppState,
     db: &Arc<dyn DatabaseBackend>,
@@ -253,11 +256,8 @@ pub(crate) async fn check_path_to_condition(
 
     let escaped_id = node_id.replace('\'', "\\'");
     let query_name = format!("Path to {}: {}", target_name, node_id);
-    // Use shortestPath for efficient BFS traversal.
-    // Plain variable-length paths like (a)-[*1..20]->(b) enumerate all paths
-    // and can be prohibitively expensive on real AD graphs.
     let query_text = format!(
-        "MATCH p = shortestPath((a)-[*1..20]->(b)) WHERE a.objectid = '{}' AND ({}) RETURN length(p) AS hops",
+        "MATCH p = shortestPath((a)-[*1..20]->(b)) WHERE a.objectid = '{}' AND ({}) AND a <> b RETURN length(p) AS hops",
         escaped_id, condition
     );
 
@@ -281,18 +281,13 @@ pub(crate) async fn check_path_to_condition(
 
     state.start_sync_query();
 
-    let query_text_clone = query_text.clone();
+    // Delegate core logic to core::paths::check_path_to_condition
+    let node_id_owned = node_id.to_string();
+    let condition_owned = condition.to_string();
     let db_clone = db.clone();
     let result: Result<Option<usize>, ApiError> = run_db(db_clone, move |db| {
-        let result = db.run_custom_query(&query_text_clone)?;
-        if let Some(rows) = result.get("rows").and_then(|v| v.as_array()) {
-            if let Some(first_row) = rows.first().and_then(|r| r.as_array()) {
-                if let Some(hops) = first_row.first().and_then(|h| h.as_i64()) {
-                    return Ok(Some(hops as usize));
-                }
-            }
-        }
-        Ok(None)
+        crate::api::core::paths::check_path_to_condition(db, &node_id_owned, &condition_owned)
+            .map_err(DbError::Database)
     })
     .await;
 

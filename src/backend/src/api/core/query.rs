@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
+use crate::api::types::QueryStatus;
 use super::{BrowseEntry, BrowseResponse, QueryHistoryEntry, QueryHistoryResponse, QueryResult};
 
 /// Execute a query synchronously.
@@ -74,17 +75,25 @@ pub fn get_query_history(
 
     let entries: Vec<QueryHistoryEntry> = history_rows
         .into_iter()
-        .map(|row| QueryHistoryEntry {
-            id: row.id,
-            name: row.name,
-            query: row.query,
-            timestamp: row.timestamp,
-            result_count: row.result_count,
-            status: row.status,
-            started_at: row.started_at,
-            duration_ms: row.duration_ms,
-            error: row.error,
-            background: row.background,
+        .map(|row| {
+            let status = match row.status.as_str() {
+                "running" => QueryStatus::Running,
+                "failed" => QueryStatus::Failed,
+                "aborted" => QueryStatus::Aborted,
+                _ => QueryStatus::Completed,
+            };
+            QueryHistoryEntry {
+                id: row.id,
+                name: row.name,
+                query: row.query,
+                timestamp: row.timestamp,
+                result_count: row.result_count,
+                status,
+                started_at: row.started_at,
+                duration_ms: row.duration_ms,
+                error: row.error,
+                background: row.background,
+            }
         })
         .collect();
 
@@ -110,8 +119,7 @@ pub fn clear_query_history(history: &QueryHistoryService) -> Result<(), String> 
 pub fn add_query_history(
     history: &QueryHistoryService,
     body: crate::api::types::AddHistoryRequest,
-) -> Result<crate::api::types::QueryHistoryEntry, String> {
-    use crate::api::types::{QueryHistoryEntry, QueryStatus};
+) -> Result<QueryHistoryEntry, String> {
     use crate::db::NewQueryHistoryEntry;
 
     let id = uuid::Uuid::new_v4().to_string();

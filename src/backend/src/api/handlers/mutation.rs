@@ -5,7 +5,7 @@ use crate::api::core;
 use crate::api::types::{
     AddEdgeRequest, AddNodeRequest, ApiError, UpdateEdgeRequest, UpdateNodeRequest,
 };
-use crate::db::{DbEdge, DbError, DbNode};
+use crate::db::{DbError, DbNode};
 use crate::graph::GraphEdge;
 use crate::state::AppState;
 use axum::{
@@ -21,38 +21,17 @@ pub async fn add_node(
     State(state): State<AppState>,
     Json(body): Json<AddNodeRequest>,
 ) -> Result<Json<DbNode>, ApiError> {
-    // Validate inputs
-    if body.id.is_empty() {
-        return Err(ApiError::BadRequest("Node ID is required".to_string()));
-    }
-    if body.name.is_empty() {
-        return Err(ApiError::BadRequest("Node name is required".to_string()));
-    }
-    if body.label.is_empty() {
-        return Err(ApiError::BadRequest("Node label is required".to_string()));
-    }
-
-    let node = DbNode {
-        id: body.id.clone(),
-        name: body.name.clone(),
-        label: body.label.clone(),
-        properties: if body.properties.is_null() {
-            serde_json::json!({})
-        } else {
-            body.properties
-        },
-    };
-
     let db = state.require_db()?;
-    run_db(db, move |db| db.insert_node(node)).await?;
-    info!(id = %body.id, name = %body.name, label = %body.label, "Node added");
-
-    Ok(Json(DbNode {
-        id: body.id,
-        name: body.name,
-        label: body.label,
-        properties: serde_json::json!({}),
-    }))
+    let id_for_log = body.id.clone();
+    let name_for_log = body.name.clone();
+    let label_for_log = body.label.clone();
+    let result = run_db(db, move |db| {
+        core::add_node(db, body.id, body.name, body.label, body.properties)
+            .map_err(DbError::Database)
+    })
+    .await?;
+    info!(id = %id_for_log, name = %name_for_log, label = %label_for_log, "Node added");
+    Ok(Json(result))
 }
 
 /// Add a new relationship to the graph.
@@ -61,49 +40,22 @@ pub async fn add_edge(
     State(state): State<AppState>,
     Json(body): Json<AddEdgeRequest>,
 ) -> Result<Json<GraphEdge>, ApiError> {
-    // Validate inputs
-    if body.source.is_empty() {
-        return Err(ApiError::BadRequest(
-            "Source node ID is required".to_string(),
-        ));
-    }
-    if body.target.is_empty() {
-        return Err(ApiError::BadRequest(
-            "Target node ID is required".to_string(),
-        ));
-    }
-    if body.rel_type.is_empty() {
-        return Err(ApiError::BadRequest(
-            "Relationship type is required".to_string(),
-        ));
-    }
-
-    let relationship = DbEdge {
-        source: body.source.clone(),
-        target: body.target.clone(),
-        rel_type: body.rel_type.clone(),
-        properties: if body.properties.is_null() {
-            serde_json::json!({})
-        } else {
-            body.properties
-        },
-        ..Default::default()
-    };
-
     let db = state.require_db()?;
-    run_db(db, move |db| db.insert_edge(relationship)).await?;
+    let source_for_log = body.source.clone();
+    let target_for_log = body.target.clone();
+    let rel_type_for_log = body.rel_type.clone();
+    let result = run_db(db, move |db| {
+        core::add_edge(db, body.source, body.target, body.rel_type, body.properties)
+            .map_err(DbError::Database)
+    })
+    .await?;
     info!(
-        source = %body.source,
-        target = %body.target,
-        rel_type = %body.rel_type,
+        source = %source_for_log,
+        target = %target_for_log,
+        rel_type = %rel_type_for_log,
         "Relationship added"
     );
-
-    Ok(Json(GraphEdge {
-        source: body.source,
-        target: body.target,
-        rel_type: body.rel_type,
-    }))
+    Ok(Json(result))
 }
 
 /// Update a node's properties.

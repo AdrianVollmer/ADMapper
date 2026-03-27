@@ -114,14 +114,14 @@ pub struct QueryProgress {
 // ============================================================================
 
 /// Database status response.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseStatus {
     pub connected: bool,
     pub database_type: Option<String>,
 }
 
 /// Supported database info.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SupportedDatabase {
     pub id: &'static str,
     pub name: &'static str,
@@ -166,7 +166,7 @@ fn default_limit() -> usize {
 // ============================================================================
 
 /// Node connection counts response.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeCounts {
     pub incoming: usize,
     pub outgoing: usize,
@@ -178,7 +178,7 @@ pub struct NodeCounts {
 }
 
 /// Node security status response.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeStatus {
     /// Is the node owned by the attacker
     pub owned: bool,
@@ -290,7 +290,7 @@ pub struct PathParams {
 }
 
 /// Path step in the response.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PathStep {
     pub node: DbNode,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -298,7 +298,7 @@ pub struct PathStep {
 }
 
 /// Path response with full graph for rendering.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PathResponse {
     pub found: bool,
     pub path: Vec<PathStep>,
@@ -314,7 +314,7 @@ pub struct PathsToDaParams {
 }
 
 /// Response item for paths to Domain Admins query.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathsToDaEntry {
     pub id: String,
     #[serde(rename = "type")]
@@ -324,7 +324,7 @@ pub struct PathsToDaEntry {
 }
 
 /// Response for paths to Domain Admins query.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathsToDaResponse {
     pub count: usize,
     pub entries: Vec<PathsToDaEntry>,
@@ -423,7 +423,7 @@ pub enum QueryStartResponse {
 // ============================================================================
 
 /// Query history entry.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryHistoryEntry {
     pub id: String,
     pub name: String,
@@ -439,7 +439,7 @@ pub struct QueryHistoryEntry {
 }
 
 /// Query history response with pagination.
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryHistoryResponse {
     pub entries: Vec<QueryHistoryEntry>,
     pub total: usize,
@@ -500,7 +500,7 @@ pub struct GenerateRequest {
 }
 
 /// Response after generating sample data.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateResponse {
     pub nodes: usize,
     pub relationships: usize,
@@ -518,7 +518,7 @@ pub struct BrowseParams {
 }
 
 /// A file or directory entry.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrowseEntry {
     pub name: String,
     pub path: String,
@@ -526,7 +526,7 @@ pub struct BrowseEntry {
 }
 
 /// File browser response.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrowseResponse {
     /// Current directory path
     pub current: String,

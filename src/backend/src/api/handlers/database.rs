@@ -1,5 +1,6 @@
 //! Database connection endpoints.
 
+use crate::api::core;
 use crate::api::types::{ApiError, ConnectRequest, DatabaseStatus, SupportedDatabase};
 use crate::state::AppState;
 use axum::{extract::State, http::StatusCode, response::Json};
@@ -24,32 +25,8 @@ pub async fn database_status(State(state): State<AppState>) -> Json<DatabaseStat
 }
 
 /// Get list of supported database types based on compiled features.
-#[allow(unused_mut, clippy::vec_init_then_push)]
 pub async fn database_supported() -> Json<Vec<SupportedDatabase>> {
-    let mut supported = Vec::new();
-
-    #[cfg(feature = "crustdb")]
-    supported.push(SupportedDatabase {
-        id: "crustdb",
-        name: "CrustDB",
-        connection_type: "file",
-    });
-
-    #[cfg(feature = "neo4j")]
-    supported.push(SupportedDatabase {
-        id: "neo4j",
-        name: "Neo4j",
-        connection_type: "network",
-    });
-
-    #[cfg(feature = "falkordb")]
-    supported.push(SupportedDatabase {
-        id: "falkordb",
-        name: "FalkorDB",
-        connection_type: "network",
-    });
-
-    Json(supported)
+    Json(core::database_supported())
 }
 
 /// Connect to a database.
