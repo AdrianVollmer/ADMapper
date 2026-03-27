@@ -3,7 +3,7 @@
 use serde_json::Value as JsonValue;
 
 use super::super::backend::{DatabaseBackend, QueryLanguage};
-use super::super::types::{DbEdge, DbNode, DetailedStats, Result, SecurityInsights};
+use super::super::types::{admin_types_set, DbEdge, DbNode, DetailedStats, Result, SecurityInsights};
 use super::CrustDatabase;
 
 impl DatabaseBackend for CrustDatabase {
@@ -106,19 +106,7 @@ impl DatabaseBackend for CrustDatabase {
         // Get all relationships for this node efficiently
         let relationships = CrustDatabase::get_node_edges(self, node_id)?;
 
-        let admin_types: std::collections::HashSet<&str> = [
-            "AdminTo",
-            "GenericAll",
-            "GenericWrite",
-            "Owns",
-            "WriteDacl",
-            "WriteOwner",
-            "AllExtendedRights",
-            "ForceChangePassword",
-            "AddMember",
-        ]
-        .into_iter()
-        .collect();
+        let admin_types = admin_types_set();
 
         // Count unique nodes, not relationships
         // e.g., if node A has 3 relationships from node B, count as 1 incoming node

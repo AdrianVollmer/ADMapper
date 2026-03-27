@@ -11,8 +11,9 @@ use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
-    DbEdge, DbError, DbNode, DetailedStats, ReachabilityInsight, Result, SecurityInsights,
-    DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    json_to_cypher_props, CypherEscapeStyle, DbEdge, DbError, DbNode, DetailedStats,
+    ReachabilityInsight, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX,
+    WELL_KNOWN_PRINCIPALS,
 };
 
 /// FalkorDB database backend.
@@ -154,79 +155,6 @@ impl FalkorDbDatabase {
         })
     }
 
-    /// Flatten BloodHound node properties into a single JSON object.
-    fn flatten_node_properties(node: &DbNode) -> JsonValue {
-        let mut props = Map::new();
-
-        // Add core identifiers - include both objectid (BloodHound standard) and
-        // objectid (internal standard) for query compatibility across all backends
-        props.insert("objectid".to_string(), json!(node.id));
-        props.insert("objectid".to_string(), json!(node.id));
-        props.insert("name".to_string(), json!(node.name));
-
-        // Flatten BloodHound properties into top-level fields
-        if let JsonValue::Object(bh_props) = &node.properties {
-            for (key, value) in bh_props {
-                // Skip null values and empty arrays
-                if value.is_null() {
-                    continue;
-                }
-                if let Some(arr) = value.as_array() {
-                    if arr.is_empty() {
-                        continue;
-                    }
-                }
-                // Don't overwrite core fields
-                let key_lower = key.to_lowercase();
-                if key_lower != "objectid" && key_lower != "name" {
-                    props.insert(key_lower, value.clone());
-                }
-            }
-        }
-
-        JsonValue::Object(props)
-    }
-
-    /// Convert a JSON object to Cypher property syntax with escaping.
-    fn json_to_cypher_props(value: &JsonValue) -> String {
-        let obj = match value.as_object() {
-            Some(o) => o,
-            None => return "{}".to_string(),
-        };
-
-        let pairs: Vec<String> = obj
-            .iter()
-            .filter_map(|(k, v)| {
-                let val_str = Self::json_value_to_cypher(v)?;
-                Some(format!("{}: {}", k, val_str))
-            })
-            .collect();
-
-        format!("{{{}}}", pairs.join(", "))
-    }
-
-    /// Convert a JSON value to Cypher literal syntax.
-    fn json_value_to_cypher(value: &JsonValue) -> Option<String> {
-        match value {
-            JsonValue::Null => None,
-            JsonValue::Bool(b) => Some(b.to_string()),
-            JsonValue::Number(n) => Some(n.to_string()),
-            JsonValue::String(s) => {
-                // Escape backslashes first, then single quotes
-                let escaped = s.replace('\\', "\\\\").replace('\'', "\\'");
-                Some(format!("'{}'", escaped))
-            }
-            JsonValue::Array(arr) => {
-                let items: Vec<String> =
-                    arr.iter().filter_map(Self::json_value_to_cypher).collect();
-                Some(format!("[{}]", items.join(", ")))
-            }
-            JsonValue::Object(_) => {
-                // Skip nested objects - Cypher doesn't support them directly
-                None
-            }
-        }
-    }
 }
 
 /// Convert FalkorDB value to JSON.
@@ -404,8 +332,8 @@ impl DatabaseBackend for FalkorDbDatabase {
                 let items: Vec<String> = chunk
                     .iter()
                     .map(|n| {
-                        let flat_props = FalkorDbDatabase::flatten_node_properties(n);
-                        FalkorDbDatabase::json_to_cypher_props(&flat_props)
+                        let flat_props = n.flatten_properties(true);
+                        json_to_cypher_props(&flat_props, CypherEscapeStyle::Backslash)
                     })
                     .collect();
 

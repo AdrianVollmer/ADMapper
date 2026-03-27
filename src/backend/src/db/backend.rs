@@ -6,7 +6,8 @@ use serde_json::Value as JsonValue;
 use std::str::FromStr;
 
 use super::types::{
-    ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, Result, SecurityInsights,
+    admin_types_set, ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, Result,
+    SecurityInsights,
 };
 
 /// Query language supported by a database backend.
@@ -162,19 +163,7 @@ pub trait DatabaseBackend: Send + Sync {
         );
         let all_edges = self.get_all_edges()?;
 
-        let admin_types: std::collections::HashSet<&str> = [
-            "AdminTo",
-            "GenericAll",
-            "GenericWrite",
-            "Owns",
-            "WriteDacl",
-            "WriteOwner",
-            "AllExtendedRights",
-            "ForceChangePassword",
-            "AddMember",
-        ]
-        .into_iter()
-        .collect();
+        let admin_types = admin_types_set();
 
         // Count unique nodes, not relationships
         // e.g., if node A has 3 relationships from node B, count as 1 incoming node

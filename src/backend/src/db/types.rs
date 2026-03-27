@@ -1,7 +1,8 @@
 //! Common types for all database backends.
 
 use serde::Serialize;
-use serde_json::Value as JsonValue;
+use serde_json::{Map, Value as JsonValue};
+use std::collections::HashSet;
 use thiserror::Error;
 
 /// A node stored in the database.
@@ -18,6 +19,131 @@ pub struct DbNode {
     #[serde(rename = "type")]
     pub label: String,
     pub properties: JsonValue,
+}
+
+impl DbNode {
+    /// Flatten BloodHound node properties into a single JSON object.
+    ///
+    /// Merges the nested `properties` from BloodHound into top-level fields,
+    /// making them directly queryable in Cypher.
+    ///
+    /// When `lowercase_keys` is true (Neo4j/FalkorDB), property keys are
+    /// lowercased. When false (CrustDB), keys are preserved as-is and the
+    /// `label` field is included in the output.
+    pub fn flatten_properties(&self, lowercase_keys: bool) -> JsonValue {
+        let mut props = Map::new();
+
+        // Add core identifiers
+        props.insert("objectid".to_string(), serde_json::json!(self.id));
+        props.insert("name".to_string(), serde_json::json!(self.name));
+
+        // CrustDB includes label as a property; Neo4j/FalkorDB use Cypher labels instead
+        if !lowercase_keys {
+            props.insert("label".to_string(), serde_json::json!(self.label));
+        }
+
+        // Flatten BloodHound properties into top-level fields
+        if let JsonValue::Object(bh_props) = &self.properties {
+            for (key, value) in bh_props {
+                // Skip null values and empty arrays to save space
+                if value.is_null() {
+                    continue;
+                }
+                if let Some(arr) = value.as_array() {
+                    if arr.is_empty() {
+                        continue;
+                    }
+                }
+                // Don't overwrite core fields
+                let insert_key = if lowercase_keys {
+                    key.to_lowercase()
+                } else {
+                    key.clone()
+                };
+                if insert_key != "objectid" && insert_key != "name" && insert_key != "label" {
+                    props.insert(insert_key, value.clone());
+                }
+            }
+        }
+
+        JsonValue::Object(props)
+    }
+}
+
+/// Relationship types that represent administrative or privileged access.
+///
+/// Used when computing admin relationship counts for node details.
+pub const ADMIN_RELATIONSHIP_TYPES: &[&str] = &[
+    "AdminTo",
+    "GenericAll",
+    "GenericWrite",
+    "Owns",
+    "WriteDacl",
+    "WriteOwner",
+    "AllExtendedRights",
+    "ForceChangePassword",
+    "AddMember",
+];
+
+/// Build a HashSet from `ADMIN_RELATIONSHIP_TYPES` for O(1) lookups.
+pub fn admin_types_set() -> HashSet<&'static str> {
+    ADMIN_RELATIONSHIP_TYPES.iter().copied().collect()
+}
+
+/// Quote-escaping style for Cypher string literals.
+#[derive(Clone, Copy)]
+pub enum CypherEscapeStyle {
+    /// Escape single quotes by doubling them: `'` -> `''` (CrustDB)
+    DoubleQuote,
+    /// Escape single quotes with backslash: `'` -> `\'` (Neo4j, FalkorDB)
+    Backslash,
+}
+
+/// Convert a JSON object to Cypher property syntax (e.g., `{key: value, ...}`).
+pub fn json_to_cypher_props(value: &JsonValue, style: CypherEscapeStyle) -> String {
+    let obj = match value.as_object() {
+        Some(o) => o,
+        None => return "{}".to_string(),
+    };
+
+    let pairs: Vec<String> = obj
+        .iter()
+        .filter_map(|(k, v)| {
+            let val_str = json_value_to_cypher(v, style)?;
+            Some(format!("{}: {}", k, val_str))
+        })
+        .collect();
+
+    format!("{{{}}}", pairs.join(", "))
+}
+
+/// Convert a JSON value to a Cypher literal string.
+pub fn json_value_to_cypher(value: &JsonValue, style: CypherEscapeStyle) -> Option<String> {
+    match value {
+        JsonValue::Null => None,
+        JsonValue::Bool(b) => Some(b.to_string()),
+        JsonValue::Number(n) => Some(n.to_string()),
+        JsonValue::String(s) => {
+            let escaped = match style {
+                CypherEscapeStyle::DoubleQuote => s.replace('\'', "''"),
+                CypherEscapeStyle::Backslash => {
+                    s.replace('\\', "\\\\").replace('\'', "\\'")
+                }
+            };
+            Some(format!("'{}'", escaped))
+        }
+        JsonValue::Array(arr) => {
+            let items: Vec<String> = arr
+                .iter()
+                .filter_map(|v| json_value_to_cypher(v, style))
+                .collect();
+            Some(format!("[{}]", items.join(", ")))
+        }
+        JsonValue::Object(_) => {
+            // Skip nested objects - Cypher doesn't support them directly
+            None
+        }
+    }
 }
 
 /// An relationship stored in the database.

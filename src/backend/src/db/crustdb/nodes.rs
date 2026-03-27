@@ -2,7 +2,7 @@
 
 use tracing::debug;
 
-use super::super::types::{DbNode, Result};
+use super::super::types::{json_to_cypher_props, CypherEscapeStyle, DbNode, Result};
 use super::CrustDatabase;
 
 impl CrustDatabase {
@@ -31,7 +31,7 @@ impl CrustDatabase {
                     vec![node.label.clone(), "Base".to_string()]
                 };
                 // Flatten BloodHound properties into top-level fields
-                let props = Self::flatten_node_properties(node);
+                let props = node.flatten_properties(false);
                 (labels, props)
             })
             .collect();
@@ -58,8 +58,8 @@ impl CrustDatabase {
         let mut count = 0;
         for node in nodes {
             // Build flattened properties for Cypher
-            let props = Self::flatten_node_properties(node);
-            let props_str = Self::json_to_cypher_props(&props);
+            let props = node.flatten_properties(false);
+            let props_str = json_to_cypher_props(&props, CypherEscapeStyle::DoubleQuote);
             let cypher_label = node.label.replace('\'', "''");
 
             // Add :Base as a secondary label (matching Neo4j/FalkorDB)
@@ -75,77 +75,6 @@ impl CrustDatabase {
             }
         }
         Ok(count)
-    }
-
-    /// Flatten BloodHound node properties into a single JSON object.
-    ///
-    /// This merges the nested `properties` from BloodHound into top-level fields,
-    /// making them directly queryable in Cypher.
-    pub(crate) fn flatten_node_properties(node: &DbNode) -> serde_json::Value {
-        let mut props = serde_json::Map::new();
-
-        // Add core identifiers
-        props.insert("objectid".to_string(), serde_json::json!(node.id));
-        props.insert("name".to_string(), serde_json::json!(node.name));
-        props.insert("label".to_string(), serde_json::json!(node.label));
-
-        // Flatten BloodHound properties into top-level fields
-        if let serde_json::Value::Object(bh_props) = &node.properties {
-            for (key, value) in bh_props {
-                // Skip null values and empty arrays to save space
-                if value.is_null() {
-                    continue;
-                }
-                if let Some(arr) = value.as_array() {
-                    if arr.is_empty() {
-                        continue;
-                    }
-                }
-                // Don't overwrite core fields
-                if key != "objectid" && key != "name" && key != "label" {
-                    props.insert(key.clone(), value.clone());
-                }
-            }
-        }
-
-        serde_json::Value::Object(props)
-    }
-
-    /// Convert a JSON object to Cypher property syntax.
-    pub(crate) fn json_to_cypher_props(value: &serde_json::Value) -> String {
-        let obj = match value.as_object() {
-            Some(o) => o,
-            None => return "{}".to_string(),
-        };
-
-        let pairs: Vec<String> = obj
-            .iter()
-            .filter_map(|(k, v)| {
-                let val_str = Self::json_value_to_cypher(v)?;
-                Some(format!("{}: {}", k, val_str))
-            })
-            .collect();
-
-        format!("{{{}}}", pairs.join(", "))
-    }
-
-    /// Convert a JSON value to Cypher literal syntax.
-    pub(crate) fn json_value_to_cypher(value: &serde_json::Value) -> Option<String> {
-        match value {
-            serde_json::Value::Null => None,
-            serde_json::Value::Bool(b) => Some(b.to_string()),
-            serde_json::Value::Number(n) => Some(n.to_string()),
-            serde_json::Value::String(s) => Some(format!("'{}'", s.replace('\'', "''"))),
-            serde_json::Value::Array(arr) => {
-                let items: Vec<String> =
-                    arr.iter().filter_map(Self::json_value_to_cypher).collect();
-                Some(format!("[{}]", items.join(", ")))
-            }
-            serde_json::Value::Object(_) => {
-                // Skip nested objects for now - Cypher doesn't support them directly
-                None
-            }
-        }
     }
 
     /// Get all nodes.
