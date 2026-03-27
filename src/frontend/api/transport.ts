@@ -8,6 +8,7 @@
  */
 
 import { api, isRunningInTauri } from "./client";
+import type { QueryProgressEvent } from "./types";
 
 // ============================================================================
 // Types
@@ -63,19 +64,7 @@ export const QUERY_ACTIVITY_CHANNEL: ChannelDefinition<QueryActivityEvent> = {
 };
 
 /** Query progress channel - tracks individual query progress */
-export interface QueryProgressEvent {
-  query_id: string;
-  status: "running" | "completed" | "failed" | "aborted";
-  started_at: number;
-  duration_ms?: number;
-  result_count?: number;
-  error?: string;
-  results?: unknown;
-  graph?: {
-    nodes: unknown[];
-    relationships: unknown[];
-  };
-}
+export { type QueryProgressEvent } from "./types";
 
 export const QUERY_PROGRESS_CHANNEL: ChannelDefinition<QueryProgressEvent> = {
   name: "query-progress",

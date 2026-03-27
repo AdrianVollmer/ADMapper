@@ -6,8 +6,6 @@
 //! - Property graph model
 //! - Optional in-memory entity cache for traversal performance
 
-// Allow dead code for public API methods that may not be used within the crate itself
-#![allow(dead_code)]
 //!
 //! # Example
 //!

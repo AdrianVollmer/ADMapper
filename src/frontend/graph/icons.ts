@@ -20,6 +20,7 @@ import {
   type IconNode,
 } from "lucide";
 import type { ADNodeType } from "./types";
+import { NODE_COLORS } from "./theme";
 
 /** Convert Lucide IconNode to SVG string */
 function iconNodeToSvg(iconNode: IconNode, color: string = "#fff", size: number = 64): string {
@@ -58,22 +59,6 @@ const LUCIDE_ICONS: Record<ADNodeType, IconNode> = {
   Unknown: HelpCircle,
 };
 
-// Node colors for icon backgrounds (matching theme.ts)
-const ICON_COLORS: Record<ADNodeType, string> = {
-  User: "#22b8cf",
-  Group: "#fab005",
-  Computer: "#f03e3e",
-  Domain: "#7950f2",
-  GPO: "#fd7e14",
-  OU: "#20c997",
-  Container: "#db2777",
-  CertTemplate: "#f06595",
-  EnterpriseCA: "#f06595",
-  RootCA: "#f06595",
-  AIACA: "#f06595",
-  NTAuthStore: "#f06595",
-  Unknown: "#adb5bd",
-};
 
 /** Generate icon data URLs for all node types */
 function generateIcons(): Record<ADNodeType, string> {
@@ -97,7 +82,7 @@ export function getNodeIcon(type: ADNodeType): string {
 
 /** Get the color for a node type */
 export function getNodeTypeColor(type: ADNodeType): string {
-  return ICON_COLORS[type] || ICON_COLORS.Unknown;
+  return NODE_COLORS[type] || NODE_COLORS.Unknown;
 }
 
 /** Default node size (uniform for all types) */
