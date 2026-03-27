@@ -57,7 +57,8 @@ export type { RendererOptions, ADGraphRenderer } from "./ADGraphRenderer";
 export {
   applyLayout,
   applyLayoutAsync,
-  normalizePositions,
+  normalizeGraphPositions,
+  mergeForceSettings,
   validateAndFixPositions,
   setUserForceSettings,
   getUserForceSettings,

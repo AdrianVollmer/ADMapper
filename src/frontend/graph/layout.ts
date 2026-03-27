@@ -189,19 +189,7 @@ function applyForceLayout(graph: ADGraphType, options: LayoutOptions): void {
   const nodeCount = graph.order;
   const iterations = options.iterations ?? getDefaultIterations(nodeCount);
 
-  // Merge defaults with user settings (if any) and explicit options
-  let settings = { ...DEFAULT_FORCE_SETTINGS };
-  if (userForceSettings) {
-    settings = {
-      ...settings,
-      gravity: userForceSettings.gravity,
-      scalingRatio: userForceSettings.scalingRatio,
-      adjustSizes: userForceSettings.adjustSizes,
-    };
-  }
-  if (options.settings) {
-    settings = { ...settings, ...options.settings };
-  }
+  const settings = mergeForceSettings(userForceSettings, options.settings);
 
   // Run ForceAtlas2 to compute initial positions
   forceAtlas2.assign(graph, {
@@ -279,38 +267,12 @@ function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettin
     }
   });
 
-  // Calculate bounds
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
-  for (const pos of positions) {
-    minX = Math.min(minX, pos.x);
-    minY = Math.min(minY, pos.y);
-    maxX = Math.max(maxX, pos.x);
-    maxY = Math.max(maxY, pos.y);
-  }
-
-  // Normalize positions to fill a standard coordinate space with 20% padding on all sides
-  // Target: fit within [-800, 800] leaving 20% padding (so full range is [-1000, 1000])
-  const targetSize = 800; // 80% of 1000, leaving 20% padding
-  const currentWidth = maxX - minX || 1;
-  const currentHeight = maxY - minY || 1;
-
-  // Scale uniformly to fit within the target bounds (preserve aspect ratio)
-  // But also ensure we USE the available space in both dimensions
-  const scaleX = (targetSize * 2) / currentWidth;
-  const scaleY = (targetSize * 2) / currentHeight;
-
-  // Apply positions with scaling, centered around origin
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-
-  for (const pos of positions) {
+  // Normalize and apply positions
+  const normalized = normalizeGraphPositions(positions);
+  for (const pos of normalized) {
     if (graph.hasNode(pos.nodeId)) {
-      graph.setNodeAttribute(pos.nodeId, "x", (pos.x - centerX) * scaleX);
-      graph.setNodeAttribute(pos.nodeId, "y", (pos.y - centerY) * scaleY);
+      graph.setNodeAttribute(pos.nodeId, "x", pos.x);
+      graph.setNodeAttribute(pos.nodeId, "y", pos.y);
     }
   }
 
@@ -712,34 +674,12 @@ async function applyHierarchicalLayoutAsync(graph: ADGraphType, options: Hierarc
     });
   });
 
-  // Calculate bounds
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
-  for (const pos of positions) {
-    minX = Math.min(minX, pos.x);
-    minY = Math.min(minY, pos.y);
-    maxX = Math.max(maxX, pos.x);
-    maxY = Math.max(maxY, pos.y);
-  }
-
-  // Normalize positions to fill a standard coordinate space with 20% padding on all sides
-  const targetSize = 800;
-  const currentWidth = maxX - minX || 1;
-  const currentHeight = maxY - minY || 1;
-
-  const scaleX = (targetSize * 2) / currentWidth;
-  const scaleY = (targetSize * 2) / currentHeight;
-
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-
-  for (const pos of positions) {
+  // Normalize and apply positions
+  const normalized = normalizeGraphPositions(positions);
+  for (const pos of normalized) {
     if (graph.hasNode(pos.nodeId)) {
-      graph.setNodeAttribute(pos.nodeId, "x", (pos.x - centerX) * scaleX);
-      graph.setNodeAttribute(pos.nodeId, "y", (pos.y - centerY) * scaleY);
+      graph.setNodeAttribute(pos.nodeId, "x", pos.x);
+      graph.setNodeAttribute(pos.nodeId, "y", pos.y);
     }
   }
 
@@ -793,19 +733,7 @@ export async function applyLayoutAsync(
   // Force layout: run in chunks
   const totalIterations = options.iterations ?? getDefaultIterations(nodeCount);
 
-  // Merge defaults with user settings (if any) and explicit options
-  let settings = { ...DEFAULT_FORCE_SETTINGS };
-  if (userForceSettings) {
-    settings = {
-      ...settings,
-      gravity: userForceSettings.gravity,
-      scalingRatio: userForceSettings.scalingRatio,
-      adjustSizes: userForceSettings.adjustSizes,
-    };
-  }
-  if (options.settings) {
-    settings = { ...settings, ...options.settings };
-  }
+  const settings = mergeForceSettings(userForceSettings, options.settings);
 
   const chunkSize = 20;
   let completed = 0;
@@ -848,42 +776,75 @@ export async function applyLayoutAsync(
 }
 
 /**
- * Scale and center the graph positions.
+ * Normalize positions to fill a standard coordinate space centered at origin.
  *
- * Useful after layout to fit the graph in a specific viewport.
+ * Calculates bounds, computes per-axis scale factors, and centers the positions.
+ * Target: fit within [-targetSize, targetSize] on each axis (default 800,
+ * leaving 20% padding in a [-1000, 1000] viewport).
+ *
+ * This is the canonical implementation — used by both sync and async
+ * hierarchical layout paths.
  */
-export function normalizePositions(graph: ADGraphType, width = 1000, height = 1000, padding = 50): void {
-  if (graph.order === 0) return;
+export function normalizeGraphPositions(
+  positions: Array<{ nodeId: string; x: number; y: number }>,
+  targetSize = 800
+): Array<{ nodeId: string; x: number; y: number }> {
+  if (positions.length === 0) return positions;
 
+  // Calculate bounds
   let minX = Infinity;
-  let maxX = -Infinity;
   let minY = Infinity;
+  let maxX = -Infinity;
   let maxY = -Infinity;
 
-  // Find bounds
-  graph.forEachNode((_, attrs) => {
-    minX = Math.min(minX, attrs.x);
-    maxX = Math.max(maxX, attrs.x);
-    minY = Math.min(minY, attrs.y);
-    maxY = Math.max(maxY, attrs.y);
-  });
+  for (const pos of positions) {
+    minX = Math.min(minX, pos.x);
+    minY = Math.min(minY, pos.y);
+    maxX = Math.max(maxX, pos.x);
+    maxY = Math.max(maxY, pos.y);
+  }
 
   const currentWidth = maxX - minX || 1;
   const currentHeight = maxY - minY || 1;
 
-  const targetWidth = width - padding * 2;
-  const targetHeight = height - padding * 2;
+  // Scale per-axis to fill the target bounds
+  const scaleX = (targetSize * 2) / currentWidth;
+  const scaleY = (targetSize * 2) / currentHeight;
 
-  const scale = Math.min(targetWidth / currentWidth, targetHeight / currentHeight);
+  // Center around origin
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
 
-  const offsetX = padding + (targetWidth - currentWidth * scale) / 2 - minX * scale;
-  const offsetY = padding + (targetHeight - currentHeight * scale) / 2 - minY * scale;
+  return positions.map((pos) => ({
+    nodeId: pos.nodeId,
+    x: (pos.x - centerX) * scaleX,
+    y: (pos.y - centerY) * scaleY,
+  }));
+}
 
-  // Apply transformation
-  graph.forEachNode((nodeId, attrs) => {
-    graph.setNodeAttribute(nodeId, "x", attrs.x * scale + offsetX);
-    graph.setNodeAttribute(nodeId, "y", attrs.y * scale + offsetY);
-  });
+/**
+ * Merge force layout settings: defaults + user overrides + explicit options.
+ *
+ * Canonical implementation used by both sync (applyForceLayout) and async
+ * (applyLayoutAsync) force layout paths.
+ */
+export function mergeForceSettings(
+  userSettings: UserForceSettings | null,
+  explicitSettings?: ForceAtlas2Settings
+): ForceAtlas2Settings {
+  let settings: ForceAtlas2Settings = { ...DEFAULT_FORCE_SETTINGS };
+  if (userSettings) {
+    settings = {
+      ...settings,
+      gravity: userSettings.gravity,
+      scalingRatio: userSettings.scalingRatio,
+      adjustSizes: userSettings.adjustSizes,
+    };
+  }
+  if (explicitSettings) {
+    settings = { ...settings, ...explicitSettings };
+  }
+  return settings;
 }
 
 /**
