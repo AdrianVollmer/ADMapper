@@ -12,7 +12,7 @@ import type { QueryHistoryResponse, QueryStartResponse, QueryProgressEvent } fro
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph } from "../graph/types";
 import { subscribe, QUERY_PROGRESS_CHANNEL, type Unsubscribe } from "../api/transport";
-import { registerForegroundQuery, unregisterForegroundQuery } from "../utils/query";
+import { registerForegroundQuery, unregisterForegroundQuery, getQueryErrorMessage, formatDuration } from "../utils/query";
 
 /** Modal element */
 let modalEl: HTMLElement | null = null;
@@ -144,18 +144,6 @@ function getDocsUrl(): string {
   return "https://neo4j.com/docs/cypher-manual/current/";
 }
 
-/** Format duration in human readable format */
-function formatDuration(ms: number): string {
-  if (ms < 1000) {
-    return `${ms}ms`;
-  } else if (ms < 60000) {
-    return `${(ms / 1000).toFixed(1)}s`;
-  } else {
-    const minutes = Math.floor(ms / 60000);
-    const seconds = Math.floor((ms % 60000) / 1000);
-    return `${minutes}m ${seconds}s`;
-  }
-}
 
 /** Render the modal content */
 function renderModal(): void {
@@ -411,16 +399,6 @@ function cleanup(): void {
   }
 }
 
-/** Get error message from various error types */
-function getQueryErrorMessage(err: unknown): string {
-  if (err instanceof Error) {
-    return err.message;
-  }
-  if (typeof err === "string") {
-    return err;
-  }
-  return "An unknown error occurred";
-}
 
 /** Handle clicks in the modal */
 function handleModalClick(e: Event): void {

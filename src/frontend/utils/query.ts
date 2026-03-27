@@ -310,6 +310,20 @@ export async function executeQueryWithHistory(
   return executeQuery(query, opts);
 }
 
+/** Format duration in human readable format */
+export function formatDuration(ms: number | null): string {
+  if (ms === null) return "-";
+  if (ms < 1000) {
+    return `${ms}ms`;
+  } else if (ms < 60000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  } else {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    return `${minutes}m ${seconds}s`;
+  }
+}
+
 /**
  * Get a user-friendly error message from a query error.
  */
