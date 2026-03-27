@@ -8,8 +8,7 @@ use crate::api::types::{
     NodeStatus, PathParams, PathResponse, PathStep, PathsToDaEntry, PathsToDaParams,
     PathsToDaResponse, QueryActivity, QueryHistoryEntry, QueryHistoryResponse, QueryProgress,
     QueryRequest, QueryStartResponse, QueryStatus, SearchParams, SupportedDatabase,
-    TierViolationCategory, TierViolationEdge, TierViolationsResponse, UpdateEdgeRequest,
-    UpdateNodeRequest,
+    TierViolationsResponse, UpdateEdgeRequest, UpdateNodeRequest,
 };
 use crate::db::{DatabaseBackend, DbEdge, DbError, DbNode, NewQueryHistoryEntry, QueryLanguage};
 use crate::graph::{extract_graph_from_results, FullGraph, GraphEdge, GraphNode};
@@ -933,46 +932,6 @@ pub async fn node_set_owned(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Reverse BFS from `root_id`, following edges of `edge_type` in reverse
-/// (target -> source), returning all reached node IDs (excluding root).
-fn expand_transitive(
-    edges: &[DbEdge],
-    root_id: &str,
-    edge_type: &str,
-) -> std::collections::HashSet<String> {
-    use std::collections::{HashMap, HashSet, VecDeque};
-
-    // Build reverse adjacency for the specific edge type only
-    let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
-    for edge in edges {
-        if edge.rel_type.eq_ignore_ascii_case(edge_type) {
-            reverse_adj
-                .entry(edge.target.as_str())
-                .or_default()
-                .push(edge.source.as_str());
-        }
-    }
-
-    let mut visited = HashSet::new();
-    let mut queue = VecDeque::new();
-    visited.insert(root_id.to_string());
-    queue.push_back(root_id.to_string());
-
-    while let Some(current) = queue.pop_front() {
-        if let Some(predecessors) = reverse_adj.get(current.as_str()) {
-            for &pred in predecessors {
-                if visited.insert(pred.to_string()) {
-                    queue.push_back(pred.to_string());
-                }
-            }
-        }
-    }
-
-    // Remove the root itself — we want members, not the group/OU
-    visited.remove(root_id);
-    visited
-}
-
 /// Batch-set the tier property on nodes matching the given filters.
 #[instrument(skip(state, body))]
 pub async fn batch_set_tier(
@@ -981,107 +940,13 @@ pub async fn batch_set_tier(
 ) -> Result<Json<BatchSetTierResponse>, ApiError> {
     let db = state.require_db()?;
 
-    if !(0..=3).contains(&body.tier) {
-        return Err(ApiError::BadRequest("Tier must be between 0 and 3".into()));
-    }
-
-    let tier = body.tier;
-    let node_type = body.node_type.clone();
-    let name_regex = body.name_regex.clone();
-    let group_id = body.group_id.clone();
-    let ou_id = body.ou_id.clone();
-    let node_ids = body.node_ids.clone();
-
-    let updated = run_db(db, move |db| {
-        use std::collections::HashSet;
-
-        // Fetch all nodes (we filter in Rust since the DB trait doesn't expose regex filtering)
-        let all_nodes = db.get_all_nodes()?;
-        let regex = name_regex
-            .as_deref()
-            .filter(|r| !r.is_empty())
-            .map(regex::Regex::new)
-            .transpose()
-            .map_err(|e| crate::db::DbError::Database(format!("Invalid regex: {e}")))?;
-
-        // Start with name/type filter matches
-        let mut matching_ids: HashSet<String> = all_nodes
-            .iter()
-            .filter(|n| {
-                if let Some(ref nt) = node_type {
-                    if !n.label.eq_ignore_ascii_case(nt) {
-                        return false;
-                    }
-                }
-                if let Some(ref re) = regex {
-                    if !re.is_match(&n.name) {
-                        return false;
-                    }
-                }
-                true
-            })
-            .map(|n| n.id.clone())
-            .collect();
-
-        // If group_id or ou_id is specified, we need edges for expansion
-        let needs_expansion = group_id.is_some() || ou_id.is_some();
-        let edges = if needs_expansion {
-            db.get_all_edges()?
-        } else {
-            Vec::new()
-        };
-
-        // Expand group membership (reverse MemberOf BFS)
-        if let Some(ref gid) = group_id {
-            let members = expand_transitive(&edges, gid, "MemberOf");
-            // Intersect with existing filter if name/type filters are active
-            if node_type.is_some() || regex.is_some() {
-                matching_ids = matching_ids.intersection(&members).cloned().collect();
-            } else {
-                matching_ids = members;
-            }
-        }
-
-        // Expand OU containment (reverse Contains BFS)
-        if let Some(ref oid) = ou_id {
-            let contained = expand_transitive(&edges, oid, "Contains");
-            if node_type.is_some() || regex.is_some() || group_id.is_some() {
-                matching_ids = matching_ids.intersection(&contained).cloned().collect();
-            } else {
-                matching_ids = contained;
-            }
-        }
-
-        // Union explicit node IDs
-        if let Some(ref ids) = node_ids {
-            for id in ids {
-                matching_ids.insert(id.clone());
-            }
-        }
-
-        let final_ids: Vec<String> = matching_ids.into_iter().collect();
-        let count = final_ids.len();
-
-        // Update in batches using Cypher SET
-        for chunk in final_ids.chunks(500) {
-            let ids_list: Vec<String> = chunk
-                .iter()
-                .map(|id| format!("'{}'", id.replace('\'', "\\'")))
-                .collect();
-            let query = format!(
-                "MATCH (n) WHERE n.objectid IN [{}] SET n.tier = {}",
-                ids_list.join(", "),
-                tier
-            );
-            db.run_custom_query(&query)?;
-        }
-
-        Ok(count)
+    let result = run_db(db, move |db| {
+        core::batch_set_tier(db, body).map_err(crate::db::DbError::Database)
     })
     .await?;
 
-    info!(tier = tier, updated = updated, "Batch set tier");
-    Ok(Json(BatchSetTierResponse { updated }))
+    info!(updated = result.updated, "Batch set tier");
+    Ok(Json(result))
 }
 
 // ============================================================================
@@ -1390,71 +1255,7 @@ pub async fn tier_violations(
     let db = state.require_db()?;
 
     let result = run_db(db, |db| {
-        use std::collections::HashMap;
-
-        let nodes = db.get_all_nodes()?;
-        let edges = db.get_all_edges()?;
-        let total_nodes = nodes.len();
-        let total_edges = edges.len();
-
-        // Use assigned tiers for zone classification. The previous approach
-        // used BFS-computed effective tiers, but that makes crossings impossible
-        // by construction: if A→B and B is in zone 0, the reverse BFS already
-        // pulls A into zone 0, so every edge has src_zone <= tgt_zone.
-        let tier_map: HashMap<&str, i64> = nodes
-            .iter()
-            .map(|n| {
-                let tier = n
-                    .properties
-                    .get("tier")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(3);
-                (n.id.as_str(), tier)
-            })
-            .collect();
-
-        // Count and collect cross-zone edges using assigned tiers.
-        // Each bucket captures edges crossing that boundary:
-        //   1→0: any edge where src_tier >= 1 and tgt_tier == 0
-        //   2→1: any edge where src_tier >= 2 and tgt_tier == 1
-        //   3→2: any edge where src_tier >= 3 and tgt_tier == 2
-        // This ensures non-adjacent crossings (e.g. tier 3→0) are counted
-        // in the most severe bucket they cross, without double-counting.
-        let max_edges = 500;
-        let mut violations = Vec::new();
-
-        for (src_label, tgt_label) in [(1i64, 0i64), (2, 1), (3, 2)] {
-            let mut count = 0usize;
-            let mut sample_edges = Vec::new();
-
-            for edge in &edges {
-                let src_tier = *tier_map.get(edge.source.as_str()).unwrap_or(&3);
-                let tgt_tier = *tier_map.get(edge.target.as_str()).unwrap_or(&3);
-                if src_tier >= src_label && tgt_tier == tgt_label {
-                    count += 1;
-                    if sample_edges.len() < max_edges {
-                        sample_edges.push(TierViolationEdge {
-                            source_id: edge.source.clone(),
-                            target_id: edge.target.clone(),
-                            rel_type: edge.rel_type.clone(),
-                        });
-                    }
-                }
-            }
-
-            violations.push(TierViolationCategory {
-                source_zone: src_label,
-                target_zone: tgt_label,
-                count,
-                edges: sample_edges,
-            });
-        }
-
-        Ok(TierViolationsResponse {
-            violations,
-            total_nodes,
-            total_edges,
-        })
+        core::tier_violations(db).map_err(crate::db::DbError::Database)
     })
     .await?;
 
@@ -1477,111 +1278,7 @@ pub async fn compute_effective_tiers(
     let db = state.require_db()?;
 
     let result = run_db(db, |db| {
-        use std::collections::{HashMap, HashSet, VecDeque};
-
-        let nodes = db.get_all_nodes()?;
-        let edges = db.get_all_edges()?;
-
-        // Build reverse adjacency list
-        let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
-        for edge in &edges {
-            reverse_adj
-                .entry(edge.target.as_str())
-                .or_default()
-                .push(edge.source.as_str());
-        }
-
-        // Build assigned tier map
-        let tier_map: HashMap<&str, i64> = nodes
-            .iter()
-            .map(|n| {
-                let tier = n
-                    .properties
-                    .get("tier")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(3);
-                (n.id.as_str(), tier)
-            })
-            .collect();
-
-        // Initialize effective tier: everyone starts at 3
-        let mut effective_tier: HashMap<&str, i64> =
-            nodes.iter().map(|n| (n.id.as_str(), 3i64)).collect();
-
-        // For each tier level (0, 1, 2), do reverse BFS from seed nodes
-        for target_tier in [0i64, 1, 2] {
-            let mut visited = HashSet::new();
-            let mut queue = VecDeque::new();
-
-            // Seed with all nodes assigned to this tier
-            for node in &nodes {
-                if *tier_map.get(node.id.as_str()).unwrap_or(&3) == target_tier
-                    && visited.insert(node.id.as_str())
-                {
-                    queue.push_back(node.id.as_str());
-                }
-            }
-
-            // Reverse BFS
-            while let Some(current) = queue.pop_front() {
-                // Update effective tier to minimum
-                let eff = effective_tier.entry(current).or_insert(3);
-                if target_tier < *eff {
-                    *eff = target_tier;
-                }
-
-                if let Some(predecessors) = reverse_adj.get(current) {
-                    for &pred in predecessors {
-                        if visited.insert(pred) {
-                            queue.push_back(pred);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Store effective_tier on each node
-        let node_tiers: Vec<(String, i64)> = effective_tier
-            .iter()
-            .map(|(id, tier)| (id.to_string(), *tier))
-            .collect();
-
-        for chunk in node_tiers.chunks(500) {
-            // Build individual SET clauses per effective tier value
-            let mut by_tier: HashMap<i64, Vec<String>> = HashMap::new();
-            for (id, tier) in chunk {
-                by_tier.entry(*tier).or_default().push(id.clone());
-            }
-
-            for (tier_val, ids) in &by_tier {
-                let ids_list: Vec<String> = ids
-                    .iter()
-                    .map(|id| format!("'{}'", id.replace('\'', "\\'")))
-                    .collect();
-                let query = format!(
-                    "MATCH (n) WHERE n.objectid IN [{}] SET n.effective_tier = {}",
-                    ids_list.join(", "),
-                    tier_val
-                );
-                db.run_custom_query(&query)?;
-            }
-        }
-
-        // Count violations: nodes where effective_tier < assigned tier
-        let computed = nodes.len();
-        let violations = nodes
-            .iter()
-            .filter(|n| {
-                let assigned = *tier_map.get(n.id.as_str()).unwrap_or(&3);
-                let effective = *effective_tier.get(n.id.as_str()).unwrap_or(&3);
-                effective < assigned
-            })
-            .count();
-
-        Ok(ComputeEffectiveTiersResponse {
-            computed,
-            violations,
-        })
+        core::compute_effective_tiers(db).map_err(crate::db::DbError::Database)
     })
     .await?;
 
@@ -2363,57 +2060,16 @@ pub async fn add_query_history(
     Json(body): Json<AddHistoryRequest>,
 ) -> Result<Json<QueryHistoryEntry>, ApiError> {
     let history_service = state.require_history()?;
-    let id = uuid::Uuid::new_v4().to_string();
-    let started_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
 
-    let status_str = body.status.as_deref().unwrap_or("completed");
-    let status = match status_str {
-        "running" => QueryStatus::Running,
-        "failed" => QueryStatus::Failed,
-        "aborted" => QueryStatus::Aborted,
-        _ => QueryStatus::Completed,
-    };
-
-    let id_clone = id.clone();
-    let name = body.name.clone();
-    let query = body.query.clone();
-    let result_count = body.result_count;
-    let duration_ms = body.duration_ms;
-    let error = body.error.clone();
-    let background = body.background;
-    let status_str_owned = status_str.to_string();
-    run_history(history_service, move |h| {
-        h.add(NewQueryHistoryEntry {
-            id: &id_clone,
-            name: &name,
-            query: &query,
-            timestamp: started_at,
-            result_count,
-            status: &status_str_owned,
-            started_at,
-            duration_ms,
-            error: error.as_deref(),
-            background,
-        })
+    let entry = tokio::task::spawn_blocking(move || {
+        core::add_query_history(history_service.as_ref(), body)
     })
-    .await?;
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {e}")))?
+    .map_err(ApiError::Internal)?;
 
-    info!(id = %id, name = %body.name, "Query added to history");
-    Ok(Json(QueryHistoryEntry {
-        id,
-        name: body.name,
-        query: body.query,
-        timestamp: started_at,
-        result_count: body.result_count,
-        status,
-        started_at,
-        duration_ms: body.duration_ms,
-        error: body.error,
-        background: body.background,
-    }))
+    info!(id = %entry.id, name = %entry.name, "Query added to history");
+    Ok(Json(entry))
 }
 
 /// Delete a query from history.
