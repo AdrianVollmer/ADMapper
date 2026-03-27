@@ -27,8 +27,8 @@ impl SqliteStorage {
         let version = self.get_schema_version();
 
         if version == 0 {
-            // Fresh database - create schema
-            self.create_schema_v1()?;
+            // Fresh database - create the current schema directly
+            self.create_current_schema()?;
         } else if version < SCHEMA_VERSION {
             // Run migrations
             self.migrate(version)?;
@@ -50,8 +50,12 @@ impl SqliteStorage {
             .unwrap_or(0)
     }
 
-    /// Create the initial schema (v1).
-    fn create_schema_v1(&self) -> Result<()> {
+    /// Create the current schema directly for fresh databases.
+    ///
+    /// This creates all tables, indexes, and triggers at the current schema version,
+    /// avoiding unnecessary migrations on empty tables. For upgrading existing
+    /// databases from older versions, see [`Self::migrate`].
+    fn create_current_schema(&self) -> Result<()> {
         self.conn.execute_batch(
             r#"
             -- Metadata table for schema versioning
@@ -59,7 +63,7 @@ impl SqliteStorage {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
-            INSERT INTO meta (key, value) VALUES ('schema_version', '3');
+            INSERT INTO meta (key, value) VALUES ('schema_version', '6');
 
             -- Normalized node labels
             CREATE TABLE node_labels (
