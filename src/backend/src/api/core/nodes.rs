@@ -172,7 +172,7 @@ pub fn node_status_full(db: &dyn DatabaseBackend, node_id: &str) -> Result<NodeS
         .unwrap_or(3);
 
     // Other tier-0 RIDs (excluding -512 DA and -519 EA which are checked above)
-    const OTHER_TIER_ZERO_RIDS: &[&str] = &["-518", "-516", "-498", "-544", "-548", "-549", "-551"];
+    const OTHER_TIER_ZERO_RIDS: &[&str] = &["-518", "-516", "-498", "-S-1-5-9", "-544", "-548", "-549", "-551"];
 
     let mut is_tier_zero = node_tier == 0;
     if !is_tier_zero {

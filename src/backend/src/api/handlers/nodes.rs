@@ -15,8 +15,6 @@ use axum::{
 };
 use tracing::{debug, info, instrument};
 
-use super::paths::check_path_to_condition;
-
 /// Get all graph nodes.
 pub async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<DbNode>>, ApiError> {
     let db = state.require_db()?;
@@ -150,14 +148,8 @@ pub async fn node_connections(
 
 /// Get security status for a node.
 ///
-/// Checks in order (aborting early when a condition is met):
-/// 1. Independent properties: owned, disabled
-/// 2. Membership in Enterprise Admins (-519)
-/// 3. Membership in Domain Admins (-512)
-/// 4. Membership in other tier-0 groups
-/// 5. Path to Enterprise Admins
-/// 6. Path to Domain Admins
-/// 7. Path to other tier-0 groups
+/// Delegates to `core::node_status_full` which is the single canonical
+/// implementation shared by both the HTTP (axum) and Tauri desktop paths.
 #[instrument(skip(state))]
 pub async fn node_status(
     State(state): State<AppState>,
@@ -166,180 +158,21 @@ pub async fn node_status(
     let db = state.require_db()?;
     info!(node_id = %node_id, "Checking node security status");
 
-    // Well-known tier-0 SID suffixes (excluding -512 DA and -519 EA which are checked separately):
-    //   -518: Schema Admins
-    //   -516: Domain Controllers
-    //   -498: Enterprise Read-Only Domain Controllers
-    //   -S-1-5-9: Enterprise Domain Controllers
-    //   -544: Administrators (local)
-    //   -548: Account Operators
-    //   -549: Server Operators
-    //   -551: Backup Operators
-    const OTHER_TIER_ZERO_RIDS: &[&str] = &[
-        "-518", "-516", "-498", "-S-1-5-9", "-544", "-548", "-549", "-551",
-    ];
-
-    // === Step 1: Get node type and independent properties (owned, disabled) ===
-    let node_id_clone = node_id.clone();
-    let db_for_props = db.clone();
-    let (node_label, owned, is_disabled) = run_db(db_for_props, move |db| {
-        let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
-        let node = nodes.first();
-
-        let label = node.map(|n| n.label.to_lowercase()).unwrap_or_default();
-
-        let owned = node
-            .and_then(|n| {
-                let props = &n.properties;
-                props.get("owned").or(props.get("Owned")).and_then(|v| {
-                    v.as_bool()
-                        .or_else(|| v.as_i64().map(|i| i == 1))
-                        .or_else(|| v.as_str().map(|s| s == "true"))
-                })
-            })
-            .unwrap_or(false);
-
-        // Check if disabled (enabled=false means disabled)
-        // Only applicable to users, computers, groups
-        let is_disabled = node
-            .and_then(|n| {
-                let props = &n.properties;
-                props.get("enabled").or(props.get("Enabled")).and_then(|v| {
-                    v.as_bool()
-                        .or_else(|| v.as_i64().map(|i| i == 1))
-                        .or_else(|| v.as_str().map(|s| s == "true"))
-                })
-            })
-            .map(|enabled| !enabled) // disabled = NOT enabled
-            .unwrap_or(false);
-
-        Ok((label, owned, is_disabled))
+    let core_status = tokio::task::spawn_blocking(move || {
+        core::node_status_full(db.as_ref(), &node_id)
     })
-    .await?;
+    .await
+    .map_err(|e| ApiError::Internal(format!("Task join error: {e}")))?
+    .map_err(ApiError::Internal)?;
 
-    // Only run expensive membership/path checks for users, computers, and groups
-    let dominated_types = ["user", "computer", "group"];
-    if !dominated_types.contains(&node_label.as_str()) {
-        return Ok(Json(NodeStatus {
-            owned,
-            is_disabled: false, // Not applicable to domains, OUs, etc.
-            is_enterprise_admin: false,
-            is_domain_admin: false,
-            tier: 3,
-            has_path_to_high_tier: false,
-            path_length: None,
-        }));
-    }
-
-    // === Step 2: Check membership in Enterprise Admins (-519) ===
-    let node_id_clone = node_id.clone();
-    let db_for_ea = db.clone();
-    let is_enterprise_admin = run_db(db_for_ea, move |db| {
-        Ok(db
-            .find_membership_by_sid_suffix(&node_id_clone, "-519")?
-            .is_some())
-    })
-    .await?;
-
-    if is_enterprise_admin {
-        return Ok(Json(NodeStatus {
-            owned,
-            is_disabled,
-            is_enterprise_admin: true,
-            is_domain_admin: false,
-            tier: 0,
-            has_path_to_high_tier: false,
-            path_length: None,
-        }));
-    }
-
-    // === Step 3: Check membership in Domain Admins (-512) ===
-    let node_id_clone = node_id.clone();
-    let db_for_da = db.clone();
-    let is_domain_admin = run_db(db_for_da, move |db| {
-        Ok(db
-            .find_membership_by_sid_suffix(&node_id_clone, "-512")?
-            .is_some())
-    })
-    .await?;
-
-    if is_domain_admin {
-        return Ok(Json(NodeStatus {
-            owned,
-            is_disabled,
-            is_enterprise_admin: false,
-            is_domain_admin: true,
-            tier: 0,
-            has_path_to_high_tier: false,
-            path_length: None,
-        }));
-    }
-
-    // === Step 4: Check tier property and membership in other tier-0 groups ===
-    let node_id_clone = node_id.clone();
-    let db_for_tier = db.clone();
-    let (is_tier_zero, node_tier) = run_db(db_for_tier, move |db| {
-        // Check tier property first
-        let nodes = db.get_nodes_by_ids(std::slice::from_ref(&node_id_clone))?;
-        let tier = nodes
-            .first()
-            .and_then(|n| n.properties.get("tier").and_then(|v| v.as_i64()))
-            .unwrap_or(3);
-
-        if tier == 0 {
-            return Ok((true, tier));
-        }
-
-        // Check membership in other tier-0 groups
-        for rid in OTHER_TIER_ZERO_RIDS {
-            if db
-                .find_membership_by_sid_suffix(&node_id_clone, rid)?
-                .is_some()
-            {
-                return Ok((true, tier));
-            }
-        }
-        Ok((false, tier))
-    })
-    .await?;
-
-    if is_tier_zero {
-        return Ok(Json(NodeStatus {
-            owned,
-            is_disabled,
-            is_enterprise_admin: false,
-            is_domain_admin: false,
-            tier: 0,
-            has_path_to_high_tier: false,
-            path_length: None,
-        }));
-    }
-
-    // === Step 5: Check path to any tier-0 target ===
-    // Uses tier property set at import time for all privileged groups and domains
-    let path_to_tier0 =
-        check_path_to_condition(&state, &db, &node_id, "b.tier = 0", "tier-0").await?;
-    if let Some(hops) = path_to_tier0 {
-        return Ok(Json(NodeStatus {
-            owned,
-            is_disabled,
-            is_enterprise_admin: false,
-            is_domain_admin: false,
-            tier: node_tier,
-            has_path_to_high_tier: true,
-            path_length: Some(hops),
-        }));
-    }
-
-    // No tier-0 status or paths found
     Ok(Json(NodeStatus {
-        owned,
-        is_disabled,
-        is_enterprise_admin: false,
-        is_domain_admin: false,
-        tier: node_tier,
-        has_path_to_high_tier: false,
-        path_length: None,
+        owned: core_status.owned,
+        is_disabled: core_status.is_disabled,
+        is_enterprise_admin: core_status.is_enterprise_admin,
+        is_domain_admin: core_status.is_domain_admin,
+        tier: core_status.tier,
+        has_path_to_high_tier: core_status.has_path_to_high_tier,
+        path_length: core_status.path_length,
     }))
 }
 
