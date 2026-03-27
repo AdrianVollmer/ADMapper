@@ -389,7 +389,7 @@ async function submitAddEdge(): Promise<void> {
     return;
   }
   if (!edgeType) {
-    showError(errorEl, "Please select an relationship type");
+    showError(errorEl, "Please select a relationship type");
     return;
   }
   if (!targetId) {

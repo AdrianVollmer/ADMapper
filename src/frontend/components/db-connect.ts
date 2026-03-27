@@ -201,7 +201,7 @@ async function connectToDatabase(): Promise<void> {
     const dbType = result.database_type || selectedDbType;
     await saveConnection({
       url,
-      displayName: getDisplayName(url, dbType),
+      displayName: getDisplayName(url),
       databaseType: dbType,
     });
 
@@ -230,7 +230,7 @@ export async function connectToUrl(url: string): Promise<boolean> {
     const dbType = result.database_type || "unknown";
     await saveConnection({
       url,
-      displayName: getDisplayName(url, dbType),
+      displayName: getDisplayName(url),
       databaseType: dbType,
     });
 
@@ -418,16 +418,13 @@ async function loadDirectory(path?: string): Promise<void> {
       return;
     }
 
-    const isDirectory = false;
     listEl.innerHTML = data.entries
       .map((entry) => {
         const icon = entry.is_dir
           ? '<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 text-yellow-500"><path d="M3 4a2 2 0 012-2h4.586a2 2 0 011.414.586l1.414 1.414H19a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V4z"/></svg>'
           : '<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 text-gray-400"><path d="M5 4a2 2 0 012-2h6l4 4v12a2 2 0 01-2 2H7a2 2 0 01-2-2V4z"/></svg>';
 
-        // For directory selection mode, only directories are clickable to navigate
-        // For file selection mode, directories navigate and files can be selected
-        const isSelectable = isDirectory ? entry.is_dir : true;
+        const isSelectable = true;
         const clickAction = entry.is_dir ? `data-navigate="${entry.path}"` : `data-select="${entry.path}"`;
 
         return `

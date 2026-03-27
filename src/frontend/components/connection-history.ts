@@ -133,7 +133,7 @@ async function saveToTauriStorage(connections: ConnectionEntry[]): Promise<void>
 }
 
 /** Get a display name from a connection URL (redacts credentials) */
-export function getDisplayName(url: string, _dbType: string): string {
+export function getDisplayName(url: string): string {
   try {
     // Redact credentials from network URLs (user:pass@host -> host)
     return url.replace(/:\/\/[^@]+@/, "://");
