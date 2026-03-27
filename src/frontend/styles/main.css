@@ -828,6 +828,46 @@
     @apply w-5 h-5;
   }
 
+  .about-licenses-link {
+    @apply text-sm text-gray-400 hover:text-indigo-300 transition-colors
+           cursor-pointer mt-3;
+  }
+
+  /* Licenses Modal */
+  .license-entry {
+    @apply border border-gray-700 rounded-md;
+  }
+
+  .license-summary {
+    @apply flex items-center justify-between px-4 py-3 cursor-pointer
+           hover:bg-gray-700/50 transition-colors select-none;
+  }
+
+  .license-name {
+    @apply text-sm font-medium text-white;
+  }
+
+  .license-type {
+    @apply text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-300;
+  }
+
+  .license-detail {
+    @apply px-4 pb-4 space-y-2;
+  }
+
+  .license-description {
+    @apply text-sm text-gray-300;
+  }
+
+  .license-url {
+    @apply text-xs text-indigo-400 hover:text-indigo-300 transition-colors block;
+  }
+
+  .license-text {
+    @apply text-xs text-gray-400 bg-gray-900 rounded p-3 overflow-x-auto
+           max-h-64 overflow-y-auto whitespace-pre-wrap break-words;
+  }
+
   /* File Browser */
   .file-browser-list {
     @apply max-h-80 overflow-y-auto border border-gray-700 rounded-md bg-gray-900;

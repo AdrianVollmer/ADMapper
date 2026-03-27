@@ -32,9 +32,7 @@ const MIN_LENS_ZOOM = 0.005;
 const MAX_LENS_ZOOM = 0.5;
 
 // Module state
-// eslint-disable-next-line no-undef
 let lensContainer: HTMLDivElement | null = null;
-// eslint-disable-next-line no-undef
 let sigmaContainer: HTMLDivElement | null = null;
 let lensSigma: Sigma | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

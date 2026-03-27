@@ -24,6 +24,7 @@ import { openSettings, toggleTheme } from "./settings";
 import { openListView } from "./list-view";
 import { openGenerateData } from "./generate-data";
 import { openEditTiers } from "./edit-tiers";
+import { openLicenses } from "./licenses";
 
 /** Action name constants for type-safe dispatch */
 export const Actions = {
@@ -75,6 +76,7 @@ export const Actions = {
   // Help menu
   KEYBOARD_SHORTCUTS: "keyboard-shortcuts",
   ABOUT: "about",
+  LICENSES: "licenses",
   // Modals
   SHOW_PLACEHOLDER_MODAL: "show-placeholder-modal",
   HIDE_PLACEHOLDER_MODAL: "hide-placeholder-modal",
@@ -167,6 +169,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "list-view": () => openListView(),
   // Help menu
   "keyboard-shortcuts": () => showKeyboardShortcuts(),
+  licenses: () => openLicenses(),
   about: () => {
     const modal = document.getElementById("about-modal");
     const versionEl = document.getElementById("about-version");
