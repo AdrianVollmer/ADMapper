@@ -23,9 +23,9 @@ pub fn add_node(
     }
 
     let node = DbNode {
-        id: id.clone(),
-        name: name.clone(),
-        label: label.clone(),
+        id,
+        name,
+        label,
         properties: if properties.is_null() {
             serde_json::json!({})
         } else {
@@ -33,14 +33,9 @@ pub fn add_node(
         },
     };
 
-    db.insert_node(node).map_err(|e| e.to_string())?;
+    db.insert_node(node.clone()).map_err(|e| e.to_string())?;
 
-    Ok(DbNode {
-        id,
-        name,
-        label,
-        properties: serde_json::json!({}),
-    })
+    Ok(node)
 }
 
 /// Add a relationship.
