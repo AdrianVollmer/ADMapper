@@ -9,12 +9,10 @@ use pest::iterators::{Pair, Pairs};
 use pest::Parser;
 use pest_derive::Parser;
 
-// Re-export AST types for backwards compatibility
+// Re-export AST types used by submodules
 pub use super::ast::{
-    BinaryOperator, CreateClause, DeleteClause, Direction, Expression, LengthSpec,
-    ListPredicateKind, Literal, MatchClause, NodePattern, Pattern, PatternElement,
-    RelationshipPattern, ReturnClause, SetClause, SetItem, ShortestPathMode, Statement,
-    UnaryOperator,
+    CreateClause, Direction, Expression, LengthSpec, MatchClause, RelationshipPattern, SetClause,
+    SetItem, ShortestPathMode, Statement, UnaryOperator,
 };
 
 mod clause;
@@ -305,6 +303,7 @@ fn build_single_part_query(pair: Pair<Rule>) -> Result<Statement> {
 }
 
 /// Check if a Cypher query is syntactically valid without building an AST.
+#[allow(dead_code)]
 pub fn validate(query: &str) -> Result<()> {
     CypherParser::parse(Rule::Cypher, query).map_err(|e| Error::Parse(e.to_string()))?;
     Ok(())
@@ -312,6 +311,7 @@ pub fn validate(query: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::ast::{Literal, PatternElement};
     use super::*;
 
     // Syntax validation tests

@@ -148,6 +148,7 @@ impl SqliteStorage {
     }
 
     /// Begin a transaction.
+    #[allow(dead_code)]
     pub fn transaction(&mut self) -> Result<Transaction<'_>> {
         Ok(self.conn.transaction()?)
     }

@@ -308,6 +308,7 @@ pub enum FilterPredicate {
         expr: PlanExpr,
         pattern: String,
     },
+    #[allow(dead_code)]
     HasLabel {
         variable: String,
         label: String,
@@ -419,6 +420,7 @@ pub struct CreateNode {
 /// Relationship creation specification.
 #[derive(Debug, Clone)]
 pub struct CreateRelationship {
+    #[allow(dead_code)]
     pub variable: Option<String>,
     pub source: String,
     pub target: String,

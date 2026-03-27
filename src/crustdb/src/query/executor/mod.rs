@@ -13,7 +13,6 @@ use crate::error::{Error, Result};
 use crate::graph::{Node, PropertyValue, Relationship};
 use crate::storage::{EntityCache, SqliteStorage};
 use smallvec::SmallVec;
-use std::collections::HashMap;
 use tracing::{debug, trace};
 
 
@@ -108,12 +107,14 @@ impl Binding {
 
     /// Check if a node variable exists.
     #[inline]
+    #[allow(dead_code)]
     pub fn has_node(&self, name: &str) -> bool {
         self.nodes.iter().any(|(n, _)| n == name)
     }
 
     /// Check if a relationship variable exists.
     #[inline]
+    #[allow(dead_code)]
     pub fn has_relationship(&self, name: &str) -> bool {
         self.relationships.iter().any(|(n, _)| n == name)
     }
@@ -167,45 +168,6 @@ impl Default for Binding {
 }
 
 // =============================================================================
-// Predicate Pushdown
-// =============================================================================
-
-/// Property constraints for a single variable (property name -> allowed values).
-pub type PropertyConstraints = HashMap<String, Vec<PropertyValue>>;
-
-/// Constraints extracted from WHERE clause, keyed by variable name.
-///
-/// This generic structure can be used for any pattern type, not just shortest paths.
-/// Each variable maps to its property constraints extracted from equality predicates.
-pub type VariableConstraints = HashMap<String, PropertyConstraints>;
-
-/// Constraints extracted from WHERE clause for shortest path optimization.
-///
-/// This is a convenience wrapper around `VariableConstraints` for the common
-/// case of source/target path endpoints.
-#[derive(Debug, Default)]
-pub struct PathConstraints {
-    /// Property constraints for source nodes (e.g., `src.name = 'A'` -> ("name", ["A"])).
-    pub source_props: PropertyConstraints,
-    /// Property constraints for target nodes (e.g., `dst.name = 'B'` -> ("name", ["B"])).
-    pub target_props: PropertyConstraints,
-}
-
-impl PathConstraints {
-    /// Create PathConstraints from generic VariableConstraints.
-    pub fn from_variable_constraints(
-        constraints: VariableConstraints,
-        source_var: &str,
-        target_var: &str,
-    ) -> Self {
-        Self {
-            source_props: constraints.get(source_var).cloned().unwrap_or_default(),
-            target_props: constraints.get(target_var).cloned().unwrap_or_default(),
-        }
-    }
-}
-
-// =============================================================================
 // Main Execution Entry Point
 // =============================================================================
 
@@ -215,6 +177,7 @@ pub use plan_exec::ResourceLimits;
 ///
 /// This uses the query planner to generate an execution plan,
 /// which is then interpreted by the plan executor.
+#[allow(dead_code)]
 pub fn execute(statement: &Statement, storage: &SqliteStorage) -> Result<QueryResult> {
     execute_with_cache(statement, storage, None, ResourceLimits::default())
 }

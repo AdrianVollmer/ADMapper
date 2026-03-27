@@ -255,6 +255,7 @@ impl SqliteStorage {
     }
 
     /// Find relationships by type.
+    #[allow(dead_code)]
     pub fn find_relationships_by_type(&self, rel_type: &str) -> Result<Vec<Relationship>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT r.id, r.source_id, r.target_id, rt.name, json(r.properties)
@@ -476,6 +477,7 @@ impl SqliteStorage {
     }
 
     /// Count outgoing relationships from a node.
+    #[allow(dead_code)]
     pub fn count_outgoing_relationships(&self, node_id: i64) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM relationships WHERE source_id = ?1",
@@ -486,6 +488,7 @@ impl SqliteStorage {
     }
 
     /// Count incoming relationships to a node.
+    #[allow(dead_code)]
     pub fn count_incoming_relationships(&self, node_id: i64) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM relationships WHERE target_id = ?1",
@@ -497,6 +500,7 @@ impl SqliteStorage {
 
     /// Count incoming relationships to a node by objectid.
     /// Uses the dedicated objectid column for efficient indexed lookup.
+    #[allow(dead_code)]
     pub fn count_incoming_relationships_by_objectid(&self, objectid: &str) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM relationships r \
@@ -510,6 +514,7 @@ impl SqliteStorage {
 
     /// Count outgoing relationships from a node by objectid.
     /// Uses the dedicated objectid column for efficient indexed lookup.
+    #[allow(dead_code)]
     pub fn count_outgoing_relationships_by_objectid(&self, objectid: &str) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM relationships r \
