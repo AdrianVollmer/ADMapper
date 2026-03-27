@@ -10,7 +10,8 @@ import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel, updateDetailPanelForEdge } from "./sidebars";
 import { clearCollapseState } from "../graph/collapse";
 import { destroyMagnifier } from "../graph/magnifier";
-import { dispatchAction, type Action } from "./actions";
+import { dispatchAction, Actions, type Action } from "./actions";
+import { api } from "../api/client";
 import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-visibility";
 import { getDefaultLayout } from "./settings";
 import { getCurrentTheme } from "../utils/theme";
@@ -121,7 +122,7 @@ export function updateGraphForConnectionState(connected: boolean, error?: string
 }
 
 /** Show placeholder when connected but no data loaded */
-export function showConnectedPlaceholder(): void {
+export async function showConnectedPlaceholder(): Promise<void> {
   const container = document.getElementById("graph-canvas");
   if (!container) return;
 
@@ -132,20 +133,42 @@ export function showConnectedPlaceholder(): void {
     renderer = null;
   }
 
+  // Check if the database has any nodes
+  let hasNodes = false;
+  try {
+    const stats = await api.get<{ total_nodes: number; total_edges: number }>("/api/graph/detailed-stats");
+    hasNodes = stats.total_nodes > 0;
+  } catch {
+    // If stats fail, fall back to showing Run Query
+  }
+
   // Create placeholder
+  const buttonHtml = hasNodes
+    ? `<button
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+        data-action="${Actions.RUN_QUERY}"
+      >
+        Run Query
+      </button>`
+    : `<button
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+        data-action="${Actions.IMPORT_BLOODHOUND}"
+      >
+        Import Data
+      </button>`;
+
   container.innerHTML = `
     <div class="flex flex-col items-center justify-center h-full text-gray-400">
       <svg class="w-16 h-16 mb-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
       <p class="text-lg mb-2 text-green-400">Database connected</p>
-      <p class="text-sm text-gray-500 mb-4">Run a query or select one from the sidebar to visualize data</p>
-      <button
-        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-        data-action="run-query"
-      >
-        Run Query
-      </button>
+      <p class="text-sm text-gray-500 mb-4">${
+        hasNodes
+          ? "Run a query or select one from the sidebar to visualize data"
+          : "Import BloodHound data to get started"
+      }</p>
+      ${buttonHtml}
     </div>
   `;
 
