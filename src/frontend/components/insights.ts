@@ -109,33 +109,21 @@ interface TabState<T> {
 
 /** Choke points pagination */
 const CHOKE_POINTS_PAGE_SIZE = 10;
+
+// Module state: mutable singletons for modal UI, active tab, per-tab loading/data,
+// pagination offsets, stale threshold, and effective-tier computation status.
 let chokePointsPage = 0;
 let unexpectedChokePointsPage = 0;
-
-/** Modal expanded state */
 let modalExpanded = false;
-
-/** Modal element */
 let modalEl: HTMLElement | null = null;
-
-/** Active tab */
 let activeTab: TabId = "da-analysis";
-
-/** Tab states */
 let daState: TabState<DAAnalysisData> = { loading: false, error: null, data: null };
 let reachabilityState: TabState<ReachabilityData[]> = { loading: false, error: null, data: null };
 let staleState: TabState<StaleObjectsData> = { loading: false, error: null, data: null };
 let accountExposureState: TabState<AccountExposureData> = { loading: false, error: null, data: null };
 let chokePointsState: TabState<ChokePointsData> = { loading: false, error: null, data: null };
 let tierViolationsState: TabState<TierViolationsData> = { loading: false, error: null, data: null };
-
-/** Stale threshold in days */
 let staleThresholdDays = 90;
-
-/** Initialize the insights modal */
-export function initInsights(): void {
-  // Modal is created on demand
-}
 
 /** Open the insights modal */
 export async function openInsights(): Promise<void> {

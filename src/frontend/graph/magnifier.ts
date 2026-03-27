@@ -29,7 +29,8 @@ const MIN_LENS_ZOOM = 0.005;
 /** Maximum lens zoom factor (least zoomed in, must still be tighter than main) */
 const MAX_LENS_ZOOM = 0.5;
 
-// Module state
+// Module state: mutable singletons managing the magnifier lens lifecycle,
+// Sigma instance, zoom level, theme, and DOM event handler references.
 let lensContainer: HTMLDivElement | null = null;
 let sigmaContainer: HTMLDivElement | null = null;
 let lensSigma: Sigma | null = null;

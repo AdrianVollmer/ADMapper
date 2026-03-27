@@ -41,9 +41,6 @@ export function isRunningInTauri(): boolean {
   return typeof window !== "undefined" && !!window.__TAURI__;
 }
 
-// Internal alias for backward compatibility within this module
-const isTauri = isRunningInTauri;
-
 /**
  * Custom error class for API errors.
  * Contains the HTTP status code and error message.
@@ -260,22 +257,28 @@ async function invokeFromUrl<T>(method: string, url: string, body?: unknown): Pr
  */
 export class ApiClient {
   /**
+   * Assert that a fetch response is OK, throwing ApiClientError otherwise.
+   */
+  private async assertOk(response: Response): Promise<void> {
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
+    }
+  }
+
+  /**
    * Make a GET request and parse JSON response.
    * @param url - The URL to fetch
    * @param signal - Optional AbortSignal for cancellation
    * @throws {ApiClientError} If the request fails or response is not OK
    */
   async get<T>(url: string, signal?: AbortSignal): Promise<T> {
-    if (isTauri()) {
+    if (isRunningInTauri()) {
       return invokeFromUrl<T>("GET", url);
     }
 
     const response = await fetch(url, { signal: signal ?? null });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
-    }
+    await this.assertOk(response);
 
     return response.json();
   }
@@ -288,7 +291,7 @@ export class ApiClient {
    * @throws {ApiClientError} If the request fails or response is not OK
    */
   async post<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
-    if (isTauri()) {
+    if (isRunningInTauri()) {
       return invokeFromUrl<T>("POST", url, body);
     }
 
@@ -298,11 +301,7 @@ export class ApiClient {
       body: JSON.stringify(body),
       signal: signal ?? null,
     });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
-    }
+    await this.assertOk(response);
 
     return response.json();
   }
@@ -315,7 +314,7 @@ export class ApiClient {
    * @throws {ApiClientError} If the request fails or response is not OK
    */
   async put<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
-    if (isTauri()) {
+    if (isRunningInTauri()) {
       return invokeFromUrl<T>("PUT", url, body);
     }
 
@@ -325,11 +324,7 @@ export class ApiClient {
       body: JSON.stringify(body),
       signal: signal ?? null,
     });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
-    }
+    await this.assertOk(response);
 
     return response.json();
   }
@@ -342,7 +337,7 @@ export class ApiClient {
    * @throws {ApiClientError} If the request fails or response is not OK
    */
   async postNoContent(url: string, body?: unknown, signal?: AbortSignal): Promise<void> {
-    if (isTauri()) {
+    if (isRunningInTauri()) {
       await invokeFromUrl<unknown>("POST", url, body);
       return;
     }
@@ -356,11 +351,7 @@ export class ApiClient {
       init.body = JSON.stringify(body);
     }
     const response = await fetch(url, init);
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
-    }
+    await this.assertOk(response);
   }
 
   /**
@@ -370,17 +361,13 @@ export class ApiClient {
    * @throws {ApiClientError} If the request fails or response is not OK
    */
   async delete(url: string, signal?: AbortSignal): Promise<void> {
-    if (isTauri()) {
+    if (isRunningInTauri()) {
       await invokeFromUrl<unknown>("DELETE", url);
       return;
     }
 
     const response = await fetch(url, { method: "DELETE", signal: signal ?? null });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
-    }
+    await this.assertOk(response);
   }
 
   /**
@@ -393,7 +380,7 @@ export class ApiClient {
    * @throws {ApiClientError} If the request fails or response is not OK
    */
   async uploadFiles<T>(url: string, files: FileList | File[], signal?: AbortSignal): Promise<T> {
-    if (isTauri()) {
+    if (isRunningInTauri()) {
       throw new ApiClientError(501, "File uploads are not supported in Tauri mode. Use the import dialog.");
     }
 
@@ -408,10 +395,7 @@ export class ApiClient {
       signal: signal ?? null,
     });
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ApiClientError(response.status, text || response.statusText || `HTTP ${response.status}`);
-    }
+    await this.assertOk(response);
 
     return response.json();
   }

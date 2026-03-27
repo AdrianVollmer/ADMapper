@@ -19,7 +19,7 @@ const MODE_NAMES: Record<LabelVisibilityMode, string> = {
   hidden: "Labels: Off",
 };
 
-/** Current visibility mode */
+// Module state: mutable singleton tracking the current label display mode.
 let currentMode: LabelVisibilityMode = "normal";
 
 /** Replace each character with '#' */
@@ -48,11 +48,6 @@ export function cycleLabelVisibility(): LabelVisibilityMode {
 /** Get human-readable name for the current mode */
 export function getLabelVisibilityName(): string {
   return MODE_NAMES[currentMode];
-}
-
-/** Get human-readable name for a specific mode */
-export function getModeName(mode: LabelVisibilityMode): string {
-  return MODE_NAMES[mode];
 }
 
 /** Label parts for partial blur rendering */

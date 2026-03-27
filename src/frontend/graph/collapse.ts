@@ -7,7 +7,7 @@
 
 import type { ADGraphType } from "./ADGraph";
 
-/** State for collapsed nodes - maps node ID to its hidden children */
+// Module state: mutable Map tracking which nodes are collapsed and their hidden children.
 const collapsedNodes = new Map<string, Set<string>>();
 
 /** Check if a node is collapsed (has hidden children) */
