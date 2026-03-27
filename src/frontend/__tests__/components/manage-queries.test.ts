@@ -47,6 +47,21 @@ describe("Manage Queries", () => {
     // Re-import module fresh to reset module-level state
     vi.resetModules();
     manageQueriesModule = await import("../../components/manage-queries");
+
+    // Register Escape handler (normally done by main.ts init).
+    // Inline minimal version to avoid importing main.ts (which pulls in WebGL).
+    // Uses the outer `manageQueriesModule` variable which is reassigned each beforeEach.
+    const mod = manageQueriesModule;
+    document.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const modal = document.querySelector<HTMLElement>(".modal-overlay:not([hidden])");
+      if (!modal) return;
+      if (modal.id === "manage-queries-modal" && mod.handleEscapeKey) {
+        mod.handleEscapeKey();
+      } else {
+        modal.hidden = true;
+      }
+    });
   });
 
   afterEach(() => {

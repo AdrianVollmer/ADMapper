@@ -53,6 +53,13 @@ import { api } from "../../api/client";
 describe("Edit Node/Edge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Register Escape handler (normally done by main.ts init).
+    // Inline minimal version to avoid importing main.ts (which pulls in WebGL).
+    document.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const modal = document.querySelector<HTMLElement>(".modal-overlay:not([hidden])");
+      if (modal) modal.hidden = true;
+    });
   });
 
   describe("openEditNode", () => {
