@@ -99,6 +99,7 @@ let isSaving = false;
 /** Initialize the manage queries component */
 export function initManageQueries(): void {
   createModalElement();
+  // Non-Escape keyboard shortcuts (Ctrl+S, Enter) -- Escape is handled globally in main.ts
   document.addEventListener("keydown", handleKeydown);
 }
 
@@ -1124,23 +1125,26 @@ function handleModalClick(e: Event): void {
   }
 }
 
-/** Handle keyboard shortcuts */
-function handleKeydown(e: KeyboardEvent): void {
+/** Handle Escape key for this modal (called by global Escape handler) */
+export function handleEscapeKey(): void {
   if (!modalEl || modalEl.hasAttribute("hidden")) return;
 
-  if (e.key === "Escape") {
-    if (viewMode !== "tree") {
-      // Go back to tree view
-      editingQuery = null;
-      editingCategory = null;
-      editContext = null;
-      validationError = "";
-      viewMode = "tree";
-      renderModal();
-    } else {
-      closeManageQueries();
-    }
+  if (viewMode !== "tree") {
+    // Go back to tree view
+    editingQuery = null;
+    editingCategory = null;
+    editContext = null;
+    validationError = "";
+    viewMode = "tree";
+    renderModal();
+  } else {
+    closeManageQueries();
   }
+}
+
+/** Handle keyboard shortcuts (non-Escape) */
+function handleKeydown(e: KeyboardEvent): void {
+  if (!modalEl || modalEl.hasAttribute("hidden")) return;
 
   // Ctrl+S to save
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {

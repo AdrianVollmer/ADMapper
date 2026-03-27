@@ -78,13 +78,6 @@ function createModal(): void {
 
   modalEl.addEventListener("click", handleClick);
   document.body.appendChild(modalEl);
-
-  // Close on Escape
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && modalEl && !modalEl.hidden) {
-      closeModal();
-    }
-  });
 }
 
 /** Load and display stats */

@@ -199,12 +199,4 @@ export function showKeyboardShortcuts(): void {
     }
   });
 
-  // Close on Escape
-  const handleEscape = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && !modal!.hidden) {
-      modal!.hidden = true;
-      e.preventDefault();
-    }
-  };
-  document.addEventListener("keydown", handleEscape);
 }

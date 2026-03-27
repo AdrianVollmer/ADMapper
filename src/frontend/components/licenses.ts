@@ -78,14 +78,6 @@ function createModal(): HTMLDivElement {
     }
   });
 
-  const handleEscape = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && !el.hidden) {
-      el.hidden = true;
-      e.preventDefault();
-    }
-  };
-  document.addEventListener("keydown", handleEscape);
-
   return el;
 }
 

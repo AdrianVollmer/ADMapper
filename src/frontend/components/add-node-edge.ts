@@ -173,13 +173,6 @@ function createAddEdgeModal(): void {
   setupSearchInput("add-relationship-target", "add-relationship-target-results", "add-relationship-target-id");
 
   document.body.appendChild(addEdgeModal);
-
-  // Close on Escape
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && addEdgeModal && !addEdgeModal.hidden) {
-      closeAddEdgeModal();
-    }
-  });
 }
 
 /** Create the Add Node modal */
@@ -250,12 +243,6 @@ function createAddNodeModal(): void {
   addNodeModal.addEventListener("click", handleAddNodeClick);
   document.body.appendChild(addNodeModal);
 
-  // Close on Escape
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && addNodeModal && !addNodeModal.hidden) {
-      closeAddNodeModal();
-    }
-  });
 }
 
 /** Set up search input with autocomplete */
@@ -566,11 +553,6 @@ function createEditNodeModal(): void {
   editNodeModal.addEventListener("click", handleEditNodeClick);
   document.body.appendChild(editNodeModal);
 
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && editNodeModal && !editNodeModal.hidden) {
-      closeEditNodeModal();
-    }
-  });
 }
 
 /** Populate the edit node form with current properties */
@@ -834,12 +816,6 @@ function createEditEdgeModal(): void {
 
   editEdgeModal.addEventListener("click", handleEditEdgeClick);
   document.body.appendChild(editEdgeModal);
-
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && editEdgeModal && !editEdgeModal.hidden) {
-      closeEditEdgeModal();
-    }
-  });
 }
 
 /** Populate the edit edge form with current properties */

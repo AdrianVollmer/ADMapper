@@ -25,7 +25,6 @@ interface SortConfig {
 }
 
 /** Modal state */
-let isOpen = false;
 let nodes: NodeListItem[] = [];
 let filteredNodes: NodeListItem[] = [];
 let filterText = "";
@@ -37,7 +36,6 @@ let modalEl: HTMLElement | null = null;
 /** Initialize list view (call once at startup) */
 export function initListView(): void {
   createModalElement();
-  document.addEventListener("keydown", handleKeydown);
 }
 
 /** Create the modal element and append to body */
@@ -98,7 +96,6 @@ export function openListView(): void {
     return;
   }
 
-  isOpen = true;
   filterText = "";
   sortConfig = { column: "label", direction: "asc" };
   applyFilterAndSort();
@@ -117,7 +114,6 @@ export function openListView(): void {
 export function closeListView(): void {
   if (!modalEl) return;
 
-  isOpen = false;
   modalEl.setAttribute("hidden", "");
 }
 
@@ -348,11 +344,3 @@ function handleModalClick(e: Event): void {
   }
 }
 
-/** Handle keyboard shortcuts */
-function handleKeydown(e: KeyboardEvent): void {
-  if (!isOpen) return;
-
-  if (e.key === "Escape") {
-    closeListView();
-  }
-}

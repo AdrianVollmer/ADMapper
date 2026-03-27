@@ -55,7 +55,6 @@ let modalEl: HTMLElement | null = null;
 /** Initialize query history (call once at startup) */
 export function initQueryHistory(): void {
   createModalElement();
-  document.addEventListener("keydown", handleKeydown);
 
   // Reset history cursor when a new foreground query starts
   setForegroundQueryCallback(() => {
@@ -671,20 +670,18 @@ function handleModalClick(e: Event): void {
   }
 }
 
-/** Handle keyboard shortcuts */
-function handleKeydown(e: KeyboardEvent): void {
+/** Handle Escape key for this modal (called by global Escape handler) */
+export function handleEscapeKey(): void {
   if (!isOpen) return;
 
-  if (e.key === "Escape") {
-    if (isEditing) {
-      isEditing = false;
-      renderModal();
-    } else if (selectedEntry) {
-      selectedEntry = null;
-      renderModal();
-    } else {
-      closeQueryHistory();
-    }
+  if (isEditing) {
+    isEditing = false;
+    renderModal();
+  } else if (selectedEntry) {
+    selectedEntry = null;
+    renderModal();
+  } else {
+    closeQueryHistory();
   }
 }
 

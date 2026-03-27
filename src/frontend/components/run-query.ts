@@ -50,6 +50,7 @@ let queryStartTime: number | null = null;
 /** Initialize the run query modal */
 export function initRunQuery(): void {
   createModalElement();
+  // Non-Escape keyboard shortcuts (Ctrl+Enter) -- Escape is handled globally in main.ts
   document.addEventListener("keydown", handleKeydown);
 }
 
@@ -451,13 +452,9 @@ function handleModalClick(e: Event): void {
   }
 }
 
-/** Handle keyboard shortcuts */
+/** Handle non-Escape keyboard shortcuts (Escape is handled globally in main.ts) */
 function handleKeydown(e: KeyboardEvent): void {
   if (!modalEl || modalEl.hasAttribute("hidden")) return;
-
-  if (e.key === "Escape") {
-    closeRunQuery();
-  }
 
   // Ctrl+Enter or Cmd+Enter to execute
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
