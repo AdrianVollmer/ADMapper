@@ -54,11 +54,6 @@ let addNodeModal: HTMLElement | null = null;
 /** Debounce timer for search */
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Initialize the add node/relationship modals */
-export function initAddNodeEdge(): void {
-  // Modals are created on demand
-}
-
 /** Open the Add Relationship modal */
 export function openAddEdge(): void {
   if (!addEdgeModal) {

@@ -74,23 +74,6 @@ export const EDGE_COLORS: Record<ADEdgeType, string> = {
   Unknown: "#adb5bd",
 };
 
-/** Default node size by type */
-export const NODE_SIZES: Record<ADNodeType, number> = {
-  Domain: 20,
-  GPO: 12,
-  OU: 10,
-  Container: 8,
-  Group: 10,
-  Computer: 8,
-  User: 6,
-  CertTemplate: 10,
-  EnterpriseCA: 14,
-  RootCA: 14,
-  AIACA: 10,
-  NTAuthStore: 10,
-  Unknown: 6,
-};
-
 /** Default relationship size (controls arrow head size) */
 export const DEFAULT_EDGE_SIZE = 5;
 

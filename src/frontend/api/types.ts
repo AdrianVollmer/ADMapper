@@ -109,12 +109,6 @@ export interface QueryProgressEvent {
   graph?: GraphData;
 }
 
-/** Query response from /api/graph/query (legacy - now returns QueryStartResponse) */
-export interface QueryResponse {
-  results: QueryResult;
-  graph?: GraphData;
-}
-
 // ============================================================================
 // Query History Types
 // ============================================================================

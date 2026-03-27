@@ -210,8 +210,6 @@ float sdTaperedLine(vec2 p, vec2 a, vec2 b, float thickness) {
 void main(void) {
   float dist = sdTaperedLine(gl_FragCoord.xy, v_source, v_target, v_thickness);
 
-  float halfThickness = v_thickness / 2.0;
-
   // Apply antialiasing with smoothstep
   if (dist < v_feather) {
     #ifdef PICKING_MODE

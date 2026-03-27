@@ -77,7 +77,6 @@ export type {
 export {
   NODE_COLORS,
   EDGE_COLORS,
-  NODE_SIZES,
   HIGHLIGHT_COLORS,
   DIM_COLORS,
   BACKGROUND_COLOR,
@@ -102,7 +101,6 @@ export {
   setLabelVisibilityMode,
   cycleLabelVisibility,
   getLabelVisibilityName,
-  getModeName,
   getLabelParts,
 } from "./label-visibility";
 export type { LabelVisibilityMode, LabelParts } from "./label-visibility";

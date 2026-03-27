@@ -12,7 +12,6 @@ import type {
   SearchResult,
   PathStep,
   PathResponse,
-  QueryResponse,
   QueryHistoryEntry,
   PaginatedResponse,
 } from "./types";
@@ -94,24 +93,6 @@ export function isPathResponse(value: unknown): value is PathResponse {
   if (!value.path.every(isPathStep)) return false;
   if (!isObject(value.graph)) return false;
   return isGraphData(value.graph);
-}
-
-// ============================================================================
-// Query type guards
-// ============================================================================
-
-/** Validate a QueryResponse structure */
-export function isQueryResponse(value: unknown): value is QueryResponse {
-  if (!isObject(value)) return false;
-  if (!isObject(value.results)) return false;
-
-  const results = value.results as Record<string, unknown>;
-  if (!isArray(results.headers) || !isArray(results.rows)) return false;
-
-  // graph is optional
-  if (value.graph !== undefined && !isGraphData(value.graph)) return false;
-
-  return true;
 }
 
 // ============================================================================

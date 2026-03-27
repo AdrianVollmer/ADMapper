@@ -29,11 +29,6 @@ interface DetailedStats {
 /** Modal handle */
 let modal: ModalHandle | null = null;
 
-/** Initialize the database manager modal */
-export function initDbManager(): void {
-  // Modal is created on demand
-}
-
 /** Open the database manager modal */
 export async function openDbManager(): Promise<void> {
   if (!modal) {

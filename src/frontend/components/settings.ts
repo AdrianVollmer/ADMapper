@@ -49,11 +49,6 @@ export function getFixedNodeSizes(): boolean {
   return currentSettings.fixedNodeSizes ?? true;
 }
 
-/** Initialize the settings modal */
-export function initSettings(): void {
-  // Modal is created on demand
-}
-
 /**
  * Apply initial settings on app startup.
  * Loads settings from API and applies the theme immediately.

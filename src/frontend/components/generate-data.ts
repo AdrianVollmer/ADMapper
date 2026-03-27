@@ -32,11 +32,6 @@ const SIZE_INFO: Record<DataSize, { nodes: string; description: string }> = {
 /** Modal handle */
 let modal: ModalHandle | null = null;
 
-/** Initialize the generate data modal */
-export function initGenerateData(): void {
-  // Modal is created on demand
-}
-
 /** Ensure the modal exists, creating it on first use */
 function ensureModal(): ModalHandle {
   if (!modal) {

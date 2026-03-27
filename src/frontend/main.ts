@@ -12,12 +12,11 @@ import { initImport } from "./components/import";
 import { initSearch, handleSearchClicks } from "./components/search";
 import { initQueries, handleQueryTreeClicks } from "./components/queries";
 import { initQueryHistory, handleEscapeKey as queryHistoryEscape } from "./components/query-history";
-import { initDbManager } from "./components/db-manager";
 import { initDbConnect } from "./components/db-connect";
 import { initRunQuery, closeRunQuery } from "./components/run-query";
 import { initManageQueries, handleEscapeKey as manageQueriesEscape } from "./components/manage-queries";
 import { initQueryActivity } from "./components/query-activity";
-import { initSettings, applyInitialSettings } from "./components/settings";
+import { applyInitialSettings } from "./components/settings";
 import { initListView, closeListView } from "./components/list-view";
 import { isRunningInTauri } from "./api/client";
 
@@ -142,12 +141,10 @@ async function init(): Promise<void> {
   initSearch();
   initQueries();
   initQueryHistory();
-  initDbManager();
   initDbConnect();
   initRunQuery();
   initManageQueries();
   initQueryActivity();
-  initSettings();
   initListView();
   initVersion();
 
