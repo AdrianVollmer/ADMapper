@@ -64,7 +64,7 @@ mod storage;
 
 pub use database::{Database, DatabaseStats, NewQueryHistoryEntry, QueryHistoryRow};
 pub use error::{Error, Result};
-pub use graph::{Node, PropertyValue, Relationship};
+pub use graph::{Node, Path, PropertyValue, Relationship};
 pub use query::executor::algorithms::RelationshipBetweenness;
 pub use query::executor::ResourceLimits;
 pub use query::{QueryResult, QueryStats, ResultValue, Row};

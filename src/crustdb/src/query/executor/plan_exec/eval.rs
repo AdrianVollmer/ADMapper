@@ -1,63 +1,56 @@
 use super::filter::evaluate_predicate;
-use super::{Binding, Path};
+use super::Binding;
 use crate::error::Result;
-use crate::graph::{Node, PropertyValue, Relationship};
+use crate::graph::PropertyValue;
 use crate::query::planner::{CaseWhen, PlanExpr, PlanLiteral};
 
-#[derive(Debug, Clone)]
-pub(in crate::query::executor) enum EvalValue {
-    Null,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    String(String),
-    List(Vec<EvalValue>),
-    Node(Node),
-    Relationship(Relationship),
-    Path(Path),
-}
-
-pub(super) fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalValue> {
+pub(super) fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<PropertyValue> {
     match expr {
         PlanExpr::Literal(lit) => Ok(match lit {
-            PlanLiteral::Null => EvalValue::Null,
-            PlanLiteral::Bool(b) => EvalValue::Bool(*b),
-            PlanLiteral::Int(i) => EvalValue::Int(*i),
-            PlanLiteral::Float(f) => EvalValue::Float(*f),
-            PlanLiteral::String(s) => EvalValue::String(s.clone()),
+            PlanLiteral::Null => PropertyValue::Null,
+            PlanLiteral::Bool(b) => PropertyValue::Bool(*b),
+            PlanLiteral::Int(i) => PropertyValue::Integer(*i),
+            PlanLiteral::Float(f) => PropertyValue::Float(*f),
+            PlanLiteral::String(s) => PropertyValue::String(s.clone()),
         }),
 
         PlanExpr::Variable(v) => {
             if let Some(node) = binding.get_node(v) {
-                Ok(EvalValue::Node(node.clone()))
+                Ok(PropertyValue::Node(node.clone()))
             } else if let Some(relationship) = binding.get_relationship(v) {
-                Ok(EvalValue::Relationship(relationship.clone()))
+                Ok(PropertyValue::Relationship(relationship.clone()))
             } else if let Some(path) = binding.get_path(v) {
-                Ok(EvalValue::Path(path.clone()))
+                Ok(PropertyValue::Path(path.clone()))
             } else if let Some(scalar) = binding.get_scalar(v) {
-                Ok(property_to_eval_value(Some(scalar)))
+                Ok(scalar.clone())
             } else {
-                Ok(EvalValue::Null)
+                Ok(PropertyValue::Null)
             }
         }
 
         PlanExpr::Property { variable, property } => {
             if let Some(node) = binding.get_node(variable) {
-                Ok(property_to_eval_value(node.properties.get(property)))
+                Ok(node
+                    .properties
+                    .get(property)
+                    .cloned()
+                    .unwrap_or(PropertyValue::Null))
             } else if let Some(relationship) = binding.get_relationship(variable) {
-                Ok(property_to_eval_value(
-                    relationship.properties.get(property),
-                ))
+                Ok(relationship
+                    .properties
+                    .get(property)
+                    .cloned()
+                    .unwrap_or(PropertyValue::Null))
             } else {
-                Ok(EvalValue::Null)
+                Ok(PropertyValue::Null)
             }
         }
 
         PlanExpr::PathLength { path_variable } => {
             if let Some(path) = binding.get_path(path_variable) {
-                Ok(EvalValue::Int(path.relationships.len() as i64))
+                Ok(PropertyValue::Integer(path.relationships.len() as i64))
             } else {
-                Ok(EvalValue::Null)
+                Ok(PropertyValue::Null)
             }
         }
 
@@ -69,65 +62,65 @@ pub(super) fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalVa
                     if args.len() == 1 {
                         let v = evaluate_expr(&args[0], binding)?;
                         match v {
-                            EvalValue::Node(n) => Ok(EvalValue::Int(n.id)),
-                            EvalValue::Relationship(e) => Ok(EvalValue::Int(e.id)),
-                            _ => Ok(EvalValue::Null),
+                            PropertyValue::Node(n) => Ok(PropertyValue::Integer(n.id)),
+                            PropertyValue::Relationship(e) => Ok(PropertyValue::Integer(e.id)),
+                            _ => Ok(PropertyValue::Null),
                         }
                     } else {
-                        Ok(EvalValue::Null)
+                        Ok(PropertyValue::Null)
                     }
                 }
                 "TYPE" => {
                     if args.len() == 1 {
                         let v = evaluate_expr(&args[0], binding)?;
-                        if let EvalValue::Relationship(e) = v {
-                            Ok(EvalValue::String(e.rel_type))
+                        if let PropertyValue::Relationship(e) = v {
+                            Ok(PropertyValue::String(e.rel_type))
                         } else {
-                            Ok(EvalValue::Null)
+                            Ok(PropertyValue::Null)
                         }
                     } else {
-                        Ok(EvalValue::Null)
+                        Ok(PropertyValue::Null)
                     }
                 }
                 "LABELS" => {
                     if args.len() == 1 {
                         let v = evaluate_expr(&args[0], binding)?;
-                        if let EvalValue::Node(n) = v {
-                            let labels: Vec<EvalValue> =
-                                n.labels.into_iter().map(EvalValue::String).collect();
-                            Ok(EvalValue::List(labels))
+                        if let PropertyValue::Node(n) = v {
+                            let labels: Vec<PropertyValue> =
+                                n.labels.into_iter().map(PropertyValue::String).collect();
+                            Ok(PropertyValue::List(labels))
                         } else {
-                            Ok(EvalValue::Null)
+                            Ok(PropertyValue::Null)
                         }
                     } else {
-                        Ok(EvalValue::Null)
+                        Ok(PropertyValue::Null)
                     }
                 }
                 "TOLOWER" | "LOWER" => {
                     if args.len() == 1 {
                         let v = evaluate_expr(&args[0], binding)?;
-                        if let EvalValue::String(s) = v {
-                            Ok(EvalValue::String(s.to_lowercase()))
+                        if let PropertyValue::String(s) = v {
+                            Ok(PropertyValue::String(s.to_lowercase()))
                         } else {
-                            Ok(EvalValue::Null)
+                            Ok(PropertyValue::Null)
                         }
                     } else {
-                        Ok(EvalValue::Null)
+                        Ok(PropertyValue::Null)
                     }
                 }
                 "TOUPPER" | "UPPER" => {
                     if args.len() == 1 {
                         let v = evaluate_expr(&args[0], binding)?;
-                        if let EvalValue::String(s) = v {
-                            Ok(EvalValue::String(s.to_uppercase()))
+                        if let PropertyValue::String(s) = v {
+                            Ok(PropertyValue::String(s.to_uppercase()))
                         } else {
-                            Ok(EvalValue::Null)
+                            Ok(PropertyValue::Null)
                         }
                     } else {
-                        Ok(EvalValue::Null)
+                        Ok(PropertyValue::Null)
                     }
                 }
-                _ => Ok(EvalValue::Null), // Unknown function
+                _ => Ok(PropertyValue::Null), // Unknown function
             }
         }
 
@@ -160,7 +153,7 @@ pub(super) fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalVa
             // No WHEN matched - return ELSE or NULL
             match else_ {
                 Some(e) => evaluate_expr(e, binding),
-                None => Ok(EvalValue::Null),
+                None => Ok(PropertyValue::Null),
             }
         }
     }
@@ -171,67 +164,29 @@ pub(super) fn evaluate_expr(expr: &PlanExpr, binding: &Binding) -> Result<EvalVa
 pub(crate) fn evaluate_expr_pub(
     expr: &PlanExpr,
     binding: &Binding,
-) -> crate::error::Result<crate::graph::PropertyValue> {
-    let val = evaluate_expr(expr, binding)?;
-    Ok(eval_value_to_property(val))
+) -> crate::error::Result<PropertyValue> {
+    evaluate_expr(expr, binding)
 }
 
-/// Convert an EvalValue to a PropertyValue.
-pub(crate) fn eval_value_to_property(val: EvalValue) -> crate::graph::PropertyValue {
-    match val {
-        EvalValue::Null => PropertyValue::Null,
-        EvalValue::Bool(b) => PropertyValue::Bool(b),
-        EvalValue::Int(i) => PropertyValue::Integer(i),
-        EvalValue::Float(f) => PropertyValue::Float(f),
-        EvalValue::String(s) => PropertyValue::String(s),
-        EvalValue::List(items) => {
-            PropertyValue::List(items.into_iter().map(eval_value_to_property).collect())
-        }
-        // Nodes, Relationships, Paths can't be directly represented as PropertyValue
-        EvalValue::Node(_) | EvalValue::Relationship(_) | EvalValue::Path(_) => PropertyValue::Null,
-    }
-}
-
-pub(super) fn property_to_eval_value(prop: Option<&PropertyValue>) -> EvalValue {
-    match prop {
-        None => EvalValue::Null,
-        Some(PropertyValue::Null) => EvalValue::Null,
-        Some(PropertyValue::Bool(b)) => EvalValue::Bool(*b),
-        Some(PropertyValue::Integer(i)) => EvalValue::Int(*i),
-        Some(PropertyValue::Float(f)) => EvalValue::Float(*f),
-        Some(PropertyValue::String(s)) => EvalValue::String(s.clone()),
-        Some(PropertyValue::List(items)) => {
-            let values: Vec<EvalValue> = items
-                .iter()
-                .map(|p| property_to_eval_value(Some(p)))
-                .collect();
-            EvalValue::List(values)
-        }
-        Some(PropertyValue::Map(_)) => {
-            // Maps are not currently supported as eval values
-            EvalValue::Null
-        }
-    }
-}
-
-pub(super) fn values_equal(a: &EvalValue, b: &EvalValue) -> bool {
+pub(super) fn values_equal(a: &PropertyValue, b: &PropertyValue) -> bool {
     match (a, b) {
-        (EvalValue::Null, EvalValue::Null) => false, // NULL != NULL in Cypher
-        (EvalValue::Bool(x), EvalValue::Bool(y)) => x == y,
-        (EvalValue::Int(x), EvalValue::Int(y)) => x == y,
-        (EvalValue::Float(x), EvalValue::Float(y)) => (x - y).abs() < f64::EPSILON,
-        (EvalValue::Int(x), EvalValue::Float(y)) | (EvalValue::Float(y), EvalValue::Int(x)) => {
+        (PropertyValue::Null, PropertyValue::Null) => false, // NULL != NULL in Cypher
+        (PropertyValue::Bool(x), PropertyValue::Bool(y)) => x == y,
+        (PropertyValue::Integer(x), PropertyValue::Integer(y)) => x == y,
+        (PropertyValue::Float(x), PropertyValue::Float(y)) => (x - y).abs() < f64::EPSILON,
+        (PropertyValue::Integer(x), PropertyValue::Float(y))
+        | (PropertyValue::Float(y), PropertyValue::Integer(x)) => {
             (*x as f64 - y).abs() < f64::EPSILON
         }
-        (EvalValue::String(x), EvalValue::String(y)) => x == y,
+        (PropertyValue::String(x), PropertyValue::String(y)) => x == y,
         _ => false,
     }
 }
 
-pub(super) fn compare_values(a: &EvalValue, b: &EvalValue) -> Option<i32> {
+pub(super) fn compare_values(a: &PropertyValue, b: &PropertyValue) -> Option<i32> {
     match (a, b) {
-        (EvalValue::Int(x), EvalValue::Int(y)) => Some(x.cmp(y) as i32),
-        (EvalValue::Float(x), EvalValue::Float(y)) => {
+        (PropertyValue::Integer(x), PropertyValue::Integer(y)) => Some(x.cmp(y) as i32),
+        (PropertyValue::Float(x), PropertyValue::Float(y)) => {
             if x < y {
                 Some(-1)
             } else if x > y {
@@ -240,7 +195,7 @@ pub(super) fn compare_values(a: &EvalValue, b: &EvalValue) -> Option<i32> {
                 Some(0)
             }
         }
-        (EvalValue::Int(x), EvalValue::Float(y)) => {
+        (PropertyValue::Integer(x), PropertyValue::Float(y)) => {
             let xf = *x as f64;
             if xf < *y {
                 Some(-1)
@@ -250,7 +205,7 @@ pub(super) fn compare_values(a: &EvalValue, b: &EvalValue) -> Option<i32> {
                 Some(0)
             }
         }
-        (EvalValue::Float(x), EvalValue::Int(y)) => {
+        (PropertyValue::Float(x), PropertyValue::Integer(y)) => {
             let yf = *y as f64;
             if *x < yf {
                 Some(-1)
@@ -260,7 +215,7 @@ pub(super) fn compare_values(a: &EvalValue, b: &EvalValue) -> Option<i32> {
                 Some(0)
             }
         }
-        (EvalValue::String(x), EvalValue::String(y)) => Some(x.cmp(y) as i32),
+        (PropertyValue::String(x), PropertyValue::String(y)) => Some(x.cmp(y) as i32),
         _ => None,
     }
 }

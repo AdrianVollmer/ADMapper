@@ -121,6 +121,57 @@ impl CrustDatabase {
                     .collect();
                 JsonValue::Object(obj)
             }
+            crustdb::PropertyValue::Node(n) => {
+                let mut obj = serde_json::Map::new();
+                obj.insert("id".into(), JsonValue::Number(n.id.into()));
+                obj.insert(
+                    "labels".into(),
+                    JsonValue::Array(
+                        n.labels.iter().map(|l| JsonValue::String(l.clone())).collect(),
+                    ),
+                );
+                obj.insert(
+                    "properties".into(),
+                    Self::property_value_to_json(&crustdb::PropertyValue::Map(n.properties.clone())),
+                );
+                JsonValue::Object(obj)
+            }
+            crustdb::PropertyValue::Relationship(r) => {
+                let mut obj = serde_json::Map::new();
+                obj.insert("id".into(), JsonValue::Number(r.id.into()));
+                obj.insert("source".into(), JsonValue::Number(r.source.into()));
+                obj.insert("target".into(), JsonValue::Number(r.target.into()));
+                obj.insert("rel_type".into(), JsonValue::String(r.rel_type.clone()));
+                obj.insert(
+                    "properties".into(),
+                    Self::property_value_to_json(&crustdb::PropertyValue::Map(r.properties.clone())),
+                );
+                JsonValue::Object(obj)
+            }
+            crustdb::PropertyValue::Path(p) => {
+                let mut obj = serde_json::Map::new();
+                obj.insert(
+                    "nodes".into(),
+                    JsonValue::Array(
+                        p.nodes
+                            .iter()
+                            .map(|n| Self::property_value_to_json(&crustdb::PropertyValue::Node(n.clone())))
+                            .collect(),
+                    ),
+                );
+                obj.insert(
+                    "relationships".into(),
+                    JsonValue::Array(
+                        p.relationships
+                            .iter()
+                            .map(|r| {
+                                Self::property_value_to_json(&crustdb::PropertyValue::Relationship(r.clone()))
+                            })
+                            .collect(),
+                    ),
+                );
+                JsonValue::Object(obj)
+            }
         }
     }
 

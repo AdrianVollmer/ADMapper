@@ -1,5 +1,6 @@
-use super::{compare_values, evaluate_expr, values_equal, Binding, EvalValue};
+use super::{compare_values, evaluate_expr, values_equal, Binding};
 use crate::error::Result;
+use crate::graph::PropertyValue;
 use crate::query::ast::ListPredicateKind;
 use crate::query::planner::FilterPredicate;
 
@@ -76,17 +77,17 @@ pub(super) fn evaluate_predicate(predicate: &FilterPredicate, binding: &Binding)
 
         FilterPredicate::IsNull { expr } => {
             let v = evaluate_expr(expr, binding)?;
-            Ok(matches!(v, EvalValue::Null))
+            Ok(matches!(v, PropertyValue::Null))
         }
 
         FilterPredicate::IsNotNull { expr } => {
             let v = evaluate_expr(expr, binding)?;
-            Ok(!matches!(v, EvalValue::Null))
+            Ok(!matches!(v, PropertyValue::Null))
         }
 
         FilterPredicate::StartsWith { expr, prefix } => {
             let v = evaluate_expr(expr, binding)?;
-            if let EvalValue::String(s) = v {
+            if let PropertyValue::String(s) = v {
                 Ok(s.starts_with(prefix))
             } else {
                 Ok(false)
@@ -95,7 +96,7 @@ pub(super) fn evaluate_predicate(predicate: &FilterPredicate, binding: &Binding)
 
         FilterPredicate::EndsWith { expr, suffix } => {
             let v = evaluate_expr(expr, binding)?;
-            if let EvalValue::String(s) = v {
+            if let PropertyValue::String(s) = v {
                 Ok(s.ends_with(suffix))
             } else {
                 Ok(false)
@@ -104,7 +105,7 @@ pub(super) fn evaluate_predicate(predicate: &FilterPredicate, binding: &Binding)
 
         FilterPredicate::Contains { expr, substring } => {
             let v = evaluate_expr(expr, binding)?;
-            if let EvalValue::String(s) = v {
+            if let PropertyValue::String(s) = v {
                 Ok(s.contains(substring))
             } else {
                 Ok(false)
@@ -113,7 +114,7 @@ pub(super) fn evaluate_predicate(predicate: &FilterPredicate, binding: &Binding)
 
         FilterPredicate::Regex { expr, pattern } => {
             let v = evaluate_expr(expr, binding)?;
-            if let EvalValue::String(s) = v {
+            if let PropertyValue::String(s) = v {
                 let re = regex::Regex::new(pattern)
                     .map_err(|e| crate::error::Error::Cypher(e.to_string()))?;
                 Ok(re.is_match(&s))

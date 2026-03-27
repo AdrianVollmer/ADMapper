@@ -175,6 +175,46 @@ fn property_to_json(prop: &crustdb::PropertyValue) -> serde_json::Value {
             serde_json::Value::Array(items.iter().map(property_to_json).collect())
         }
         crustdb::PropertyValue::Map(map) => properties_to_json(map),
+        crustdb::PropertyValue::Node(n) => {
+            let mut obj = serde_json::Map::new();
+            obj.insert("id".into(), serde_json::Value::Number(n.id.into()));
+            obj.insert(
+                "labels".into(),
+                serde_json::Value::Array(
+                    n.labels.iter().map(|l| serde_json::Value::String(l.clone())).collect(),
+                ),
+            );
+            obj.insert("properties".into(), properties_to_json(&n.properties));
+            serde_json::Value::Object(obj)
+        }
+        crustdb::PropertyValue::Relationship(r) => {
+            let mut obj = serde_json::Map::new();
+            obj.insert("id".into(), serde_json::Value::Number(r.id.into()));
+            obj.insert("source".into(), serde_json::Value::Number(r.source.into()));
+            obj.insert("target".into(), serde_json::Value::Number(r.target.into()));
+            obj.insert("rel_type".into(), serde_json::Value::String(r.rel_type.clone()));
+            obj.insert("properties".into(), properties_to_json(&r.properties));
+            serde_json::Value::Object(obj)
+        }
+        crustdb::PropertyValue::Path(p) => {
+            let mut obj = serde_json::Map::new();
+            obj.insert(
+                "nodes".into(),
+                serde_json::Value::Array(
+                    p.nodes.iter().map(|n| property_to_json(&crustdb::PropertyValue::Node(n.clone()))).collect(),
+                ),
+            );
+            obj.insert(
+                "relationships".into(),
+                serde_json::Value::Array(
+                    p.relationships
+                        .iter()
+                        .map(|r| property_to_json(&crustdb::PropertyValue::Relationship(r.clone())))
+                        .collect(),
+                ),
+            );
+            serde_json::Value::Object(obj)
+        }
     }
 }
 
@@ -383,6 +423,22 @@ fn format_property(prop: &crustdb::PropertyValue) -> String {
             format!("[{}]", formatted.join(", "))
         }
         crustdb::PropertyValue::Map(map) => format_properties(map),
+        crustdb::PropertyValue::Node(n) => {
+            format!("(id={}, labels={:?}, {})", n.id, n.labels, format_properties(&n.properties))
+        }
+        crustdb::PropertyValue::Relationship(r) => {
+            format!(
+                "[id={}, type={}, {}->{}, {}]",
+                r.id, r.rel_type, r.source, r.target, format_properties(&r.properties)
+            )
+        }
+        crustdb::PropertyValue::Path(p) => {
+            format!(
+                "<path: {} nodes, {} relationships>",
+                p.nodes.len(),
+                p.relationships.len()
+            )
+        }
     }
 }
 

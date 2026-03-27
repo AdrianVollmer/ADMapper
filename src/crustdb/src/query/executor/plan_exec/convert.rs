@@ -1,33 +1,24 @@
-use super::EvalValue;
 use crate::error::{Error, Result};
 use crate::graph::PropertyValue;
 use crate::query::planner::{PlanExpr, PlanLiteral};
 use crate::query::{PathNode, PathRelationship, ResultValue};
 
-pub(super) fn eval_to_result_value(v: EvalValue) -> ResultValue {
+/// Convert a PropertyValue to a ResultValue for query output.
+pub(super) fn eval_to_result_value(v: PropertyValue) -> ResultValue {
     match v {
-        EvalValue::Null => ResultValue::Property(PropertyValue::Null),
-        EvalValue::Bool(b) => ResultValue::Property(PropertyValue::Bool(b)),
-        EvalValue::Int(i) => ResultValue::Property(PropertyValue::Integer(i)),
-        EvalValue::Float(f) => ResultValue::Property(PropertyValue::Float(f)),
-        EvalValue::String(s) => ResultValue::Property(PropertyValue::String(s)),
-        EvalValue::List(items) => {
-            let props: Vec<PropertyValue> = items.into_iter().map(eval_to_property_value).collect();
-            ResultValue::Property(PropertyValue::List(props))
-        }
-        EvalValue::Node(n) => ResultValue::Node {
+        PropertyValue::Node(n) => ResultValue::Node {
             id: n.id,
             labels: n.labels,
             properties: n.properties,
         },
-        EvalValue::Relationship(e) => ResultValue::Relationship {
+        PropertyValue::Relationship(e) => ResultValue::Relationship {
             id: e.id,
             source: e.source,
             target: e.target,
             rel_type: e.rel_type,
             properties: e.properties,
         },
-        EvalValue::Path(p) => ResultValue::Path {
+        PropertyValue::Path(p) => ResultValue::Path {
             nodes: p
                 .nodes
                 .into_iter()
@@ -49,21 +40,7 @@ pub(super) fn eval_to_result_value(v: EvalValue) -> ResultValue {
                 })
                 .collect(),
         },
-    }
-}
-
-pub(super) fn eval_to_property_value(v: EvalValue) -> PropertyValue {
-    match v {
-        EvalValue::Null => PropertyValue::Null,
-        EvalValue::Bool(b) => PropertyValue::Bool(b),
-        EvalValue::Int(i) => PropertyValue::Integer(i),
-        EvalValue::Float(f) => PropertyValue::Float(f),
-        EvalValue::String(s) => PropertyValue::String(s),
-        EvalValue::List(items) => {
-            PropertyValue::List(items.into_iter().map(eval_to_property_value).collect())
-        }
-        // Nodes/relationships/paths can't be converted to property values
-        _ => PropertyValue::Null,
+        other => ResultValue::Property(other),
     }
 }
 

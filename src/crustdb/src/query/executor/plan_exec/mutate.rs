@@ -1,6 +1,6 @@
 use super::{
-    eval_to_property_value, evaluate_expr, execute_operator, plan_properties_to_json, Binding,
-    ExecutionContext, ExecutionResult,
+    evaluate_expr, execute_operator, plan_properties_to_json, Binding, ExecutionContext,
+    ExecutionResult,
 };
 use crate::error::{Error, Result};
 use crate::query::planner::{CreateNode, CreateRelationship, PlanOperator, SetOperation};
@@ -109,8 +109,7 @@ pub(super) fn execute_set_properties(
                     value,
                 } => {
                     if let Some(node) = binding.get_node(variable) {
-                        let val = evaluate_expr(value, binding)?;
-                        let prop_val = eval_to_property_value(val);
+                        let prop_val = evaluate_expr(value, binding)?;
                         storage.update_node_property(node.id, property, &prop_val)?;
                         stats.properties_set += 1;
                     }
