@@ -384,3 +384,24 @@ impl From<falkordb::FalkorDBError> for DbError {
 }
 
 pub type Result<T> = std::result::Result<T, DbError>;
+
+/// Normalize BloodHound type name to standard format.
+/// This ensures consistent labeling regardless of case in source data.
+pub fn normalize_node_type(data_type: &str) -> String {
+    match data_type.to_lowercase().as_str() {
+        "users" | "user" => "User",
+        "groups" | "group" => "Group",
+        "computers" | "computer" => "Computer",
+        "domains" | "domain" => "Domain",
+        "gpos" | "gpo" => "GPO",
+        "ous" | "ou" => "OU",
+        "containers" | "container" => "Container",
+        "certtemplates" | "certtemplate" => "CertTemplate",
+        "enterprisecas" | "enterpriseca" => "EnterpriseCA",
+        "rootcas" | "rootca" => "RootCA",
+        "aiacas" | "aiaca" => "AIACA",
+        "ntauthstores" | "ntauthstore" => "NTAuthStore",
+        _ => "Base",
+    }
+    .to_string()
+}

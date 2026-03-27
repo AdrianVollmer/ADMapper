@@ -3,8 +3,8 @@
 use serde_json::Value as JsonValue;
 use tracing::debug;
 
-use super::super::types::{DbEdge, DbError, DbNode, Result};
-use super::{normalize_node_type, CrustDatabase};
+use super::super::types::{normalize_node_type, DbEdge, DbError, DbNode, Result};
+use super::CrustDatabase;
 
 impl CrustDatabase {
     /// Insert a batch of relationships using efficient batch insert.
