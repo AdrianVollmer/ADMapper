@@ -189,53 +189,13 @@ impl CrustDatabase {
                 ..Default::default()
             });
 
-            // Extract node info from the result
-            if let Some(crustdb::ResultValue::Node {
-                labels, properties, ..
-            }) = row.values.get("a")
-            {
-                if !nodes_map.contains_key(&source) {
-                    let cypher_label = labels.first().cloned().unwrap_or_default();
-                    let props = Self::props_to_json(properties);
-                    let name = props
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or(&source)
-                        .to_string();
-                    nodes_map.insert(
-                        source.clone(),
-                        DbNode {
-                            id: source.clone(),
-                            name,
-                            label: cypher_label,
-                            properties: props,
-                        },
-                    );
-                }
+            // Extract node info from the result using shared helper
+            if let Some(node) = Self::extract_db_node_from_result(&row.values, "a") {
+                nodes_map.entry(source.clone()).or_insert(node);
             }
 
-            if let Some(crustdb::ResultValue::Node {
-                labels, properties, ..
-            }) = row.values.get("b")
-            {
-                if !nodes_map.contains_key(&target) {
-                    let cypher_label = labels.first().cloned().unwrap_or_default();
-                    let props = Self::props_to_json(properties);
-                    let name = props
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or(&target)
-                        .to_string();
-                    nodes_map.insert(
-                        target.clone(),
-                        DbNode {
-                            id: target.clone(),
-                            name,
-                            label: cypher_label,
-                            properties: props,
-                        },
-                    );
-                }
+            if let Some(node) = Self::extract_db_node_from_result(&row.values, "b") {
+                nodes_map.entry(target.clone()).or_insert(node);
             }
         }
 
@@ -252,14 +212,4 @@ impl CrustDatabase {
         Ok((nodes, relationships))
     }
 
-    /// Convert CrustDB properties to JSON (used by Cypher connection queries).
-    pub(crate) fn props_to_json(
-        props: &std::collections::HashMap<String, crustdb::PropertyValue>,
-    ) -> JsonValue {
-        let map: serde_json::Map<String, JsonValue> = props
-            .iter()
-            .map(|(k, v)| (k.clone(), Self::property_value_to_json(v)))
-            .collect();
-        JsonValue::Object(map)
-    }
 }

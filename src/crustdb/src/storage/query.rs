@@ -576,102 +576,7 @@ impl SqliteStorage {
         &self,
         objectid: &str,
     ) -> Result<(Vec<Node>, Vec<Relationship>)> {
-        use rusqlite::OptionalExtension;
-
-        // First find the target node's internal ID using the dedicated objectid column
-        let target_id: Option<i64> = self
-            .conn
-            .query_row(
-                "SELECT id FROM nodes WHERE objectid = ?1",
-                params![objectid],
-                |row| row.get(0),
-            )
-            .optional()?;
-
-        let Some(target_id) = target_id else {
-            return Ok((Vec::new(), Vec::new()));
-        };
-
-        // Get incoming relationships and source nodes in a single query
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT
-                e.id AS rel_id,
-                e.source_id,
-                e.target_id,
-                et.name AS rel_type,
-                json(e.properties) AS edge_props,
-                src.id AS src_node_id,
-                json(src.properties) AS src_props,
-                GROUP_CONCAT(DISTINCT nl.name) AS src_labels
-             FROM relationships e
-             JOIN rel_types et ON e.type_id = et.id
-             JOIN nodes src ON e.source_id = src.id
-             LEFT JOIN node_label_map nlm ON src.id = nlm.node_id
-             LEFT JOIN node_labels nl ON nlm.label_id = nl.id
-             WHERE e.target_id = ?1
-             GROUP BY e.id, src.id",
-        )?;
-
-        let mut nodes_map: std::collections::HashMap<i64, Node> = std::collections::HashMap::new();
-        let mut relationships = Vec::new();
-
-        let rows = stmt.query_map(params![target_id], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,            // rel_id
-                row.get::<_, i64>(1)?,            // source_id
-                row.get::<_, i64>(2)?,            // target_id
-                row.get::<_, String>(3)?,         // rel_type
-                row.get::<_, String>(4)?,         // edge_props
-                row.get::<_, i64>(5)?,            // src_node_id
-                row.get::<_, String>(6)?,         // src_props
-                row.get::<_, Option<String>>(7)?, // src_labels
-            ))
-        })?;
-
-        for row_result in rows {
-            let (
-                rel_id,
-                source_id,
-                target_id_row,
-                rel_type,
-                edge_props,
-                src_node_id,
-                src_props,
-                src_labels,
-            ) = row_result?;
-
-            // Add relationship
-            let edge_properties: std::collections::HashMap<String, PropertyValue> =
-                serde_json::from_str(&edge_props)?;
-            relationships.push(Relationship {
-                id: rel_id,
-                source: source_id,
-                target: target_id_row,
-                rel_type,
-                properties: edge_properties,
-            });
-
-            // Add source node if not already present
-            if let std::collections::hash_map::Entry::Vacant(e) = nodes_map.entry(src_node_id) {
-                let properties: std::collections::HashMap<String, PropertyValue> =
-                    serde_json::from_str(&src_props)?;
-                let labels: Vec<String> = src_labels
-                    .map(|s| s.split(',').map(|l| l.to_string()).collect())
-                    .unwrap_or_default();
-                e.insert(Node {
-                    id: src_node_id,
-                    labels,
-                    properties,
-                });
-            }
-        }
-
-        // Also fetch and add the target node itself
-        if let Some(target_node) = self.get_node(target_id)? {
-            nodes_map.insert(target_id, target_node);
-        }
-
-        Ok((nodes_map.into_values().collect(), relationships))
+        self.get_connections_by_objectid(objectid, true)
     }
 
     /// Get outgoing connections from a node by objectid.
@@ -686,10 +591,21 @@ impl SqliteStorage {
         &self,
         objectid: &str,
     ) -> Result<(Vec<Node>, Vec<Relationship>)> {
-        use rusqlite::OptionalExtension;
+        self.get_connections_by_objectid(objectid, false)
+    }
 
-        // First find the source node's internal ID using the dedicated objectid column
-        let source_id: Option<i64> = self
+    /// Shared implementation for incoming/outgoing connection queries.
+    ///
+    /// When `incoming` is true, finds relationships pointing TO the node (by objectid)
+    /// and returns source nodes. When false, finds relationships pointing FROM the node
+    /// and returns target nodes.
+    fn get_connections_by_objectid(
+        &self,
+        objectid: &str,
+        incoming: bool,
+    ) -> Result<(Vec<Node>, Vec<Relationship>)> {
+        // First find the node's internal ID using the dedicated objectid column
+        let anchor_id: Option<i64> = self
             .conn
             .query_row(
                 "SELECT id FROM nodes WHERE objectid = ?1",
@@ -698,56 +614,66 @@ impl SqliteStorage {
             )
             .optional()?;
 
-        let Some(source_id) = source_id else {
+        let Some(anchor_id) = anchor_id else {
             return Ok((Vec::new(), Vec::new()));
         };
 
-        // Get outgoing relationships and target nodes in a single query
-        let mut stmt = self.conn.prepare_cached(
+        // For incoming: join on source (the "other" node), filter on target = anchor
+        // For outgoing: join on target (the "other" node), filter on source = anchor
+        let (join_column, where_column) = if incoming {
+            ("source_id", "target_id")
+        } else {
+            ("target_id", "source_id")
+        };
+
+        let sql = format!(
             "SELECT
                 e.id AS rel_id,
                 e.source_id,
                 e.target_id,
                 et.name AS rel_type,
                 json(e.properties) AS edge_props,
-                tgt.id AS tgt_node_id,
-                json(tgt.properties) AS tgt_props,
-                GROUP_CONCAT(DISTINCT nl.name) AS tgt_labels
+                other.id AS other_node_id,
+                json(other.properties) AS other_props,
+                GROUP_CONCAT(DISTINCT nl.name) AS other_labels
              FROM relationships e
              JOIN rel_types et ON e.type_id = et.id
-             JOIN nodes tgt ON e.target_id = tgt.id
-             LEFT JOIN node_label_map nlm ON tgt.id = nlm.node_id
+             JOIN nodes other ON e.{} = other.id
+             LEFT JOIN node_label_map nlm ON other.id = nlm.node_id
              LEFT JOIN node_labels nl ON nlm.label_id = nl.id
-             WHERE e.source_id = ?1
-             GROUP BY e.id, tgt.id",
-        )?;
+             WHERE e.{} = ?1
+             GROUP BY e.id, other.id",
+            join_column, where_column
+        );
+
+        let mut stmt = self.conn.prepare_cached(&sql)?;
 
         let mut nodes_map: std::collections::HashMap<i64, Node> = std::collections::HashMap::new();
         let mut relationships = Vec::new();
 
-        let rows = stmt.query_map(params![source_id], |row| {
+        let rows = stmt.query_map(params![anchor_id], |row| {
             Ok((
                 row.get::<_, i64>(0)?,            // rel_id
                 row.get::<_, i64>(1)?,            // source_id
                 row.get::<_, i64>(2)?,            // target_id
                 row.get::<_, String>(3)?,         // rel_type
                 row.get::<_, String>(4)?,         // edge_props
-                row.get::<_, i64>(5)?,            // tgt_node_id
-                row.get::<_, String>(6)?,         // tgt_props
-                row.get::<_, Option<String>>(7)?, // tgt_labels
+                row.get::<_, i64>(5)?,            // other_node_id
+                row.get::<_, String>(6)?,         // other_props
+                row.get::<_, Option<String>>(7)?, // other_labels
             ))
         })?;
 
         for row_result in rows {
             let (
                 rel_id,
-                source_id_row,
+                source_id,
                 target_id,
                 rel_type,
                 edge_props,
-                tgt_node_id,
-                tgt_props,
-                tgt_labels,
+                other_node_id,
+                other_props,
+                other_labels,
             ) = row_result?;
 
             // Add relationship
@@ -755,30 +681,30 @@ impl SqliteStorage {
                 serde_json::from_str(&edge_props)?;
             relationships.push(Relationship {
                 id: rel_id,
-                source: source_id_row,
+                source: source_id,
                 target: target_id,
                 rel_type,
                 properties: edge_properties,
             });
 
-            // Add target node if not already present
-            if let std::collections::hash_map::Entry::Vacant(e) = nodes_map.entry(tgt_node_id) {
+            // Add the other node if not already present
+            if let std::collections::hash_map::Entry::Vacant(e) = nodes_map.entry(other_node_id) {
                 let properties: std::collections::HashMap<String, PropertyValue> =
-                    serde_json::from_str(&tgt_props)?;
-                let labels: Vec<String> = tgt_labels
+                    serde_json::from_str(&other_props)?;
+                let labels: Vec<String> = other_labels
                     .map(|s| s.split(',').map(|l| l.to_string()).collect())
                     .unwrap_or_default();
                 e.insert(Node {
-                    id: tgt_node_id,
+                    id: other_node_id,
                     labels,
                     properties,
                 });
             }
         }
 
-        // Also fetch and add the source node itself
-        if let Some(source_node) = self.get_node(source_id)? {
-            nodes_map.insert(source_id, source_node);
+        // Also fetch and add the anchor node itself
+        if let Some(anchor_node) = self.get_node(anchor_id)? {
+            nodes_map.insert(anchor_id, anchor_node);
         }
 
         Ok((nodes_map.into_values().collect(), relationships))
