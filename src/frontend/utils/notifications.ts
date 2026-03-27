@@ -5,6 +5,8 @@
  * Styles are defined in main.css under "Toast Notifications".
  */
 
+import { escapeHtml } from "./html";
+
 /** Toast container element */
 let toastContainer: HTMLElement | null = null;
 
@@ -132,11 +134,4 @@ export function showConfirm(message: string, options: ConfirmOptions = {}): Prom
     const confirmBtn = overlay.querySelector("[data-action='confirm']") as HTMLButtonElement;
     confirmBtn?.focus();
   });
-}
-
-/** Escape HTML to prevent XSS */
-function escapeHtml(text: string): string {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
 }

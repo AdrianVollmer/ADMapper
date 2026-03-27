@@ -16,6 +16,7 @@ import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-vis
 import { getDefaultLayout } from "./settings";
 import { getCurrentTheme } from "../utils/theme";
 import { showConfirm } from "../utils/notifications";
+import { escapeHtml } from "../utils/html";
 
 let renderer: ADGraphRenderer | null = null;
 let currentLayout: LayoutType = "force";
@@ -214,13 +215,6 @@ export function showNoConnectionPlaceholder(error?: string): void {
   if (statsEl) {
     statsEl.textContent = "No graph loaded";
   }
-}
-
-/** Escape HTML to prevent XSS */
-function escapeHtml(text: string): string {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
 }
 
 /** Thresholds for large graph warning */
