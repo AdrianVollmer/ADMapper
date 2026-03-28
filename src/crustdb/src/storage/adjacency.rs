@@ -60,3 +60,116 @@ impl AdjacencyCache {
         self.incoming.get(&node_id).map_or(&[], |v| v.as_slice())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::SqliteStorage;
+
+    fn setup_graph() -> SqliteStorage {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // Create nodes: A(1), B(2), C(3)
+        let a = storage
+            .insert_node(&["Node".into()], &serde_json::json!({"name": "A"}))
+            .unwrap();
+        let b = storage
+            .insert_node(&["Node".into()], &serde_json::json!({"name": "B"}))
+            .unwrap();
+        let c = storage
+            .insert_node(&["Node".into()], &serde_json::json!({"name": "C"}))
+            .unwrap();
+
+        // Relationships: A->B (KNOWS, id=1), A->C (LIKES, id=2), B->C (KNOWS, id=3)
+        storage
+            .insert_relationship(a, b, "KNOWS", &serde_json::json!({}))
+            .unwrap();
+        storage
+            .insert_relationship(a, c, "LIKES", &serde_json::json!({}))
+            .unwrap();
+        storage
+            .insert_relationship(b, c, "KNOWS", &serde_json::json!({}))
+            .unwrap();
+
+        storage
+    }
+
+    #[test]
+    fn test_build_from_storage() {
+        let storage = setup_graph();
+        let cache = AdjacencyCache::build(&storage).unwrap();
+
+        // Node A (id=1) has 2 outgoing, 0 incoming
+        assert_eq!(cache.outgoing(1).len(), 2);
+        assert_eq!(cache.incoming(1).len(), 0);
+
+        // Node B (id=2) has 1 outgoing, 1 incoming
+        assert_eq!(cache.outgoing(2).len(), 1);
+        assert_eq!(cache.incoming(2).len(), 1);
+
+        // Node C (id=3) has 0 outgoing, 2 incoming
+        assert_eq!(cache.outgoing(3).len(), 0);
+        assert_eq!(cache.incoming(3).len(), 2);
+    }
+
+    #[test]
+    fn test_outgoing_contents() {
+        let storage = setup_graph();
+        let cache = AdjacencyCache::build(&storage).unwrap();
+
+        let a_out = cache.outgoing(1);
+        let targets: Vec<i64> = a_out.iter().map(|(t, _, _)| *t).collect();
+        assert!(targets.contains(&2)); // A->B
+        assert!(targets.contains(&3)); // A->C
+
+        let types: Vec<&str> = a_out.iter().map(|(_, _, t)| t.as_str()).collect();
+        assert!(types.contains(&"KNOWS"));
+        assert!(types.contains(&"LIKES"));
+    }
+
+    #[test]
+    fn test_incoming_contents() {
+        let storage = setup_graph();
+        let cache = AdjacencyCache::build(&storage).unwrap();
+
+        let c_in = cache.incoming(3);
+        let sources: Vec<i64> = c_in.iter().map(|(s, _, _)| *s).collect();
+        assert!(sources.contains(&1)); // A->C
+        assert!(sources.contains(&2)); // B->C
+    }
+
+    #[test]
+    fn test_nonexistent_node_returns_empty() {
+        let storage = setup_graph();
+        let cache = AdjacencyCache::build(&storage).unwrap();
+
+        assert!(cache.outgoing(999).is_empty());
+        assert!(cache.incoming(999).is_empty());
+    }
+
+    #[test]
+    fn test_empty_graph() {
+        let storage = SqliteStorage::in_memory().unwrap();
+        let cache = AdjacencyCache::build(&storage).unwrap();
+
+        assert!(cache.outgoing(1).is_empty());
+        assert!(cache.incoming(1).is_empty());
+    }
+
+    #[test]
+    fn test_rel_ids_are_correct() {
+        let storage = setup_graph();
+        let cache = AdjacencyCache::build(&storage).unwrap();
+
+        // All rel_ids across the cache should be 1, 2, 3
+        let mut all_rel_ids: Vec<i64> = Vec::new();
+        for (_, rel_id, _) in cache.outgoing(1) {
+            all_rel_ids.push(*rel_id);
+        }
+        for (_, rel_id, _) in cache.outgoing(2) {
+            all_rel_ids.push(*rel_id);
+        }
+        all_rel_ids.sort();
+        assert_eq!(all_rel_ids, vec![1, 2, 3]);
+    }
+}

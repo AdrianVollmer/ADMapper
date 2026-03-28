@@ -798,4 +798,218 @@ mod tests {
         let result = db.execute("MATCH (n:Test) RETURN n.x").unwrap();
         assert_eq!(result.rows.len(), 1);
     }
+
+    // =========================================================================
+    // Adjacency Cache Tests
+    // =========================================================================
+
+    #[test]
+    fn test_adjacency_cache_lazy_build() {
+        let db = Database::in_memory().unwrap();
+
+        // Cache starts dirty
+        assert!(db
+            .adjacency_dirty
+            .load(std::sync::atomic::Ordering::Relaxed));
+
+        // Build the cache (empty graph)
+        let cache = db.ensure_adjacency_cache().unwrap();
+        assert!(cache.outgoing(1).is_empty());
+
+        // No longer dirty
+        assert!(!db
+            .adjacency_dirty
+            .load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_adjacency_cache_invalidated_on_cypher_create() {
+        let db = Database::in_memory().unwrap();
+
+        // Build initial cache
+        db.ensure_adjacency_cache().unwrap();
+        assert!(!db
+            .adjacency_dirty
+            .load(std::sync::atomic::Ordering::Relaxed));
+
+        // Write operation should invalidate
+        db.execute("CREATE (n:Person {name: 'Alice'})").unwrap();
+        assert!(db
+            .adjacency_dirty
+            .load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_adjacency_cache_invalidated_on_batch_import() {
+        let db = Database::in_memory().unwrap();
+        db.ensure_adjacency_cache().unwrap();
+
+        // Batch insert should invalidate
+        db.insert_nodes_batch(&[(vec!["Test".into()], serde_json::json!({"name": "x"}))])
+            .unwrap();
+        assert!(db
+            .adjacency_dirty
+            .load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_adjacency_cache_invalidated_on_clear() {
+        let db = Database::in_memory().unwrap();
+        db.execute("CREATE (n:Test)").unwrap();
+        db.ensure_adjacency_cache().unwrap();
+
+        db.clear().unwrap();
+        assert!(db
+            .adjacency_dirty
+            .load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_adjacency_cache_rebuilt_with_correct_data() {
+        let db = Database::in_memory().unwrap();
+
+        // Create a graph: A->B->C
+        db.execute(
+            "CREATE (a:Node {name: 'A'})-[:NEXT]->(b:Node {name: 'B'})-[:NEXT]->(c:Node {name: 'C'})",
+        )
+        .unwrap();
+
+        let cache = db.ensure_adjacency_cache().unwrap();
+
+        // A (id=1) has 1 outgoing to B (id=2)
+        assert_eq!(cache.outgoing(1).len(), 1);
+        assert_eq!(cache.outgoing(1)[0].0, 2); // target is B
+
+        // B (id=2) has 1 outgoing to C, 1 incoming from A
+        assert_eq!(cache.outgoing(2).len(), 1);
+        assert_eq!(cache.incoming(2).len(), 1);
+
+        // C (id=3) has 0 outgoing, 1 incoming from B
+        assert_eq!(cache.outgoing(3).len(), 0);
+        assert_eq!(cache.incoming(3).len(), 1);
+    }
+
+    #[test]
+    fn test_adjacency_cache_reflects_mutations() {
+        let db = Database::in_memory().unwrap();
+
+        // Initial graph: A->B
+        db.execute("CREATE (a:Node {name: 'A'})-[:KNOWS]->(b:Node {name: 'B'})")
+            .unwrap();
+
+        let cache1 = db.ensure_adjacency_cache().unwrap();
+        assert_eq!(cache1.outgoing(1).len(), 1);
+        assert_eq!(cache1.outgoing(2).len(), 0);
+
+        // Add another edge: B->A
+        db.execute("MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) CREATE (b)-[:KNOWS]->(a)")
+            .unwrap();
+
+        // Old cache still has old data (immutable Arc)
+        assert_eq!(cache1.outgoing(2).len(), 0);
+
+        // New cache should reflect the mutation
+        let cache2 = db.ensure_adjacency_cache().unwrap();
+        assert_eq!(cache2.outgoing(2).len(), 1);
+        assert_eq!(cache2.outgoing(2)[0].0, 1); // B->A
+    }
+
+    #[test]
+    fn test_queries_correct_with_adjacency_cache() {
+        let db = Database::in_memory().unwrap();
+
+        // Create a chain: A->B->C->D
+        db.execute(
+            "CREATE (a:Node {name: 'A'})-[:NEXT]->(b:Node {name: 'B'})-[:NEXT]->(c:Node {name: 'C'})-[:NEXT]->(d:Node {name: 'D'})",
+        )
+        .unwrap();
+
+        // Prime the cache
+        db.ensure_adjacency_cache().unwrap();
+
+        // Single-hop expand
+        let result = db
+            .execute("MATCH (a:Node {name: 'A'})-[:NEXT]->(b) RETURN b.name")
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(
+            result.rows[0].values.get("b.name"),
+            Some(&ResultValue::Property(PropertyValue::String("B".into())))
+        );
+
+        // Variable-length expand (2..3 hops from A)
+        let result = db
+            .execute("MATCH (a:Node {name: 'A'})-[:NEXT*2..3]->(b) RETURN b.name")
+            .unwrap();
+        assert_eq!(result.rows.len(), 2); // C (2 hops) and D (3 hops)
+
+        // Shortest path
+        let result = db
+            .execute(
+                "MATCH p = shortestPath((a:Node {name: 'A'})-[*]->(d:Node {name: 'D'})) RETURN length(p)",
+            )
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(
+            result.rows[0].values.get("length(p)"),
+            Some(&ResultValue::Property(PropertyValue::Integer(3)))
+        );
+    }
+
+    #[test]
+    fn test_adjacency_cache_with_relationship_type_filter() {
+        let db = Database::in_memory().unwrap();
+
+        // A->B via KNOWS, A->C via LIKES
+        db.execute("CREATE (a:Node {name: 'A'})-[:KNOWS]->(b:Node {name: 'B'})")
+            .unwrap();
+        db.execute("MATCH (a:Node {name: 'A'}) CREATE (a)-[:LIKES]->(c:Node {name: 'C'})")
+            .unwrap();
+
+        // Prime the cache
+        db.ensure_adjacency_cache().unwrap();
+
+        // Filter by KNOWS only
+        let result = db
+            .execute("MATCH (a:Node {name: 'A'})-[:KNOWS]->(b) RETURN b.name")
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(
+            result.rows[0].values.get("b.name"),
+            Some(&ResultValue::Property(PropertyValue::String("B".into())))
+        );
+
+        // Filter by LIKES only
+        let result = db
+            .execute("MATCH (a:Node {name: 'A'})-[:LIKES]->(b) RETURN b.name")
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(
+            result.rows[0].values.get("b.name"),
+            Some(&ResultValue::Property(PropertyValue::String("C".into())))
+        );
+    }
+
+    #[test]
+    fn test_adjacency_cache_delete_invalidates() {
+        let db = Database::in_memory().unwrap();
+
+        db.execute("CREATE (a:Node {name: 'A'})-[:KNOWS]->(b:Node {name: 'B'})")
+            .unwrap();
+
+        db.ensure_adjacency_cache().unwrap();
+
+        // Delete the relationship target
+        db.execute("MATCH (b:Node {name: 'B'}) DETACH DELETE b")
+            .unwrap();
+
+        // Cache should be invalidated
+        assert!(db
+            .adjacency_dirty
+            .load(std::sync::atomic::Ordering::Relaxed));
+
+        // Rebuilt cache should reflect deletion
+        let cache = db.ensure_adjacency_cache().unwrap();
+        assert_eq!(cache.outgoing(1).len(), 0);
+    }
 }
