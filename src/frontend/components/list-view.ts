@@ -8,6 +8,7 @@
 import { escapeHtml } from "../utils/html";
 import { getRenderer } from "./graph-view";
 import { showInfo } from "../utils/notifications";
+import { createModal, type ModalHandle } from "../utils/modal";
 import type { ADNodeAttributes, ADNodeType } from "../graph/types";
 
 /** Node data for the list */
@@ -30,47 +31,54 @@ let filteredNodes: NodeListItem[] = [];
 let filterText = "";
 let sortConfig: SortConfig = { column: "label", direction: "asc" };
 
-/** Modal element */
-let modalEl: HTMLElement | null = null;
+/** Modal handle */
+let modal: ModalHandle | null = null;
 
 /** Initialize list view (call once at startup) */
 export function initListView(): void {
-  createModalElement();
+  createListViewModal();
 }
 
-/** Create the modal element and append to body */
-function createModalElement(): void {
-  const modal = document.createElement("div");
-  modal.id = "list-view-modal";
-  modal.className = "modal-overlay";
-  modal.setAttribute("hidden", "");
-  modal.innerHTML = `
-    <div class="modal-content modal-xl">
-      <div class="modal-header">
-        <h2 class="modal-title">List View</h2>
-        <button class="modal-close" data-action="close" aria-label="Close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-body" id="list-view-body">
-        <!-- Content rendered dynamically -->
-      </div>
-      <div class="modal-footer" id="list-view-footer">
-        <!-- Footer rendered dynamically -->
-      </div>
-    </div>
-  `;
+/** Create the modal element using the shared modal utility */
+function createListViewModal(): void {
+  modal = createModal({
+    id: "list-view-modal",
+    title: "List View",
+    sizeClass: "modal-xl",
+    onClick(action) {
+      switch (action) {
+        case "close":
+          closeListView();
+          break;
+        case "copy-csv":
+          copyCSV();
+          break;
+        case "download-csv":
+          downloadCSV();
+          break;
+      }
+    },
+  });
 
-  modal.addEventListener("click", handleModalClick);
-  document.body.appendChild(modal);
-  modalEl = modal;
+  modal.body.id = "list-view-body";
+  modal.footer.id = "list-view-footer";
+
+  // Sort headers use data-sort, not data-action, so add a direct listener
+  modal.overlay.addEventListener("click", (e: Event) => {
+    const target = e.target as HTMLElement;
+    const sortHeader = target.closest("[data-sort]") as HTMLElement;
+    if (sortHeader) {
+      const column = sortHeader.getAttribute("data-sort") as SortConfig["column"];
+      if (column) {
+        toggleSort(column);
+      }
+    }
+  });
 }
 
 /** Open the list view modal */
 export function openListView(): void {
-  if (!modalEl) return;
+  if (!modal) return;
 
   const renderer = getRenderer();
   if (!renderer) {
@@ -100,7 +108,7 @@ export function openListView(): void {
   sortConfig = { column: "label", direction: "asc" };
   applyFilterAndSort();
 
-  modalEl.removeAttribute("hidden");
+  modal.open();
   renderModal();
 
   // Focus the filter input
@@ -112,9 +120,7 @@ export function openListView(): void {
 
 /** Close the modal */
 export function closeListView(): void {
-  if (!modalEl) return;
-
-  modalEl.setAttribute("hidden", "");
+  modal?.close();
 }
 
 /** Apply filter and sort to nodes */
@@ -305,41 +311,3 @@ function downloadCSV(): void {
   });
 }
 
-/** Handle clicks in the modal */
-function handleModalClick(e: Event): void {
-  const target = e.target as HTMLElement;
-
-  // Close on backdrop click
-  if (target.classList.contains("modal-overlay")) {
-    closeListView();
-    return;
-  }
-
-  // Handle sortable headers
-  const sortHeader = target.closest("[data-sort]") as HTMLElement;
-  if (sortHeader) {
-    const column = sortHeader.getAttribute("data-sort") as SortConfig["column"];
-    if (column) {
-      toggleSort(column);
-    }
-    return;
-  }
-
-  // Handle action buttons
-  const actionEl = target.closest("[data-action]") as HTMLElement;
-  if (!actionEl) return;
-
-  const action = actionEl.getAttribute("data-action");
-
-  switch (action) {
-    case "close":
-      closeListView();
-      break;
-    case "copy-csv":
-      copyCSV();
-      break;
-    case "download-csv":
-      downloadCSV();
-      break;
-  }
-}

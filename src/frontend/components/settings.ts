@@ -11,11 +11,15 @@ import type { Settings, Theme, GraphLayout, ForceLayoutSettings } from "../api/t
 import { applyTheme } from "../utils/theme";
 import { showSuccess, showError } from "../utils/notifications";
 import { setUserForceSettings } from "../graph";
+import { createModal, type ModalHandle } from "../utils/modal";
 
 /** Tab identifiers */
 type SettingsTab = "appearance" | "graph";
 
-/** Modal element */
+/** Modal handle */
+let modal: ModalHandle | null = null;
+
+/** Modal element (alias for modal.overlay for internal use) */
 let modalEl: HTMLElement | null = null;
 
 /** Active tab */
@@ -93,8 +97,8 @@ export async function toggleTheme(): Promise<void> {
 
 /** Open the settings modal */
 export async function openSettings(): Promise<void> {
-  if (!modalEl) {
-    createModal();
+  if (!modal) {
+    createSettingsModal();
   }
 
   // Load fresh settings
@@ -107,14 +111,12 @@ export async function openSettings(): Promise<void> {
   renderBody();
   attachSliderListeners();
   populateForm();
-  modalEl!.hidden = false;
+  modal!.open();
 }
 
 /** Close the modal */
 function closeModal(): void {
-  if (modalEl) {
-    modalEl.hidden = true;
-  }
+  modal?.close();
 }
 
 /** Render the Appearance tab content */
@@ -328,31 +330,29 @@ function attachSliderListeners(): void {
   }
 }
 
-/** Create the modal element */
-function createModal(): void {
-  modalEl = document.createElement("div");
-  modalEl.id = "settings-modal";
-  modalEl.className = "modal-overlay";
-  modalEl.innerHTML = `
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2 class="modal-title">Settings</h2>
-        <button class="modal-close" data-action="close" aria-label="Close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-body" id="settings-body"></div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-action="close">Cancel</button>
-        <button class="btn btn-primary" data-action="save">Save</button>
-      </div>
-    </div>
-  `;
+/** Create the modal element using the shared modal utility */
+function createSettingsModal(): void {
+  modal = createModal({
+    id: "settings-modal",
+    title: "Settings",
+    buttons: [
+      { label: "Cancel", action: "close", className: "btn btn-secondary" },
+      { label: "Save", action: "save", className: "btn btn-primary" },
+    ],
+    onClick(action) {
+      if (action === "save") {
+        saveSettings();
+      } else if (action === "close") {
+        closeModal();
+      }
+    },
+  });
 
-  modalEl.addEventListener("click", handleClick);
-  document.body.appendChild(modalEl);
+  modal.body.id = "settings-body";
+  modalEl = modal.overlay;
+
+  // Separate listener for tab switching (tabs use data-tab, not data-action)
+  modal.overlay.addEventListener("click", handleTabClick);
 }
 
 /** Populate form with current settings */
@@ -400,49 +400,25 @@ function populateForm(): void {
   }
 }
 
-/** Handle click events */
-function handleClick(e: Event): void {
+/** Handle tab switching clicks */
+function handleTabClick(e: Event): void {
   const target = e.target as HTMLElement;
-
-  // Close on backdrop click
-  if (target.classList.contains("modal-overlay")) {
-    closeModal();
-    return;
-  }
-
-  // Tab switching (toggle visibility without re-rendering to preserve form state)
   const tabBtn = target.closest("[data-tab]") as HTMLElement;
-  if (tabBtn) {
-    const tabId = tabBtn.getAttribute("data-tab") as SettingsTab;
-    if (tabId && tabId !== activeTab) {
-      activeTab = tabId;
-      // Update tab button active states
-      modalEl?.querySelectorAll("[data-tab]").forEach((btn) => {
-        btn.classList.toggle("active", btn.getAttribute("data-tab") === activeTab);
-      });
-      // Toggle tab content visibility
-      const tabs: SettingsTab[] = ["appearance", "graph"];
-      for (const id of tabs) {
-        const el = modalEl?.querySelector(`#tab-${id}`) as HTMLElement | null;
-        if (el) el.hidden = id !== activeTab;
-      }
+  if (!tabBtn) return;
+
+  const tabId = tabBtn.getAttribute("data-tab") as SettingsTab;
+  if (tabId && tabId !== activeTab) {
+    activeTab = tabId;
+    // Update tab button active states
+    modalEl?.querySelectorAll("[data-tab]").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-tab") === activeTab);
+    });
+    // Toggle tab content visibility
+    const tabs: SettingsTab[] = ["appearance", "graph"];
+    for (const id of tabs) {
+      const el = modalEl?.querySelector(`#tab-${id}`) as HTMLElement | null;
+      if (el) el.hidden = id !== activeTab;
     }
-    return;
-  }
-
-  const actionEl = target.closest("[data-action]") as HTMLElement;
-  if (!actionEl) return;
-
-  const action = actionEl.getAttribute("data-action");
-
-  switch (action) {
-    case "close":
-      closeModal();
-      break;
-
-    case "save":
-      saveSettings();
-      break;
   }
 }
 

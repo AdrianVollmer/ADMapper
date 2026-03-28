@@ -6,6 +6,7 @@
  */
 
 import { escapeHtml } from "./html";
+import { createModal } from "./modal";
 
 /** Toast container element */
 let toastContainer: HTMLElement | null = null;
@@ -77,61 +78,56 @@ export function showConfirm(message: string, options: ConfirmOptions = {}): Prom
   const { title = "Confirm", confirmText = "Confirm", cancelText = "Cancel", danger = false } = options;
 
   return new Promise((resolve) => {
-    // Create modal overlay
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    overlay.innerHTML = `
-      <div class="modal-content" style="max-width: 400px;">
-        <div class="modal-header">
-          <h2 class="modal-title">${escapeHtml(title)}</h2>
-        </div>
-        <div class="modal-body px-6 py-4">
-          <p class="text-gray-300">${escapeHtml(message)}</p>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" data-action="cancel">${escapeHtml(cancelText)}</button>
-          <button class="btn ${danger ? "btn-danger" : "btn-primary"}" data-action="confirm">${escapeHtml(confirmText)}</button>
-        </div>
-      </div>
-    `;
+    let resolved = false;
 
-    // Handle clicks
-    const handleClick = (e: Event) => {
-      const target = e.target as HTMLElement;
-      const action = target.closest("[data-action]")?.getAttribute("data-action");
-
-      if (action === "confirm") {
-        cleanup();
-        resolve(true);
-      } else if (action === "cancel" || target === overlay) {
-        cleanup();
-        resolve(false);
-      }
+    const finish = (result: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      modal.close();
+      modal.overlay.remove();
+      document.removeEventListener("keydown", handleKeydown);
+      resolve(result);
     };
 
-    // Handle escape key
+    const modal = createModal({
+      id: "confirm-dialog-" + Date.now(),
+      title: escapeHtml(title),
+      contentStyle: "max-width: 400px;",
+      buttons: [
+        { label: escapeHtml(cancelText), action: "cancel", className: "btn btn-secondary" },
+        {
+          label: escapeHtml(confirmText),
+          action: "confirm",
+          className: `btn ${danger ? "btn-danger" : "btn-primary"}`,
+        },
+      ],
+      onClick(action) {
+        if (action === "confirm") {
+          finish(true);
+        } else if (action === "cancel" || action === "close") {
+          finish(false);
+        }
+      },
+    });
+
+    // Populate the body
+    modal.body.className = "modal-body px-6 py-4";
+    modal.body.innerHTML = `<p class="text-gray-300">${escapeHtml(message)}</p>`;
+
+    // Handle escape/enter key
     const handleKeydown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        cleanup();
-        resolve(false);
+        finish(false);
       } else if (e.key === "Enter") {
-        cleanup();
-        resolve(true);
+        finish(true);
       }
     };
 
-    // Cleanup function
-    const cleanup = () => {
-      overlay.remove();
-      document.removeEventListener("keydown", handleKeydown);
-    };
-
-    overlay.addEventListener("click", handleClick);
     document.addEventListener("keydown", handleKeydown);
-    document.body.appendChild(overlay);
+    modal.open();
 
     // Focus the confirm button
-    const confirmBtn = overlay.querySelector("[data-action='confirm']") as HTMLButtonElement;
+    const confirmBtn = modal.overlay.querySelector("[data-action='confirm']") as HTMLButtonElement;
     confirmBtn?.focus();
   });
 }

@@ -5,6 +5,7 @@
  */
 
 import { dispatchAction, type StaticAction } from "./actions";
+import { createModal, type ModalHandle } from "../utils/modal";
 
 /** Shortcut definition with display info */
 interface ShortcutDef {
@@ -127,12 +128,13 @@ function formatShortcut(shortcut: ShortcutDef): string {
   return parts.join("+");
 }
 
+/** Cached modal handle for keyboard shortcuts */
+let shortcutsModal: ModalHandle | null = null;
+
 /** Show keyboard shortcuts modal */
 export function showKeyboardShortcuts(): void {
-  // Check if modal already exists
-  let modal = document.getElementById("shortcuts-modal");
-  if (modal) {
-    modal.hidden = false;
+  if (shortcutsModal) {
+    shortcutsModal.open();
     return;
   }
 
@@ -145,7 +147,7 @@ export function showKeyboardShortcuts(): void {
     byCategory.set(shortcut.category, existing);
   }
 
-  // Build modal HTML
+  // Build body HTML
   let categoriesHtml = "";
   for (const [category, categoryShortcuts] of byCategory) {
     let shortcutsHtml = "";
@@ -165,37 +167,18 @@ export function showKeyboardShortcuts(): void {
     `;
   }
 
-  modal = document.createElement("div");
-  modal.id = "shortcuts-modal";
-  modal.className = "modal-overlay";
-  modal.innerHTML = `
-    <div class="modal-content modal-lg">
-      <div class="modal-header">
-        <h2 class="modal-title">Keyboard Shortcuts</h2>
-        <button class="modal-close" data-action="close-shortcuts-modal" aria-label="Close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <div class="shortcuts-grid">
-          ${categoriesHtml}
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-primary" data-action="close-shortcuts-modal">Close</button>
-      </div>
+  shortcutsModal = createModal({
+    id: "shortcuts-modal",
+    title: "Keyboard Shortcuts",
+    sizeClass: "modal-lg",
+    buttons: [{ label: "Close", action: "close", className: "btn btn-primary" }],
+  });
+
+  shortcutsModal.body.innerHTML = `
+    <div class="shortcuts-grid">
+      ${categoriesHtml}
     </div>
   `;
 
-  document.body.appendChild(modal);
-
-  // Handle close actions
-  modal.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    if (target === modal || target.closest("[data-action='close-shortcuts-modal']")) {
-      modal!.hidden = true;
-    }
-  });
+  shortcutsModal.open();
 }
