@@ -64,6 +64,7 @@ falkordb = ["dep:falkordb"]
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
 mime = "0.3"
+rstest = "0.25"
 
 [profile.release]
 panic = "abort"

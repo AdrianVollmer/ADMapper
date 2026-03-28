@@ -4,49 +4,33 @@ use super::*;
 use crate::db::crustdb::CrustDatabase;
 use crate::db::DbNode;
 use crate::import::types::ImportProgress;
+use rstest::rstest;
 
-#[test]
-fn test_ace_to_edge_type() {
+#[rstest]
+#[case("GenericAll", Some("GenericAll"))]
+#[case("WriteDacl", Some("WriteDacl"))]
+#[case("Enroll", Some("Enroll"))]
+#[case("AddSelf", Some("AddSelf"))]
+#[case("Unknown", None)]
+fn test_ace_to_edge_type(#[case] right_name: &str, #[case] expected: Option<&str>) {
     assert_eq!(
-        BloodHoundImporter::ace_to_edge_type("GenericAll"),
-        Some("GenericAll")
-    );
-    assert_eq!(
-        BloodHoundImporter::ace_to_edge_type("WriteDacl"),
-        Some("WriteDacl")
-    );
-    assert_eq!(
-        BloodHoundImporter::ace_to_edge_type("Enroll"),
-        Some("Enroll")
-    );
-    assert_eq!(
-        BloodHoundImporter::ace_to_edge_type("AddSelf"),
-        Some("AddSelf")
-    );
-    assert_eq!(
-        BloodHoundImporter::ace_to_edge_type("Unknown"),
-        None,
-        "Unknown rights should return None, not generic ACE"
+        BloodHoundImporter::ace_to_edge_type(right_name),
+        expected,
+        "ACE right '{}' should map to {:?}",
+        right_name,
+        expected,
     );
 }
 
-#[test]
-fn test_local_group_to_edge_type() {
+#[rstest]
+#[case("Administrators", Some("AdminTo"))]
+#[case("Remote Desktop Users", Some("CanRDP"))]
+#[case("Remote Interactive Logon", Some("RemoteInteractiveLogonRight"))]
+#[case("Unknown Group", None)]
+fn test_local_group_to_edge_type(#[case] group_name: &str, #[case] expected: Option<&str>) {
     assert_eq!(
-        BloodHoundImporter::local_group_to_edge_type("Administrators"),
-        Some("AdminTo")
-    );
-    assert_eq!(
-        BloodHoundImporter::local_group_to_edge_type("Remote Desktop Users"),
-        Some("CanRDP")
-    );
-    assert_eq!(
-        BloodHoundImporter::local_group_to_edge_type("Remote Interactive Logon"),
-        Some("RemoteInteractiveLogonRight")
-    );
-    assert_eq!(
-        BloodHoundImporter::local_group_to_edge_type("Unknown Group"),
-        None,
+        BloodHoundImporter::local_group_to_edge_type(group_name),
+        expected,
     );
 }
 
@@ -61,67 +45,32 @@ fn test_importer() -> BloodHoundImporter {
 // Node Extraction Tests
 // ========================================================================
 
-#[test]
-fn test_extract_node_user() {
+#[rstest]
+#[case("users", "S-1-5-21-1234-USER", "testuser@corp.local", "User")]
+#[case("computers", "S-1-5-21-1234-COMP", "DC01.corp.local", "Computer")]
+#[case("groups", "S-1-5-21-1234-GROUP", "Domain Admins", "Group")]
+fn test_extract_node_by_type(
+    #[case] data_type: &str,
+    #[case] sid: &str,
+    #[case] name: &str,
+    #[case] expected_label: &str,
+) {
     let importer = test_importer();
 
     let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234-USER",
+        "ObjectIdentifier": sid,
         "Properties": {
-            "name": "testuser@corp.local",
-            "enabled": true,
-            "pwdlastset": 12345678
+            "name": name
         }
     });
 
-    let node = importer.extract_node("users", &entity);
+    let node = importer.extract_node(data_type, &entity);
     assert!(node.is_some());
 
     let node = node.unwrap();
-    assert_eq!(node.id, "S-1-5-21-1234-USER");
-    assert_eq!(node.name, "testuser@corp.local");
-    assert_eq!(node.label, "User");
-    assert_eq!(node.properties["enabled"], true);
-}
-
-#[test]
-fn test_extract_node_computer() {
-    let importer = test_importer();
-
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234-COMP",
-        "Properties": {
-            "name": "DC01.corp.local",
-            "operatingsystem": "Windows Server 2019"
-        }
-    });
-
-    let node = importer.extract_node("computers", &entity);
-    assert!(node.is_some());
-
-    let node = node.unwrap();
-    assert_eq!(node.id, "S-1-5-21-1234-COMP");
-    assert_eq!(node.name, "DC01.corp.local");
-    assert_eq!(node.label, "Computer");
-}
-
-#[test]
-fn test_extract_node_group() {
-    let importer = test_importer();
-
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234-GROUP",
-        "Properties": {
-            "name": "Domain Admins"
-        }
-    });
-
-    let node = importer.extract_node("groups", &entity);
-    assert!(node.is_some());
-
-    let node = node.unwrap();
-    assert_eq!(node.label, "Group");
-    assert_eq!(node.name, "Domain Admins");
+    assert_eq!(node.id, sid);
+    assert_eq!(node.name, name);
+    assert_eq!(node.label, expected_label);
 }
 
 #[test]
@@ -179,41 +128,31 @@ fn test_extract_node_expands_uac_flags() {
     assert_eq!(node.properties["password_never_expires"], true); // DONT_EXPIRE_PASSWORD set
 }
 
-#[test]
-fn test_extract_node_uac_disabled_account() {
+#[rstest]
+#[case(0x202, "enabled", false)] // ACCOUNTDISABLE (0x2) + NORMAL_ACCOUNT (0x200)
+#[case(0x400200, "enabled", true)] // NORMAL_ACCOUNT (0x200) + DONT_REQ_PREAUTH (0x400000)
+#[case(0x400200, "dont_require_preauth", true)] // AS-REP roastable
+fn test_extract_node_uac_flags(
+    #[case] uac_value: u32,
+    #[case] property: &str,
+    #[case] expected: bool,
+) {
     let importer = test_importer();
 
-    // UAC = 0x202 = ACCOUNTDISABLE (0x2) + NORMAL_ACCOUNT (0x200)
     let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234-DISABLED",
+        "ObjectIdentifier": "S-1-5-21-1234-UAC-TEST",
         "Properties": {
-            "name": "disabled@corp.local",
-            "useraccountcontrol": 0x202
+            "name": "uactest@corp.local",
+            "useraccountcontrol": uac_value
         }
     });
 
     let node = importer.extract_node("users", &entity).unwrap();
-
-    assert_eq!(node.properties["enabled"], false); // ACCOUNTDISABLE is set
-}
-
-#[test]
-fn test_extract_node_uac_asrep_roastable() {
-    let importer = test_importer();
-
-    // UAC = 0x400200 = NORMAL_ACCOUNT (0x200) + DONT_REQ_PREAUTH (0x400000)
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234-ASREP",
-        "Properties": {
-            "name": "asrep@corp.local",
-            "useraccountcontrol": 0x400200
-        }
-    });
-
-    let node = importer.extract_node("users", &entity).unwrap();
-
-    assert_eq!(node.properties["enabled"], true);
-    assert_eq!(node.properties["dont_require_preauth"], true); // AS-REP roastable
+    assert_eq!(
+        node.properties[property], expected,
+        "UAC 0x{:X} should set {}={}",
+        uac_value, property, expected,
+    );
 }
 
 #[test]
@@ -240,116 +179,62 @@ fn test_extract_node_uac_preserves_existing_enabled() {
 // Tier Assignment Tests
 // ========================================================================
 
-#[test]
-fn test_extract_node_marks_domain_admins_tier_zero() {
+#[rstest]
+#[case(
+    "S-1-5-21-1234567890-512",
+    "groups",
+    "DOMAIN ADMINS@CORP.LOCAL",
+    Some(0)
+)]
+#[case(
+    "S-1-5-21-1234567890-519",
+    "groups",
+    "ENTERPRISE ADMINS@CORP.LOCAL",
+    Some(0)
+)]
+#[case("S-1-5-32-544", "groups", "ADMINISTRATORS@CORP.LOCAL", Some(0))]
+#[case(
+    "S-1-5-21-1234567890-S-1-5-9",
+    "groups",
+    "ENTERPRISE DOMAIN CONTROLLERS@CORP.LOCAL",
+    Some(0)
+)]
+#[case("S-1-5-21-1234567890", "domains", "CORP.LOCAL", Some(0))]
+#[case(
+    "S-1-5-21-1234567890-515",
+    "groups",
+    "DOMAIN COMPUTERS@CORP.LOCAL",
+    Some(2)
+)]
+#[case("S-1-5-21-1234567890-1001", "users", "regularuser@corp.local", None)]
+fn test_tier_assignment(
+    #[case] sid: &str,
+    #[case] data_type: &str,
+    #[case] name: &str,
+    #[case] expected_tier: Option<i64>,
+) {
     let importer = test_importer();
 
-    // Domain Admins group (SID ends with -512)
     let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234567890-512",
+        "ObjectIdentifier": sid,
         "Properties": {
-            "name": "DOMAIN ADMINS@CORP.LOCAL"
+            "name": name
         }
     });
 
-    let node = importer.extract_node("groups", &entity).unwrap();
-    assert_eq!(node.properties["tier"], 0);
-}
-
-#[test]
-fn test_extract_node_marks_enterprise_admins_tier_zero() {
-    let importer = test_importer();
-
-    // Enterprise Admins group (SID ends with -519)
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234567890-519",
-        "Properties": {
-            "name": "ENTERPRISE ADMINS@CORP.LOCAL"
-        }
-    });
-
-    let node = importer.extract_node("groups", &entity).unwrap();
-    assert_eq!(node.properties["tier"], 0);
-}
-
-#[test]
-fn test_extract_node_marks_builtin_administrators_tier_zero() {
-    let importer = test_importer();
-
-    // Builtin Administrators (SID ends with -544)
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-32-544",
-        "Properties": {
-            "name": "ADMINISTRATORS@CORP.LOCAL"
-        }
-    });
-
-    let node = importer.extract_node("groups", &entity).unwrap();
-    assert_eq!(node.properties["tier"], 0);
-}
-
-#[test]
-fn test_extract_node_marks_enterprise_domain_controllers_tier_zero() {
-    let importer = test_importer();
-
-    // Enterprise Domain Controllers (SID ends with -S-1-5-9)
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234567890-S-1-5-9",
-        "Properties": {
-            "name": "ENTERPRISE DOMAIN CONTROLLERS@CORP.LOCAL"
-        }
-    });
-
-    let node = importer.extract_node("groups", &entity).unwrap();
-    assert_eq!(node.properties["tier"], 0);
-}
-
-#[test]
-fn test_extract_node_marks_domain_tier_zero() {
-    let importer = test_importer();
-
-    // Domain objects should be tier 0
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234567890",
-        "Properties": {
-            "name": "CORP.LOCAL"
-        }
-    });
-
-    let node = importer.extract_node("domains", &entity).unwrap();
-    assert_eq!(node.properties["tier"], 0);
-}
-
-#[test]
-fn test_extract_node_regular_user_default_tier() {
-    let importer = test_importer();
-
-    // Regular user should NOT have tier set (defaults to 3 at query time)
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234567890-1001",
-        "Properties": {
-            "name": "regularuser@corp.local"
-        }
-    });
-
-    let node = importer.extract_node("users", &entity).unwrap();
-    assert!(node.properties.get("tier").is_none());
-}
-
-#[test]
-fn test_extract_node_marks_domain_computers_tier_two() {
-    let importer = test_importer();
-
-    // Domain Computers group (SID ends with -515)
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234567890-515",
-        "Properties": {
-            "name": "DOMAIN COMPUTERS@CORP.LOCAL"
-        }
-    });
-
-    let node = importer.extract_node("groups", &entity).unwrap();
-    assert_eq!(node.properties["tier"], 2);
+    let node = importer.extract_node(data_type, &entity).unwrap();
+    match expected_tier {
+        Some(tier) => assert_eq!(
+            node.properties["tier"], tier,
+            "SID {} should be tier {}",
+            sid, tier,
+        ),
+        None => assert!(
+            node.properties.get("tier").is_none(),
+            "SID {} should not have a tier assigned",
+            sid,
+        ),
+    }
 }
 
 #[test]
@@ -866,53 +751,40 @@ fn test_bhce_gplink_direction() {
     assert!(gplinks.iter().any(|e| e.source == "GPO-GUID-2"));
 }
 
-/// BH CE creates MemberOf edges from PrimaryGroupSID for every
-/// user and computer.  A user with PrimaryGroupSID pointing to
-/// Domain Users (-513) should get a MemberOf edge to that group.
-#[test]
-fn test_bhce_primary_group_creates_memberof() {
+/// BH CE creates MemberOf edges from PrimaryGroupSID for both users and computers.
+#[rstest]
+#[case("users", "S-1-5-21-1234-1001", "S-1-5-21-1234-513", "jdoe@corp.local")]
+#[case(
+    "computers",
+    "S-1-5-21-1234-1103",
+    "S-1-5-21-1234-515",
+    "DC01.corp.local"
+)]
+fn test_bhce_primary_group_creates_memberof(
+    #[case] data_type: &str,
+    #[case] entity_sid: &str,
+    #[case] group_sid: &str,
+    #[case] name: &str,
+) {
     let mut importer = test_importer();
 
-    let user = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234-1001",
-        "PrimaryGroupSID": "S-1-5-21-1234-513",
-        "Properties": {"name": "jdoe@corp.local"}
+    let entity = serde_json::json!({
+        "ObjectIdentifier": entity_sid,
+        "PrimaryGroupSID": group_sid,
+        "Properties": {"name": name}
     });
 
-    let edges = importer.extract_edges("users", &user);
+    let edges = importer.extract_edges(data_type, &entity);
     let memberof: Vec<_> = edges.iter().filter(|e| e.rel_type == "MemberOf").collect();
 
     assert_eq!(
         memberof.len(),
         1,
-        "PrimaryGroupSID should produce a MemberOf edge"
+        "PrimaryGroupSID should produce a MemberOf edge for {}",
+        data_type,
     );
-    assert_eq!(memberof[0].source, "S-1-5-21-1234-1001");
-    assert_eq!(memberof[0].target, "S-1-5-21-1234-513");
-}
-
-/// BH CE creates MemberOf edges from PrimaryGroupSID for computers
-/// too (typically pointing to Domain Computers, RID -515).
-#[test]
-fn test_bhce_primary_group_computer() {
-    let mut importer = test_importer();
-
-    let computer = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-1234-1103",
-        "PrimaryGroupSID": "S-1-5-21-1234-515",
-        "Properties": {"name": "DC01.corp.local"}
-    });
-
-    let edges = importer.extract_edges("computers", &computer);
-    let memberof: Vec<_> = edges.iter().filter(|e| e.rel_type == "MemberOf").collect();
-
-    assert_eq!(
-        memberof.len(),
-        1,
-        "Computer PrimaryGroupSID should produce a MemberOf edge"
-    );
-    assert_eq!(memberof[0].source, "S-1-5-21-1234-1103");
-    assert_eq!(memberof[0].target, "S-1-5-21-1234-515");
+    assert_eq!(memberof[0].source, entity_sid);
+    assert_eq!(memberof[0].target, group_sid);
 }
 
 /// BH CE derives a DCSync edge when a principal has both GetChanges
@@ -1668,78 +1540,44 @@ fn test_bhce_enterprise_ca_registry_aces() {
     );
 }
 
-#[test]
-fn test_bhce_root_ca_for_domain() {
+/// PKI entities create domain-relationship edges (RootCAFor, NTAuthStoreFor,
+/// EnterpriseCAFor) pointing from the PKI object to its domain.
+#[rstest]
+#[case(
+    "rootcas", "ROOTCA-GUID-1", "RootCAFor",
+    serde_json::json!({"ObjectIdentifier": "ROOTCA-GUID-1", "DomainSID": "S-1-5-21-DOMAIN", "Properties": {"name": "ROOT-CA@CORP.LOCAL"}})
+)]
+#[case(
+    "ntauthstores", "NTAUTH-GUID-1", "NTAuthStoreFor",
+    serde_json::json!({"ObjectIdentifier": "NTAUTH-GUID-1", "DomainSID": "S-1-5-21-DOMAIN", "Properties": {"name": "NTAUTH@CORP.LOCAL"}})
+)]
+#[case(
+    "enterprisecas", "CA-GUID-1", "EnterpriseCAFor",
+    serde_json::json!({"ObjectIdentifier": "CA-GUID-1", "Properties": {"name": "MY-CA@CORP.LOCAL", "domainsid": "S-1-5-21-DOMAIN"}})
+)]
+fn test_bhce_pki_domain_relationship(
+    #[case] data_type: &str,
+    #[case] expected_source: &str,
+    #[case] expected_rel_type: &str,
+    #[case] entity: serde_json::Value,
+) {
     let mut importer = test_importer();
-    // BH CE creates RootCAFor edges from Root CAs to their domain.
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "ROOTCA-GUID-1",
-        "DomainSID": "S-1-5-21-DOMAIN",
-        "Properties": {"name": "ROOT-CA@CORP.LOCAL"}
-    });
-    let edges = importer.extract_edges("rootcas", &entity);
+    let edges = importer.extract_edges(data_type, &entity);
 
-    let root_for: Vec<_> = edges.iter().filter(|e| e.rel_type == "RootCAFor").collect();
-    assert_eq!(
-        root_for.len(),
-        1,
-        "Root CA should create RootCAFor edge to its domain; got: {:?}",
-        edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
-    );
-    assert_eq!(root_for[0].source, "ROOTCA-GUID-1");
-    assert_eq!(root_for[0].target, "S-1-5-21-DOMAIN");
-}
-
-#[test]
-fn test_bhce_ntauth_store_for_domain() {
-    let mut importer = test_importer();
-    // BH CE creates NTAuthStoreFor edges from NTAuth stores to their domain.
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "NTAUTH-GUID-1",
-        "DomainSID": "S-1-5-21-DOMAIN",
-        "Properties": {"name": "NTAUTH@CORP.LOCAL"}
-    });
-    let edges = importer.extract_edges("ntauthstores", &entity);
-
-    let nta_for: Vec<_> = edges
+    let matched: Vec<_> = edges
         .iter()
-        .filter(|e| e.rel_type == "NTAuthStoreFor")
+        .filter(|e| e.rel_type == expected_rel_type)
         .collect();
     assert_eq!(
-        nta_for.len(),
+        matched.len(),
         1,
-        "NTAuth store should create NTAuthStoreFor edge to its domain; got: {:?}",
+        "{} should create exactly one {} edge; got: {:?}",
+        data_type,
+        expected_rel_type,
         edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
     );
-    assert_eq!(nta_for[0].source, "NTAUTH-GUID-1");
-    assert_eq!(nta_for[0].target, "S-1-5-21-DOMAIN");
-}
-
-#[test]
-fn test_bhce_enterprise_ca_for_domain() {
-    let mut importer = test_importer();
-    // BH CE creates EnterpriseCAFor edges from Enterprise CAs to their domain.
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "CA-GUID-1",
-        "Properties": {
-            "name": "MY-CA@CORP.LOCAL",
-            "domainsid": "S-1-5-21-DOMAIN"
-        }
-    });
-    let edges = importer.extract_edges("enterprisecas", &entity);
-
-    let eca_for: Vec<_> = edges
-        .iter()
-        .filter(|e| e.rel_type == "EnterpriseCAFor")
-        .collect();
-    assert_eq!(
-        eca_for.len(),
-        1,
-        "Enterprise CA should create EnterpriseCAFor edge to its domain; got: {:?}",
-        edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
-    );
-    assert_eq!(eca_for[0].source, "CA-GUID-1");
-    assert_eq!(eca_for[0].target, "S-1-5-21-DOMAIN");
+    assert_eq!(matched[0].source, expected_source);
+    assert_eq!(matched[0].target, "S-1-5-21-DOMAIN");
 }
 
 #[test]
@@ -1801,17 +1639,21 @@ fn test_bhce_trusted_for_ntauth() {
     assert!(trusted.iter().all(|e| e.target == "NTAUTH-GUID-1"));
 }
 
-#[test]
-fn test_bhce_computer_coerce_to_tgt() {
+/// CoerceToTGT edges should only be created for computers with unconstrained delegation.
+#[rstest]
+#[case(true, 1)]
+#[case(false, 0)]
+fn test_bhce_computer_coerce_to_tgt(
+    #[case] unconstrained_delegation: bool,
+    #[case] expected_count: usize,
+) {
     let mut importer = test_importer();
-    // BH CE creates CoerceToTGT edges from computers with unconstrained
-    // delegation (unconstraineddelegation=true) to their domain.
     let entity = serde_json::json!({
         "ObjectIdentifier": "S-1-5-21-COMP-1",
         "Properties": {
             "name": "DC01.CORP.LOCAL",
             "domainsid": "S-1-5-21-DOMAIN",
-            "unconstraineddelegation": true
+            "unconstraineddelegation": unconstrained_delegation
         }
     });
     let edges = importer.extract_edges("computers", &entity);
@@ -1822,50 +1664,39 @@ fn test_bhce_computer_coerce_to_tgt() {
         .collect();
     assert_eq!(
         coerce.len(),
-        1,
-        "Computer with unconstrained delegation should create CoerceToTGT to domain; got: {:?}",
+        expected_count,
+        "unconstrained_delegation={} should produce {} CoerceToTGT edges; got: {:?}",
+        unconstrained_delegation,
+        expected_count,
         edges.iter().map(|e| &e.rel_type).collect::<Vec<_>>()
     );
-    assert_eq!(coerce[0].source, "S-1-5-21-COMP-1");
-    assert_eq!(coerce[0].target, "S-1-5-21-DOMAIN");
-}
-
-#[test]
-fn test_bhce_computer_no_coerce_without_delegation() {
-    let mut importer = test_importer();
-    // Computer WITHOUT unconstrained delegation should NOT get CoerceToTGT.
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-COMP-2",
-        "Properties": {
-            "name": "SRV01.CORP.LOCAL",
-            "domainsid": "S-1-5-21-DOMAIN",
-            "unconstraineddelegation": false
-        }
-    });
-    let edges = importer.extract_edges("computers", &entity);
-
-    assert!(
-        !edges.iter().any(|e| e.rel_type == "CoerceToTGT"),
-        "Computer without unconstrained delegation should not have CoerceToTGT"
-    );
+    if expected_count > 0 {
+        assert_eq!(coerce[0].source, "S-1-5-21-COMP-1");
+        assert_eq!(coerce[0].target, "S-1-5-21-DOMAIN");
+    }
 }
 
 // ========================================================================
 // BH CE Parity: Trust direction (CrossForestTrust / SameForestTrust)
 // ========================================================================
 
-#[test]
-fn test_bhce_inbound_trust_direction() {
-    // Inbound trust: the OTHER domain trusts THIS domain.
-    // BH CE convention: edge from trusting -> trusted.
-    // So: target_domain -> this_domain.
+/// Inbound: other domain trusts this domain -> edge from target to this.
+/// Outbound: this domain trusts other domain -> edge from this to target.
+#[rstest]
+#[case("Inbound", "S-1-5-21-OTHER", "S-1-5-21-PHANTOM")]
+#[case("Outbound", "S-1-5-21-PHANTOM", "S-1-5-21-OTHER")]
+fn test_bhce_trust_direction(
+    #[case] direction: &str,
+    #[case] expected_source: &str,
+    #[case] expected_target: &str,
+) {
     let mut importer = test_importer();
     let entity = serde_json::json!({
         "ObjectIdentifier": "S-1-5-21-PHANTOM",
         "Trusts": [{
-            "TargetDomainSid": "S-1-5-21-REVENANT",
-            "TargetDomainName": "REVENANT.CORP",
-            "TrustDirection": "Inbound",
+            "TargetDomainSid": "S-1-5-21-OTHER",
+            "TargetDomainName": "OTHER.CORP",
+            "TrustDirection": direction,
             "TrustType": "External"
         }]
     });
@@ -1875,33 +1706,8 @@ fn test_bhce_inbound_trust_direction() {
         .filter(|e| e.rel_type == "CrossForestTrust")
         .collect();
     assert_eq!(trust.len(), 1);
-    assert_eq!(trust[0].source, "S-1-5-21-REVENANT");
-    assert_eq!(trust[0].target, "S-1-5-21-PHANTOM");
-}
-
-#[test]
-fn test_bhce_outbound_trust_direction() {
-    // Outbound trust: THIS domain trusts the OTHER domain.
-    // BH CE convention: edge from trusting -> trusted.
-    // So: this_domain -> target_domain.
-    let mut importer = test_importer();
-    let entity = serde_json::json!({
-        "ObjectIdentifier": "S-1-5-21-PHANTOM",
-        "Trusts": [{
-            "TargetDomainSid": "S-1-5-21-WRAITH",
-            "TargetDomainName": "WRAITH.CORP",
-            "TrustDirection": "Outbound",
-            "TrustType": "External"
-        }]
-    });
-    let edges = importer.extract_edges("domains", &entity);
-    let trust: Vec<_> = edges
-        .iter()
-        .filter(|e| e.rel_type == "CrossForestTrust")
-        .collect();
-    assert_eq!(trust.len(), 1);
-    assert_eq!(trust[0].source, "S-1-5-21-PHANTOM");
-    assert_eq!(trust[0].target, "S-1-5-21-WRAITH");
+    assert_eq!(trust[0].source, expected_source);
+    assert_eq!(trust[0].target, expected_target);
 }
 
 // ========================================================================
