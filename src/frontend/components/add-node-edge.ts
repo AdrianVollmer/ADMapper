@@ -10,6 +10,15 @@ import { getRenderer, loadGraphData } from "./graph-view";
 import { updateDetailPanel, updateDetailPanelForEdge } from "./sidebars";
 import type { RawADGraph } from "../graph/types";
 
+/** Debounce delay for search inputs (ms) */
+const SEARCH_DEBOUNCE_MS = 200;
+
+/** Minimum query length before triggering search */
+const MIN_SEARCH_LENGTH = 2;
+
+/** Maximum number of search results to fetch */
+const SEARCH_RESULT_LIMIT = 10;
+
 /** Available relationship types */
 const COMMON_EDGE_TYPES = [
   "MemberOf",
@@ -251,14 +260,14 @@ function setupSearchInput(inputId: string, resultsId: string, hiddenId: string):
     const query = input.value.trim();
     hidden.value = ""; // Clear hidden ID when typing
 
-    if (query.length < 2) {
+    if (query.length < MIN_SEARCH_LENGTH) {
       results.hidden = true;
       return;
     }
 
     // Debounce search
     if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => performSearch(query, results, input, hidden), 200);
+    searchTimer = setTimeout(() => performSearch(query, results, input, hidden), SEARCH_DEBOUNCE_MS);
   });
 
   input.addEventListener("focus", () => {
@@ -284,7 +293,7 @@ async function performSearch(
   hiddenEl: HTMLInputElement
 ): Promise<void> {
   try {
-    const results = await api.get<SearchResult[]>(`/api/graph/search?q=${encodeURIComponent(query)}&limit=10`);
+    const results = await api.get<SearchResult[]>(`/api/graph/search?q=${encodeURIComponent(query)}&limit=${SEARCH_RESULT_LIMIT}`);
 
     if (results.length === 0) {
       resultsEl.innerHTML = '<div class="search-result-empty">No nodes found</div>';
@@ -713,7 +722,7 @@ async function submitEditNode(): Promise<void> {
       if (name !== undefined) {
         graph.setNodeAttribute(editingNodeId, "label", name);
       }
-      const existingProps = graph.getNodeAttribute(editingNodeId, "properties") || {};
+      const existingProps = graph.getNodeAttribute(editingNodeId, "properties") ?? {};
       graph.setNodeAttribute(editingNodeId, "properties", { ...existingProps, ...properties });
       renderer?.refresh();
 
@@ -887,14 +896,14 @@ async function submitEditEdge(): Promise<void> {
     const renderer = getRenderer();
     const graph = renderer?.sigma.getGraph();
     if (graph?.hasEdge(edgeId)) {
-      const existingProps = graph.getEdgeAttribute(edgeId, "properties") || {};
+      const existingProps = graph.getEdgeAttribute(edgeId, "properties") ?? {};
       graph.setEdgeAttribute(edgeId, "properties", { ...existingProps, ...properties });
       renderer?.refresh();
 
       // Refresh the detail panel
       const attrs = graph.getEdgeAttributes(edgeId);
-      const sourceLabel = graph.getNodeAttribute(sourceId, "label") || sourceId;
-      const targetLabel = graph.getNodeAttribute(targetId, "label") || targetId;
+      const sourceLabel = graph.getNodeAttribute(sourceId, "label") ?? sourceId;
+      const targetLabel = graph.getNodeAttribute(targetId, "label") ?? targetId;
       updateDetailPanelForEdge(
         edgeId,
         attrs as Parameters<typeof updateDetailPanelForEdge>[1],

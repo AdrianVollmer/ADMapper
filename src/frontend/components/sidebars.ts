@@ -19,6 +19,9 @@ import { openEditNode, openEditEdge } from "./add-node-edge";
 const NAV_SIDEBAR_WIDTH = "240px";
 const DETAIL_SIDEBAR_WIDTH = "300px";
 
+/** Duration to show the "copied" indicator after clipboard copy (ms) */
+const COPY_FEEDBACK_DURATION_MS = 1500;
+
 /**
  * Priority order for properties in the detail panel.
  * Lower numbers appear first. Properties not listed get a default priority of 100.
@@ -397,7 +400,7 @@ export function handleSidebarClicks(e: MouseEvent): boolean {
 async function handleDetailAction(action: string, nodeId: string): Promise<void> {
   const renderer = getRenderer();
   const graph = renderer?.sigma.getGraph();
-  const nodeLabel = graph?.getNodeAttribute(nodeId, "label") || nodeId;
+  const nodeLabel = graph?.getNodeAttribute(nodeId, "label") ?? nodeId;
 
   switch (action) {
     case "show-incoming":
@@ -439,7 +442,7 @@ async function handleDetailAction(action: string, nodeId: string): Promise<void>
           const node = await api.get<{ properties: Record<string, unknown> }>(
             `/api/graph/node/${encodeURIComponent(nodeId)}`
           );
-          openEditNode(nodeId, node.properties || {});
+          openEditNode(nodeId, node.properties ?? {});
         } catch (err) {
           console.error("Failed to fetch node for editing:", err);
           showError("Failed to load node properties");
@@ -531,8 +534,8 @@ async function handleEdgeAction(
               }
 
               // Refresh sidebar to show updated list
-              const sourceLabel = graph.getNodeAttribute(sourceId, "label") || sourceId;
-              const targetLabel = graph.getNodeAttribute(targetId, "label") || targetId;
+              const sourceLabel = graph.getNodeAttribute(sourceId, "label") ?? sourceId;
+              const targetLabel = graph.getNodeAttribute(targetId, "label") ?? targetId;
               const updatedAttrs = graph.getEdgeAttributes(edgeId) as ADEdgeAttributes;
               updateDetailPanelForEdge(edgeId, updatedAttrs, sourceId, targetId, sourceLabel, targetLabel);
             } else {
@@ -628,7 +631,7 @@ async function copyToClipboard(text: string, element: HTMLElement): Promise<void
     element.classList.add("copied");
     setTimeout(() => {
       element.classList.remove("copied");
-    }, 1500);
+    }, COPY_FEEDBACK_DURATION_MS);
   } catch {
     // Fallback for older browsers
     const textArea = document.createElement("textarea");
@@ -643,7 +646,7 @@ async function copyToClipboard(text: string, element: HTMLElement): Promise<void
     element.classList.add("copied");
     setTimeout(() => {
       element.classList.remove("copied");
-    }, 1500);
+    }, COPY_FEEDBACK_DURATION_MS);
   }
 }
 
