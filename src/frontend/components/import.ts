@@ -237,8 +237,7 @@ function updateProgressUI(progress: ImportProgressEvent): void {
   }
 
   if (stageEl) {
-    stageEl.textContent = progress.stage || "";
-    stageEl.hidden = !progress.stage;
+    stageEl.innerHTML = progress.stage || "&nbsp;";
   }
 
   if (nodesCountEl) {
@@ -257,8 +256,7 @@ function resetProgress(): void {
   if (progressFiles) progressFiles.textContent = "0 / 0 files";
   if (currentFileEl) currentFileEl.textContent = "-";
   if (stageEl) {
-    stageEl.textContent = "";
-    stageEl.hidden = true;
+    stageEl.innerHTML = "&nbsp;";
   }
   if (nodesCountEl) nodesCountEl.textContent = "0";
   if (edgesCountEl) edgesCountEl.textContent = "0";

@@ -1379,8 +1379,12 @@
     @apply text-gray-300 ml-2 truncate;
   }
 
+  .import-stage-line {
+    @apply min-h-[1.25rem];
+  }
+
   .status-stage {
-    @apply text-gray-500 ml-2 text-xs;
+    @apply text-gray-500 text-xs;
   }
 
   .import-stats {
