@@ -55,8 +55,6 @@ let queryStartTime: number | null = null;
 /** Initialize the run query modal */
 export function initRunQuery(): void {
   createModalElement();
-  // Non-Escape keyboard shortcuts (Ctrl+Enter) -- Escape is handled globally in main.ts
-  document.addEventListener("keydown", handleKeydown);
 }
 
 /** Create the modal element */
@@ -112,6 +110,8 @@ export async function openRunQuery(): Promise<void> {
   }
 
   modalEl.removeAttribute("hidden");
+  // Add keyboard listener when modal opens (removed on close to prevent leaks)
+  document.addEventListener("keydown", handleKeydown);
   renderModal();
 
   // Focus the textarea after render
@@ -140,6 +140,9 @@ export function closeRunQuery(): void {
     clearInterval(durationInterval);
     durationInterval = null;
   }
+
+  // Remove keyboard listener when modal closes to prevent leaks
+  document.removeEventListener("keydown", handleKeydown);
 
   modalEl.setAttribute("hidden", "");
 }

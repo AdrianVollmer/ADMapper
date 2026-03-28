@@ -1184,9 +1184,12 @@ async function fetchNodeStatus(nodeId: string): Promise<void> {
     container.innerHTML = indicators.join("");
 
     // Attach click handler for "path to tier 0" indicator
+    // Clone and replace the element to remove any previously attached listeners
     const pathIndicator = container.querySelector('[data-action="show-path-to-hv"]');
     if (pathIndicator) {
-      pathIndicator.addEventListener("click", () => showPathToTierZero(nodeId));
+      const freshIndicator = pathIndicator.cloneNode(true);
+      pathIndicator.parentNode?.replaceChild(freshIndicator, pathIndicator);
+      freshIndicator.addEventListener("click", () => showPathToTierZero(nodeId));
     }
 
     // Update the overflow menu button text based on owned status
