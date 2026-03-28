@@ -16,6 +16,107 @@ use pushdown::{
     push_filter_into_expand, push_filter_into_shortest_path, push_filter_into_var_len_expand,
 };
 
+/// Try to push a LIMIT into a single operator.
+///
+/// Handles NodeScan (by setting its limit) and expand-like operators (Expand,
+/// VariableLengthExpand, ShortestPath) that have no limit yet. Returns `Ok` with
+/// the modified operator on success, or `Err` with the original operator unchanged
+/// so the caller can fall back to keeping LIMIT on top.
+fn try_push_limit(source: PlanOperator, count: u64) -> Result<PlanOperator, PlanOperator> {
+    match source {
+        PlanOperator::NodeScan {
+            variable,
+            label_groups,
+            limit: None,
+            property_filter,
+        } => Ok(PlanOperator::NodeScan {
+            variable,
+            label_groups,
+            limit: Some(count),
+            property_filter,
+        }),
+        PlanOperator::Expand(mut p) if p.limit.is_none() => {
+            p.source = Box::new(optimize_operator(*p.source));
+            p.limit = Some(count);
+            Ok(PlanOperator::Expand(p))
+        }
+        PlanOperator::VariableLengthExpand(mut p) if p.limit.is_none() => {
+            p.source = Box::new(optimize_operator(*p.source));
+            p.limit = Some(count);
+            Ok(PlanOperator::VariableLengthExpand(p))
+        }
+        PlanOperator::ShortestPath(mut p) if p.limit.is_none() => {
+            p.source = Box::new(optimize_operator(*p.source));
+            p.limit = Some(count);
+            Ok(PlanOperator::ShortestPath(p))
+        }
+        other => Err(other),
+    }
+}
+
+/// Push a LIMIT through a Project into the project's source operator.
+///
+/// First tries `try_push_limit` directly. For Filter sources, optimizes the filter
+/// first (which may eliminate it via predicate pushdown), then retries the limit push.
+/// Returns the final operator tree with the LIMIT placed as deep as possible.
+fn push_limit_through_project(
+    project_source: PlanOperator,
+    columns: Vec<super::ProjectColumn>,
+    count: u64,
+) -> PlanOperator {
+    // Special case: Filter sources need optimization first to see if the filter
+    // can be eliminated, which then allows the limit to be pushed deeper.
+    if matches!(project_source, PlanOperator::Filter { .. }) {
+        let optimized = optimize_operator(project_source);
+        return match optimized {
+            // Filter survived optimization — predicates could not be fully pushed
+            // down, so we must NOT push LIMIT past the filter (it may discard
+            // rows, causing early termination with too few results).
+            PlanOperator::Filter { source, predicate } => PlanOperator::Limit {
+                source: Box::new(PlanOperator::Project {
+                    source: Box::new(PlanOperator::Filter { source, predicate }),
+                    columns,
+                    distinct: false,
+                }),
+                count,
+            },
+            // Filter was eliminated — try pushing limit into whatever remains.
+            other => match try_push_limit(other, count) {
+                Ok(op) => PlanOperator::Project {
+                    source: Box::new(op),
+                    columns,
+                    distinct: false,
+                },
+                Err(inner) => PlanOperator::Limit {
+                    source: Box::new(PlanOperator::Project {
+                        source: Box::new(inner),
+                        columns,
+                        distinct: false,
+                    }),
+                    count,
+                },
+            },
+        };
+    }
+
+    // General case: try to push limit directly into the source.
+    match try_push_limit(project_source, count) {
+        Ok(op) => PlanOperator::Project {
+            source: Box::new(op),
+            columns,
+            distinct: false,
+        },
+        Err(other) => PlanOperator::Limit {
+            source: Box::new(PlanOperator::Project {
+                source: Box::new(optimize_operator(other)),
+                columns,
+                distinct: false,
+            }),
+            count,
+        },
+    }
+}
+
 /// Apply optimization passes to a query plan.
 pub fn optimize(plan: QueryPlan) -> QueryPlan {
     let root = optimize_operator(plan.root);
@@ -110,187 +211,24 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
             }
         }
 
-        // Optimize LIMIT pushdown for simple node scans
+        // Optimize LIMIT pushdown — try to push the limit into the source
+        // operator to enable early termination deeper in the plan tree.
         PlanOperator::Limit { source, count } => {
             match *source {
-                // LIMIT on NodeScan can be pushed down
-                PlanOperator::NodeScan {
-                    variable,
-                    label_groups,
-                    limit: None,
-                    property_filter,
-                } => PlanOperator::NodeScan {
-                    variable,
-                    label_groups,
-                    limit: Some(count),
-                    property_filter,
-                },
-
-                // LIMIT on Expand can be pushed down for early termination
-                PlanOperator::Expand(mut p) if p.limit.is_none() => {
-                    p.source = Box::new(optimize_operator(*p.source));
-                    p.limit = Some(count);
-                    PlanOperator::Expand(p)
-                }
-
-                // LIMIT on VariableLengthExpand can be pushed down for early termination
-                PlanOperator::VariableLengthExpand(mut p) if p.limit.is_none() => {
-                    p.source = Box::new(optimize_operator(*p.source));
-                    p.limit = Some(count);
-                    PlanOperator::VariableLengthExpand(p)
-                }
-
-                // LIMIT on ShortestPath can be pushed down for early termination
-                PlanOperator::ShortestPath(mut p) if p.limit.is_none() => {
-                    p.source = Box::new(optimize_operator(*p.source));
-                    p.limit = Some(count);
-                    PlanOperator::ShortestPath(p)
-                }
-
-                // LIMIT on Project can be pushed through to inner operators
+                // LIMIT on Project (non-DISTINCT) can be pushed through
                 PlanOperator::Project {
                     source: project_source,
                     columns,
                     distinct: false,
-                } => {
-                    match *project_source {
-                        // Push through to NodeScan
-                        PlanOperator::NodeScan {
-                            variable,
-                            label_groups,
-                            limit: None,
-                            property_filter,
-                        } => PlanOperator::Project {
-                            source: Box::new(PlanOperator::NodeScan {
-                                variable,
-                                label_groups,
-                                limit: Some(count),
-                                property_filter,
-                            }),
-                            columns,
-                            distinct: false,
-                        },
-                        // Push through to Expand
-                        PlanOperator::Expand(mut p) if p.limit.is_none() => {
-                            p.source = Box::new(optimize_operator(*p.source));
-                            p.limit = Some(count);
-                            PlanOperator::Project {
-                                source: Box::new(PlanOperator::Expand(p)),
-                                columns,
-                                distinct: false,
-                            }
-                        }
-                        // Push through to VariableLengthExpand
-                        PlanOperator::VariableLengthExpand(mut p) if p.limit.is_none() => {
-                            p.source = Box::new(optimize_operator(*p.source));
-                            p.limit = Some(count);
-                            PlanOperator::Project {
-                                source: Box::new(PlanOperator::VariableLengthExpand(p)),
-                                columns,
-                                distinct: false,
-                            }
-                        }
-                        // Push through to ShortestPath
-                        PlanOperator::ShortestPath(mut p) if p.limit.is_none() => {
-                            p.source = Box::new(optimize_operator(*p.source));
-                            p.limit = Some(count);
-                            PlanOperator::Project {
-                                source: Box::new(PlanOperator::ShortestPath(p)),
-                                columns,
-                                distinct: false,
-                            }
-                        }
-                        // Push through Filter -> expand/shortest-path
-                        // This handles: MATCH (a)-[*]->(b) WHERE ... RETURN ... LIMIT n
-                        // First optimize the Filter (which may push target predicates),
-                        // then push LIMIT into the result
-                        PlanOperator::Filter {
-                            source: filter_source,
-                            predicate,
-                        } => {
-                            // Optimize the Filter first to allow target predicate pushdown
-                            let optimized_filter = optimize_operator(PlanOperator::Filter {
-                                source: filter_source,
-                                predicate,
-                            });
+                } => push_limit_through_project(*project_source, columns, count),
 
-                            // Now check if we can push LIMIT into the result
-                            match optimized_filter {
-                                // Filter was kept, check what's inside
-                                PlanOperator::Filter {
-                                    source: opt_filter_source,
-                                    predicate: opt_predicate,
-                                } => {
-                                    // A Filter remains above the expand, meaning
-                                    // some predicates could not be pushed down.
-                                    // We must NOT push LIMIT into the expand because
-                                    // the Filter may discard results, causing the
-                                    // expand to terminate early with too few results.
-                                    // Keep LIMIT on top instead.
-                                    PlanOperator::Limit {
-                                        source: Box::new(PlanOperator::Project {
-                                            source: Box::new(PlanOperator::Filter {
-                                                source: opt_filter_source,
-                                                predicate: opt_predicate,
-                                            }),
-                                            columns,
-                                            distinct: false,
-                                        }),
-                                        count,
-                                    }
-                                }
-                                // Filter was optimized away (predicate fully pushed),
-                                // check if we got an expand-like operator
-                                PlanOperator::VariableLengthExpand(mut p) if p.limit.is_none() => {
-                                    p.limit = Some(count);
-                                    PlanOperator::Project {
-                                        source: Box::new(PlanOperator::VariableLengthExpand(p)),
-                                        columns,
-                                        distinct: false,
-                                    }
-                                }
-                                PlanOperator::Expand(mut p) if p.limit.is_none() => {
-                                    p.limit = Some(count);
-                                    PlanOperator::Project {
-                                        source: Box::new(PlanOperator::Expand(p)),
-                                        columns,
-                                        distinct: false,
-                                    }
-                                }
-                                PlanOperator::ShortestPath(mut p) if p.limit.is_none() => {
-                                    p.limit = Some(count);
-                                    PlanOperator::Project {
-                                        source: Box::new(PlanOperator::ShortestPath(p)),
-                                        columns,
-                                        distinct: false,
-                                    }
-                                }
-                                // Something else, keep LIMIT on top
-                                other => PlanOperator::Limit {
-                                    source: Box::new(PlanOperator::Project {
-                                        source: Box::new(other),
-                                        columns,
-                                        distinct: false,
-                                    }),
-                                    count,
-                                },
-                            }
-                        }
-                        // Default: keep LIMIT on top
-                        other => PlanOperator::Limit {
-                            source: Box::new(PlanOperator::Project {
-                                source: Box::new(optimize_operator(other)),
-                                columns,
-                                distinct: false,
-                            }),
-                            count,
-                        },
-                    }
-                }
-
-                other => PlanOperator::Limit {
-                    source: Box::new(optimize_operator(other)),
-                    count,
+                // LIMIT on NodeScan / Expand / VarLenExpand / ShortestPath
+                source => match try_push_limit(source, count) {
+                    Ok(op) => op,
+                    Err(inner) => PlanOperator::Limit {
+                        source: Box::new(optimize_operator(inner)),
+                        count,
+                    },
                 },
             }
         }
