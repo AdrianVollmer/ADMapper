@@ -1051,7 +1051,7 @@ export function updateDetailPanelForEdge(
   // Relationship types list with edit and delete buttons
   const typesHtml = types
     .map((type) => {
-      const color = EDGE_COLORS[type] || "#6c757d";
+      const color = EDGE_COLORS[type] ?? "#6c757d";
       return `
       <div class="detail-prop" style="flex-direction:row; align-items:center; justify-content:space-between; gap:8px">
         <span class="detail-node-type relationship-badge" style="background-color: ${color}; font-size: 0.75rem">

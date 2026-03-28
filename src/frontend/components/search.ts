@@ -231,7 +231,7 @@ async function performSearch(
       resultsEl.innerHTML = results
         .map((r) => {
           const nodeType = r.type as ADNodeType;
-          const color = NODE_COLORS[nodeType] || "#6c757d";
+          const color = NODE_COLORS[nodeType] ?? "#6c757d";
           const iconPath = getNodeIconPath(nodeType);
           return `
           <div class="search-result-item" data-node-id="${escapeHtml(r.id)}" data-node-label="${escapeHtml(r.name)}" data-node-type="${escapeHtml(r.type)}" data-context="${context}">
@@ -307,7 +307,7 @@ export function handleSearchClicks(e: MouseEvent): boolean {
   const target = e.target as HTMLElement;
   const resultItem = target.closest(".search-result-item") as HTMLElement;
   if (resultItem) {
-    const context = resultItem.getAttribute("data-context") || "node";
+    const context = resultItem.getAttribute("data-context") ?? "node";
     handleResultSelection(resultItem, context);
     return true;
   }

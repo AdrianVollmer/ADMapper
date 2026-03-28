@@ -389,11 +389,11 @@ function filterCategories(cats: QueryCategory[]): QueryCategory[] {
   const lowerFilter = filterText.toLowerCase();
 
   for (const cat of cats) {
-    const filteredQueries = (cat.queries || []).filter(
+    const filteredQueries = (cat.queries ?? []).filter(
       (q) => q.name.toLowerCase().includes(lowerFilter) || q.description?.toLowerCase().includes(lowerFilter)
     );
 
-    const filteredSubcats = filterCategories(cat.subcategories || []);
+    const filteredSubcats = filterCategories(cat.subcategories ?? []);
 
     if (filteredQueries.length > 0 || filteredSubcats.length > 0 || cat.name.toLowerCase().includes(lowerFilter)) {
       const filtered: QueryCategory = {
@@ -543,7 +543,7 @@ function renderCategoryHtml(category: QueryCategory, depth: number): string {
     html += `<div class="query-manager-category-content">`;
 
     // Render queries
-    for (const query of category.queries || []) {
+    for (const query of category.queries ?? []) {
       html += renderQueryHtml(query, category.id, depth);
     }
 
@@ -749,7 +749,7 @@ function findCategory(categoryId: string, cats: QueryCategory[] = categories): Q
 
 /** Find a query by ID within a category */
 function findQueryInCategory(queryId: string, category: QueryCategory): Query | null {
-  return category.queries?.find((q) => q.id === queryId) || null;
+  return category.queries?.find((q) => q.id === queryId) ?? null;
 }
 
 /** Handle creating a new query */

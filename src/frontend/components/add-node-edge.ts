@@ -313,8 +313,8 @@ async function performSearch(
       for (const item of resultsEl.querySelectorAll(".search-result-item")) {
         item.addEventListener("mousedown", (e) => {
           e.preventDefault(); // Prevent blur from firing on the input
-          const id = item.getAttribute("data-id") || "";
-          const label = item.getAttribute("data-label") || "";
+          const id = item.getAttribute("data-id") ?? "";
+          const label = item.getAttribute("data-label") ?? "";
           inputEl.value = label;
           hiddenEl.value = id;
           resultsEl.hidden = true;

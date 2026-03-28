@@ -295,7 +295,7 @@ function showSuggestions(input: HTMLInputElement, resultsEl: HTMLElement, sugges
   resultsEl.innerHTML = suggestions
     .map((s) => {
       const nodeType = s.type as ADNodeType;
-      const color = NODE_COLORS[nodeType] || "#6c757d";
+      const color = NODE_COLORS[nodeType] ?? "#6c757d";
       const iconPath = getNodeIconPath(nodeType);
       return `
         <div class="search-result-item" data-node-id="${escapeHtml(s.id)}" data-node-label="${escapeHtml(s.name)}" data-node-type="${escapeHtml(s.type)}">

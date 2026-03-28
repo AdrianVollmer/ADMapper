@@ -142,7 +142,7 @@ export function showKeyboardShortcuts(): void {
   const byCategory = new Map<string, ShortcutDef[]>();
   for (const shortcut of shortcuts) {
     if (!shortcut.label || !shortcut.category) continue; // Skip duplicates
-    const existing = byCategory.get(shortcut.category) || [];
+    const existing = byCategory.get(shortcut.category) ?? [];
     existing.push(shortcut);
     byCategory.set(shortcut.category, existing);
   }

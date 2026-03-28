@@ -573,7 +573,7 @@ function handleModalClick(e: Event): void {
 
     case "select": {
       const id = actionEl.getAttribute("data-id");
-      selectedEntry = entries.find((e) => e.id === id) || null;
+      selectedEntry = entries.find((e) => e.id === id) ?? null;
       renderModal();
       break;
     }

@@ -138,12 +138,12 @@ function renderCategory(category: QueryCategory, depth: number): string {
   const isExpanded = expandedCategories.has(category.id);
 
   // Filter queries
-  const filteredQueries = (category.queries || []).filter(
+  const filteredQueries = (category.queries ?? []).filter(
     (q) => !filterText || q.name.toLowerCase().includes(filterText) || q.description?.toLowerCase().includes(filterText)
   );
 
   // Filter subcategories recursively
-  const filteredSubcats = (category.subcategories || [])
+  const filteredSubcats = (category.subcategories ?? [])
     .map((sub) => {
       const subHtml = renderCategory(sub, depth + 1);
       return { sub, html: subHtml };
