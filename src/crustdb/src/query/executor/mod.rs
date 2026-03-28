@@ -100,19 +100,6 @@ impl Binding {
         self.nodes.iter()
     }
 
-    /// Check if a node variable exists.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn has_node(&self, name: &str) -> bool {
-        self.nodes.iter().any(|(n, _)| n == name)
-    }
-
-    /// Check if a relationship variable exists.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn has_relationship(&self, name: &str) -> bool {
-        self.relationships.iter().any(|(n, _)| n == name)
-    }
 
     pub fn with_node(mut self, var: &str, node: Node) -> Self {
         self.nodes.push((var.to_string(), node));
@@ -172,7 +159,7 @@ pub use plan_exec::ResourceLimits;
 ///
 /// This uses the query planner to generate an execution plan,
 /// which is then interpreted by the plan executor.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn execute(statement: &Statement, storage: &SqliteStorage) -> Result<QueryResult> {
     execute_with_cache(statement, storage, None, ResourceLimits::default())
 }

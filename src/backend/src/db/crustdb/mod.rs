@@ -111,21 +111,6 @@ impl CrustDatabase {
         Ok((stats.node_count, stats.relationship_count))
     }
 
-    /// Extract count from a query result.
-    #[allow(dead_code)]
-    fn extract_count(&self, result: &crustdb::QueryResult) -> usize {
-        result
-            .rows
-            .first()
-            .and_then(|row| row.values.values().next())
-            .and_then(|v| match v {
-                crustdb::ResultValue::Property(crustdb::PropertyValue::Integer(n)) => {
-                    Some(*n as usize)
-                }
-                _ => None,
-            })
-            .unwrap_or(0)
-    }
 
     /// Get detailed stats including counts by node type.
     ///

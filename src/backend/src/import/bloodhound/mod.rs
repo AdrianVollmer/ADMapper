@@ -75,24 +75,14 @@ mod tier_zero_rids {
 
 /// User Account Control flags from Active Directory.
 /// See: https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/useraccountcontrol-manipulate-account-properties
-#[allow(dead_code)]
 mod uac_flags {
-    pub const SCRIPT: i64 = 0x0001;
     pub const ACCOUNTDISABLE: i64 = 0x0002;
-    pub const HOMEDIR_REQUIRED: i64 = 0x0008;
     pub const LOCKOUT: i64 = 0x0010;
     pub const PASSWD_NOTREQD: i64 = 0x0020;
-    pub const PASSWD_CANT_CHANGE: i64 = 0x0040;
-    pub const ENCRYPTED_TEXT_PWD_ALLOWED: i64 = 0x0080;
-    pub const NORMAL_ACCOUNT: i64 = 0x0200;
-    pub const INTERDOMAIN_TRUST_ACCOUNT: i64 = 0x0800;
-    pub const WORKSTATION_TRUST_ACCOUNT: i64 = 0x1000;
-    pub const SERVER_TRUST_ACCOUNT: i64 = 0x2000;
     pub const DONT_EXPIRE_PASSWORD: i64 = 0x10000;
     pub const SMARTCARD_REQUIRED: i64 = 0x40000;
     pub const TRUSTED_FOR_DELEGATION: i64 = 0x80000;
     pub const NOT_DELEGATED: i64 = 0x100000;
-    pub const USE_DES_KEY_ONLY: i64 = 0x200000;
     pub const DONT_REQ_PREAUTH: i64 = 0x400000;
     pub const PASSWORD_EXPIRED: i64 = 0x800000;
     pub const TRUSTED_TO_AUTH_FOR_DELEGATION: i64 = 0x1000000;

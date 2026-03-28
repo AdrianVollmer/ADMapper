@@ -303,7 +303,7 @@ fn build_single_part_query(pair: Pair<Rule>) -> Result<Statement> {
 }
 
 /// Check if a Cypher query is syntactically valid without building an AST.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn validate(query: &str) -> Result<()> {
     CypherParser::parse(Rule::Cypher, query).map_err(|e| Error::Parse(e.to_string()))?;
     Ok(())

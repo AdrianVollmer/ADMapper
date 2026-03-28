@@ -34,7 +34,6 @@ pub(super) fn plan_create(create: &super::super::parser::CreateClause) -> Result
                         super::super::parser::Direction::Both => (source_var, var.clone()), // Default to outgoing
                     };
                     relationships.push(CreateRelationship {
-                        variable: rp.variable.clone(),
                         source,
                         target,
                         rel_type,
@@ -107,7 +106,6 @@ pub(super) fn plan_create_after_match(
                         super::super::parser::Direction::Both => (source_var, var.clone()),
                     };
                     relationships.push(CreateRelationship {
-                        variable: rp.variable.clone(),
                         source,
                         target,
                         rel_type,

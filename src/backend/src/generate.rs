@@ -12,7 +12,6 @@ const SEED: u64 = 0xAD_AAAA_2024;
 
 /// Tier model tiers.
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
 enum Tier {
     Zero, // Domain Controllers, Domain Admins
     One,  // Servers, Server Admins
@@ -30,10 +29,8 @@ impl Tier {
 }
 
 /// Domain information.
-#[allow(dead_code)]
 struct Domain {
     name: String,
-    netbios: String,
     sid: String,
     is_root: bool,
     forest_id: usize,
@@ -247,13 +244,12 @@ impl Generator {
     }
 
     /// Add a domain.
-    fn add_domain(&mut self, netbios: &str, fqdn: &str, is_root: bool, forest_id: usize) {
+    fn add_domain(&mut self, _netbios: &str, fqdn: &str, is_root: bool, forest_id: usize) {
         let domain_idx = self.domains.len();
         let sid = format!("S-1-5-21-{}-{}-{}", 1000 + domain_idx, 2000, 3000);
 
         let domain = Domain {
             name: fqdn.to_string(),
-            netbios: netbios.to_string(),
             sid: sid.clone(),
             is_root,
             forest_id,

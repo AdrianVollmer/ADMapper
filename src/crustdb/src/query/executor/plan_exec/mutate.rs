@@ -120,9 +120,6 @@ pub(super) fn execute_set_properties(
                         stats.labels_added += 1;
                     }
                 }
-                SetOperation::RemoveLabel { .. } => {
-                    // Not implemented yet
-                }
             }
         }
     }

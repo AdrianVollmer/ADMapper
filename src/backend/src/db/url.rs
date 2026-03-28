@@ -50,8 +50,6 @@ impl DatabaseType {
 }
 
 /// Parsed database URL.
-// Fields are used by feature-gated backends (neo4j, falkordb).
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DatabaseUrl {
     /// Type of database.

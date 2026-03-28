@@ -195,7 +195,6 @@ pub struct ReachabilityInsight {
 /// Format: (display_name, SID_pattern)
 /// - Patterns starting with '-' are domain-relative SID suffixes
 /// - Other patterns are exact well-known SIDs
-#[allow(dead_code)]
 pub const WELL_KNOWN_PRINCIPALS: &[(&str, &str)] = &[
     ("Everyone", "S-1-1-0"),
     ("Authenticated Users", "S-1-5-11"),
@@ -204,7 +203,6 @@ pub const WELL_KNOWN_PRINCIPALS: &[(&str, &str)] = &[
 ];
 
 /// SID suffix for Domain Admins group.
-#[allow(dead_code)]
 pub const DOMAIN_ADMIN_SID_SUFFIX: &str = "-512";
 
 /// Security insights computed from the graph.

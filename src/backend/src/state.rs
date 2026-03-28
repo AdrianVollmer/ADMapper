@@ -74,9 +74,6 @@ pub struct ImportJob {
 struct DatabaseConnection {
     backend: Arc<dyn DatabaseBackend>,
     db_type: DatabaseType,
-    /// Database path (for file-based backends like CrustDB).
-    #[allow(dead_code)]
-    db_path: Option<PathBuf>,
 }
 
 // ============================================================================
@@ -137,7 +134,6 @@ impl AppState {
             connection: Arc::new(RwLock::new(Some(DatabaseConnection {
                 backend,
                 db_type,
-                db_path,
             }))),
             history_service: Arc::new(RwLock::new(Some(Arc::new(history_service)))),
             import_jobs: Arc::new(DashMap::new()),
@@ -388,7 +384,6 @@ impl AppState {
         *self.connection.write() = Some(DatabaseConnection {
             backend,
             db_type,
-            db_path,
         });
         *self.history_service.write() = Some(Arc::new(history_service));
 

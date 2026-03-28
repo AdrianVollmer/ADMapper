@@ -419,9 +419,6 @@ fn execute_operator(
             }
         }
 
-        PlanOperator::RelationshipScan { .. } => {
-            Err(Error::Cypher("RelationshipScan not implemented".into()))
-        }
     }
 }
 

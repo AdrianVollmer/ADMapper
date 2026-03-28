@@ -123,14 +123,6 @@ pub(super) fn evaluate_predicate(predicate: &FilterPredicate, binding: &Binding)
             }
         }
 
-        FilterPredicate::HasLabel { variable, label } => {
-            if let Some(node) = binding.get_node(variable) {
-                Ok(node.has_label(label))
-            } else {
-                Ok(false)
-            }
-        }
-
         FilterPredicate::In { expr, list } => {
             let v = evaluate_expr(expr, binding)?;
             for item in list {

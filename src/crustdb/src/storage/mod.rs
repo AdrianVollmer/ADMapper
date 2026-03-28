@@ -23,7 +23,7 @@ pub use entity_cache::{EntityCache, EntityCacheConfig, EntityCacheStats};
 
 use crate::error::{Error, Result};
 use crate::DatabaseStats;
-use rusqlite::{Connection, Transaction};
+use rusqlite::Connection;
 use std::path::Path;
 
 /// Validate a property name to prevent JSON path injection.
@@ -147,11 +147,6 @@ impl SqliteStorage {
         Ok(())
     }
 
-    /// Begin a transaction.
-    #[allow(dead_code)]
-    pub fn transaction(&mut self) -> Result<Transaction<'_>> {
-        Ok(self.conn.transaction()?)
-    }
 }
 
 /// Cache statistics.

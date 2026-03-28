@@ -94,12 +94,6 @@ pub enum PlanOperator {
         /// Format: (property_name, value) - uses property index if available.
         property_filter: Option<(String, serde_json::Value)>,
     },
-    /// Scan all relationships with optional type filter.
-    #[allow(dead_code)]
-    RelationshipScan {
-        variable: String,
-        types: Vec<String>,
-    },
     /// Expand from a node along relationships.
     Expand(ExpandParams),
     /// Variable-length expand (BFS).
@@ -190,7 +184,6 @@ impl PlanOperator {
     pub fn variant_name(&self) -> &'static str {
         match self {
             Self::NodeScan { .. } => "NodeScan",
-            Self::RelationshipScan { .. } => "RelationshipScan",
             Self::Expand(_) => "Expand",
             Self::VariableLengthExpand(_) => "VariableLengthExpand",
             Self::ShortestPath(_) => "ShortestPath",
@@ -308,11 +301,6 @@ pub enum FilterPredicate {
         expr: PlanExpr,
         pattern: String,
     },
-    #[allow(dead_code)]
-    HasLabel {
-        variable: String,
-        label: String,
-    },
     /// IN list check.
     In {
         expr: PlanExpr,
@@ -420,8 +408,6 @@ pub struct CreateNode {
 /// Relationship creation specification.
 #[derive(Debug, Clone)]
 pub struct CreateRelationship {
-    #[allow(dead_code)]
-    pub variable: Option<String>,
     pub source: String,
     pub target: String,
     pub rel_type: String,
@@ -437,11 +423,6 @@ pub enum SetOperation {
         value: PlanExpr,
     },
     AddLabel {
-        variable: String,
-        label: String,
-    },
-    #[allow(dead_code)]
-    RemoveLabel {
         variable: String,
         label: String,
     },
