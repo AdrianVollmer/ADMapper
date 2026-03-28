@@ -90,7 +90,7 @@ function buildConnectionUrl(): string {
       const user = (form.querySelector("#db-user") as HTMLInputElement)?.value || "";
       const pass = (form.querySelector("#db-pass") as HTMLInputElement)?.value || "";
       const database = (form.querySelector("#db-name") as HTMLInputElement)?.value || "";
-      const ssl = (form.querySelector("#db-ssl") as HTMLInputElement)?.checked || false;
+      const ssl = (form.querySelector("#db-ssl") as HTMLInputElement)?.checked ?? false;
 
       // Use neo4j+s:// for SSL, neo4j:// for plain
       let url = ssl ? "neo4j+s://" : "neo4j://";

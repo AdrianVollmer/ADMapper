@@ -19,11 +19,11 @@ pub(super) fn build_expression(pair: Pair<Rule>) -> Result<Expression> {
                     return build_or_expression(inner);
                 }
             }
-            Err(Error::Parse("Expression requires OrExpression".into()))
+            Err(Error::Parse("expected or-expression in expression".into()))
         }
         Rule::OrExpression => build_or_expression(pair),
         _ => Err(Error::Parse(format!(
-            "Unexpected rule in expression: {:?}",
+            "expected expression rule, found {:?}",
             pair.as_rule()
         ))),
     }
@@ -47,7 +47,7 @@ fn build_left_assoc_binary(
 
     if operands.is_empty() {
         return Err(Error::Parse(format!(
-            "{:?} expression requires operands",
+            "expected operands in {:?} expression",
             op
         )));
     }
@@ -110,7 +110,7 @@ fn build_not_expression(pair: Pair<Rule>) -> Result<Expression> {
     }
 
     let mut expr =
-        inner_expr.ok_or_else(|| Error::Parse("NOT expression requires operand".into()))?;
+        inner_expr.ok_or_else(|| Error::Parse("expected operand in NOT expression".into()))?;
 
     // Apply NOT operators (odd number means negate)
     for _ in 0..(not_count % 2) {
@@ -128,7 +128,7 @@ fn build_comparison_expression(pair: Pair<Rule>) -> Result<Expression> {
     let mut parts: Vec<Pair<Rule>> = pair.into_inner().collect();
 
     if parts.is_empty() {
-        return Err(Error::Parse("Empty comparison expression".into()));
+        return Err(Error::Parse("expected operand in comparison expression".into()));
     }
 
     // First element should be AddOrSubtractExpression
@@ -171,8 +171,8 @@ fn build_partial_comparison(pair: Pair<Rule>) -> Result<(BinaryOperator, Express
         }
     }
 
-    let op = op.ok_or_else(|| Error::Parse("Comparison requires operator".into()))?;
-    let right = right.ok_or_else(|| Error::Parse("Comparison requires right operand".into()))?;
+    let op = op.ok_or_else(|| Error::Parse("expected operator in comparison".into()))?;
+    let right = right.ok_or_else(|| Error::Parse("expected right operand in comparison".into()))?;
     Ok((op, right))
 }
 
@@ -193,14 +193,14 @@ fn build_add_or_subtract_expression(pair: Pair<Rule>) -> Result<Expression> {
     }
 
     if parts.is_empty() {
-        return Err(Error::Parse("Empty add/subtract expression".into()));
+        return Err(Error::Parse("expected operand in add/subtract expression".into()));
     }
 
     let (_, first) = parts.remove(0);
     let mut result = build_multiply_divide_expression(first)?;
 
     for (op, part) in parts {
-        let op = op.ok_or_else(|| Error::Parse("Binary expression requires operator".into()))?;
+        let op = op.ok_or_else(|| Error::Parse("expected operator in binary expression".into()))?;
         let right = build_multiply_divide_expression(part)?;
         result = Expression::BinaryOp {
             left: Box::new(result),
@@ -230,14 +230,14 @@ fn build_multiply_divide_expression(pair: Pair<Rule>) -> Result<Expression> {
     }
 
     if parts.is_empty() {
-        return Err(Error::Parse("Empty multiply/divide expression".into()));
+        return Err(Error::Parse("expected operand in multiply/divide expression".into()));
     }
 
     let (_, first) = parts.remove(0);
     let mut result = build_power_expression(first)?;
 
     for (op, part) in parts {
-        let op = op.ok_or_else(|| Error::Parse("Binary expression requires operator".into()))?;
+        let op = op.ok_or_else(|| Error::Parse("expected operator in binary expression".into()))?;
         let right = build_power_expression(part)?;
         result = Expression::BinaryOp {
             left: Box::new(result),
@@ -264,7 +264,7 @@ fn build_power_expression(pair: Pair<Rule>) -> Result<Expression> {
     }
 
     if parts.is_empty() {
-        return Err(Error::Parse("Empty power expression".into()));
+        return Err(Error::Parse("expected operand in power expression".into()));
     }
 
     // Power is right-associative
@@ -298,7 +298,7 @@ fn build_unary_add_subtract_expression(pair: Pair<Rule>) -> Result<Expression> {
     }
 
     let mut expr =
-        inner_expr.ok_or_else(|| Error::Parse("Unary expression requires operand".into()))?;
+        inner_expr.ok_or_else(|| Error::Parse("expected operand in unary expression".into()))?;
 
     if negate {
         expr = Expression::UnaryOp {
@@ -330,7 +330,7 @@ pub(super) fn build_string_list_null_expression(pair: Pair<Rule>) -> Result<Expr
     }
 
     let mut result =
-        base.ok_or_else(|| Error::Parse("String/list/null expression requires base".into()))?;
+        base.ok_or_else(|| Error::Parse("expected base in string/list/null expression".into()))?;
 
     for op in operations {
         result = apply_string_list_null_operator(result, op)?;
@@ -377,9 +377,9 @@ pub(super) fn apply_string_list_null_operator(
                 }
             }
 
-            let op = op.ok_or_else(|| Error::Parse("String operator missing".into()))?;
+            let op = op.ok_or_else(|| Error::Parse("expected string operator".into()))?;
             let operand =
-                operand.ok_or_else(|| Error::Parse("String operator requires operand".into()))?;
+                operand.ok_or_else(|| Error::Parse("expected operand for string operator".into()))?;
             Ok(Expression::BinaryOp {
                 left: Box::new(base),
                 op,
@@ -403,14 +403,14 @@ pub(super) fn apply_string_list_null_operator(
                     Rule::Expression => {
                         // List indexing [expr] or slicing [expr..expr]
                         // For now, return an error as we don't have List indexing in our AST
-                        return Err(Error::Parse("List indexing not yet supported".into()));
+                        return Err(Error::Parse("expected supported operator, list indexing not yet supported".into()));
                     }
                     _ => {}
                 }
             }
-            Err(Error::Parse("Invalid list operator".into()))
+            Err(Error::Parse("expected valid list operator".into()))
         }
-        _ => Err(Error::Parse("Unknown string/list/null operator".into())),
+        _ => Err(Error::Parse("expected known string/list/null operator".into())),
     }
 }
 
@@ -440,7 +440,7 @@ pub(super) fn build_property_or_labels_expression(pair: Pair<Rule>) -> Result<Ex
     }
 
     let mut result =
-        base.ok_or_else(|| Error::Parse("Property expression requires atom".into()))?;
+        base.ok_or_else(|| Error::Parse("expected atom in property expression".into()))?;
 
     // Apply property lookups
     for prop in property_lookups {
@@ -488,11 +488,11 @@ pub(super) fn build_atom(pair: Pair<Rule>) -> Result<Expression> {
                 });
             }
             Rule::ListComprehension => {
-                return Err(Error::Parse("List comprehension not yet supported".into()));
+                return Err(Error::Parse("expected supported expression, list comprehension not yet supported".into()));
             }
             Rule::PatternComprehension => {
                 return Err(Error::Parse(
-                    "Pattern comprehension not yet supported".into(),
+                    "expected supported expression, pattern comprehension not yet supported".into(),
                 ));
             }
             Rule::ShortestPathPattern => {
@@ -509,13 +509,13 @@ pub(super) fn build_atom(pair: Pair<Rule>) -> Result<Expression> {
                 // FilterExpression is the next sibling
                 let filter_expr = children
                     .get(i + 1)
-                    .ok_or_else(|| Error::Parse("Missing FilterExpression".into()))?;
+                    .ok_or_else(|| Error::Parse("expected filter expression".into()))?;
                 return build_list_predicate(filter_expr.clone(), kind);
             }
             _ => {}
         }
     }
-    Err(Error::Parse("Unknown atom type".into()))
+    Err(Error::Parse("expected known atom type".into()))
 }
 
 /// Build a list predicate expression: ALL/ANY/NONE/SINGLE(var IN list WHERE pred).
@@ -554,9 +554,9 @@ fn build_list_predicate(filter_pair: Pair<Rule>, kind: ListPredicateKind) -> Res
     }
 
     let variable =
-        variable.ok_or_else(|| Error::Parse("List predicate missing variable".into()))?;
+        variable.ok_or_else(|| Error::Parse("expected variable in list predicate".into()))?;
     let list =
-        list_expr.ok_or_else(|| Error::Parse("List predicate missing list expression".into()))?;
+        list_expr.ok_or_else(|| Error::Parse("expected list expression in list predicate".into()))?;
 
     Ok(Expression::ListPredicate {
         kind,
@@ -588,7 +588,7 @@ pub(super) fn build_shortest_path_pattern(pair: Pair<Rule>) -> Result<Expression
     }
 
     let pattern =
-        pattern_element.ok_or_else(|| Error::Parse("shortestPath requires a pattern".into()))?;
+        pattern_element.ok_or_else(|| Error::Parse("expected pattern in shortestPath".into()))?;
 
     if is_all {
         Ok(Expression::AllShortestPaths(Box::new(pattern)))
@@ -630,7 +630,7 @@ pub(super) fn build_literal(pair: Pair<Rule>) -> Result<Expression> {
             _ => {}
         }
     }
-    Err(Error::Parse("Unknown literal type".into()))
+    Err(Error::Parse("expected known literal type".into()))
 }
 
 /// Build a number literal.
@@ -641,7 +641,7 @@ pub(super) fn build_number_literal(pair: Pair<Rule>) -> Result<Expression> {
                 let s = inner.as_str();
                 let n: f64 = s
                     .parse()
-                    .map_err(|_| Error::Parse(format!("Invalid float: {}", s)))?;
+                    .map_err(|_| Error::Parse(format!("expected valid float, found: {}", s)))?;
                 return Ok(Expression::Literal(Literal::Float(n)));
             }
             Rule::IntegerLiteral => {
@@ -651,7 +651,7 @@ pub(super) fn build_number_literal(pair: Pair<Rule>) -> Result<Expression> {
             _ => {}
         }
     }
-    Err(Error::Parse("Unknown number type".into()))
+    Err(Error::Parse("expected known number type".into()))
 }
 
 /// Parse an integer literal (decimal, hex, or octal).

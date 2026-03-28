@@ -105,8 +105,8 @@ export async function exportSVG(): Promise<void> {
       const sourceDisplay = sigma.getNodeDisplayData(source);
       const targetDisplay = sigma.getNodeDisplayData(target);
       if (sourceDisplay && targetDisplay) {
-        const color = attrs.color || edgeColor;
-        const strokeWidth = attrs.size || 1;
+        const color = attrs.color ?? edgeColor;
+        const strokeWidth = attrs.size ?? 1;
         svg += `    <line x1="${sourceDisplay.x}" y1="${sourceDisplay.y}" x2="${targetDisplay.x}" y2="${targetDisplay.y}" stroke="${color}" stroke-width="${strokeWidth}"/>\n`;
       }
     });
@@ -118,8 +118,8 @@ export async function exportSVG(): Promise<void> {
       // Use getNodeDisplayData to get viewport coordinates and display properties
       const display = sigma.getNodeDisplayData(node);
       if (display && !display.hidden) {
-        const color = display.color || "#6b7280";
-        const size = display.size || 5;
+        const color = display.color ?? "#6b7280";
+        const size = display.size ?? 5;
         svg += `    <circle cx="${display.x}" cy="${display.y}" r="${size}" fill="${color}"/>\n`;
         // Label is in display data
         const label = display.label;
@@ -174,11 +174,11 @@ export async function exportJSON(): Promise<void> {
       ) => {
         nodes.push({
           id: node,
-          label: attrs.label || node,
-          type: attrs.nodeType || "Unknown",
-          x: attrs.x || 0,
-          y: attrs.y || 0,
-          properties: attrs.properties || {},
+          label: attrs.label ?? node,
+          type: attrs.nodeType ?? "Unknown",
+          x: attrs.x ?? 0,
+          y: attrs.y ?? 0,
+          properties: attrs.properties ?? {},
         });
       }
     );
@@ -187,7 +187,7 @@ export async function exportJSON(): Promise<void> {
       relationships.push({
         source,
         target,
-        type: attrs.edgeType || "Unknown",
+        type: attrs.edgeType ?? "Unknown",
       });
     });
 

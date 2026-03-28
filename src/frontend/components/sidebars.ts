@@ -334,7 +334,7 @@ export function handleSidebarClicks(e: MouseEvent): boolean {
   // Handle click-to-copy for property values
   const valueEl = target.closest(".detail-prop-value") as HTMLElement;
   if (valueEl) {
-    const text = valueEl.getAttribute("data-value") || valueEl.textContent || "";
+    const text = valueEl.getAttribute("data-value") ?? valueEl.textContent ?? "";
     copyToClipboard(text, valueEl);
     return true;
   }
@@ -385,9 +385,9 @@ export function handleSidebarClicks(e: MouseEvent): boolean {
 
     if (action && edgeId) {
       // Handle relationship actions
-      const sourceId = button.getAttribute("data-source-id") || "";
-      const targetId = button.getAttribute("data-target-id") || "";
-      const edgeType = button.getAttribute("data-relationship-type") || "";
+      const sourceId = button.getAttribute("data-source-id") ?? "";
+      const targetId = button.getAttribute("data-target-id") ?? "";
+      const edgeType = button.getAttribute("data-relationship-type") ?? "";
       handleEdgeAction(action, edgeId, sourceId, targetId, edgeType);
       return true;
     }
@@ -891,7 +891,7 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
     return;
   }
 
-  const typeColor = NODE_COLORS[attrs.nodeType] || "#6c757d";
+  const typeColor = NODE_COLORS[attrs.nodeType] ?? "#6c757d";
 
   // Build status indicators placeholder (fetched asynchronously from backend)
   const indicatorsHtml = `<span id="node-status-indicators" class="user-indicators">
@@ -1028,8 +1028,8 @@ export function updateDetailPanelForEdge(
   const isMulti = types.length > 1;
 
   // Header: show count for multi, type name for single
-  const headerType = isMulti ? `${types.length} Relationships` : types[0] || "Unknown";
-  const headerColor = isMulti ? "#6c757d" : EDGE_COLORS[types[0]!] || "#6c757d";
+  const headerType = isMulti ? `${types.length} Relationships` : types[0] ?? "Unknown";
+  const headerColor = isMulti ? "#6c757d" : EDGE_COLORS[types[0]!] ?? "#6c757d";
   const badgeLabel = isMulti ? "Relationships" : "Relationship";
 
   // Endpoints section

@@ -272,7 +272,7 @@ export class TaperedEdgeProgram extends EdgeProgram<(typeof UNIFORMS)[number], E
     data: EdgeDisplayData
   ) {
     const array = this.array;
-    const thickness = data.size || 1;
+    const thickness = data.size ?? 1;
 
     array[startIndex++] = sourceData.x;
     array[startIndex++] = sourceData.y;

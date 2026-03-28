@@ -356,7 +356,7 @@ function countTotalQueries(): number {
 
 /** Count queries in a category (recursive) */
 function countQueriesInCategory(category: QueryCategory): number {
-  let count = category.queries?.length || 0;
+  let count = category.queries?.length ?? 0;
   if (category.subcategories) {
     for (const sub of category.subcategories) {
       count += countQueriesInCategory(sub);

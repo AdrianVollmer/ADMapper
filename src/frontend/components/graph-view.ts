@@ -275,8 +275,8 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
       renderer?.selectNode(nodeId);
     },
     onEdgeClick: (edgeId, attrs, source, target) => {
-      const sourceLabel = graph.getNodeAttribute(source, "label") || source;
-      const targetLabel = graph.getNodeAttribute(target, "label") || target;
+      const sourceLabel = graph.getNodeAttribute(source, "label") ?? source;
+      const targetLabel = graph.getNodeAttribute(target, "label") ?? target;
       updateDetailPanelForEdge(edgeId, attrs, source, target, sourceLabel, targetLabel);
       renderer?.clearSelection();
     },

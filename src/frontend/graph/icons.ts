@@ -76,12 +76,12 @@ export const NODE_ICONS: Record<ADNodeType, string> = generateIcons();
 
 /** Get the icon URL for a node type */
 export function getNodeIcon(type: ADNodeType): string {
-  return NODE_ICONS[type] || NODE_ICONS.Unknown;
+  return NODE_ICONS[type] ?? NODE_ICONS.Unknown;
 }
 
 /** Get the color for a node type */
 export function getNodeTypeColor(type: ADNodeType): string {
-  return NODE_COLORS[type] || NODE_COLORS.Unknown;
+  return NODE_COLORS[type] ?? NODE_COLORS.Unknown;
 }
 
 /** Default node size (uniform for all types) */
@@ -89,12 +89,12 @@ export const NODE_SIZE = 12;
 
 /** Get Lucide icon node for a node type (for inline rendering) */
 export function getNodeIconNode(type: ADNodeType): IconNode {
-  return LUCIDE_ICONS[type] || LUCIDE_ICONS.Unknown;
+  return LUCIDE_ICONS[type] ?? LUCIDE_ICONS.Unknown;
 }
 
 /** Get SVG inner content for inline rendering (stroke-based, for use inside an SVG element) */
 export function getNodeIconPath(type: ADNodeType): string {
-  const iconNode = LUCIDE_ICONS[type] || LUCIDE_ICONS.Unknown;
+  const iconNode = LUCIDE_ICONS[type] ?? LUCIDE_ICONS.Unknown;
   return iconNode
     .map(([tag, attrs]) => {
       const attrStr = Object.entries(attrs)

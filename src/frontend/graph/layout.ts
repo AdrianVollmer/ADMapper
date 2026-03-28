@@ -291,11 +291,11 @@ function applyGridLayout(graph: ADGraphType, options: GridSettings = {}): void {
   graph.forEachNode((nodeId) => nodes.push(nodeId));
   nodes.sort((a, b) => {
     // Sort by type first, then by label
-    const typeA = graph.getNodeAttribute(a, "nodeType") || "";
-    const typeB = graph.getNodeAttribute(b, "nodeType") || "";
+    const typeA = graph.getNodeAttribute(a, "nodeType") ?? "";
+    const typeB = graph.getNodeAttribute(b, "nodeType") ?? "";
     if (typeA !== typeB) return typeA.localeCompare(typeB);
-    const labelA = graph.getNodeAttribute(a, "label") || a;
-    const labelB = graph.getNodeAttribute(b, "label") || b;
+    const labelA = graph.getNodeAttribute(a, "label") ?? a;
+    const labelB = graph.getNodeAttribute(b, "label") ?? b;
     return labelA.localeCompare(labelB);
   });
 
@@ -334,11 +334,11 @@ function applyLatticeLayout(graph: ADGraphType, options: LatticeSettings = {}): 
   graph.forEachNode((nodeId) => nodes.push(nodeId));
   nodes.sort((a, b) => {
     // Sort by type first, then by label
-    const typeA = graph.getNodeAttribute(a, "nodeType") || "";
-    const typeB = graph.getNodeAttribute(b, "nodeType") || "";
+    const typeA = graph.getNodeAttribute(a, "nodeType") ?? "";
+    const typeB = graph.getNodeAttribute(b, "nodeType") ?? "";
     if (typeA !== typeB) return typeA.localeCompare(typeB);
-    const labelA = graph.getNodeAttribute(a, "label") || a;
-    const labelB = graph.getNodeAttribute(b, "label") || b;
+    const labelA = graph.getNodeAttribute(a, "label") ?? a;
+    const labelB = graph.getNodeAttribute(b, "label") ?? b;
     return labelA.localeCompare(labelB);
   });
 

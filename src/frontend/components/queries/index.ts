@@ -210,7 +210,7 @@ function renderCategory(category: QueryCategory, depth: number): string {
 
 /** Count total queries in a category (including subcategories) */
 function countQueries(category: QueryCategory): number {
-  let count = category.queries?.length || 0;
+  let count = category.queries?.length ?? 0;
   if (category.subcategories) {
     for (const sub of category.subcategories) {
       count += countQueries(sub);
