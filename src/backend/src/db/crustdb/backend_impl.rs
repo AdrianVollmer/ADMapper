@@ -3,7 +3,9 @@
 use serde_json::Value as JsonValue;
 
 use super::super::backend::{DatabaseBackend, QueryLanguage};
-use super::super::types::{admin_types_set, DbEdge, DbNode, DetailedStats, Result, SecurityInsights};
+use super::super::types::{
+    admin_types_set, DbEdge, DbNode, DetailedStats, Result, SecurityInsights,
+};
 use super::CrustDatabase;
 
 impl DatabaseBackend for CrustDatabase {

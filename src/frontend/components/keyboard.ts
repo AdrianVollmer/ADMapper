@@ -198,5 +198,4 @@ export function showKeyboardShortcuts(): void {
       modal!.hidden = true;
     }
   });
-
 }

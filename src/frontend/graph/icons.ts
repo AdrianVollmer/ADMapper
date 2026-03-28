@@ -59,7 +59,6 @@ const LUCIDE_ICONS: Record<ADNodeType, IconNode> = {
   Unknown: HelpCircle,
 };
 
-
 /** Generate icon data URLs for all node types */
 function generateIcons(): Record<ADNodeType, string> {
   const icons: Partial<Record<ADNodeType, string>> = {};

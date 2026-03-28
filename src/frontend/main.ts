@@ -76,16 +76,18 @@ function handleGlobalEscape(e: KeyboardEvent): void {
   const active = document.activeElement;
   if (active) {
     const tag = active.tagName.toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select" ||
-        active.getAttribute("contenteditable") === "true") {
+    if (
+      tag === "input" ||
+      tag === "textarea" ||
+      tag === "select" ||
+      active.getAttribute("contenteditable") === "true"
+    ) {
       return;
     }
   }
 
   // Find all visible modal overlays, take the last one (topmost in DOM order)
-  const visibleModals = document.querySelectorAll<HTMLElement>(
-    ".modal-overlay:not([hidden])"
-  );
+  const visibleModals = document.querySelectorAll<HTMLElement>(".modal-overlay:not([hidden])");
   const topModal = visibleModals[visibleModals.length - 1];
   if (!topModal) return;
 

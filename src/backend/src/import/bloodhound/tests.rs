@@ -7,16 +7,24 @@ use crate::import::types::ImportProgress;
 
 #[test]
 fn test_ace_to_edge_type() {
-    let db = Arc::new(CrustDatabase::in_memory().unwrap());
-    let (tx, _) = broadcast::channel(1);
-    let importer = BloodHoundImporter::new(db, tx);
-
-    assert_eq!(importer.ace_to_edge_type("GenericAll"), Some("GenericAll"));
-    assert_eq!(importer.ace_to_edge_type("WriteDacl"), Some("WriteDacl"));
-    assert_eq!(importer.ace_to_edge_type("Enroll"), Some("Enroll"));
-    assert_eq!(importer.ace_to_edge_type("AddSelf"), Some("AddSelf"));
     assert_eq!(
-        importer.ace_to_edge_type("Unknown"),
+        BloodHoundImporter::ace_to_edge_type("GenericAll"),
+        Some("GenericAll")
+    );
+    assert_eq!(
+        BloodHoundImporter::ace_to_edge_type("WriteDacl"),
+        Some("WriteDacl")
+    );
+    assert_eq!(
+        BloodHoundImporter::ace_to_edge_type("Enroll"),
+        Some("Enroll")
+    );
+    assert_eq!(
+        BloodHoundImporter::ace_to_edge_type("AddSelf"),
+        Some("AddSelf")
+    );
+    assert_eq!(
+        BloodHoundImporter::ace_to_edge_type("Unknown"),
         None,
         "Unknown rights should return None, not generic ACE"
     );
@@ -24,23 +32,22 @@ fn test_ace_to_edge_type() {
 
 #[test]
 fn test_local_group_to_edge_type() {
-    let db = Arc::new(CrustDatabase::in_memory().unwrap());
-    let (tx, _) = broadcast::channel(1);
-    let importer = BloodHoundImporter::new(db, tx);
-
     assert_eq!(
-        importer.local_group_to_edge_type("Administrators"),
+        BloodHoundImporter::local_group_to_edge_type("Administrators"),
         Some("AdminTo")
     );
     assert_eq!(
-        importer.local_group_to_edge_type("Remote Desktop Users"),
+        BloodHoundImporter::local_group_to_edge_type("Remote Desktop Users"),
         Some("CanRDP")
     );
     assert_eq!(
-        importer.local_group_to_edge_type("Remote Interactive Logon"),
+        BloodHoundImporter::local_group_to_edge_type("Remote Interactive Logon"),
         Some("RemoteInteractiveLogonRight")
     );
-    assert_eq!(importer.local_group_to_edge_type("Unknown Group"), None,);
+    assert_eq!(
+        BloodHoundImporter::local_group_to_edge_type("Unknown Group"),
+        None,
+    );
 }
 
 /// Helper to create an importer for testing

@@ -175,7 +175,6 @@ impl Neo4jDatabase {
             Ok(())
         })
     }
-
 }
 
 impl DatabaseBackend for Neo4jDatabase {

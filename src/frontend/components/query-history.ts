@@ -316,7 +316,6 @@ async function runQuery(query: string, name: string): Promise<void> {
   }
 }
 
-
 /** Calculate live duration for running queries */
 function getLiveDuration(entry: QueryHistoryEntry): number {
   if (entry.status !== "running") {

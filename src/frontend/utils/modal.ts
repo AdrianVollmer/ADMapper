@@ -103,9 +103,7 @@ export function createModal(options: ModalOptions): ModalHandle {
     </button>`;
 
   // Wrap header actions — use the flex wrapper when there are multiple buttons
-  const headerActionsHtml = expandable
-    ? `<div class="modal-header-actions">${headerActions}</div>`
-    : headerActions;
+  const headerActionsHtml = expandable ? `<div class="modal-header-actions">${headerActions}</div>` : headerActions;
 
   // Build footer buttons
   const footerButtonsHtml = (buttons ?? [])

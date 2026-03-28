@@ -1211,3 +1211,64 @@ async fn test_graph_data_via_api() {
     let users: Vec<_> = nodes.iter().filter(|n| n["type"] == "User").collect();
     assert_eq!(users.len(), 2);
 }
+
+/// Regression test: inserting edges whose placeholder nodes would collide
+/// with existing nodes must not fail. Previously, `insert_nodes_batch` was
+/// used for placeholders instead of `upsert_nodes_batch`, causing a UNIQUE
+/// constraint violation when an objectid already existed.
+#[tokio::test]
+async fn test_insert_edges_placeholder_does_not_fail_on_existing_node() {
+    let app = TestApp::new();
+
+    // Seed one node that will also be referenced as a relationship endpoint
+    app.db()
+        .insert_nodes(&[DbNode {
+            id: "existing-group".to_string(),
+            name: "Existing Group".to_string(),
+            label: "Group".to_string(),
+            properties: json!({"enabled": true}),
+        }])
+        .unwrap();
+
+    // Insert edges referencing the existing node AND a genuinely new node.
+    // Before the fix this would fail with UNIQUE constraint on objectid.
+    let result = app.db().insert_edges(&[DbEdge {
+        source: "brand-new-user".to_string(),
+        target: "existing-group".to_string(),
+        rel_type: "MemberOf".to_string(),
+        properties: json!({}),
+        source_type: Some("User".to_string()),
+        target_type: Some("Group".to_string()),
+    }]);
+    assert!(result.is_ok(), "insert_edges should not fail: {:?}", result);
+    assert_eq!(result.unwrap(), 1);
+}
+
+/// Regression test: the same objectid referenced with different types in a
+/// single batch must not cause a UNIQUE constraint error.
+#[tokio::test]
+async fn test_insert_edges_same_objectid_different_types_no_conflict() {
+    let app = TestApp::new();
+
+    // Two edges reference the same unknown target with different type hints.
+    let result = app.db().insert_edges(&[
+        DbEdge {
+            source: "src-a".to_string(),
+            target: "ambiguous-node".to_string(),
+            rel_type: "GenericAll".to_string(),
+            properties: json!({}),
+            source_type: Some("User".to_string()),
+            target_type: Some("Group".to_string()),
+        },
+        DbEdge {
+            source: "src-b".to_string(),
+            target: "ambiguous-node".to_string(),
+            rel_type: "WriteDacl".to_string(),
+            properties: json!({}),
+            source_type: Some("Computer".to_string()),
+            target_type: Some("Base".to_string()),
+        },
+    ]);
+    assert!(result.is_ok(), "insert_edges should not fail: {:?}", result);
+    assert_eq!(result.unwrap(), 2);
+}

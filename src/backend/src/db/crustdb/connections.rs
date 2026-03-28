@@ -211,5 +211,4 @@ impl CrustDatabase {
         let nodes: Vec<DbNode> = nodes_map.into_values().collect();
         Ok((nodes, relationships))
     }
-
 }

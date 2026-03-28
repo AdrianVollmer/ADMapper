@@ -15,7 +15,6 @@ use crate::storage::{EntityCache, SqliteStorage};
 use smallvec::SmallVec;
 use tracing::{debug, trace};
 
-
 // =============================================================================
 // Core Data Structures
 // =============================================================================
@@ -478,11 +477,7 @@ fn project_with_bindings(
         }
 
         if let Some(ref mut seen_set) = seen {
-            let key: Vec<(String, PropertyValue)> = new_binding
-                .scalars
-                .iter()
-                .cloned()
-                .collect();
+            let key: Vec<(String, PropertyValue)> = new_binding.scalars.iter().cloned().collect();
             if !seen_set.insert(key) {
                 continue;
             }
@@ -507,7 +502,9 @@ fn execute_union(
     let mut seen: std::collections::HashSet<Vec<(String, ResultValue)>> =
         std::collections::HashSet::new();
     result.rows.retain(|row| {
-        let mut key: Vec<(String, ResultValue)> = row.values.iter()
+        let mut key: Vec<(String, ResultValue)> = row
+            .values
+            .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         key.sort_by(|(a, _), (b, _)| a.cmp(b));

@@ -127,12 +127,17 @@ impl CrustDatabase {
                 obj.insert(
                     "labels".into(),
                     JsonValue::Array(
-                        n.labels.iter().map(|l| JsonValue::String(l.clone())).collect(),
+                        n.labels
+                            .iter()
+                            .map(|l| JsonValue::String(l.clone()))
+                            .collect(),
                     ),
                 );
                 obj.insert(
                     "properties".into(),
-                    Self::property_value_to_json(&crustdb::PropertyValue::Map(n.properties.clone())),
+                    Self::property_value_to_json(&crustdb::PropertyValue::Map(
+                        n.properties.clone(),
+                    )),
                 );
                 JsonValue::Object(obj)
             }
@@ -144,7 +149,9 @@ impl CrustDatabase {
                 obj.insert("rel_type".into(), JsonValue::String(r.rel_type.clone()));
                 obj.insert(
                     "properties".into(),
-                    Self::property_value_to_json(&crustdb::PropertyValue::Map(r.properties.clone())),
+                    Self::property_value_to_json(&crustdb::PropertyValue::Map(
+                        r.properties.clone(),
+                    )),
                 );
                 JsonValue::Object(obj)
             }
@@ -155,7 +162,11 @@ impl CrustDatabase {
                     JsonValue::Array(
                         p.nodes
                             .iter()
-                            .map(|n| Self::property_value_to_json(&crustdb::PropertyValue::Node(n.clone())))
+                            .map(|n| {
+                                Self::property_value_to_json(&crustdb::PropertyValue::Node(
+                                    n.clone(),
+                                ))
+                            })
                             .collect(),
                     ),
                 );
@@ -165,7 +176,9 @@ impl CrustDatabase {
                         p.relationships
                             .iter()
                             .map(|r| {
-                                Self::property_value_to_json(&crustdb::PropertyValue::Relationship(r.clone()))
+                                Self::property_value_to_json(&crustdb::PropertyValue::Relationship(
+                                    r.clone(),
+                                ))
                             })
                             .collect(),
                     ),

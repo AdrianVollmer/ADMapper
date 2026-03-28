@@ -12,7 +12,12 @@ import type { QueryHistoryResponse, QueryStartResponse, QueryProgressEvent } fro
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph } from "../graph/types";
 import { subscribe, QUERY_PROGRESS_CHANNEL, type Unsubscribe } from "../api/transport";
-import { registerForegroundQuery, unregisterForegroundQuery, getQueryErrorMessage, formatDuration } from "../utils/query";
+import {
+  registerForegroundQuery,
+  unregisterForegroundQuery,
+  getQueryErrorMessage,
+  formatDuration,
+} from "../utils/query";
 
 /** Modal element */
 let modalEl: HTMLElement | null = null;
@@ -143,7 +148,6 @@ export function closeRunQuery(): void {
 function getDocsUrl(): string {
   return "https://neo4j.com/docs/cypher-manual/current/";
 }
-
 
 /** Render the modal content */
 function renderModal(): void {
@@ -398,7 +402,6 @@ function cleanup(): void {
     durationInterval = null;
   }
 }
-
 
 /** Handle clicks in the modal */
 function handleModalClick(e: Event): void {

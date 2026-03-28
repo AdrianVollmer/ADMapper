@@ -190,5 +190,4 @@ impl BloodHoundImporter {
             props.insert("tier".to_string(), JsonValue::Number(2.into()));
         }
     }
-
 }

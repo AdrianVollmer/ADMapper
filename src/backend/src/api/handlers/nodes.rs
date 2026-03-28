@@ -158,12 +158,11 @@ pub async fn node_status(
     let db = state.require_db()?;
     info!(node_id = %node_id, "Checking node security status");
 
-    let core_status = tokio::task::spawn_blocking(move || {
-        core::node_status_full(db.as_ref(), &node_id)
-    })
-    .await
-    .map_err(|e| ApiError::Internal(format!("Task join error: {e}")))?
-    .map_err(ApiError::Internal)?;
+    let core_status =
+        tokio::task::spawn_blocking(move || core::node_status_full(db.as_ref(), &node_id))
+            .await
+            .map_err(|e| ApiError::Internal(format!("Task join error: {e}")))?
+            .map_err(ApiError::Internal)?;
 
     Ok(Json(NodeStatus {
         owned: core_status.owned,

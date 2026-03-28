@@ -11,8 +11,8 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
-use crate::api::types::QueryStatus;
 use super::{BrowseEntry, BrowseResponse, QueryHistoryEntry, QueryHistoryResponse, QueryResult};
+use crate::api::types::QueryStatus;
 
 /// Execute a query synchronously.
 pub fn execute_query(

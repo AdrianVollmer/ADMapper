@@ -28,7 +28,9 @@ pub(super) fn execute_project(
         let mut seen: HashSet<Vec<(String, ResultValue)>> = HashSet::new();
         let mut unique_rows = Vec::new();
         for row in rows {
-            let mut key: Vec<(String, ResultValue)> = row.values.iter()
+            let mut key: Vec<(String, ResultValue)> = row
+                .values
+                .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             key.sort_by(|(a, _), (b, _)| a.cmp(b));

@@ -12,8 +12,7 @@ use tracing::{debug, info};
 use super::backend::{DatabaseBackend, QueryLanguage};
 use super::types::{
     json_to_cypher_props, CypherEscapeStyle, DbEdge, DbError, DbNode, DetailedStats,
-    ReachabilityInsight, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX,
-    WELL_KNOWN_PRINCIPALS,
+    ReachabilityInsight, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
 };
 
 /// FalkorDB database backend.
@@ -154,7 +153,6 @@ impl FalkorDbDatabase {
             properties,
         })
     }
-
 }
 
 /// Convert FalkorDB value to JSON.

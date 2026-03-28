@@ -19,9 +19,9 @@ impl CrustDatabase {
         // Build index of objectid -> node_id for efficient lookups
         let node_index = self.db.build_property_index("objectid")?;
 
-        // Collect unique placeholder nodes to create (deduplicated)
-        let mut placeholder_set: std::collections::HashSet<(String, String)> =
-            std::collections::HashSet::new();
+        // Collect unique placeholder nodes to create (deduplicated by objectid)
+        let mut placeholder_map: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
 
         for relationship in relationships {
             let source_id = node_index.get(&relationship.source);
@@ -29,29 +29,35 @@ impl CrustDatabase {
 
             // Create placeholder for missing source
             if source_id.is_none() {
-                let node_type = relationship
-                    .source_type
-                    .as_deref()
-                    .map(normalize_node_type)
-                    .unwrap_or_else(|| "Base".to_string());
-                placeholder_set.insert((relationship.source.clone(), node_type));
+                placeholder_map
+                    .entry(relationship.source.clone())
+                    .or_insert_with(|| {
+                        relationship
+                            .source_type
+                            .as_deref()
+                            .map(normalize_node_type)
+                            .unwrap_or_else(|| "Base".to_string())
+                    });
             }
             // Create placeholder for missing target
             if target_id.is_none() {
-                let node_type = relationship
-                    .target_type
-                    .as_deref()
-                    .map(normalize_node_type)
-                    .unwrap_or_else(|| "Base".to_string());
-                placeholder_set.insert((relationship.target.clone(), node_type));
+                placeholder_map
+                    .entry(relationship.target.clone())
+                    .or_insert_with(|| {
+                        relationship
+                            .target_type
+                            .as_deref()
+                            .map(normalize_node_type)
+                            .unwrap_or_else(|| "Base".to_string())
+                    });
             }
         }
 
-        // Insert placeholder nodes using batch insert
-        let node_index = if !placeholder_set.is_empty() {
-            debug!("Creating {} placeholder nodes", placeholder_set.len());
+        // Upsert placeholder nodes (handles pre-existing nodes gracefully)
+        let node_index = if !placeholder_map.is_empty() {
+            debug!("Creating {} placeholder nodes", placeholder_map.len());
 
-            let placeholder_batch: Vec<(Vec<String>, serde_json::Value)> = placeholder_set
+            let placeholder_batch: Vec<(Vec<String>, serde_json::Value)> = placeholder_map
                 .iter()
                 .map(|(objectid, node_type)| {
                     let labels = vec![node_type.clone()];
@@ -65,8 +71,8 @@ impl CrustDatabase {
                 })
                 .collect();
 
-            self.db.insert_nodes_batch(&placeholder_batch)?;
-            debug!("Inserted {} placeholder nodes", placeholder_set.len());
+            self.db.upsert_nodes_batch(&placeholder_batch)?;
+            debug!("Upserted {} placeholder nodes", placeholder_map.len());
 
             // Rebuild index after creating placeholders
             self.db.build_property_index("objectid")?

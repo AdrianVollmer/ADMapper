@@ -343,4 +343,3 @@ function handleModalClick(e: Event): void {
       break;
   }
 }
-

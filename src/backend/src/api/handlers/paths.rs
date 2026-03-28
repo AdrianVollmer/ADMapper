@@ -5,7 +5,7 @@ use crate::api::types::{
     ApiError, PathParams, PathResponse, PathStep, PathsToDaEntry, PathsToDaParams,
     PathsToDaResponse,
 };
-use crate::db::{DatabaseBackend, DbError, DbNode, NewQueryHistoryEntry};
+use crate::db::{DbError, DbNode, NewQueryHistoryEntry};
 use crate::graph::{FullGraph, GraphEdge, GraphNode};
 use crate::state::AppState;
 use axum::{
@@ -13,7 +13,6 @@ use axum::{
     response::Json,
 };
 use serde_json::Value as JsonValue;
-use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
 
 /// Find shortest path between two nodes.
@@ -233,96 +232,4 @@ pub async fn paths_to_domain_admins(
     info!(count = count, "Found users with paths to Domain Admins");
 
     Ok(Json(PathsToDaResponse { count, entries }))
-}
-
-/// Helper: Check if there's a path matching a WHERE condition.
-/// Returns Some(hops) if path found, None otherwise.
-///
-/// This is a thin wrapper around `core::paths::check_path_to_condition` that
-/// adds query history tracking and async execution via `spawn_blocking`.
-pub(crate) async fn check_path_to_condition(
-    state: &AppState,
-    db: &Arc<dyn DatabaseBackend>,
-    node_id: &str,
-    condition: &str,
-    target_name: &str,
-) -> Result<Option<usize>, ApiError> {
-    let query_id = uuid::Uuid::new_v4().to_string();
-    let started_at = std::time::Instant::now();
-    let started_at_unix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-
-    let escaped_id = node_id.replace('\'', "\\'");
-    let query_name = format!("Path to {}: {}", target_name, node_id);
-    let query_text = format!(
-        "MATCH p = shortestPath((a)-[*1..20]->(b)) WHERE a.objectid = '{}' AND ({}) AND a <> b RETURN length(p) AS hops",
-        escaped_id, condition
-    );
-
-    // Add to history with "running" status (background query)
-    if let Some(history) = state.history() {
-        if let Err(e) = history.add(NewQueryHistoryEntry {
-            id: &query_id,
-            name: &query_name,
-            query: &query_text,
-            timestamp: started_at_unix,
-            result_count: None,
-            status: "running",
-            started_at: started_at_unix,
-            duration_ms: None,
-            error: None,
-            background: true,
-        }) {
-            warn!(error = %e, "Failed to add path check to history");
-        }
-    }
-
-    state.start_sync_query();
-
-    // Delegate core logic to core::paths::check_path_to_condition
-    let node_id_owned = node_id.to_string();
-    let condition_owned = condition.to_string();
-    let db_clone = db.clone();
-    let result: Result<Option<usize>, ApiError> = run_db(db_clone, move |db| {
-        crate::api::core::paths::check_path_to_condition(db, &node_id_owned, &condition_owned)
-            .map_err(DbError::Database)
-    })
-    .await;
-
-    state.end_sync_query();
-
-    let duration_ms = started_at.elapsed().as_millis() as u64;
-
-    if let Some(history) = state.history() {
-        match &result {
-            Ok(path_len) => {
-                let result_count = path_len.map(|l| l as i64).or(Some(0));
-                if let Err(e) = history.update_status(
-                    &query_id,
-                    "completed",
-                    Some(duration_ms),
-                    result_count,
-                    None,
-                ) {
-                    warn!(error = %e, "Failed to update path check history");
-                }
-            }
-            Err(e) => {
-                let error_str = e.to_string();
-                if let Err(e2) = history.update_status(
-                    &query_id,
-                    "failed",
-                    Some(duration_ms),
-                    None,
-                    Some(&error_str),
-                ) {
-                    warn!(error = %e2, "Failed to update path check history");
-                }
-            }
-        }
-    }
-
-    result
 }

@@ -237,7 +237,6 @@ function createAddNodeModal(): void {
 
   addNodeModal.addEventListener("click", handleAddNodeClick);
   document.body.appendChild(addNodeModal);
-
 }
 
 /** Set up search input with autocomplete */
@@ -547,7 +546,6 @@ function createEditNodeModal(): void {
 
   editNodeModal.addEventListener("click", handleEditNodeClick);
   document.body.appendChild(editNodeModal);
-
 }
 
 /** Populate the edit node form with current properties */
