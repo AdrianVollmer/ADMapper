@@ -19,7 +19,9 @@ impl super::Database {
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.insert_nodes_batch(nodes)
+        let result = storage.insert_nodes_batch(nodes);
+        self.invalidate_adjacency_cache();
+        result
     }
 
     /// Upsert multiple nodes in a single transaction.
@@ -45,7 +47,9 @@ impl super::Database {
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.upsert_nodes_batch(nodes)
+        let result = storage.upsert_nodes_batch(nodes);
+        self.invalidate_adjacency_cache();
+        result
     }
 
     /// Get or create a node by objectid, returning its internal ID.
@@ -62,7 +66,9 @@ impl super::Database {
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.get_or_create_node_by_objectid(objectid, label)
+        let result = storage.get_or_create_node_by_objectid(objectid, label);
+        self.invalidate_adjacency_cache();
+        result
     }
 
     /// Insert multiple relationships in a single transaction.
@@ -80,7 +86,9 @@ impl super::Database {
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.insert_relationships_batch(relationships)
+        let result = storage.insert_relationships_batch(relationships);
+        self.invalidate_adjacency_cache();
+        result
     }
 
     /// Find a node ID by a property value.

@@ -10,11 +10,11 @@ mod tests;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::error::{Error, Result};
-use crate::storage::{EntityCache, EntityCacheConfig, SqliteStorage};
+use crate::storage::{AdjacencyCache, EntityCache, EntityCacheConfig, SqliteStorage};
 
 /// Default number of read connections in the pool.
 const DEFAULT_READ_POOL_SIZE: usize = 4;
@@ -50,6 +50,12 @@ pub struct Database {
     /// Maximum BFS frontier entries allowed per query (memory safeguard).
     /// None means unlimited. Set via `set_max_frontier_entries`.
     pub(crate) max_frontier_entries: Option<usize>,
+    /// In-memory adjacency list cache for fast graph traversals.
+    /// Lazily built on first read query after invalidation.
+    /// Wrapped in Arc so it can be shared with query execution contexts.
+    pub(crate) adjacency_cache: RwLock<Option<Arc<AdjacencyCache>>>,
+    /// Whether the adjacency cache needs rebuilding (set on mutations).
+    pub(crate) adjacency_dirty: AtomicBool,
 }
 
 impl Database {
@@ -86,6 +92,8 @@ impl Database {
             entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
             max_intermediate_bindings: None,
             max_frontier_entries: None,
+            adjacency_cache: RwLock::new(None),
+            adjacency_dirty: AtomicBool::new(true),
         })
     }
 
@@ -122,6 +130,8 @@ impl Database {
             entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
             max_intermediate_bindings: None,
             max_frontier_entries: None,
+            adjacency_cache: RwLock::new(None),
+            adjacency_dirty: AtomicBool::new(true),
         })
     }
 
@@ -141,6 +151,8 @@ impl Database {
             entity_cache: Mutex::new(EntityCache::new(EntityCacheConfig::disabled())),
             max_intermediate_bindings: None,
             max_frontier_entries: None,
+            adjacency_cache: RwLock::new(None),
+            adjacency_dirty: AtomicBool::new(true),
         })
     }
 
@@ -169,6 +181,46 @@ impl Database {
         } else {
             Ok(())
         }
+    }
+
+    /// Mark the adjacency cache as dirty (needs rebuild).
+    /// Called after any graph mutation.
+    pub(crate) fn invalidate_adjacency_cache(&self) {
+        self.adjacency_dirty.store(true, Ordering::Release);
+    }
+
+    /// Get the adjacency cache, rebuilding it if necessary.
+    ///
+    /// Returns an `Arc` clone of the cache that can be passed to query
+    /// execution contexts without holding the lock.
+    pub fn ensure_adjacency_cache(&self) -> Result<Arc<AdjacencyCache>> {
+        // Fast path: cache is valid
+        if !self.adjacency_dirty.load(Ordering::Acquire) {
+            let guard = self.adjacency_cache.read().unwrap();
+            if let Some(ref arc) = *guard {
+                return Ok(Arc::clone(arc));
+            }
+            // Cache was None despite not being dirty — fall through to rebuild
+            drop(guard);
+        }
+
+        // Slow path: rebuild the cache
+        let mut write_guard = self.adjacency_cache.write().unwrap();
+        // Double-check after acquiring write lock (another thread may have rebuilt)
+        if !self.adjacency_dirty.load(Ordering::Acquire) {
+            if let Some(ref arc) = *write_guard {
+                return Ok(Arc::clone(arc));
+            }
+        }
+
+        let storage = self.get_read_storage();
+        let cache = Arc::new(AdjacencyCache::build(&storage)?);
+        drop(storage);
+        let result = Arc::clone(&cache);
+        *write_guard = Some(cache);
+        self.adjacency_dirty.store(false, Ordering::Release);
+
+        Ok(result)
     }
 }
 

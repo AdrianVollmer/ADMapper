@@ -11,8 +11,9 @@ use super::planner;
 use super::{QueryResult, QueryStats, ResultValue, Row};
 use crate::error::{Error, Result};
 use crate::graph::{Node, PropertyValue, Relationship};
-use crate::storage::{EntityCache, SqliteStorage};
+use crate::storage::{AdjacencyCache, EntityCache, SqliteStorage};
 use smallvec::SmallVec;
+use std::sync::Arc;
 use tracing::{debug, trace};
 
 // =============================================================================
@@ -160,7 +161,7 @@ pub use plan_exec::ResourceLimits;
 /// which is then interpreted by the plan executor.
 #[cfg(test)]
 pub fn execute(statement: &Statement, storage: &SqliteStorage) -> Result<QueryResult> {
-    execute_with_cache(statement, storage, None, ResourceLimits::default())
+    execute_with_cache(statement, storage, None, ResourceLimits::default(), None)
 }
 
 /// Execute a parsed statement with an optional entity cache and resource limits.
@@ -170,25 +171,29 @@ pub fn execute(statement: &Statement, storage: &SqliteStorage) -> Result<QueryRe
 ///
 /// `limits` controls resource bounds (intermediate bindings, BFS frontier size)
 /// to prevent OOM on queries that produce explosive results.
+///
+/// `adjacency` provides an in-memory adjacency list cache for O(1) neighbor
+/// lookups during graph traversals, replacing per-node SQL queries.
 pub fn execute_with_cache(
     statement: &Statement,
     storage: &SqliteStorage,
     cache: Option<&mut EntityCache>,
     limits: ResourceLimits,
+    adjacency: Option<Arc<AdjacencyCache>>,
 ) -> Result<QueryResult> {
     // Handle UNION/UNION ALL at the statement level: execute each branch and concatenate
     if let Statement::UnionAll(queries) = statement {
-        return execute_union_all(queries, storage, cache, limits);
+        return execute_union_all(queries, storage, cache, limits, adjacency);
     }
     if let Statement::Union(queries) = statement {
-        return execute_union(queries, storage, cache, limits);
+        return execute_union(queries, storage, cache, limits, adjacency);
     }
     if let Statement::Pipeline {
         stages,
         final_query,
     } = statement
     {
-        return execute_pipeline(stages, final_query, storage, cache, limits);
+        return execute_pipeline(stages, final_query, storage, cache, limits, adjacency);
     }
 
     let t0 = std::time::Instant::now();
@@ -210,7 +215,7 @@ pub fn execute_with_cache(
     trace!("full plan: {:?}", optimized_plan.root);
 
     // Execute the plan
-    let result = plan_exec::execute_plan(&optimized_plan, storage, cache, limits)?;
+    let result = plan_exec::execute_plan(&optimized_plan, storage, cache, limits, adjacency)?;
     let exec_ms = t0.elapsed().as_micros();
 
     debug!(
@@ -235,6 +240,7 @@ fn execute_pipeline(
     storage: &SqliteStorage,
     mut cache: Option<&mut EntityCache>,
     limits: ResourceLimits,
+    adjacency: Option<Arc<AdjacencyCache>>,
 ) -> Result<QueryResult> {
     let t0 = std::time::Instant::now();
     let mut current_bindings: Option<Vec<Binding>> = None;
@@ -253,7 +259,7 @@ fn execute_pipeline(
             });
             let plan = planner::plan(&match_stmt)?;
             let optimized = planner::optimize(plan);
-            let mut ctx = plan_exec::ExecutionContext::new(limits.clone());
+            let mut ctx = plan_exec::ExecutionContext::new(limits.clone(), adjacency.clone());
             let bindings = plan_exec::execute_plan_bindings(
                 &optimized,
                 storage,
@@ -290,7 +296,7 @@ fn execute_pipeline(
             // For aggregation, execute the full aggregate plan and convert rows back to bindings
             let plan = planner::plan_return(planner::PlanOperator::ProduceRow, with_return)?;
             let optimized = planner::optimize(planner::QueryPlan { root: plan });
-            let mut ctx = plan_exec::ExecutionContext::new(limits.clone());
+            let mut ctx = plan_exec::ExecutionContext::new(limits.clone(), adjacency.clone());
             // Feed the stage bindings through the aggregate plan
             let result = plan_exec::execute_plan_on_bindings(
                 &optimized,
@@ -352,7 +358,7 @@ fn execute_pipeline(
         });
         let plan = planner::plan(&match_stmt)?;
         let optimized = planner::optimize(plan);
-        let mut ctx = plan_exec::ExecutionContext::new(limits.clone());
+        let mut ctx = plan_exec::ExecutionContext::new(limits.clone(), adjacency.clone());
         let new_bindings =
             plan_exec::execute_plan_bindings(&optimized, storage, &mut ctx, cache.as_deref_mut())?;
         // Cross-join with accumulated bindings
@@ -370,7 +376,7 @@ fn execute_pipeline(
     // Project the final RETURN
     let plan = planner::plan_return(planner::PlanOperator::ProduceRow, return_clause)?;
     let optimized = planner::optimize(planner::QueryPlan { root: plan });
-    let mut ctx = plan_exec::ExecutionContext::new(limits.clone());
+    let mut ctx = plan_exec::ExecutionContext::new(limits.clone(), adjacency.clone());
     let mut result =
         plan_exec::execute_plan_on_bindings(&optimized, final_bindings, storage, &mut ctx, cache)?;
     result.stats.execution_time_ms = t0.elapsed().as_millis() as u64;
@@ -481,8 +487,9 @@ fn execute_union(
     storage: &SqliteStorage,
     cache: Option<&mut EntityCache>,
     limits: ResourceLimits,
+    adjacency: Option<Arc<AdjacencyCache>>,
 ) -> Result<QueryResult> {
-    let mut result = execute_union_all(queries, storage, cache, limits)?;
+    let mut result = execute_union_all(queries, storage, cache, limits, adjacency)?;
 
     // Deduplicate rows using proper Hash/Eq on ResultValue.
     let mut seen: std::collections::HashSet<Vec<(String, ResultValue)>> =
@@ -506,6 +513,7 @@ fn execute_union_all(
     storage: &SqliteStorage,
     mut cache: Option<&mut EntityCache>,
     limits: ResourceLimits,
+    adjacency: Option<Arc<AdjacencyCache>>,
 ) -> Result<QueryResult> {
     let t0 = std::time::Instant::now();
     let mut combined_columns: Option<Vec<String>> = None;
@@ -513,7 +521,13 @@ fn execute_union_all(
     let mut combined_stats = QueryStats::default();
 
     for query in queries {
-        let result = execute_with_cache(query, storage, cache.as_deref_mut(), limits.clone())?;
+        let result = execute_with_cache(
+            query,
+            storage,
+            cache.as_deref_mut(),
+            limits.clone(),
+            adjacency.clone(),
+        )?;
 
         match &combined_columns {
             None => {

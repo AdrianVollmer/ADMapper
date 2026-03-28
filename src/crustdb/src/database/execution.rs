@@ -13,6 +13,9 @@ impl super::Database {
     ///
     /// If entity caching is enabled (via `set_entity_cache`), nodes and relationships
     /// are cached during traversals to reduce SQLite lookups.
+    ///
+    /// The adjacency cache is built lazily on the first read query and provides
+    /// O(1) neighbor lookups during graph traversals.
     pub fn execute(&self, query: &str) -> Result<QueryResult> {
         let statement = query::parser::parse(query)?;
 
@@ -21,6 +24,9 @@ impl super::Database {
         }
 
         if statement.is_read_only() {
+            // Build/get adjacency cache for read queries
+            let adjacency = self.ensure_adjacency_cache().ok();
+
             // Use read connection from pool for query execution
             let read_storage = self.get_read_storage();
 
@@ -51,6 +57,7 @@ impl super::Database {
                         &read_storage,
                         cache_ref,
                         self.resource_limits(),
+                        adjacency,
                     )?
                 };
 
@@ -80,6 +87,7 @@ impl super::Database {
                     &read_storage,
                     cache_ref,
                     self.resource_limits(),
+                    adjacency,
                 )
             }
         } else {
@@ -89,13 +97,20 @@ impl super::Database {
                 .lock()
                 .map_err(|e| Error::Internal(e.to_string()))?;
 
-            // Clear entity cache on write operations (data changed)
+            // Clear caches on write operations (data changed)
             {
                 let mut entity_cache = self.entity_cache.lock().unwrap();
                 entity_cache.clear();
             }
+            self.invalidate_adjacency_cache();
 
-            query::executor::execute_with_cache(&statement, &storage, None, self.resource_limits())
+            query::executor::execute_with_cache(
+                &statement,
+                &storage,
+                None,
+                self.resource_limits(),
+                None,
+            )
         }
     }
 }

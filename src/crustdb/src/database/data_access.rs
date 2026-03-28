@@ -33,7 +33,9 @@ impl super::Database {
             .write_conn
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?;
-        storage.clear()
+        let result = storage.clear();
+        self.invalidate_adjacency_cache();
+        result
     }
 
     /// Get a node by its ID.

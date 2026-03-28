@@ -26,7 +26,8 @@ use crate::graph::{Node, Relationship};
 use crate::query::operators::{ExpandRequest, VariableLengthExpandRequest};
 use crate::query::planner::{PlanOperator, QueryPlan};
 use crate::query::{QueryResult, QueryStats, Row};
-use crate::storage::{EntityCache, SqliteStorage};
+use crate::storage::{AdjacencyCache, EntityCache, SqliteStorage};
+use std::sync::Arc;
 
 // =============================================================================
 // Execution Context
@@ -65,14 +66,17 @@ pub(crate) struct ExecutionContext {
     limits: ResourceLimits,
     /// Running count of bindings produced so far.
     bindings_produced: usize,
+    /// In-memory adjacency cache for fast neighbor lookups during traversals.
+    pub adjacency: Option<Arc<AdjacencyCache>>,
 }
 
 impl ExecutionContext {
-    pub fn new(limits: ResourceLimits) -> Self {
+    pub fn new(limits: ResourceLimits, adjacency: Option<Arc<AdjacencyCache>>) -> Self {
         Self {
             stats: QueryStats::default(),
             limits,
             bindings_produced: 0,
+            adjacency,
         }
     }
 
@@ -166,8 +170,9 @@ pub fn execute_plan(
     storage: &SqliteStorage,
     cache: Option<&mut EntityCache>,
     limits: ResourceLimits,
+    adjacency: Option<Arc<AdjacencyCache>>,
 ) -> Result<QueryResult> {
-    let mut ctx = ExecutionContext::new(limits);
+    let mut ctx = ExecutionContext::new(limits, adjacency);
     let start = std::time::Instant::now();
 
     // Execute the plan tree

@@ -5,7 +5,8 @@ use crate::error::{Error, Result};
 use crate::graph::{Node, Relationship};
 use crate::query::operators::{ExpandRequest, VariableLengthExpandRequest};
 use crate::query::planner::{ExpandDirection, TargetPropertyFilter};
-use crate::storage::{EntityCache, SqliteStorage};
+use crate::storage::adjacency::AdjEntry;
+use crate::storage::{AdjacencyCache, EntityCache, SqliteStorage};
 use std::collections::{HashMap, HashSet, VecDeque};
 use tracing::trace;
 
@@ -18,62 +19,119 @@ pub(super) fn execute_expand(
 ) -> Result<ExecutionResult> {
     let mut result = Vec::new();
     let limit = req.limit.map(|l| l as usize);
+    let need_rel = req.rel_variable.is_some() || req.path_variable.is_some();
+    let adj = ctx.adjacency.clone();
 
     'outer: for binding in bindings {
         let source_node = binding
             .get_node(req.source_variable)
             .ok_or_else(|| Error::Cypher(format!("Variable {} not bound", req.source_variable)))?;
 
-        let relationships = get_relationships(source_node.id, req.direction, storage)?;
-        let relationships = filter_relationships_by_type(relationships, req.types);
+        if let Some(ref adj) = adj {
+            // Fast path: use adjacency cache
+            let entries = get_adj_entries(source_node.id, req.direction, adj);
+            let entries = filter_adj_entries_by_type(entries, req.types);
 
-        for relationship in relationships {
-            let target_id = get_target_id(&relationship, source_node.id, req.direction);
-            let target_node = match get_node_cached(target_id, storage, cache.as_deref_mut())? {
-                Some(n) => n,
-                None => continue,
-            };
+            for &(target_id, rel_id, _) in entries {
+                let target_node = match get_node_cached(target_id, storage, cache.as_deref_mut())? {
+                    Some(n) => n,
+                    None => continue,
+                };
 
-            // Check target labels
-            if !req.target_labels.is_empty()
-                && !req.target_labels.iter().any(|l| target_node.has_label(l))
-            {
-                continue;
-            }
-
-            // Check target property filter (pushed down from WHERE)
-            if let Some(filter) = &req.target_property_filter {
-                if !node_matches_target_filter(&target_node, filter) {
+                if !req.target_labels.is_empty()
+                    && !req.target_labels.iter().any(|l| target_node.has_label(l))
+                {
                     continue;
                 }
+
+                if let Some(filter) = &req.target_property_filter {
+                    if !node_matches_target_filter(&target_node, filter) {
+                        continue;
+                    }
+                }
+
+                let mut new_binding = binding
+                    .clone()
+                    .with_node(req.target_variable, target_node.clone());
+
+                // Only load full relationship when needed for binding
+                if need_rel {
+                    if let Some(rel) =
+                        get_relationship_cached(rel_id, storage, cache.as_deref_mut())?
+                    {
+                        if let Some(rv) = req.rel_variable {
+                            new_binding = new_binding.with_relationship(rv, rel.clone());
+                        }
+                        if let Some(pv) = req.path_variable {
+                            new_binding = new_binding.with_path(
+                                pv,
+                                Path {
+                                    nodes: vec![source_node.clone(), target_node],
+                                    relationships: vec![rel],
+                                },
+                            );
+                        }
+                    }
+                }
+
+                result.push(new_binding);
+                ctx.track_bindings(1)?;
+
+                if let Some(lim) = limit {
+                    if result.len() >= lim {
+                        break 'outer;
+                    }
+                }
             }
+        } else {
+            // Fallback: SQL path
+            let relationships = get_relationships(source_node.id, req.direction, storage)?;
+            let relationships = filter_relationships_by_type(relationships, req.types);
 
-            let mut new_binding = binding
-                .clone()
-                .with_node(req.target_variable, target_node.clone());
+            for relationship in relationships {
+                let target_id = get_target_id(&relationship, source_node.id, req.direction);
+                let target_node = match get_node_cached(target_id, storage, cache.as_deref_mut())? {
+                    Some(n) => n,
+                    None => continue,
+                };
 
-            if let Some(rv) = req.rel_variable {
-                new_binding = new_binding.with_relationship(rv, relationship.clone());
-            }
+                if !req.target_labels.is_empty()
+                    && !req.target_labels.iter().any(|l| target_node.has_label(l))
+                {
+                    continue;
+                }
 
-            // Bind the path if path_variable is set
-            if let Some(pv) = req.path_variable {
-                new_binding = new_binding.with_path(
-                    pv,
-                    Path {
-                        nodes: vec![source_node.clone(), target_node],
-                        relationships: vec![relationship],
-                    },
-                );
-            }
+                if let Some(filter) = &req.target_property_filter {
+                    if !node_matches_target_filter(&target_node, filter) {
+                        continue;
+                    }
+                }
 
-            result.push(new_binding);
-            ctx.track_bindings(1)?;
+                let mut new_binding = binding
+                    .clone()
+                    .with_node(req.target_variable, target_node.clone());
 
-            // Early termination when limit is reached
-            if let Some(lim) = limit {
-                if result.len() >= lim {
-                    break 'outer;
+                if let Some(rv) = req.rel_variable {
+                    new_binding = new_binding.with_relationship(rv, relationship.clone());
+                }
+
+                if let Some(pv) = req.path_variable {
+                    new_binding = new_binding.with_path(
+                        pv,
+                        Path {
+                            nodes: vec![source_node.clone(), target_node],
+                            relationships: vec![relationship],
+                        },
+                    );
+                }
+
+                result.push(new_binding);
+                ctx.track_bindings(1)?;
+
+                if let Some(lim) = limit {
+                    if result.len() >= lim {
+                        break 'outer;
+                    }
                 }
             }
         }
@@ -227,6 +285,7 @@ pub(super) fn execute_variable_length_expand(
         };
 
     let limit = req.limit.map(|l| l as usize);
+    let adj = ctx.adjacency.clone();
 
     for binding in bindings {
         // Early termination: check if we've reached the limit
@@ -378,27 +437,47 @@ pub(super) fn execute_variable_length_expand(
                 continue;
             }
 
-            // Expand to neighbors
-            let relationships = get_relationships(current_id, req.direction, storage)?;
-            let relationships = filter_relationships_by_type(relationships, req.types);
+            // Expand to neighbors (use adjacency cache if available)
+            if let Some(ref adj) = adj {
+                let entries = get_adj_entries(current_id, req.direction, adj);
+                let entries = filter_adj_entries_by_type(entries, req.types);
 
-            for relationship in relationships {
-                let next_id = get_target_id(&relationship, current_id, req.direction);
+                for &(next_id, rel_id, _) in entries {
+                    if visited.contains(&next_id) {
+                        continue;
+                    }
+                    visited.insert(next_id);
 
-                // Skip already visited nodes (global deduplication)
-                if visited.contains(&next_id) {
-                    continue;
+                    let mut new_path_nodes = path_nodes.clone();
+                    new_path_nodes.push(next_id);
+
+                    let mut new_path_rels = path_rels.clone();
+                    new_path_rels.push(rel_id);
+
+                    queue.push_back((next_id, new_path_nodes, new_path_rels));
+                    ctx.check_frontier(queue.len())?;
                 }
-                visited.insert(next_id);
+            } else {
+                let relationships = get_relationships(current_id, req.direction, storage)?;
+                let relationships = filter_relationships_by_type(relationships, req.types);
 
-                let mut new_path_nodes = path_nodes.clone();
-                new_path_nodes.push(next_id);
+                for relationship in relationships {
+                    let next_id = get_target_id(&relationship, current_id, req.direction);
 
-                let mut new_path_rels = path_rels.clone();
-                new_path_rels.push(relationship.id);
+                    if visited.contains(&next_id) {
+                        continue;
+                    }
+                    visited.insert(next_id);
 
-                queue.push_back((next_id, new_path_nodes, new_path_rels));
-                ctx.check_frontier(queue.len())?;
+                    let mut new_path_nodes = path_nodes.clone();
+                    new_path_nodes.push(next_id);
+
+                    let mut new_path_rels = path_rels.clone();
+                    new_path_rels.push(relationship.id);
+
+                    queue.push_back((next_id, new_path_nodes, new_path_rels));
+                    ctx.check_frontier(queue.len())?;
+                }
             }
         }
 
@@ -489,6 +568,8 @@ pub(super) fn execute_shortest_path(
         );
     }
 
+    let adj = ctx.adjacency.clone();
+
     'outer: for binding in bindings {
         let source_node = binding
             .get_node(source_variable)
@@ -549,21 +630,37 @@ pub(super) fn execute_shortest_path(
                 }
             }
 
-            // Expand
-            let relationships = get_relationships(current_id, direction, storage)?;
-            let relationships = filter_relationships_by_type(relationships, types);
+            // Expand (use adjacency cache if available)
+            if let Some(ref adj) = adj {
+                let entries = get_adj_entries(current_id, direction, adj);
+                let entries = filter_adj_entries_by_type(entries, types);
 
-            for relationship in relationships {
-                let next_id = get_target_id(&relationship, current_id, direction);
+                for &(next_id, rel_id, _) in entries {
+                    if visited.contains(&next_id) {
+                        continue;
+                    }
+                    visited.insert(next_id);
+                    parent.insert(next_id, (current_id, rel_id));
 
-                if visited.contains(&next_id) {
-                    continue;
+                    queue.push_back((next_id, depth + 1));
+                    ctx.check_frontier(queue.len())?;
                 }
-                visited.insert(next_id);
-                parent.insert(next_id, (current_id, relationship.id));
+            } else {
+                let relationships = get_relationships(current_id, direction, storage)?;
+                let relationships = filter_relationships_by_type(relationships, types);
 
-                queue.push_back((next_id, depth + 1));
-                ctx.check_frontier(queue.len())?;
+                for relationship in relationships {
+                    let next_id = get_target_id(&relationship, current_id, direction);
+
+                    if visited.contains(&next_id) {
+                        continue;
+                    }
+                    visited.insert(next_id);
+                    parent.insert(next_id, (current_id, relationship.id));
+
+                    queue.push_back((next_id, depth + 1));
+                    ctx.check_frontier(queue.len())?;
+                }
             }
         }
 
@@ -643,6 +740,43 @@ pub(super) fn get_relationships(
             relationships.extend(storage.find_incoming_relationships(node_id)?);
             Ok(relationships)
         }
+    }
+}
+
+/// Get lightweight neighbor entries from the adjacency cache.
+///
+/// Returns `(neighbor_id, rel_id, rel_type)` tuples without loading full
+/// Relationship objects from SQLite. Used by BFS/shortest path where only
+/// topology is needed during traversal.
+fn get_adj_entries(
+    node_id: i64,
+    direction: ExpandDirection,
+    adj: &AdjacencyCache,
+) -> Vec<&AdjEntry> {
+    match direction {
+        ExpandDirection::Outgoing => adj.outgoing(node_id).iter().collect(),
+        ExpandDirection::Incoming => adj.incoming(node_id).iter().collect(),
+        ExpandDirection::Both => {
+            let mut entries: Vec<&AdjEntry> = adj.outgoing(node_id).iter().collect();
+            entries.extend(adj.incoming(node_id).iter());
+            entries
+        }
+    }
+}
+
+/// Filter adjacency entries by relationship type.
+#[inline]
+fn filter_adj_entries_by_type<'a>(
+    entries: Vec<&'a AdjEntry>,
+    types: &'a [String],
+) -> Vec<&'a AdjEntry> {
+    if types.is_empty() {
+        entries
+    } else {
+        entries
+            .into_iter()
+            .filter(|(_, _, rt)| types.iter().any(|t| t == rt))
+            .collect()
     }
 }
 
