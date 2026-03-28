@@ -4,7 +4,42 @@ use crate::error::Result;
 use crate::graph::{Node, PropertyValue, Relationship};
 use rusqlite::{params, OptionalExtension};
 
+use rusqlite::Transaction;
+
 use super::SqliteStorage;
+
+/// Build a label cache by querying existing labels and inserting new ones.
+///
+/// Returns a mapping from label name to label ID for all unique labels
+/// found in the provided nodes.
+fn build_label_cache(
+    tx: &Transaction,
+    nodes: &[(Vec<String>, serde_json::Value)],
+) -> Result<std::collections::HashMap<String, i64>> {
+    let mut label_cache: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for (labels, _) in nodes {
+        for label in labels {
+            if !label_cache.contains_key(label) {
+                let label_id: Option<i64> = tx
+                    .query_row(
+                        "SELECT id FROM node_labels WHERE name = ?1",
+                        params![label],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let label_id = match label_id {
+                    Some(id) => id,
+                    None => {
+                        tx.execute("INSERT INTO node_labels (name) VALUES (?1)", params![label])?;
+                        tx.last_insert_rowid()
+                    }
+                };
+                label_cache.insert(label.clone(), label_id);
+            }
+        }
+    }
+    Ok(label_cache)
+}
 
 impl SqliteStorage {
     /// Get or create a node label ID.
@@ -108,32 +143,7 @@ impl SqliteStorage {
         let mut node_ids = Vec::with_capacity(nodes.len());
 
         // Pre-collect all unique labels and create them
-        let mut label_cache: std::collections::HashMap<String, i64> =
-            std::collections::HashMap::new();
-        for (labels, _) in nodes {
-            for label in labels {
-                if !label_cache.contains_key(label) {
-                    let label_id: Option<i64> = tx
-                        .query_row(
-                            "SELECT id FROM node_labels WHERE name = ?1",
-                            params![label],
-                            |row| row.get(0),
-                        )
-                        .optional()?;
-                    let label_id = match label_id {
-                        Some(id) => id,
-                        None => {
-                            tx.execute(
-                                "INSERT INTO node_labels (name) VALUES (?1)",
-                                params![label],
-                            )?;
-                            tx.last_insert_rowid()
-                        }
-                    };
-                    label_cache.insert(label.clone(), label_id);
-                }
-            }
-        }
+        let label_cache = build_label_cache(&tx, nodes)?;
 
         // Insert nodes using prepared statement
         {
@@ -184,32 +194,7 @@ impl SqliteStorage {
         let mut node_ids = Vec::with_capacity(nodes.len());
 
         // Pre-collect all unique labels and create them
-        let mut label_cache: std::collections::HashMap<String, i64> =
-            std::collections::HashMap::new();
-        for (labels, _) in nodes {
-            for label in labels {
-                if !label_cache.contains_key(label) {
-                    let label_id: Option<i64> = tx
-                        .query_row(
-                            "SELECT id FROM node_labels WHERE name = ?1",
-                            params![label],
-                            |row| row.get(0),
-                        )
-                        .optional()?;
-                    let label_id = match label_id {
-                        Some(id) => id,
-                        None => {
-                            tx.execute(
-                                "INSERT INTO node_labels (name) VALUES (?1)",
-                                params![label],
-                            )?;
-                            tx.last_insert_rowid()
-                        }
-                    };
-                    label_cache.insert(label.clone(), label_id);
-                }
-            }
-        }
+        let label_cache = build_label_cache(&tx, nodes)?;
 
         // Upsert nodes using prepared statements
         // json_patch merges the new properties into the existing ones
