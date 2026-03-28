@@ -15,11 +15,36 @@ import { redactUrlCredentials } from "../utils/html";
 import { api, isRunningInTauri } from "../api/client";
 import type { DatabaseStatusResponse, SupportedDatabaseInfo, DatabaseType } from "../api/types";
 
-/** Cached list of supported database types */
-let supportedDatabases: SupportedDatabaseInfo[] = [];
+/** Mutable state for the database connection modal */
+interface DbConnectState {
+  /** Cached list of supported database types */
+  supportedDatabases: SupportedDatabaseInfo[];
+  /** Current selected database type */
+  selectedDbType: DatabaseType;
+  /** Current file browser path */
+  currentBrowsePath: string;
+  /** Parent path for file browser navigation */
+  currentParentPath: string | null;
+}
 
-/** Current selected database type */
-let selectedDbType: DatabaseType = "crustdb";
+function createInitialState(): DbConnectState {
+  return {
+    supportedDatabases: [],
+    selectedDbType: "crustdb",
+    currentBrowsePath: "",
+    currentParentPath: null,
+  };
+}
+
+let state = createInitialState();
+
+function resetState(): void {
+  // Preserve supportedDatabases cache across modal opens since it is
+  // fetched once at init and reused for the lifetime of the page.
+  const cached = state.supportedDatabases;
+  state = createInitialState();
+  state.supportedDatabases = cached;
+}
 
 /** Update the connection status indicator */
 export function updateConnectionStatus(): void {
@@ -79,7 +104,7 @@ function buildConnectionUrl(): string {
   const form = document.getElementById("db-connect-form") as HTMLFormElement | null;
   if (!form) return "";
 
-  switch (selectedDbType) {
+  switch (state.selectedDbType) {
     case "crustdb": {
       const path = (form.querySelector("#db-path") as HTMLInputElement)?.value || "";
       return `crustdb://${path}`;
@@ -132,23 +157,23 @@ function updateFormFields(): void {
 
   if (!fileFields || !networkFields) return;
 
-  const isFile = selectedDbType === "crustdb";
+  const isFile = state.selectedDbType === "crustdb";
 
   fileFields.hidden = !isFile;
   networkFields.hidden = isFile;
 
   // Neo4j has database name field and SSL option, FalkorDB doesn't
   if (dbNameField) {
-    dbNameField.hidden = selectedDbType !== "neo4j";
+    dbNameField.hidden = state.selectedDbType !== "neo4j";
   }
   if (sslField) {
-    sslField.hidden = selectedDbType !== "neo4j";
+    sslField.hidden = state.selectedDbType !== "neo4j";
   }
 
   // Update default port
   const portInput = document.getElementById("db-port") as HTMLInputElement | null;
   if (portInput) {
-    portInput.value = selectedDbType === "neo4j" ? "7687" : "6379";
+    portInput.value = state.selectedDbType === "neo4j" ? "7687" : "6379";
   }
 }
 
@@ -198,7 +223,7 @@ async function connectToDatabase(): Promise<void> {
     updateGraphForConnectionState(result.connected, undefined, true);
 
     // Save to connection history
-    const dbType = result.database_type || selectedDbType;
+    const dbType = result.database_type || state.selectedDbType;
     await saveConnection({
       url,
       displayName: getDisplayName(url),
@@ -383,10 +408,6 @@ function createFileBrowserModal(): HTMLElement {
   return modal;
 }
 
-/** Current browser state */
-let currentBrowsePath = "";
-let currentParentPath: string | null = null;
-
 /** Load a directory's contents */
 async function loadDirectory(path?: string): Promise<void> {
   const listEl = document.getElementById("file-browser-list");
@@ -399,8 +420,8 @@ async function loadDirectory(path?: string): Promise<void> {
   try {
     const browseUrl = path ? `/api/browse?path=${encodeURIComponent(path)}` : "/api/browse";
     const data = await api.get<BrowseResponse>(browseUrl);
-    currentBrowsePath = data.current;
-    currentParentPath = data.parent;
+    state.currentBrowsePath = data.current;
+    state.currentParentPath = data.parent;
 
     if (pathInput) {
       pathInput.value = data.current;
@@ -461,14 +482,14 @@ async function loadDirectory(path?: string): Promise<void> {
 
 /** Go to parent directory */
 function goToParentDirectory(): void {
-  if (currentParentPath) {
-    loadDirectory(currentParentPath);
+  if (state.currentParentPath) {
+    loadDirectory(state.currentParentPath);
   }
 }
 
 /** Select current directory path */
 function selectCurrentPath(): void {
-  setSelectedPath(currentBrowsePath);
+  setSelectedPath(state.currentBrowsePath);
   closeFileBrowser();
 }
 
@@ -502,10 +523,10 @@ export function openDbConnect(): void {
   form?.reset();
 
   // Reset to first supported type (or crustdb as fallback)
-  selectedDbType = supportedDatabases.length > 0 ? supportedDatabases[0]!.id : "crustdb";
+  state.selectedDbType = state.supportedDatabases.length > 0 ? state.supportedDatabases[0]!.id : "crustdb";
   const tabs = modal.querySelectorAll(".db-type-tab");
   for (const tab of tabs) {
-    tab.classList.toggle("active", tab.getAttribute("data-type") === selectedDbType);
+    tab.classList.toggle("active", tab.getAttribute("data-type") === state.selectedDbType);
   }
   updateFormFields();
 
@@ -519,6 +540,7 @@ export function closeDbConnect(): void {
   if (modal) {
     modal.hidden = true;
   }
+  resetState();
 }
 
 /** Create the modal HTML */
@@ -624,8 +646,8 @@ function createModal(): HTMLElement {
   if (tabsContainer) {
     // Use supportedDatabases if available, otherwise fall back to defaults
     const databases =
-      supportedDatabases.length > 0
-        ? supportedDatabases
+      state.supportedDatabases.length > 0
+        ? state.supportedDatabases
         : [
             { id: "crustdb" as DatabaseType, name: "CrustDB", connection_type: "file" as const },
             { id: "neo4j" as DatabaseType, name: "Neo4j", connection_type: "network" as const },
@@ -637,7 +659,7 @@ function createModal(): HTMLElement {
       btn.className = "db-type-tab";
       btn.setAttribute("data-type", db.id);
       btn.textContent = db.name;
-      if (db.id === selectedDbType) {
+      if (db.id === state.selectedDbType) {
         btn.classList.add("active");
       }
       tabsContainer.appendChild(btn);
@@ -648,7 +670,7 @@ function createModal(): HTMLElement {
   const tabs = modal.querySelectorAll(".db-type-tab");
   for (const tab of tabs) {
     tab.addEventListener("click", () => {
-      selectedDbType = tab.getAttribute("data-type") as DatabaseType;
+      state.selectedDbType = tab.getAttribute("data-type") as DatabaseType;
       for (const t of tabs) {
         t.classList.toggle("active", t === tab);
       }
@@ -670,15 +692,15 @@ function createModal(): HTMLElement {
 async function fetchSupportedDatabases(): Promise<void> {
   try {
     const result = await api.get<SupportedDatabaseInfo[]>("/api/database/supported");
-    supportedDatabases = result;
+    state.supportedDatabases = result;
     // Set default to first supported type
-    if (supportedDatabases.length > 0) {
-      selectedDbType = supportedDatabases[0]!.id;
+    if (state.supportedDatabases.length > 0) {
+      state.selectedDbType = state.supportedDatabases[0]!.id;
     }
   } catch (error) {
     console.error("Failed to fetch supported databases:", error);
     // Fall back to showing all types
-    supportedDatabases = [
+    state.supportedDatabases = [
       { id: "crustdb", name: "CrustDB", connection_type: "file" },
       { id: "neo4j", name: "Neo4j", connection_type: "network" },
       { id: "falkordb", name: "FalkorDB", connection_type: "network" },
