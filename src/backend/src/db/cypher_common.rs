@@ -14,7 +14,7 @@ use tracing::debug;
 
 use super::types::{
     json_to_cypher_props, CypherEscapeStyle, DbEdge, DbNode, DetailedStats, ReachabilityInsight,
-    Result, ADMIN_RELATIONSHIP_TYPES, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    Result, ADMIN_RELATIONSHIP_TYPES, WELL_KNOWN_PRINCIPALS,
 };
 
 // ========================================================================

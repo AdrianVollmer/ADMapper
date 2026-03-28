@@ -9,7 +9,6 @@
 
 use falkordb::{FalkorClientBuilder, FalkorConnectionInfo, SyncGraph};
 use serde_json::{json, Map, Value as JsonValue};
-use std::collections::HashSet;
 use std::sync::Mutex;
 use tracing::{debug, info};
 
