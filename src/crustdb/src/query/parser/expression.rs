@@ -29,82 +29,69 @@ pub(super) fn build_expression(pair: Pair<Rule>) -> Result<Expression> {
     }
 }
 
-/// Build an OR expression.
-fn build_or_expression(pair: Pair<Rule>) -> Result<Expression> {
+/// Build a left-associative binary expression by collecting child pairs of a
+/// given rule, building each with `child_builder`, then folding them with `op`.
+fn build_left_assoc_binary(
+    pair: Pair<Rule>,
+    child_rule: Rule,
+    op: BinaryOperator,
+    child_builder: fn(Pair<Rule>) -> Result<Expression>,
+) -> Result<Expression> {
     let mut operands = Vec::new();
 
     for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::XorExpression {
-            operands.push(build_xor_expression(inner)?);
+        if inner.as_rule() == child_rule {
+            operands.push(child_builder(inner)?);
         }
     }
 
     if operands.is_empty() {
-        return Err(Error::Parse("OR expression requires operands".into()));
+        return Err(Error::Parse(format!(
+            "{:?} expression requires operands",
+            op
+        )));
     }
 
     let mut result = operands.remove(0);
     for operand in operands {
         result = Expression::BinaryOp {
             left: Box::new(result),
-            op: BinaryOperator::Or,
+            op,
             right: Box::new(operand),
         };
     }
 
     Ok(result)
+}
+
+/// Build an OR expression.
+fn build_or_expression(pair: Pair<Rule>) -> Result<Expression> {
+    build_left_assoc_binary(
+        pair,
+        Rule::XorExpression,
+        BinaryOperator::Or,
+        build_xor_expression,
+    )
 }
 
 /// Build an XOR expression.
 fn build_xor_expression(pair: Pair<Rule>) -> Result<Expression> {
-    let mut operands = Vec::new();
-
-    for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::AndExpression {
-            operands.push(build_and_expression(inner)?);
-        }
-    }
-
-    if operands.is_empty() {
-        return Err(Error::Parse("XOR expression requires operands".into()));
-    }
-
-    let mut result = operands.remove(0);
-    for operand in operands {
-        result = Expression::BinaryOp {
-            left: Box::new(result),
-            op: BinaryOperator::Xor,
-            right: Box::new(operand),
-        };
-    }
-
-    Ok(result)
+    build_left_assoc_binary(
+        pair,
+        Rule::AndExpression,
+        BinaryOperator::Xor,
+        build_and_expression,
+    )
 }
 
 /// Build an AND expression.
 fn build_and_expression(pair: Pair<Rule>) -> Result<Expression> {
-    let mut operands = Vec::new();
-
-    for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::NotExpression {
-            operands.push(build_not_expression(inner)?);
-        }
-    }
-
-    if operands.is_empty() {
-        return Err(Error::Parse("AND expression requires operands".into()));
-    }
-
-    let mut result = operands.remove(0);
-    for operand in operands {
-        result = Expression::BinaryOp {
-            left: Box::new(result),
-            op: BinaryOperator::And,
-            right: Box::new(operand),
-        };
-    }
-
-    Ok(result)
+    build_left_assoc_binary(
+        pair,
+        Rule::NotExpression,
+        BinaryOperator::And,
+        build_not_expression,
+    )
 }
 
 /// Build a NOT expression.
@@ -865,33 +852,57 @@ pub(super) fn build_function_name(pair: Pair<Rule>) -> Result<String> {
 }
 
 /// Build a CASE expression.
+///
+/// Grammar: CASE [Expression] CaseAlternative+ [ELSE Expression] END
+///
+/// We collect all children and use structural position to determine roles:
+/// - An Expression before the first CaseAlternative is the CASE operand (simple CASE)
+/// - An Expression after the last CaseAlternative is the ELSE expression
 pub(super) fn build_case_expression(pair: Pair<Rule>) -> Result<Expression> {
-    let mut operand: Option<Box<Expression>> = None;
-    let mut whens = Vec::new();
-    let mut else_expr = None;
-    #[allow(unused_assignments)]
-    let mut saw_first_expr = false;
+    let children: Vec<Pair<Rule>> = pair.into_inner().collect();
 
-    for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::CaseAlternative => {
-                saw_first_expr = true;
-                let (when, then) = build_case_alternative(inner)?;
-                whens.push((when, then));
+    // Find the index range of CaseAlternative children
+    let first_alt = children
+        .iter()
+        .position(|c| c.as_rule() == Rule::CaseAlternative);
+    let last_alt = children
+        .iter()
+        .rposition(|c| c.as_rule() == Rule::CaseAlternative);
+
+    // Expressions before the first CaseAlternative are the CASE operand
+    let operand = if let Some(first_alt_idx) = first_alt {
+        let mut op = None;
+        for child in &children[..first_alt_idx] {
+            if child.as_rule() == Rule::Expression {
+                op = Some(Box::new(build_expression(child.clone())?));
             }
-            Rule::Expression => {
-                if !saw_first_expr && operand.is_none() && whens.is_empty() {
-                    // This is the CASE operand (simple CASE)
-                    operand = Some(Box::new(build_expression(inner)?));
-                    saw_first_expr = true;
-                } else {
-                    // This is the ELSE expression
-                    else_expr = Some(Box::new(build_expression(inner)?));
-                }
-            }
-            _ => {}
+        }
+        op
+    } else {
+        None
+    };
+
+    // Collect WHEN/THEN pairs from CaseAlternative children
+    let mut whens = Vec::new();
+    for child in &children {
+        if child.as_rule() == Rule::CaseAlternative {
+            let (when, then) = build_case_alternative(child.clone())?;
+            whens.push((when, then));
         }
     }
+
+    // Expressions after the last CaseAlternative are the ELSE expression
+    let else_expr = if let Some(last_alt_idx) = last_alt {
+        let mut el = None;
+        for child in &children[last_alt_idx + 1..] {
+            if child.as_rule() == Rule::Expression {
+                el = Some(Box::new(build_expression(child.clone())?));
+            }
+        }
+        el
+    } else {
+        None
+    };
 
     Ok(Expression::Case {
         operand,
@@ -901,30 +912,27 @@ pub(super) fn build_case_expression(pair: Pair<Rule>) -> Result<Expression> {
 }
 
 /// Build a CASE alternative (WHEN ... THEN ...).
+///
+/// Grammar: CaseAlternative = { WHEN Expression THEN Expression }
+///
+/// We collect the two Expression children by position: the first is the
+/// WHEN condition and the second is the THEN result.
 pub(super) fn build_case_alternative(pair: Pair<Rule>) -> Result<(Expression, Expression)> {
-    let mut when_expr = None;
-    let mut then_expr = None;
-    let mut is_then = false;
+    let expressions: Vec<Pair<Rule>> = pair
+        .into_inner()
+        .filter(|c| c.as_rule() == Rule::Expression)
+        .collect();
 
-    for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::THEN => is_then = true,
-            Rule::Expression => {
-                let expr = build_expression(inner)?;
-                if is_then {
-                    then_expr = Some(expr);
-                } else {
-                    when_expr = Some(expr);
-                }
-            }
-            _ => {}
-        }
+    if expressions.len() != 2 {
+        return Err(Error::Parse(format!(
+            "CASE alternative requires exactly 2 expressions (WHEN and THEN), found {}",
+            expressions.len()
+        )));
     }
 
-    let when_expr =
-        when_expr.ok_or_else(|| Error::Parse("CASE requires WHEN expression".into()))?;
-    let then_expr =
-        then_expr.ok_or_else(|| Error::Parse("CASE requires THEN expression".into()))?;
+    let mut exprs = expressions.into_iter();
+    let when_expr = build_expression(exprs.next().unwrap())?;
+    let then_expr = build_expression(exprs.next().unwrap())?;
     Ok((when_expr, then_expr))
 }
 
