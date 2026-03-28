@@ -60,7 +60,7 @@ impl CrustDatabase {
             let placeholder_batch: Vec<(Vec<String>, serde_json::Value)> = placeholder_map
                 .iter()
                 .map(|(objectid, node_type)| {
-                    let labels = vec![node_type.clone()];
+                    let labels = vec!["Base".to_string()];
                     let props = serde_json::json!({
                         "objectid": objectid,
                         "name": objectid,

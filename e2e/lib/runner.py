@@ -1785,7 +1785,8 @@ class TestRunner:
         # -- Collect all nodes --
         def collect_nodes():
             response = self.api.query(
-                "MATCH (n) RETURN labels(n) AS labels, n.objectid AS objectid"
+                "MATCH (n) WHERE n.placeholder IS NULL"
+                " RETURN labels(n) AS labels, n.objectid AS objectid"
                 " ORDER BY objectid",
                 timeout=120,
             )

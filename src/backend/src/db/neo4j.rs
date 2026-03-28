@@ -132,13 +132,16 @@ impl Neo4jDatabase {
         }
     }
 
-    /// Convert a Neo4j Row to a positional Vec<JsonValue>.
+    /// Convert a Neo4j Row to a positional Vec<JsonValue>, extracting
+    /// columns in the order given by `columns`.
     ///
-    /// Handles Node, Relation, Path, and scalar types so that shared logic
-    /// in `cypher_common` can parse results identically to FalkorDB.
-    fn row_to_json_vec(row: &Row) -> Vec<JsonValue> {
-        let keys: Vec<String> = row.keys().iter().map(|k| k.to_string()).collect();
-        keys.iter()
+    /// neo4rs stores row attributes in a `HashMap` whose iteration order
+    /// varies per instance.  Callers must pass a stable column order
+    /// (typically obtained from the first row) so that every row produces
+    /// values in the same positional order.
+    fn row_to_json_vec(row: &Row, columns: &[String]) -> Vec<JsonValue> {
+        columns
+            .iter()
             .map(|col| {
                 if let Ok(node) = row.get::<Neo4jNode>(col) {
                     let db_node = Self::neo4j_node_to_db_node(&node);
@@ -291,7 +294,15 @@ impl Neo4jDatabase {
 impl CypherExecutor for Neo4jDatabase {
     fn exec_rows(&self, cypher: &str) -> Result<Vec<Vec<JsonValue>>> {
         let rows = self.execute_query(query(cypher))?;
-        Ok(rows.iter().map(|row| Self::row_to_json_vec(row)).collect())
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Lock column order from the first row so every row is consistent.
+        let columns: Vec<String> = rows[0].keys().iter().map(|k| k.to_string()).collect();
+        Ok(rows
+            .iter()
+            .map(|row| Self::row_to_json_vec(row, &columns))
+            .collect())
     }
 
     fn exec_write(&self, cypher: &str) -> Result<()> {
@@ -677,7 +688,7 @@ impl DatabaseBackend for Neo4jDatabase {
                 if headers.is_empty() {
                     headers = row.keys().iter().map(|k| k.to_string()).collect();
                 }
-                rows.push(JsonValue::Array(Self::row_to_json_vec(&row)));
+                rows.push(JsonValue::Array(Self::row_to_json_vec(&row, &headers)));
             }
 
             Ok::<_, neo4rs::Error>((headers, rows))
