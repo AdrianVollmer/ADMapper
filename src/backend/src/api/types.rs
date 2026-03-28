@@ -45,8 +45,13 @@ impl std::error::Error for ApiError {}
 
 impl From<DbError> for ApiError {
     fn from(e: DbError) -> Self {
-        error!(error = %e, "Database error");
-        ApiError::Database(e)
+        match e {
+            DbError::NotFound(msg) => ApiError::NotFound(msg),
+            other => {
+                error!(error = %other, "Database error");
+                ApiError::Database(other)
+            }
+        }
     }
 }
 

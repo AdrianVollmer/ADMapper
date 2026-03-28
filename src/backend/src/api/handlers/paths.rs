@@ -39,11 +39,11 @@ pub async fn graph_path(
     let (from_id, to_id) = run_db(db_for_resolve, move |db| {
         let from_id = match db.resolve_node_identifier(&from_param)? {
             Some(id) => id,
-            None => return Err(DbError::Database(format!("Node not found: {}", from_param))),
+            None => return Err(DbError::NotFound(format!("Node not found: {}", from_param))),
         };
         let to_id = match db.resolve_node_identifier(&to_param)? {
             Some(id) => id,
-            None => return Err(DbError::Database(format!("Node not found: {}", to_param))),
+            None => return Err(DbError::NotFound(format!("Node not found: {}", to_param))),
         };
         Ok((from_id, to_id))
     })

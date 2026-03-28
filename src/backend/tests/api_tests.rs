@@ -710,7 +710,7 @@ async fn test_node_status_domain_admin_member() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_status_transitive_da_member() {
     let app = TestApp::new();
     let db = app.db();
@@ -746,7 +746,7 @@ async fn test_node_status_transitive_da_member() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_status_with_base_label() {
     let app = TestApp::new();
     let db = app.db();
@@ -776,7 +776,7 @@ async fn test_node_status_with_base_label() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_node_status_non_memberof_path_to_tier_zero() {
     let app = TestApp::new();
     let db = app.db();
@@ -814,7 +814,7 @@ async fn test_node_status_non_memberof_path_to_tier_zero() {
 ///
 /// A tier-2 user with AdminTo a tier-0 DC is a zone 2→0 crossing.
 /// This must show up in the "Zone 1 → Zone 0" bucket (any src > 0, tgt == 0).
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tier_violations_counts_assigned_tier_crossings() {
     let app = TestApp::new();
     let db = app.db();
@@ -858,7 +858,7 @@ async fn test_tier_violations_counts_assigned_tier_crossings() {
 
 /// After compute-effective-tiers, tier_violations should still show crossings
 /// based on assigned tiers (not effective tiers, which would zero everything out).
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tier_violations_after_compute_effective_tiers() {
     let app = TestApp::new();
     let db = app.db();
