@@ -175,20 +175,14 @@ pub fn parse_real_das(rows: &[Vec<JsonValue>]) -> Vec<(String, String)> {
     rows.iter()
         .filter_map(|r| {
             let id = r.first()?.as_str()?.to_string();
-            let name = r
-                .get(1)
-                .and_then(|v| v.as_str())
-                .unwrap_or(&id)
-                .to_string();
+            let name = r.get(1).and_then(|v| v.as_str()).unwrap_or(&id).to_string();
             Some((id, name))
         })
         .collect()
 }
 
 /// Parse paths-to-DA results (id, label, name, hops) with deduplication.
-pub fn parse_paths_to_da_results(
-    rows: &[Vec<JsonValue>],
-) -> Vec<(String, String, String, usize)> {
+pub fn parse_paths_to_da_results(rows: &[Vec<JsonValue>]) -> Vec<(String, String, String, usize)> {
     let mut results = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
@@ -448,9 +442,7 @@ pub fn resolve_node_identifier(
     let id_escaped = identifier.replace('\'', "\\'");
 
     // Try exact objectid match
-    let cypher = format!(
-        "MATCH (n {{objectid: '{id_escaped}'}}) RETURN n.objectid AS id LIMIT 1"
-    );
+    let cypher = format!("MATCH (n {{objectid: '{id_escaped}'}}) RETURN n.objectid AS id LIMIT 1");
     let rows = exec.exec_rows(&cypher)?;
     if let Some(id) = rows
         .first()
@@ -488,26 +480,20 @@ pub fn get_node_connections(
     let admin_types = admin_types_cypher_list();
 
     let cypher = match direction {
-        "incoming" => format!(
-            "MATCH (a)-[r]->(b {{objectid: '{id_escaped}'}}) RETURN a, r, b"
-        ),
-        "outgoing" => format!(
-            "MATCH (a {{objectid: '{id_escaped}'}})-[r]->(b) RETURN a, r, b"
-        ),
+        "incoming" => format!("MATCH (a)-[r]->(b {{objectid: '{id_escaped}'}}) RETURN a, r, b"),
+        "outgoing" => format!("MATCH (a {{objectid: '{id_escaped}'}})-[r]->(b) RETURN a, r, b"),
         "admin" => format!(
             "MATCH (a {{objectid: '{id_escaped}'}})-[r]->(b) \
              WHERE type(r) IN [{admin_types}] \
              RETURN a, r, b"
         ),
-        "memberof" => format!(
-            "MATCH (a {{objectid: '{id_escaped}'}})-[r:MemberOf]->(b) RETURN a, r, b"
-        ),
-        "members" => format!(
-            "MATCH (a)-[r:MemberOf]->(b {{objectid: '{id_escaped}'}}) RETURN a, r, b"
-        ),
-        _ => format!(
-            "MATCH (a {{objectid: '{id_escaped}'}})-[r]-(b) RETURN a, r, b"
-        ),
+        "memberof" => {
+            format!("MATCH (a {{objectid: '{id_escaped}'}})-[r:MemberOf]->(b) RETURN a, r, b")
+        }
+        "members" => {
+            format!("MATCH (a)-[r:MemberOf]->(b {{objectid: '{id_escaped}'}}) RETURN a, r, b")
+        }
+        _ => format!("MATCH (a {{objectid: '{id_escaped}'}})-[r]-(b) RETURN a, r, b"),
     };
 
     let rows = exec.exec_rows(&cypher)?;

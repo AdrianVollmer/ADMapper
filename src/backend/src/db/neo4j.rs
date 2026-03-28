@@ -7,8 +7,7 @@
 //! Neo4j-specific query syntax.
 
 use neo4rs::{
-    query, ConfigBuilder, Graph, Node as Neo4jNode, Path, Query, Relation, Row,
-    UnboundedRelation,
+    query, ConfigBuilder, Graph, Node as Neo4jNode, Path, Query, Relation, Row, UnboundedRelation,
 };
 use serde_json::{json, Map, Value as JsonValue};
 use std::collections::HashSet;
@@ -573,11 +572,7 @@ impl DatabaseBackend for Neo4jDatabase {
         Ok(None)
     }
 
-    fn shortest_path(
-        &self,
-        from: &str,
-        to: &str,
-    ) -> Result<Option<Vec<(String, Option<String>)>>> {
+    fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));
         }
