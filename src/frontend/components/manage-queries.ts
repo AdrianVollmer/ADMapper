@@ -40,31 +40,41 @@ interface EditContext {
   categoryId: string;
 }
 
-/** Modal element */
+/** Encapsulated mutable state for the manage-queries component */
+interface ManageQueriesState {
+  viewMode: ViewMode;
+  categories: QueryCategory[];
+  filterText: string;
+  expandedCategories: Set<string>;
+  editingQuery: QueryFormData | null;
+  editingCategory: CategoryFormData | null;
+  editContext: EditContext | null;
+  validationError: string;
+  isSaving: boolean;
+}
+
+function createInitialState(): ManageQueriesState {
+  return {
+    viewMode: "tree",
+    categories: [],
+    filterText: "",
+    expandedCategories: new Set<string>(),
+    editingQuery: null,
+    editingCategory: null,
+    editContext: null,
+    validationError: "",
+    isSaving: false,
+  };
+}
+
+let state = createInitialState();
+
+function resetState(): void {
+  state = createInitialState();
+}
+
+/** Modal element (DOM reference, kept outside state) */
 let modalEl: HTMLElement | null = null;
-
-/** Current view mode */
-let viewMode: ViewMode = "tree";
-
-/** Categories data */
-let categories: QueryCategory[] = [];
-
-/** Filter text */
-let filterText = "";
-
-/** Track expanded categories */
-const expandedCategories = new Set<string>();
-
-/** Editing state */
-let editingQuery: QueryFormData | null = null;
-let editingCategory: CategoryFormData | null = null;
-let editContext: EditContext | null = null;
-
-/** Validation error message */
-let validationError = "";
-
-/** Is saving */
-let isSaving = false;
 
 /** Initialize the manage queries component */
 export function initManageQueries(): void {
@@ -108,23 +118,16 @@ function createModalElement(): void {
 export async function openManageQueries(): Promise<void> {
   if (!modalEl) return;
 
-  viewMode = "tree";
-  validationError = "";
-  isSaving = false;
-  filterText = "";
-  editingQuery = null;
-  editingCategory = null;
-  editContext = null;
+  resetState();
 
   // Load current queries
   const queries = await loadCustomQueries();
-  categories = queries.categories;
+  state.categories = queries.categories;
 
   // Initialize expanded state
-  expandedCategories.clear();
-  for (const cat of categories) {
+  for (const cat of state.categories) {
     if (cat.expanded) {
-      expandedCategories.add(cat.id);
+      state.expandedCategories.add(cat.id);
     }
   }
 
@@ -136,13 +139,14 @@ export async function openManageQueries(): Promise<void> {
 export function closeManageQueries(): void {
   if (!modalEl) return;
   modalEl.setAttribute("hidden", "");
+  resetState();
 }
 
 /** Render the modal content based on view mode */
 function renderModal(): void {
   const title = document.getElementById("manage-queries-title");
   if (title) {
-    switch (viewMode) {
+    switch (state.viewMode) {
       case "tree":
         title.textContent = "Manage Custom Queries";
         break;
@@ -161,7 +165,7 @@ function renderModal(): void {
     }
   }
 
-  switch (viewMode) {
+  switch (state.viewMode) {
     case "tree":
       renderTreeView();
       break;
@@ -184,7 +188,7 @@ function generateId(): string {
 /** Count total queries in categories */
 function countTotalQueries(): number {
   let count = 0;
-  for (const cat of categories) {
+  for (const cat of state.categories) {
     count += countQueriesInCategory(cat);
   }
   return count;
@@ -219,10 +223,10 @@ function getFileLocationHint(): string {
 
 /** Filter categories and queries by filter text */
 function filterCategories(cats: QueryCategory[]): QueryCategory[] {
-  if (!filterText) return cats;
+  if (!state.filterText) return cats;
 
   const result: QueryCategory[] = [];
-  const lowerFilter = filterText.toLowerCase();
+  const lowerFilter = state.filterText.toLowerCase();
 
   for (const cat of cats) {
     const filteredQueries = (cat.queries ?? []).filter(
@@ -253,7 +257,7 @@ function renderTreeView(): void {
   if (!body || !footer) return;
 
   const totalQueries = countTotalQueries();
-  const filteredCats = filterCategories(categories);
+  const filteredCats = filterCategories(state.categories);
 
   body.innerHTML = `
     <div class="manage-queries-content">
@@ -268,7 +272,7 @@ function renderTreeView(): void {
             id="query-manager-filter"
             class="search-input"
             placeholder="Filter queries..."
-            value="${escapeHtml(filterText)}"
+            value="${escapeHtml(state.filterText)}"
           />
         </div>
         <button class="btn btn-secondary btn-sm" data-action="add-category">
@@ -277,7 +281,7 @@ function renderTreeView(): void {
           </svg>
           Category
         </button>
-        <button class="btn btn-secondary btn-sm" data-action="add-query-root" ${categories.length === 0 ? "disabled" : ""}>
+        <button class="btn btn-secondary btn-sm" data-action="add-query-root" ${state.categories.length === 0 ? "disabled" : ""}>
           <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 5v14M5 12h14"/>
           </svg>
@@ -290,13 +294,13 @@ function renderTreeView(): void {
         ${
           filteredCats.length > 0
             ? renderCategoriesHtml(filteredCats, 0)
-            : categories.length === 0
+            : state.categories.length === 0
               ? `<div class="query-manager-empty">
               <p>No custom queries yet.</p>
               <p>Click "Load Example" to get started or add your own categories and queries.</p>
             </div>`
               : `<div class="query-manager-empty">
-              <p>No queries match "${escapeHtml(filterText)}"</p>
+              <p>No queries match "${escapeHtml(state.filterText)}"</p>
             </div>`
         }
       </div>
@@ -314,8 +318,8 @@ function renderTreeView(): void {
     <button class="btn btn-secondary" data-action="load-example">Load Example</button>
     <div class="spacer"></div>
     <button class="btn btn-secondary" data-action="close">Cancel</button>
-    <button class="btn btn-primary" data-action="save-all" ${isSaving ? "disabled" : ""}>
-      ${isSaving ? '<span class="spinner-sm"></span> Saving...' : "Save All"}
+    <button class="btn btn-primary" data-action="save-all" ${state.isSaving ? "disabled" : ""}>
+      ${state.isSaving ? '<span class="spinner-sm"></span> Saving...' : "Save All"}
     </button>
   `;
 
@@ -323,7 +327,7 @@ function renderTreeView(): void {
   const filterInput = document.getElementById("query-manager-filter") as HTMLInputElement;
   if (filterInput) {
     filterInput.addEventListener("input", () => {
-      filterText = filterInput.value.trim();
+      state.filterText = filterInput.value.trim();
       renderModal();
     });
     filterInput.focus();
@@ -341,7 +345,7 @@ function renderCategoriesHtml(cats: QueryCategory[], depth: number): string {
 
 /** Render a single category HTML */
 function renderCategoryHtml(category: QueryCategory, depth: number): string {
-  const isExpanded = filterText ? true : expandedCategories.has(category.id);
+  const isExpanded = state.filterText ? true : state.expandedCategories.has(category.id);
   const queryCount = countQueriesInCategory(category);
   const indent = depth * 16;
 
@@ -452,7 +456,7 @@ function renderEditQueryView(): void {
   const footer = document.getElementById("manage-queries-footer");
   if (!body || !footer) return;
 
-  const data = editingQuery || { id: "", name: "", description: "", query: "" };
+  const data = state.editingQuery || { id: "", name: "", description: "", query: "" };
 
   body.innerHTML = `
     <div class="query-history-edit">
@@ -489,14 +493,14 @@ function renderEditQueryView(): void {
       </div>
 
       ${
-        validationError
+        state.validationError
           ? `
         <div class="query-error">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="error-icon">
             <circle cx="12" cy="12" r="10"/>
             <path d="M12 8v4m0 4h.01"/>
           </svg>
-          <span>${escapeHtml(validationError)}</span>
+          <span>${escapeHtml(state.validationError)}</span>
         </div>
       `
           : ""
@@ -525,7 +529,7 @@ function renderEditCategoryView(): void {
   const footer = document.getElementById("manage-queries-footer");
   if (!body || !footer) return;
 
-  const data = editingCategory || { id: "", name: "" };
+  const data = state.editingCategory || { id: "", name: "" };
 
   body.innerHTML = `
     <div class="query-history-edit">
@@ -541,14 +545,14 @@ function renderEditCategoryView(): void {
       </div>
 
       ${
-        validationError
+        state.validationError
           ? `
         <div class="query-error">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="error-icon">
             <circle cx="12" cy="12" r="10"/>
             <path d="M12 8v4m0 4h.01"/>
           </svg>
-          <span>${escapeHtml(validationError)}</span>
+          <span>${escapeHtml(state.validationError)}</span>
         </div>
       `
           : ""
@@ -572,7 +576,7 @@ function renderEditCategoryView(): void {
 }
 
 /** Find a category by ID */
-function findCategory(categoryId: string, cats: QueryCategory[] = categories): QueryCategory | null {
+function findCategory(categoryId: string, cats: QueryCategory[] = state.categories): QueryCategory | null {
   for (const cat of cats) {
     if (cat.id === categoryId) return cat;
     if (cat.subcategories) {
@@ -590,15 +594,15 @@ function findQueryInCategory(queryId: string, category: QueryCategory): Query | 
 
 /** Handle creating a new query */
 function handleCreateQuery(categoryId: string): void {
-  editingQuery = {
+  state.editingQuery = {
     id: generateId(),
     name: "",
     description: "",
     query: "",
   };
-  editContext = { categoryId };
-  validationError = "";
-  viewMode = "create-query";
+  state.editContext = { categoryId };
+  state.validationError = "";
+  state.viewMode = "create-query";
   renderModal();
 }
 
@@ -610,15 +614,15 @@ function handleEditQuery(queryId: string, categoryId: string): void {
   const query = findQueryInCategory(queryId, category);
   if (!query) return;
 
-  editingQuery = {
+  state.editingQuery = {
     id: query.id,
     name: query.name,
     description: query.description || "",
     query: query.query,
   };
-  editContext = { categoryId };
-  validationError = "";
-  viewMode = "edit-query";
+  state.editContext = { categoryId };
+  state.validationError = "";
+  state.viewMode = "edit-query";
   renderModal();
 }
 
@@ -630,15 +634,15 @@ function handleDuplicateQuery(queryId: string, categoryId: string): void {
   const query = findQueryInCategory(queryId, category);
   if (!query) return;
 
-  editingQuery = {
+  state.editingQuery = {
     id: generateId(),
     name: `${query.name} (copy)`,
     description: query.description || "",
     query: query.query,
   };
-  editContext = { categoryId };
-  validationError = "";
-  viewMode = "create-query";
+  state.editContext = { categoryId };
+  state.validationError = "";
+  state.viewMode = "create-query";
   renderModal();
 }
 
@@ -656,12 +660,12 @@ function handleDeleteQuery(queryId: string, categoryId: string): void {
 
 /** Handle creating a new category */
 function handleCreateCategory(): void {
-  editingCategory = {
+  state.editingCategory = {
     id: generateId(),
     name: "",
   };
-  validationError = "";
-  viewMode = "create-category";
+  state.validationError = "";
+  state.viewMode = "create-category";
   renderModal();
 }
 
@@ -670,12 +674,12 @@ function handleEditCategory(categoryId: string): void {
   const category = findCategory(categoryId);
   if (!category) return;
 
-  editingCategory = {
+  state.editingCategory = {
     id: category.id,
     name: category.name,
   };
-  validationError = "";
-  viewMode = "edit-category";
+  state.validationError = "";
+  state.viewMode = "edit-category";
   renderModal();
 }
 
@@ -694,9 +698,9 @@ function handleDeleteCategory(categoryId: string): void {
   }
 
   // Remove from categories array
-  const index = categories.findIndex((c) => c.id === categoryId);
+  const index = state.categories.findIndex((c) => c.id === categoryId);
   if (index !== -1) {
-    categories.splice(index, 1);
+    state.categories.splice(index, 1);
     renderModal();
   }
 }
@@ -715,30 +719,30 @@ function saveQuery(): void {
 
   // Validate
   if (!name) {
-    validationError = "Name is required";
+    state.validationError = "Name is required";
     renderModal();
     return;
   }
 
   if (!query) {
-    validationError = "Query is required";
+    state.validationError = "Query is required";
     renderModal();
     return;
   }
 
-  if (!editingQuery || !editContext) return;
+  if (!state.editingQuery || !state.editContext) return;
 
-  const category = findCategory(editContext.categoryId);
+  const category = findCategory(state.editContext.categoryId);
   if (!category) return;
 
   if (!category.queries) {
     category.queries = [];
   }
 
-  if (viewMode === "create-query") {
+  if (state.viewMode === "create-query") {
     // Add new query
     const newQuery: Query = {
-      id: editingQuery.id,
+      id: state.editingQuery.id,
       name,
       query,
     };
@@ -748,7 +752,7 @@ function saveQuery(): void {
     category.queries.push(newQuery);
   } else {
     // Update existing query
-    const existingQuery = findQueryInCategory(editingQuery.id, category);
+    const existingQuery = findQueryInCategory(state.editingQuery.id, category);
     if (existingQuery) {
       existingQuery.name = name;
       if (description) {
@@ -760,10 +764,10 @@ function saveQuery(): void {
     }
   }
 
-  editingQuery = null;
-  editContext = null;
-  validationError = "";
-  viewMode = "tree";
+  state.editingQuery = null;
+  state.editContext = null;
+  state.validationError = "";
+  state.viewMode = "tree";
   renderModal();
 }
 
@@ -776,45 +780,45 @@ function saveCategory(): void {
 
   // Validate
   if (!name) {
-    validationError = "Name is required";
+    state.validationError = "Name is required";
     renderModal();
     return;
   }
 
-  if (!editingCategory) return;
+  if (!state.editingCategory) return;
 
-  if (viewMode === "create-category") {
+  if (state.viewMode === "create-category") {
     // Add new category
-    categories.push({
-      id: editingCategory.id,
+    state.categories.push({
+      id: state.editingCategory.id,
       name,
       queries: [],
       expanded: true,
     });
-    expandedCategories.add(editingCategory.id);
+    state.expandedCategories.add(state.editingCategory.id);
   } else {
     // Update existing category
-    const category = findCategory(editingCategory.id);
+    const category = findCategory(state.editingCategory.id);
     if (category) {
       category.name = name;
     }
   }
 
-  editingCategory = null;
-  validationError = "";
-  viewMode = "tree";
+  state.editingCategory = null;
+  state.validationError = "";
+  state.viewMode = "tree";
   renderModal();
 }
 
 /** Save all changes to storage */
 async function saveAllChanges(): Promise<void> {
-  isSaving = true;
-  validationError = "";
+  state.isSaving = true;
+  state.validationError = "";
   renderModal();
 
   const queriesFile: CustomQueriesFile = {
     version: 1,
-    categories,
+    categories: state.categories,
   };
 
   try {
@@ -834,19 +838,19 @@ async function saveAllChanges(): Promise<void> {
     // Notify that queries have changed
     window.dispatchEvent(new CustomEvent("custom-queries-changed"));
   } catch (err) {
-    isSaving = false;
-    validationError = `Failed to save: ${err instanceof Error ? err.message : "Unknown error"}`;
+    state.isSaving = false;
+    state.validationError = `Failed to save: ${err instanceof Error ? err.message : "Unknown error"}`;
     renderModal();
   }
 }
 
 /** Load example queries */
 function loadExample(): void {
-  categories = JSON.parse(JSON.stringify(EXAMPLE_QUERIES.categories));
-  expandedCategories.clear();
-  for (const cat of categories) {
+  state.categories = JSON.parse(JSON.stringify(EXAMPLE_QUERIES.categories));
+  state.expandedCategories.clear();
+  for (const cat of state.categories) {
     if (cat.expanded) {
-      expandedCategories.add(cat.id);
+      state.expandedCategories.add(cat.id);
     }
   }
   renderModal();
@@ -884,10 +888,10 @@ function handleModalClick(e: Event): void {
 
     case "toggle-category":
       if (categoryId) {
-        if (expandedCategories.has(categoryId)) {
-          expandedCategories.delete(categoryId);
+        if (state.expandedCategories.has(categoryId)) {
+          state.expandedCategories.delete(categoryId);
         } else {
-          expandedCategories.add(categoryId);
+          state.expandedCategories.add(categoryId);
         }
         renderModal();
       }
@@ -917,7 +921,7 @@ function handleModalClick(e: Event): void {
 
     case "add-query-root": {
       // Add to first category if exists
-      const firstCategory = categories[0];
+      const firstCategory = state.categories[0];
       if (firstCategory) {
         handleCreateQuery(firstCategory.id);
       }
@@ -951,11 +955,11 @@ function handleModalClick(e: Event): void {
       break;
 
     case "cancel-edit":
-      editingQuery = null;
-      editingCategory = null;
-      editContext = null;
-      validationError = "";
-      viewMode = "tree";
+      state.editingQuery = null;
+      state.editingCategory = null;
+      state.editContext = null;
+      state.validationError = "";
+      state.viewMode = "tree";
       renderModal();
       break;
   }
@@ -965,13 +969,13 @@ function handleModalClick(e: Event): void {
 export function handleEscapeKey(): void {
   if (!modalEl || modalEl.hasAttribute("hidden")) return;
 
-  if (viewMode !== "tree") {
+  if (state.viewMode !== "tree") {
     // Go back to tree view
-    editingQuery = null;
-    editingCategory = null;
-    editContext = null;
-    validationError = "";
-    viewMode = "tree";
+    state.editingQuery = null;
+    state.editingCategory = null;
+    state.editContext = null;
+    state.validationError = "";
+    state.viewMode = "tree";
     renderModal();
   } else {
     closeManageQueries();
@@ -985,18 +989,18 @@ function handleKeydown(e: KeyboardEvent): void {
   // Ctrl+S to save
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {
     e.preventDefault();
-    if (viewMode === "tree" && !isSaving) {
+    if (state.viewMode === "tree" && !state.isSaving) {
       saveAllChanges();
-    } else if (viewMode === "edit-query" || viewMode === "create-query") {
+    } else if (state.viewMode === "edit-query" || state.viewMode === "create-query") {
       saveQuery();
-    } else if (viewMode === "edit-category" || viewMode === "create-category") {
+    } else if (state.viewMode === "edit-category" || state.viewMode === "create-category") {
       saveCategory();
     }
   }
 
   // Enter to save in edit views
   if (e.key === "Enter" && !e.shiftKey) {
-    if (viewMode === "edit-category" || viewMode === "create-category") {
+    if (state.viewMode === "edit-category" || state.viewMode === "create-category") {
       e.preventDefault();
       saveCategory();
     }
