@@ -110,20 +110,50 @@ interface TabState<T> {
 /** Choke points pagination */
 const CHOKE_POINTS_PAGE_SIZE = 10;
 
-// Module state: mutable singletons for modal UI, active tab, per-tab loading/data,
-// pagination offsets, stale threshold, and effective-tier computation status.
-let chokePointsPage = 0;
-let unexpectedChokePointsPage = 0;
-let modalExpanded = false;
+/** Encapsulated mutable state for the insights modal */
+interface InsightsState {
+  chokePointsPage: number;
+  unexpectedChokePointsPage: number;
+  modalExpanded: boolean;
+  activeTab: TabId;
+  daState: TabState<DAAnalysisData>;
+  reachabilityState: TabState<ReachabilityData[]>;
+  staleState: TabState<StaleObjectsData>;
+  accountExposureState: TabState<AccountExposureData>;
+  chokePointsState: TabState<ChokePointsData>;
+  tierViolationsState: TabState<TierViolationsData>;
+  staleThresholdDays: number;
+  computingEffectiveTiers: boolean;
+  effectiveTiersResult: { computed: number; violations: number } | null;
+}
+
+function createInitialInsightsState(): InsightsState {
+  return {
+    chokePointsPage: 0,
+    unexpectedChokePointsPage: 0,
+    modalExpanded: false,
+    activeTab: "da-analysis",
+    daState: { loading: false, error: null, data: null },
+    reachabilityState: { loading: false, error: null, data: null },
+    staleState: { loading: false, error: null, data: null },
+    accountExposureState: { loading: false, error: null, data: null },
+    chokePointsState: { loading: false, error: null, data: null },
+    tierViolationsState: { loading: false, error: null, data: null },
+    staleThresholdDays: 90,
+    computingEffectiveTiers: false,
+    effectiveTiersResult: null,
+  };
+}
+
+let state = createInitialInsightsState();
+
+/** Reset all mutable state (called on modal close) */
+function resetState(): void {
+  state = createInitialInsightsState();
+}
+
+/** Modal element (DOM reference, not reset with state) */
 let modalEl: HTMLElement | null = null;
-let activeTab: TabId = "da-analysis";
-let daState: TabState<DAAnalysisData> = { loading: false, error: null, data: null };
-let reachabilityState: TabState<ReachabilityData[]> = { loading: false, error: null, data: null };
-let staleState: TabState<StaleObjectsData> = { loading: false, error: null, data: null };
-let accountExposureState: TabState<AccountExposureData> = { loading: false, error: null, data: null };
-let chokePointsState: TabState<ChokePointsData> = { loading: false, error: null, data: null };
-let tierViolationsState: TabState<TierViolationsData> = { loading: false, error: null, data: null };
-let staleThresholdDays = 90;
 
 /** Open the insights modal */
 export async function openInsights(): Promise<void> {
@@ -132,16 +162,16 @@ export async function openInsights(): Promise<void> {
   }
 
   // Reset states
-  daState = { loading: true, error: null, data: null };
-  reachabilityState = { loading: true, error: null, data: null };
-  staleState = { loading: true, error: null, data: null };
-  accountExposureState = { loading: true, error: null, data: null };
-  chokePointsState = { loading: true, error: null, data: null };
-  tierViolationsState = { loading: true, error: null, data: null };
-  chokePointsPage = 0;
-  unexpectedChokePointsPage = 0;
-  modalExpanded = false;
-  activeTab = "da-analysis";
+  state.daState = { loading: true, error: null, data: null };
+  state.reachabilityState = { loading: true, error: null, data: null };
+  state.staleState = { loading: true, error: null, data: null };
+  state.accountExposureState = { loading: true, error: null, data: null };
+  state.chokePointsState = { loading: true, error: null, data: null };
+  state.tierViolationsState = { loading: true, error: null, data: null };
+  state.chokePointsPage = 0;
+  state.unexpectedChokePointsPage = 0;
+  state.modalExpanded = false;
+  state.activeTab = "da-analysis";
 
   modalEl!.hidden = false;
   updateModalExpanded();
@@ -161,6 +191,7 @@ function closeModal(): void {
   if (modalEl) {
     modalEl.hidden = true;
   }
+  resetState();
 }
 
 /** Update modal expanded/collapsed state */
@@ -169,13 +200,13 @@ function updateModalExpanded(): void {
   const content = modalEl.querySelector(".modal-content") as HTMLElement;
   if (!content) return;
 
-  content.classList.toggle("modal-expanded", modalExpanded);
+  content.classList.toggle("modal-expanded", state.modalExpanded);
 
   const expandIcon = modalEl.querySelector(".expand-icon") as HTMLElement;
   const collapseIcon = modalEl.querySelector(".collapse-icon") as HTMLElement;
   if (expandIcon && collapseIcon) {
-    expandIcon.style.display = modalExpanded ? "none" : "";
-    collapseIcon.style.display = modalExpanded ? "" : "none";
+    expandIcon.style.display = state.modalExpanded ? "none" : "";
+    collapseIcon.style.display = state.modalExpanded ? "" : "none";
   }
 }
 
@@ -224,47 +255,47 @@ function renderModal(): void {
 
   body.innerHTML = `
     <div class="db-type-tabs">
-      <button class="db-type-tab ${activeTab === "da-analysis" ? "active" : ""}" data-tab="da-analysis">
+      <button class="db-type-tab ${state.activeTab === "da-analysis" ? "active" : ""}" data-tab="da-analysis">
         Domain Admin Analysis
       </button>
-      <button class="db-type-tab ${activeTab === "reachability" ? "active" : ""}" data-tab="reachability">
+      <button class="db-type-tab ${state.activeTab === "reachability" ? "active" : ""}" data-tab="reachability">
         Reachability
       </button>
-      <button class="db-type-tab ${activeTab === "stale-objects" ? "active" : ""}" data-tab="stale-objects">
+      <button class="db-type-tab ${state.activeTab === "stale-objects" ? "active" : ""}" data-tab="stale-objects">
         Stale Objects
       </button>
-      <button class="db-type-tab ${activeTab === "account-exposure" ? "active" : ""}" data-tab="account-exposure">
+      <button class="db-type-tab ${state.activeTab === "account-exposure" ? "active" : ""}" data-tab="account-exposure">
         Account Exposure
       </button>
-      <button class="db-type-tab ${activeTab === "choke-points" ? "active" : ""}" data-tab="choke-points">
+      <button class="db-type-tab ${state.activeTab === "choke-points" ? "active" : ""}" data-tab="choke-points">
         Choke Points
       </button>
-      <button class="db-type-tab ${activeTab === "unexpected-choke-points" ? "active" : ""}" data-tab="unexpected-choke-points">
+      <button class="db-type-tab ${state.activeTab === "unexpected-choke-points" ? "active" : ""}" data-tab="unexpected-choke-points">
         Unexpected Choke Points
       </button>
-      <button class="db-type-tab ${activeTab === "tier-violations" ? "active" : ""}" data-tab="tier-violations">
+      <button class="db-type-tab ${state.activeTab === "tier-violations" ? "active" : ""}" data-tab="tier-violations">
         Tier Violations
       </button>
     </div>
-    <div class="insight-tab-content" ${activeTab !== "da-analysis" ? "hidden" : ""} id="tab-da-analysis">
+    <div class="insight-tab-content" ${state.activeTab !== "da-analysis" ? "hidden" : ""} id="tab-da-analysis">
       ${renderDAAnalysisTab()}
     </div>
-    <div class="insight-tab-content" ${activeTab !== "reachability" ? "hidden" : ""} id="tab-reachability">
+    <div class="insight-tab-content" ${state.activeTab !== "reachability" ? "hidden" : ""} id="tab-reachability">
       ${renderReachabilityTab()}
     </div>
-    <div class="insight-tab-content" ${activeTab !== "stale-objects" ? "hidden" : ""} id="tab-stale-objects">
+    <div class="insight-tab-content" ${state.activeTab !== "stale-objects" ? "hidden" : ""} id="tab-stale-objects">
       ${renderStaleObjectsTab()}
     </div>
-    <div class="insight-tab-content" ${activeTab !== "account-exposure" ? "hidden" : ""} id="tab-account-exposure">
+    <div class="insight-tab-content" ${state.activeTab !== "account-exposure" ? "hidden" : ""} id="tab-account-exposure">
       ${renderAccountExposureTab()}
     </div>
-    <div class="insight-tab-content" ${activeTab !== "choke-points" ? "hidden" : ""} id="tab-choke-points">
+    <div class="insight-tab-content" ${state.activeTab !== "choke-points" ? "hidden" : ""} id="tab-choke-points">
       ${renderChokePointsTab()}
     </div>
-    <div class="insight-tab-content" ${activeTab !== "unexpected-choke-points" ? "hidden" : ""} id="tab-unexpected-choke-points">
+    <div class="insight-tab-content" ${state.activeTab !== "unexpected-choke-points" ? "hidden" : ""} id="tab-unexpected-choke-points">
       ${renderUnexpectedChokePointsTab()}
     </div>
-    <div class="insight-tab-content" ${activeTab !== "tier-violations" ? "hidden" : ""} id="tab-tier-violations">
+    <div class="insight-tab-content" ${state.activeTab !== "tier-violations" ? "hidden" : ""} id="tab-tier-violations">
       ${renderTierViolationsTab()}
     </div>
   `;
@@ -272,17 +303,17 @@ function renderModal(): void {
 
 /** Render Domain Admin Analysis tab */
 function renderDAAnalysisTab(): string {
-  if (daState.loading) {
+  if (state.daState.loading) {
     return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing domain admins...</span></div>`;
   }
-  if (daState.error) {
-    return `<div class="insight-error">${escapeHtml(daState.error)}</div>`;
+  if (state.daState.error) {
+    return `<div class="insight-error">${escapeHtml(state.daState.error)}</div>`;
   }
-  if (!daState.data) {
+  if (!state.daState.data) {
     return `<div class="insight-error">No data available</div>`;
   }
 
-  const { effectiveCount, realCount, ratio } = daState.data;
+  const { effectiveCount, realCount, ratio } = state.daState.data;
 
   return `
     <div class="insights-container">
@@ -314,17 +345,17 @@ function renderDAAnalysisTab(): string {
 
 /** Render Reachability tab */
 function renderReachabilityTab(): string {
-  if (reachabilityState.loading) {
+  if (state.reachabilityState.loading) {
     return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing reachability...</span></div>`;
   }
-  if (reachabilityState.error) {
-    return `<div class="insight-error">${escapeHtml(reachabilityState.error)}</div>`;
+  if (state.reachabilityState.error) {
+    return `<div class="insight-error">${escapeHtml(state.reachabilityState.error)}</div>`;
   }
-  if (!reachabilityState.data) {
+  if (!state.reachabilityState.data) {
     return `<div class="insight-error">No data available</div>`;
   }
 
-  const principals = reachabilityState.data;
+  const principals = state.reachabilityState.data;
   if (principals.length === 0) {
     return `<div class="insights-container"><div class="insight-section">
       <h3 class="insight-section-title">Reachability from Well-Known Principals</h3>
@@ -362,17 +393,17 @@ function renderReachabilityTab(): string {
 
 /** Render Stale Objects tab */
 function renderStaleObjectsTab(): string {
-  if (staleState.loading) {
+  if (state.staleState.loading) {
     return `<div class="insight-loading"><div class="spinner"></div><span>Finding stale objects...</span></div>`;
   }
-  if (staleState.error) {
-    return `<div class="insight-error">${escapeHtml(staleState.error)}</div>`;
+  if (state.staleState.error) {
+    return `<div class="insight-error">${escapeHtml(state.staleState.error)}</div>`;
   }
-  if (!staleState.data) {
+  if (!state.staleState.data) {
     return `<div class="insight-error">No data available</div>`;
   }
 
-  const { users, computers, thresholdDays } = staleState.data;
+  const { users, computers, thresholdDays } = state.staleState.data;
 
   return `
     <div class="insights-container">
@@ -411,17 +442,17 @@ function renderStaleObjectsTab(): string {
 
 /** Render Account Exposure tab */
 function renderAccountExposureTab(): string {
-  if (accountExposureState.loading) {
+  if (state.accountExposureState.loading) {
     return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing account exposure...</span></div>`;
   }
-  if (accountExposureState.error) {
-    return `<div class="insight-error">${escapeHtml(accountExposureState.error)}</div>`;
+  if (state.accountExposureState.error) {
+    return `<div class="insight-error">${escapeHtml(state.accountExposureState.error)}</div>`;
   }
-  if (!accountExposureState.data) {
+  if (!state.accountExposureState.data) {
     return `<div class="insight-error">No data available</div>`;
   }
 
-  const { kerberoastable, asrepRoastable, unconstrainedDelegation, protectedUsers } = accountExposureState.data;
+  const { kerberoastable, asrepRoastable, unconstrainedDelegation, protectedUsers } = state.accountExposureState.data;
 
   function row(label: string, count: number, queryType: string): string {
     return `
@@ -528,17 +559,17 @@ function renderChokePointsTable(opts: {
 
 /** Render Choke Points tab */
 function renderChokePointsTab(): string {
-  if (chokePointsState.loading) {
+  if (state.chokePointsState.loading) {
     return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing choke points...</span></div>`;
   }
-  if (chokePointsState.error) {
-    return `<div class="insight-error">${escapeHtml(chokePointsState.error)}</div>`;
+  if (state.chokePointsState.error) {
+    return `<div class="insight-error">${escapeHtml(state.chokePointsState.error)}</div>`;
   }
-  if (!chokePointsState.data) {
+  if (!state.chokePointsState.data) {
     return `<div class="insight-error">No data available</div>`;
   }
 
-  const { choke_points, total_edges, total_nodes } = chokePointsState.data;
+  const { choke_points, total_edges, total_nodes } = state.chokePointsState.data;
 
   if (choke_points.length === 0) {
     return `
@@ -561,7 +592,7 @@ function renderChokePointsTab(): string {
         </p>
         ${renderChokePointsTable({
           items: choke_points,
-          page: chokePointsPage,
+          page: state.chokePointsPage,
           prevAction: "choke-page-prev",
           nextAction: "choke-page-next",
         })}
@@ -572,17 +603,17 @@ function renderChokePointsTab(): string {
 
 /** Render Unexpected Choke Points tab */
 function renderUnexpectedChokePointsTab(): string {
-  if (chokePointsState.loading) {
+  if (state.chokePointsState.loading) {
     return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing choke points...</span></div>`;
   }
-  if (chokePointsState.error) {
-    return `<div class="insight-error">${escapeHtml(chokePointsState.error)}</div>`;
+  if (state.chokePointsState.error) {
+    return `<div class="insight-error">${escapeHtml(state.chokePointsState.error)}</div>`;
   }
-  if (!chokePointsState.data) {
+  if (!state.chokePointsState.data) {
     return `<div class="insight-error">No data available</div>`;
   }
 
-  const { unexpected_choke_points, total_edges, total_nodes } = chokePointsState.data;
+  const { unexpected_choke_points, total_edges, total_nodes } = state.chokePointsState.data;
 
   if (unexpected_choke_points.length === 0) {
     return `
@@ -607,7 +638,7 @@ function renderUnexpectedChokePointsTab(): string {
         </p>
         ${renderChokePointsTable({
           items: unexpected_choke_points,
-          page: unexpectedChokePointsPage,
+          page: state.unexpectedChokePointsPage,
           prevAction: "unexpected-choke-page-prev",
           nextAction: "unexpected-choke-page-next",
         })}
@@ -616,23 +647,19 @@ function renderUnexpectedChokePointsTab(): string {
   `;
 }
 
-/** State for effective tier computation */
-let computingEffectiveTiers = false;
-let effectiveTiersResult: { computed: number; violations: number } | null = null;
-
 /** Render Tier Violations tab */
 function renderTierViolationsTab(): string {
-  if (tierViolationsState.loading) {
+  if (state.tierViolationsState.loading) {
     return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing tier violations...</span></div>`;
   }
-  if (tierViolationsState.error) {
-    return `<div class="insight-error">${escapeHtml(tierViolationsState.error)}</div>`;
+  if (state.tierViolationsState.error) {
+    return `<div class="insight-error">${escapeHtml(state.tierViolationsState.error)}</div>`;
   }
-  if (!tierViolationsState.data) {
+  if (!state.tierViolationsState.data) {
     return `<div class="insight-error">No data available</div>`;
   }
 
-  const { violations, total_nodes, total_edges } = tierViolationsState.data;
+  const { violations, total_nodes, total_edges } = state.tierViolationsState.data;
 
   // Find each violation category (may be absent if backend returns fewer)
   const v1to0 = violations.find((v) => v.source_zone === 1 && v.target_zone === 0);
@@ -664,12 +691,12 @@ function renderTierViolationsTab(): string {
     `;
   };
 
-  const computeButton = computingEffectiveTiers
+  const computeButton = state.computingEffectiveTiers
     ? `<button class="btn btn-sm btn-secondary" disabled><span class="spinner spinner-sm"></span> Computing...</button>`
     : `<button class="btn btn-sm btn-primary" data-action="compute-effective-tiers">Analyze Tier Violations</button>`;
 
-  const computeResult = effectiveTiersResult
-    ? `<div class="text-sm text-green-400 mt-2">Computed effective tiers for ${effectiveTiersResult.computed.toLocaleString()} nodes. Found ${effectiveTiersResult.violations.toLocaleString()} violation${effectiveTiersResult.violations === 1 ? "" : "s"}.</div>`
+  const computeResult = state.effectiveTiersResult
+    ? `<div class="text-sm text-green-400 mt-2">Computed effective tiers for ${state.effectiveTiersResult.computed.toLocaleString()} nodes. Found ${state.effectiveTiersResult.violations.toLocaleString()} violation${state.effectiveTiersResult.violations === 1 ? "" : "s"}.</div>`
     : "";
 
   return `
@@ -701,30 +728,30 @@ function renderTierViolationsTab(): string {
 
 /** Compute effective tiers and reload violations */
 async function computeEffectiveTiers(): Promise<void> {
-  computingEffectiveTiers = true;
-  effectiveTiersResult = null;
+  state.computingEffectiveTiers = true;
+  state.effectiveTiersResult = null;
   renderModal();
 
   try {
     const result = await api.post<{ computed: number; violations: number }>("/api/graph/compute-effective-tiers", {});
-    effectiveTiersResult = result;
-    computingEffectiveTiers = false;
+    state.effectiveTiersResult = result;
+    state.computingEffectiveTiers = false;
     renderModal();
 
     // Reload tier violations to reflect updated effective tiers
     await loadTierViolations();
   } catch (err) {
-    computingEffectiveTiers = false;
+    state.computingEffectiveTiers = false;
     const message = err instanceof Error ? err.message : "Failed to compute effective tiers";
-    effectiveTiersResult = null;
-    tierViolationsState = { loading: false, error: message, data: tierViolationsState.data };
+    state.effectiveTiersResult = null;
+    state.tierViolationsState = { loading: false, error: message, data: state.tierViolationsState.data };
     renderModal();
   }
 }
 
 /** Load Domain Admin Analysis data */
 async function loadDAAnalysis(): Promise<void> {
-  daState = { loading: true, error: null, data: null };
+  state.daState = { loading: true, error: null, data: null };
   renderModal();
 
   try {
@@ -744,7 +771,7 @@ async function loadDAAnalysis(): Promise<void> {
     const realCount = realResult.resultCount;
     const ratio = realCount > 0 ? effectiveCount / realCount : effectiveCount > 0 ? Infinity : 1;
 
-    daState = {
+    state.daState = {
       loading: false,
       error: null,
       data: { effectiveCount, realCount, ratio },
@@ -754,7 +781,7 @@ async function loadDAAnalysis(): Promise<void> {
     if (err instanceof QueryAbortedError) {
       return;
     }
-    daState = { loading: false, error: getQueryErrorMessage(err), data: null };
+    state.daState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
   renderModal();
@@ -762,7 +789,7 @@ async function loadDAAnalysis(): Promise<void> {
 
 /** Load Reachability data */
 async function loadReachability(): Promise<void> {
-  reachabilityState = { loading: true, error: null, data: null };
+  state.reachabilityState = { loading: true, error: null, data: null };
   renderModal();
 
   // Well-known principal SIDs (relative IDs)
@@ -796,12 +823,12 @@ async function loadReachability(): Promise<void> {
     const allResults = await Promise.all(queries);
     results.push(...allResults);
 
-    reachabilityState = { loading: false, error: null, data: results };
+    state.reachabilityState = { loading: false, error: null, data: results };
   } catch (err) {
     if (err instanceof QueryAbortedError) {
       return;
     }
-    reachabilityState = { loading: false, error: getQueryErrorMessage(err), data: null };
+    state.reachabilityState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
   renderModal();
@@ -820,11 +847,11 @@ function daysToWindowsFileTime(days: number): number {
 
 /** Load Stale Objects data */
 async function loadStaleObjects(): Promise<void> {
-  staleState = { loading: true, error: null, data: null };
+  state.staleState = { loading: true, error: null, data: null };
   renderModal();
 
   try {
-    const threshold = daysToWindowsFileTime(staleThresholdDays);
+    const threshold = daysToWindowsFileTime(state.staleThresholdDays);
 
     // Run both queries in parallel
     const [usersResult, computersResult] = await Promise.all([
@@ -838,20 +865,20 @@ async function loadStaleObjects(): Promise<void> {
       }),
     ]);
 
-    staleState = {
+    state.staleState = {
       loading: false,
       error: null,
       data: {
         users: usersResult.resultCount,
         computers: computersResult.resultCount,
-        thresholdDays: staleThresholdDays,
+        thresholdDays: state.staleThresholdDays,
       },
     };
   } catch (err) {
     if (err instanceof QueryAbortedError) {
       return;
     }
-    staleState = { loading: false, error: getQueryErrorMessage(err), data: null };
+    state.staleState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
   renderModal();
@@ -859,7 +886,7 @@ async function loadStaleObjects(): Promise<void> {
 
 /** Load Account Exposure data */
 async function loadAccountExposure(): Promise<void> {
-  accountExposureState = { loading: true, error: null, data: null };
+  state.accountExposureState = { loading: true, error: null, data: null };
   renderModal();
 
   try {
@@ -882,7 +909,7 @@ async function loadAccountExposure(): Promise<void> {
       ),
     ]);
 
-    accountExposureState = {
+    state.accountExposureState = {
       loading: false,
       error: null,
       data: {
@@ -896,7 +923,7 @@ async function loadAccountExposure(): Promise<void> {
     if (err instanceof QueryAbortedError) {
       return;
     }
-    accountExposureState = { loading: false, error: getQueryErrorMessage(err), data: null };
+    state.accountExposureState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
   renderModal();
@@ -904,15 +931,15 @@ async function loadAccountExposure(): Promise<void> {
 
 /** Load Choke Points data */
 async function loadChokePoints(): Promise<void> {
-  chokePointsState = { loading: true, error: null, data: null };
+  state.chokePointsState = { loading: true, error: null, data: null };
   renderModal();
 
   try {
     const data = await api.get<ChokePointsData>("/api/graph/choke-points");
-    chokePointsState = { loading: false, error: null, data };
+    state.chokePointsState = { loading: false, error: null, data };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load choke points";
-    chokePointsState = { loading: false, error: message, data: null };
+    state.chokePointsState = { loading: false, error: message, data: null };
   }
 
   renderModal();
@@ -920,15 +947,15 @@ async function loadChokePoints(): Promise<void> {
 
 /** Load Tier Violations data */
 async function loadTierViolations(): Promise<void> {
-  tierViolationsState = { loading: true, error: null, data: null };
+  state.tierViolationsState = { loading: true, error: null, data: null };
   renderModal();
 
   try {
     const data = await api.get<TierViolationsData>("/api/graph/tier-violations");
-    tierViolationsState = { loading: false, error: null, data };
+    state.tierViolationsState = { loading: false, error: null, data };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load tier violations";
-    tierViolationsState = { loading: false, error: message, data: null };
+    state.tierViolationsState = { loading: false, error: message, data: null };
   }
 
   renderModal();
@@ -951,7 +978,7 @@ async function executeChokePointQuery(sourceId: string, targetId: string, relTyp
 
 /** Show tier violation edges as a graph using pre-fetched edge data */
 async function executeTierViolationGraph(sid: string): Promise<void> {
-  const data = tierViolationsState.data;
+  const data = state.tierViolationsState.data;
   if (!data) return;
 
   const parts = sid.split("-");
@@ -1018,12 +1045,12 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
       query = `MATCH (u:User), (g:Group), p = shortestPath((u)-[:MemberOf*1..]->(g)) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u LIMIT 500`;
       break;
     case "stale-users": {
-      const threshold = daysToWindowsFileTime(staleThresholdDays);
+      const threshold = daysToWindowsFileTime(state.staleThresholdDays);
       query = `MATCH (u:User) WHERE u.enabled = true AND u.lastlogon < ${threshold} RETURN u LIMIT 500`;
       break;
     }
     case "stale-computers": {
-      const threshold = daysToWindowsFileTime(staleThresholdDays);
+      const threshold = daysToWindowsFileTime(state.staleThresholdDays);
       query = `MATCH (c:Computer) WHERE c.enabled = true AND c.lastlogon < ${threshold} RETURN c LIMIT 500`;
       break;
     }
@@ -1066,8 +1093,8 @@ function handleClick(e: Event): void {
   const tabBtn = target.closest("[data-tab]") as HTMLElement;
   if (tabBtn) {
     const tabId = tabBtn.getAttribute("data-tab") as TabId;
-    if (tabId && tabId !== activeTab) {
-      activeTab = tabId;
+    if (tabId && tabId !== state.activeTab) {
+      state.activeTab = tabId;
       renderModal();
     }
     return;
@@ -1112,13 +1139,13 @@ function handleClick(e: Event): void {
       closeModal();
       break;
     case "toggle-expand":
-      modalExpanded = !modalExpanded;
+      state.modalExpanded = !state.modalExpanded;
       updateModalExpanded();
       break;
     case "refresh":
       // Reload all tabs
-      chokePointsPage = 0;
-      unexpectedChokePointsPage = 0;
+      state.chokePointsPage = 0;
+      state.unexpectedChokePointsPage = 0;
       loadDAAnalysis();
       loadReachability();
       loadStaleObjects();
@@ -1127,31 +1154,31 @@ function handleClick(e: Event): void {
       loadTierViolations();
       break;
     case "choke-page-prev":
-      if (chokePointsPage > 0) {
-        chokePointsPage--;
+      if (state.chokePointsPage > 0) {
+        state.chokePointsPage--;
         renderModal();
       }
       break;
     case "choke-page-next": {
-      const total = chokePointsState.data?.choke_points.length ?? 0;
+      const total = state.chokePointsState.data?.choke_points.length ?? 0;
       const maxPage = Math.ceil(total / CHOKE_POINTS_PAGE_SIZE) - 1;
-      if (chokePointsPage < maxPage) {
-        chokePointsPage++;
+      if (state.chokePointsPage < maxPage) {
+        state.chokePointsPage++;
         renderModal();
       }
       break;
     }
     case "unexpected-choke-page-prev":
-      if (unexpectedChokePointsPage > 0) {
-        unexpectedChokePointsPage--;
+      if (state.unexpectedChokePointsPage > 0) {
+        state.unexpectedChokePointsPage--;
         renderModal();
       }
       break;
     case "unexpected-choke-page-next": {
-      const unexpectedCount = chokePointsState.data?.unexpected_choke_points.length ?? 0;
+      const unexpectedCount = state.chokePointsState.data?.unexpected_choke_points.length ?? 0;
       const maxUnexpectedPage = Math.ceil(unexpectedCount / CHOKE_POINTS_PAGE_SIZE) - 1;
-      if (unexpectedChokePointsPage < maxUnexpectedPage) {
-        unexpectedChokePointsPage++;
+      if (state.unexpectedChokePointsPage < maxUnexpectedPage) {
+        state.unexpectedChokePointsPage++;
         renderModal();
       }
       break;
@@ -1170,8 +1197,8 @@ function handleChange(e: Event): void {
   const thresholdSelect = target.closest("[data-action='change-threshold']") as HTMLSelectElement;
   if (thresholdSelect) {
     const newThreshold = parseInt(thresholdSelect.value, 10);
-    if (newThreshold !== staleThresholdDays) {
-      staleThresholdDays = newThreshold;
+    if (newThreshold !== state.staleThresholdDays) {
+      state.staleThresholdDays = newThreshold;
       loadStaleObjects();
     }
   }

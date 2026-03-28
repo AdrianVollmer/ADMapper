@@ -19,38 +19,44 @@ import {
   formatDuration,
 } from "../utils/query";
 
-/** Modal element */
+/** Encapsulated mutable state for the run-query modal */
+interface RunQueryState {
+  queryText: string;
+  isExecuting: boolean;
+  currentQueryId: string | null;
+  unsubscribeProgress: Unsubscribe | null;
+  currentAbortController: AbortController | null;
+  errorMessage: string;
+  infoMessage: string;
+  currentDurationMs: number;
+  durationInterval: ReturnType<typeof setInterval> | null;
+  queryStartTime: number | null;
+}
+
+function createInitialRunQueryState(): RunQueryState {
+  return {
+    queryText: "",
+    isExecuting: false,
+    currentQueryId: null,
+    unsubscribeProgress: null,
+    currentAbortController: null,
+    errorMessage: "",
+    infoMessage: "",
+    currentDurationMs: 0,
+    durationInterval: null,
+    queryStartTime: null,
+  };
+}
+
+let state = createInitialRunQueryState();
+
+/** Reset all mutable state (called on modal close) */
+function resetState(): void {
+  state = createInitialRunQueryState();
+}
+
+/** Modal element (DOM reference, not reset with state) */
 let modalEl: HTMLElement | null = null;
-
-/** Current query text */
-let queryText = "";
-
-/** Is query executing */
-let isExecuting = false;
-
-/** Current query ID (for abort) */
-let currentQueryId: string | null = null;
-
-/** Unsubscribe function for progress events */
-let unsubscribeProgress: Unsubscribe | null = null;
-
-/** Abort controller for the current query (from foreground query registration) */
-let currentAbortController: AbortController | null = null;
-
-/** Error message */
-let errorMessage = "";
-
-/** Info message (e.g., zero rows returned) */
-let infoMessage = "";
-
-/** Current duration for running queries */
-let currentDurationMs = 0;
-
-/** Duration update interval */
-let durationInterval: ReturnType<typeof setInterval> | null = null;
-
-/** Query start time */
-let queryStartTime: number | null = null;
 
 /** Initialize the run query modal */
 export function initRunQuery(): void {
@@ -92,18 +98,18 @@ function createModalElement(): void {
 export async function openRunQuery(): Promise<void> {
   if (!modalEl) return;
 
-  isExecuting = false;
-  errorMessage = "";
-  infoMessage = "";
-  currentQueryId = null;
-  currentDurationMs = 0;
-  queryStartTime = null;
+  state.isExecuting = false;
+  state.errorMessage = "";
+  state.infoMessage = "";
+  state.currentQueryId = null;
+  state.currentDurationMs = 0;
+  state.queryStartTime = null;
 
   // Try to load the last query from history
   try {
     const data = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=1");
     if (data.entries.length > 0) {
-      queryText = data.entries[0]?.query ?? "";
+      state.queryText = data.entries[0]?.query ?? "";
     }
   } catch {
     // Ignore errors, just start with empty query
@@ -130,21 +136,22 @@ export function closeRunQuery(): void {
   if (!modalEl) return;
 
   // Clean up event subscription
-  if (unsubscribeProgress) {
-    unsubscribeProgress();
-    unsubscribeProgress = null;
+  if (state.unsubscribeProgress) {
+    state.unsubscribeProgress();
+    state.unsubscribeProgress = null;
   }
 
   // Clear duration interval
-  if (durationInterval) {
-    clearInterval(durationInterval);
-    durationInterval = null;
+  if (state.durationInterval) {
+    clearInterval(state.durationInterval);
+    state.durationInterval = null;
   }
 
   // Remove keyboard listener when modal closes to prevent leaks
   document.removeEventListener("keydown", handleKeydown);
 
   modalEl.setAttribute("hidden", "");
+  resetState();
 }
 
 /** Get the documentation URL for Cypher */
@@ -180,18 +187,18 @@ function renderModal(): void {
           rows="12"
           placeholder="MATCH (n:User) RETURN n LIMIT 10"
           spellcheck="false"
-          ${isExecuting ? "disabled" : ""}
-        >${escapeHtml(queryText)}</textarea>
+          ${state.isExecuting ? "disabled" : ""}
+        >${escapeHtml(state.queryText)}</textarea>
       </div>
 
       ${
-        isExecuting
+        state.isExecuting
           ? `
         <div class="query-executing">
           <div class="flex items-center gap-3">
             <div class="spinner"></div>
             <span class="text-gray-300">Executing query...</span>
-            <span class="text-gray-500">${formatDuration(currentDurationMs)}</span>
+            <span class="text-gray-500">${formatDuration(state.currentDurationMs)}</span>
           </div>
         </div>
       `
@@ -199,28 +206,28 @@ function renderModal(): void {
       }
 
       ${
-        errorMessage
+        state.errorMessage
           ? `
         <div class="query-error">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="error-icon">
             <circle cx="12" cy="12" r="10"/>
             <path d="M12 8v4m0 4h.01"/>
           </svg>
-          <pre class="query-error-text"><code>${escapeHtml(errorMessage)}</code></pre>
+          <pre class="query-error-text"><code>${escapeHtml(state.errorMessage)}</code></pre>
         </div>
       `
           : ""
       }
 
       ${
-        infoMessage
+        state.infoMessage
           ? `
         <div class="query-info">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="info-icon">
             <circle cx="12" cy="12" r="10"/>
             <path d="M12 16v-4m0-4h.01"/>
           </svg>
-          <span>${escapeHtml(infoMessage)}</span>
+          <span>${escapeHtml(state.infoMessage)}</span>
         </div>
       `
           : ""
@@ -228,7 +235,7 @@ function renderModal(): void {
     </div>
   `;
 
-  if (isExecuting) {
+  if (state.isExecuting) {
     footer.innerHTML = `
       <button class="btn btn-secondary" data-action="close">Cancel</button>
       <button class="btn btn-danger" data-action="abort">
@@ -258,23 +265,23 @@ async function executeQuery(): Promise<void> {
 
   const query = textarea.value.trim();
   if (!query) {
-    errorMessage = "Please enter a query";
+    state.errorMessage = "Please enter a query";
     renderModal();
     return;
   }
 
-  isExecuting = true;
-  errorMessage = "";
-  infoMessage = "";
-  queryText = query;
-  queryStartTime = Date.now();
-  currentDurationMs = 0;
+  state.isExecuting = true;
+  state.errorMessage = "";
+  state.infoMessage = "";
+  state.queryText = query;
+  state.queryStartTime = Date.now();
+  state.currentDurationMs = 0;
   renderModal();
 
   // Start duration update interval
-  durationInterval = setInterval(() => {
-    if (queryStartTime) {
-      currentDurationMs = Date.now() - queryStartTime;
+  state.durationInterval = setInterval(() => {
+    if (state.queryStartTime) {
+      state.currentDurationMs = Date.now() - state.queryStartTime;
       renderModal();
     }
   }, 100);
@@ -286,56 +293,56 @@ async function executeQuery(): Promise<void> {
       extract_graph: true,
     });
 
-    currentQueryId = startResponse.query_id;
+    state.currentQueryId = startResponse.query_id;
 
     // Register as the current foreground query (aborts any previous foreground query)
-    currentAbortController = registerForegroundQuery(currentQueryId, () => {
+    state.currentAbortController = registerForegroundQuery(state.currentQueryId, () => {
       // This cleanup is called if another query aborts us
-      if (unsubscribeProgress) {
-        unsubscribeProgress();
-        unsubscribeProgress = null;
+      if (state.unsubscribeProgress) {
+        state.unsubscribeProgress();
+        state.unsubscribeProgress = null;
       }
     });
 
     // Listen for abort from the foreground query system
-    currentAbortController.signal.addEventListener("abort", () => {
-      if (isExecuting) {
+    state.currentAbortController.signal.addEventListener("abort", () => {
+      if (state.isExecuting) {
         cleanup();
-        infoMessage = "Query was superseded by a new query";
+        state.infoMessage = "Query was superseded by a new query";
         renderModal();
       }
     });
 
     // Subscribe to progress events
-    unsubscribeProgress = subscribe(
+    state.unsubscribeProgress = subscribe(
       QUERY_PROGRESS_CHANNEL,
-      { queryId: currentQueryId, query_id: currentQueryId },
+      { queryId: state.currentQueryId, query_id: state.currentQueryId },
       (progress) => {
         // Ignore events if we've been aborted
-        if (currentAbortController?.signal.aborted) {
+        if (state.currentAbortController?.signal.aborted) {
           return;
         }
         handleQueryProgress(progress as QueryProgressEvent);
       },
       () => {
         // Connection closed, check if we're still executing and not aborted
-        if (isExecuting && !currentAbortController?.signal.aborted) {
+        if (state.isExecuting && !state.currentAbortController?.signal.aborted) {
           cleanup();
-          errorMessage = "Lost connection to server";
+          state.errorMessage = "Lost connection to server";
           renderModal();
         }
       }
     );
   } catch (err) {
     cleanup();
-    errorMessage = getQueryErrorMessage(err);
+    state.errorMessage = getQueryErrorMessage(err);
     renderModal();
   }
 }
 
 /** Handle query progress event */
 function handleQueryProgress(progress: QueryProgressEvent): void {
-  currentDurationMs = progress.duration_ms ?? (queryStartTime ? Date.now() - queryStartTime : 0);
+  state.currentDurationMs = progress.duration_ms ?? (state.queryStartTime ? Date.now() - state.queryStartTime : 0);
 
   switch (progress.status) {
     case "running":
@@ -350,20 +357,20 @@ function handleQueryProgress(progress: QueryProgressEvent): void {
         closeRunQuery();
         loadGraphData(progress.graph as unknown as RawADGraph);
       } else {
-        infoMessage = `Query returned ${progress.result_count ?? 0} row${progress.result_count === 1 ? "" : "s"}`;
+        state.infoMessage = `Query returned ${progress.result_count ?? 0} row${progress.result_count === 1 ? "" : "s"}`;
         renderModal();
       }
       break;
 
     case "failed":
       cleanup();
-      errorMessage = progress.error ?? "Query failed";
+      state.errorMessage = progress.error ?? "Query failed";
       renderModal();
       break;
 
     case "aborted":
       cleanup();
-      infoMessage = "Query was aborted";
+      state.infoMessage = "Query was aborted";
       renderModal();
       break;
   }
@@ -371,38 +378,38 @@ function handleQueryProgress(progress: QueryProgressEvent): void {
 
 /** Abort the running query */
 async function abortQuery(): Promise<void> {
-  if (!currentQueryId) return;
+  if (!state.currentQueryId) return;
 
   try {
-    await api.postNoContent(`/api/query/abort/${currentQueryId}`);
+    await api.postNoContent(`/api/query/abort/${state.currentQueryId}`);
     // The SSE will receive the aborted status
   } catch (err) {
     console.error("Failed to abort query:", err);
     cleanup();
-    errorMessage = "Failed to abort query";
+    state.errorMessage = "Failed to abort query";
     renderModal();
   }
 }
 
 /** Clean up after query completes */
 function cleanup(): void {
-  isExecuting = false;
+  state.isExecuting = false;
 
   // Unregister from foreground query tracking
-  if (currentQueryId) {
-    unregisterForegroundQuery(currentQueryId);
+  if (state.currentQueryId) {
+    unregisterForegroundQuery(state.currentQueryId);
   }
-  currentQueryId = null;
-  currentAbortController = null;
+  state.currentQueryId = null;
+  state.currentAbortController = null;
 
-  if (unsubscribeProgress) {
-    unsubscribeProgress();
-    unsubscribeProgress = null;
+  if (state.unsubscribeProgress) {
+    state.unsubscribeProgress();
+    state.unsubscribeProgress = null;
   }
 
-  if (durationInterval) {
-    clearInterval(durationInterval);
-    durationInterval = null;
+  if (state.durationInterval) {
+    clearInterval(state.durationInterval);
+    state.durationInterval = null;
   }
 }
 
@@ -443,7 +450,7 @@ function handleKeydown(e: KeyboardEvent): void {
   // Ctrl+Enter or Cmd+Enter to execute
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
-    if (!isExecuting) {
+    if (!state.isExecuting) {
       executeQuery();
     }
   }
