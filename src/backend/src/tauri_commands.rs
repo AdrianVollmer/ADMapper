@@ -304,7 +304,7 @@ pub fn update_node(
     id: String,
     name: Option<String>,
     label: Option<String>,
-    #[allow(unused_variables)] properties: Option<JsonValue>,
+    properties: Option<JsonValue>,
 ) -> Result<(), String> {
     let db = state.db().ok_or("Not connected to database")?;
     info!(id = %id, "Updating node (IPC)");
@@ -324,7 +324,7 @@ pub fn update_edge(
     source: String,
     target: String,
     rel_type: String,
-    #[allow(unused_variables)] properties: Option<JsonValue>,
+    properties: Option<JsonValue>,
 ) -> Result<(), String> {
     let db = state.db().ok_or("Not connected to database")?;
     info!(source = %source, target = %target, rel_type = %rel_type, "Updating edge (IPC)");
