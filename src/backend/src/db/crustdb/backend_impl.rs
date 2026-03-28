@@ -145,6 +145,32 @@ impl DatabaseBackend for CrustDatabase {
         ))
     }
 
+    fn is_member_of(&self, node_id: &str, target_id: &str) -> Result<bool> {
+        // BFS over MemberOf relationships using per-node edge lookups
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(node_id.to_string());
+        visited.insert(node_id.to_string());
+
+        while let Some(current) = queue.pop_front() {
+            if current == target_id {
+                return Ok(true);
+            }
+            let edges = CrustDatabase::get_node_edges(self, &current)?;
+            for edge in &edges {
+                if edge.source == current
+                    && edge.rel_type == "MemberOf"
+                    && !visited.contains(&edge.target)
+                {
+                    visited.insert(edge.target.clone());
+                    queue.push_back(edge.target.clone());
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
     fn find_membership_by_sid_suffix(
         &self,
         node_id: &str,

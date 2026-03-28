@@ -164,10 +164,10 @@ function createAddEdgeModal(): void {
   `;
 
   addEdgeModal.addEventListener("click", handleAddEdgeClick);
+  document.body.appendChild(addEdgeModal);
+
   setupSearchInput("add-relationship-source", "add-relationship-source-results", "add-relationship-source-id");
   setupSearchInput("add-relationship-target", "add-relationship-target-results", "add-relationship-target-id");
-
-  document.body.appendChild(addEdgeModal);
 }
 
 /** Create the Add Node modal */
@@ -241,41 +241,39 @@ function createAddNodeModal(): void {
 
 /** Set up search input with autocomplete */
 function setupSearchInput(inputId: string, resultsId: string, hiddenId: string): void {
-  // Need to wait for modal to be appended to DOM
-  setTimeout(() => {
-    const input = document.getElementById(inputId) as HTMLInputElement;
-    const results = document.getElementById(resultsId);
-    const hidden = document.getElementById(hiddenId) as HTMLInputElement;
+  const input = document.getElementById(inputId) as HTMLInputElement;
+  const results = document.getElementById(resultsId);
+  const hidden = document.getElementById(hiddenId) as HTMLInputElement;
 
-    if (!input || !results || !hidden) return;
+  if (!input || !results || !hidden) return;
 
-    input.addEventListener("input", () => {
-      const query = input.value.trim();
-      hidden.value = ""; // Clear hidden ID when typing
+  input.addEventListener("input", () => {
+    const query = input.value.trim();
+    hidden.value = ""; // Clear hidden ID when typing
 
-      if (query.length < 2) {
-        results.hidden = true;
-        return;
-      }
+    if (query.length < 2) {
+      results.hidden = true;
+      return;
+    }
 
-      // Debounce search
-      if (searchTimer) clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => performSearch(query, results, input, hidden), 200);
-    });
+    // Debounce search
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => performSearch(query, results, input, hidden), 200);
+  });
 
-    input.addEventListener("focus", () => {
-      if (input.value.length >= 2 && results.children.length > 0) {
-        results.hidden = false;
-      }
-    });
+  input.addEventListener("focus", () => {
+    if (input.value.length >= 2 && results.children.length > 0) {
+      results.hidden = false;
+    }
+  });
 
-    input.addEventListener("blur", () => {
-      // Delay to allow click on result
-      setTimeout(() => {
-        results.hidden = true;
-      }, 200);
-    });
-  }, 0);
+  input.addEventListener("blur", (e: FocusEvent) => {
+    // Only hide results if focus moved outside the results container
+    const relatedTarget = e.relatedTarget as HTMLElement | null;
+    if (!relatedTarget || !results.contains(relatedTarget)) {
+      results.hidden = true;
+    }
+  });
 }
 
 /** Perform node search and display results */
@@ -302,9 +300,10 @@ async function performSearch(
         )
         .join("");
 
-      // Add click handlers to results
+      // Use mousedown so the handler fires before the input's blur event
       for (const item of resultsEl.querySelectorAll(".search-result-item")) {
-        item.addEventListener("click", () => {
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault(); // Prevent blur from firing on the input
           const id = item.getAttribute("data-id") || "";
           const label = item.getAttribute("data-label") || "";
           inputEl.value = label;

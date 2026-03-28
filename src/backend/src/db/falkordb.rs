@@ -469,6 +469,22 @@ impl DatabaseBackend for FalkorDbDatabase {
         }
     }
 
+    fn is_member_of(&self, node_id: &str, target_id: &str) -> Result<bool> {
+        let id_escaped = node_id.replace('\'', "\\'");
+        let target_escaped = target_id.replace('\'', "\\'");
+
+        let cypher = format!(
+            "MATCH (n {{objectid: '{}'}}), (t {{objectid: '{}'}}) \
+             WITH n, t, shortestPath((n)-[:MemberOf*1..20]->(t)) AS p \
+             WHERE p IS NOT NULL \
+             RETURN true AS found",
+            id_escaped, target_escaped
+        );
+
+        let rows = self.execute_query(&cypher)?;
+        Ok(!rows.is_empty())
+    }
+
     fn find_membership_by_sid_suffix(
         &self,
         node_id: &str,

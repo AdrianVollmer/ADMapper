@@ -548,6 +548,18 @@ impl DatabaseBackend for Neo4jDatabase {
         }
     }
 
+    fn is_member_of(&self, node_id: &str, target_id: &str) -> Result<bool> {
+        let q = query(
+            "MATCH p = shortestPath((n {objectid: $id})-[:MemberOf*1..20]->(t {objectid: $target})) \
+             RETURN true AS found",
+        )
+        .param("id", node_id.to_string())
+        .param("target", target_id.to_string());
+
+        let rows = self.execute_query(q)?;
+        Ok(!rows.is_empty())
+    }
+
     fn find_membership_by_sid_suffix(
         &self,
         node_id: &str,

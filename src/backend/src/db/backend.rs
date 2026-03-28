@@ -6,8 +6,7 @@ use serde_json::Value as JsonValue;
 use std::str::FromStr;
 
 use super::types::{
-    admin_types_set, ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, Result,
-    SecurityInsights,
+    ChokePointsResponse, DbEdge, DbError, DbNode, DetailedStats, Result, SecurityInsights,
 };
 
 /// Query language supported by a database backend.
@@ -147,171 +146,30 @@ pub trait DatabaseBackend: Send + Sync {
     /// Get relationship counts for a node (for badge display).
     /// Returns (incoming, outgoing, admin_to, member_of, members).
     ///
-    /// # Performance Warning
-    /// The default implementation loads ALL relationships into memory and scans them linearly.
-    /// For large graphs (100k+ relationships), this is severely inefficient.
-    /// All backends should override this method with an efficient indexed query.
+    /// Each backend must provide an efficient implementation using indexed queries.
     fn get_node_relationship_counts(
         &self,
         node_id: &str,
-    ) -> Result<(usize, usize, usize, usize, usize)> {
-        // WARNING: This default implementation is O(n) where n = total relationships.
-        // Backends should override with efficient indexed queries.
-        tracing::warn!(
-            node_id = %node_id,
-            "Using inefficient default get_node_relationship_counts - backend should override"
-        );
-        let all_edges = self.get_all_edges()?;
-
-        let admin_types = admin_types_set();
-
-        // Count unique nodes, not relationships
-        // e.g., if node A has 3 relationships from node B, count as 1 incoming node
-        let mut incoming_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        let mut outgoing_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        let mut admin_to_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        let mut member_of_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        let mut member_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
-
-        for relationship in &all_edges {
-            if relationship.target == node_id {
-                incoming_nodes.insert(&relationship.source);
-                if relationship.rel_type == "MemberOf" {
-                    member_nodes.insert(&relationship.source);
-                }
-            }
-            if relationship.source == node_id {
-                outgoing_nodes.insert(&relationship.target);
-                if relationship.rel_type == "MemberOf" {
-                    member_of_nodes.insert(&relationship.target);
-                }
-                if admin_types.contains(relationship.rel_type.as_str()) {
-                    admin_to_nodes.insert(&relationship.target);
-                }
-            }
-        }
-
-        Ok((
-            incoming_nodes.len(),
-            outgoing_nodes.len(),
-            admin_to_nodes.len(),
-            member_of_nodes.len(),
-            member_nodes.len(),
-        ))
-    }
+    ) -> Result<(usize, usize, usize, usize, usize)>;
 
     /// Check if a node is a transitive member of a target group.
     /// Uses MemberOf relationships to traverse group membership.
-    fn is_member_of(&self, node_id: &str, target_id: &str) -> Result<bool> {
-        // Default implementation using BFS over MemberOf relationships
-        let all_edges = self.get_all_edges()?;
-
-        // Build adjacency for MemberOf relationships only
-        let mut member_of_adj: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
-        for relationship in &all_edges {
-            if relationship.rel_type == "MemberOf" {
-                member_of_adj
-                    .entry(relationship.source.clone())
-                    .or_default()
-                    .push(relationship.target.clone());
-            }
-        }
-
-        // BFS from node_id to find if we can reach target_id
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = std::collections::VecDeque::new();
-        queue.push_back(node_id.to_string());
-        visited.insert(node_id.to_string());
-
-        while let Some(current) = queue.pop_front() {
-            if current == target_id {
-                return Ok(true);
-            }
-            if let Some(targets) = member_of_adj.get(&current) {
-                for target in targets {
-                    if !visited.contains(target) {
-                        visited.insert(target.clone());
-                        queue.push_back(target.clone());
-                    }
-                }
-            }
-        }
-
-        Ok(false)
-    }
+    ///
+    /// Each backend must provide an efficient implementation (e.g., BFS over
+    /// per-node edges for in-memory backends, or a graph traversal query for
+    /// Cypher-based backends).
+    fn is_member_of(&self, node_id: &str, target_id: &str) -> Result<bool>;
 
     /// Find the first group matching a SID suffix that the node is a member of.
     /// Returns the group's objectid if found.
     ///
-    /// # Performance Warning
-    /// The default implementation loads ALL nodes and ALL relationships into memory.
-    /// For large graphs (50k+ nodes, 200k+ relationships), this is severely inefficient.
-    /// Called multiple times on node hover, this can freeze the UI.
-    /// All backends should override this with an efficient graph traversal query.
+    /// Each backend must provide an efficient implementation using graph
+    /// traversal queries rather than loading all nodes and edges into memory.
     fn find_membership_by_sid_suffix(
         &self,
         node_id: &str,
         sid_suffix: &str,
-    ) -> Result<Option<String>> {
-        // WARNING: This default implementation is O(n+m) where n = nodes, m = relationships.
-        // Backends should override with efficient graph traversal queries.
-        tracing::warn!(
-            node_id = %node_id,
-            sid_suffix = %sid_suffix,
-            "Using inefficient default find_membership_by_sid_suffix - backend should override"
-        );
-        let all_nodes = self.get_all_nodes()?;
-        let all_edges = self.get_all_edges()?;
-
-        // Find all groups with matching SID suffix
-        let target_groups: Vec<&str> = all_nodes
-            .iter()
-            .filter(|n| n.id.ends_with(sid_suffix))
-            .map(|n| n.id.as_str())
-            .collect();
-
-        if target_groups.is_empty() {
-            return Ok(None);
-        }
-
-        // Build adjacency for MemberOf relationships
-        let mut member_of_adj: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
-        for relationship in &all_edges {
-            if relationship.rel_type == "MemberOf" {
-                member_of_adj
-                    .entry(relationship.source.clone())
-                    .or_default()
-                    .push(relationship.target.clone());
-            }
-        }
-
-        // BFS from node_id
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = std::collections::VecDeque::new();
-        queue.push_back(node_id.to_string());
-        visited.insert(node_id.to_string());
-
-        while let Some(current) = queue.pop_front() {
-            // Check if current is one of the target groups
-            for &target in &target_groups {
-                if current == target {
-                    return Ok(Some(target.to_string()));
-                }
-            }
-            if let Some(targets) = member_of_adj.get(&current) {
-                for target in targets {
-                    if !visited.contains(target) {
-                        visited.insert(target.clone());
-                        queue.push_back(target.clone());
-                    }
-                }
-            }
-        }
-
-        Ok(None)
-    }
+    ) -> Result<Option<String>>;
 
     // ========================================================================
     // Path Finding
