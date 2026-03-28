@@ -27,84 +27,86 @@ fn test_plan_count_pushdown() {
 fn test_plan_with_where() {
     let plan = plan_query("MATCH (n:Person) WHERE n.age > 30 RETURN n");
     // Should be: Project -> Filter -> NodeScan
-    if let PlanOperator::Project { source, .. } = plan.root {
-        assert!(matches!(*source, PlanOperator::Filter { .. }));
-    } else {
-        panic!("Expected Project");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project, got {:?}", plan.root);
+    };
+    assert!(
+        matches!(*source, PlanOperator::Filter { .. }),
+        "expected Filter, got {:?}",
+        source
+    );
 }
 
 #[test]
 fn test_plan_limit_pushdown() {
     let plan = plan_query("MATCH (n:Person) RETURN n LIMIT 10");
     // Should be: Project -> NodeScan(limit=10)
-    if let PlanOperator::Project { source, .. } = plan.root {
-        if let PlanOperator::NodeScan { limit, .. } = *source {
-            assert_eq!(limit, Some(10));
-        } else {
-            panic!("Expected NodeScan");
-        }
-    } else {
-        panic!("Expected Project");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project, got {:?}", plan.root);
+    };
+    let PlanOperator::NodeScan { limit, .. } = *source else {
+        panic!("expected NodeScan, got {:?}", source);
+    };
+    assert_eq!(limit, Some(10));
 }
 
 #[test]
 fn test_plan_single_hop() {
     let plan = plan_query("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b");
     // Should be: Project -> Expand -> NodeScan
-    if let PlanOperator::Project { source, .. } = plan.root {
-        assert!(matches!(*source, PlanOperator::Expand(_)));
-    } else {
-        panic!("Expected Project");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project, got {:?}", plan.root);
+    };
+    assert!(
+        matches!(*source, PlanOperator::Expand(_)),
+        "expected Expand, got {:?}",
+        source
+    );
 }
 
 #[test]
 fn test_plan_variable_length_limit_pushdown() {
     let plan = plan_query("MATCH (a)-[*1..5]->(b) RETURN b LIMIT 1");
     // Should have limit pushed into VariableLengthExpand
-    if let PlanOperator::Project { source, .. } = plan.root {
-        if let PlanOperator::VariableLengthExpand(ref p) = *source {
-            assert_eq!(
-                p.limit,
-                Some(1),
-                "LIMIT should be pushed into VariableLengthExpand"
-            );
-        } else {
-            panic!("Expected VariableLengthExpand");
-        }
-    } else {
-        panic!("Expected Project");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project, got {:?}", plan.root);
+    };
+    let PlanOperator::VariableLengthExpand(ref p) = *source else {
+        panic!("expected VariableLengthExpand, got {:?}", source);
+    };
+    assert_eq!(
+        p.limit,
+        Some(1),
+        "LIMIT should be pushed into VariableLengthExpand"
+    );
 }
 
 #[test]
 fn test_plan_variable_length_filter_pushdown() {
     let plan = plan_query("MATCH (a)-[*1..5]->(b) WHERE b.name ENDS WITH 'admin' RETURN b");
     // Should have target_property_filter pushed into VariableLengthExpand
-    if let PlanOperator::Project { source, .. } = plan.root {
-        if let PlanOperator::VariableLengthExpand(ref p) = *source {
-            assert!(
-                p.target_property_filter.is_some(),
-                "ENDS WITH predicate should be pushed into VariableLengthExpand"
-            );
-            if let Some(TargetPropertyFilter::EndsWith {
-                ref property,
-                ref suffix,
-            }) = p.target_property_filter
-            {
-                assert_eq!(property, "name");
-                assert_eq!(suffix, "admin");
-            } else {
-                panic!("Expected EndsWith filter");
-            }
-        } else {
-            panic!("Expected VariableLengthExpand");
-        }
-    } else {
-        panic!("Expected Project");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project, got {:?}", plan.root);
+    };
+    let PlanOperator::VariableLengthExpand(ref p) = *source else {
+        panic!("expected VariableLengthExpand, got {:?}", source);
+    };
+    assert!(
+        p.target_property_filter.is_some(),
+        "ENDS WITH predicate should be pushed into VariableLengthExpand"
+    );
+    let Some(TargetPropertyFilter::EndsWith {
+        ref property,
+        ref suffix,
+    }) = p.target_property_filter
+    else {
+        panic!(
+            "expected EndsWith filter, got {:?}",
+            p.target_property_filter
+        );
+    };
+    assert_eq!(property, "name");
+    assert_eq!(suffix, "admin");
 }
 
 #[test]
@@ -117,38 +119,38 @@ fn test_plan_variable_length_limit_through_filter() {
     let plan = plan_query(
         "MATCH p = (a)-[*1..20]->(b) WHERE a.name = 'test' AND b.id ENDS WITH '-519' RETURN length(p) LIMIT 1",
     );
-    if let PlanOperator::Project { source, .. } = plan.root {
-        if let PlanOperator::VariableLengthExpand(ref p) = *source {
-            assert_eq!(
-                p.limit,
-                Some(1),
-                "LIMIT should be pushed into VariableLengthExpand when Filter is eliminated"
-            );
-            assert!(
-                p.target_property_filter.is_some(),
-                "Target property filter should be pushed"
-            );
-            if let PlanOperator::NodeScan {
-                ref property_filter,
-                ..
-            } = *p.source
-            {
-                assert!(
-                    property_filter.is_some(),
-                    "Source property filter should be pushed into NodeScan"
-                );
-            } else {
-                panic!("Expected NodeScan under VariableLengthExpand");
-            }
-        } else {
-            panic!(
-                "Expected VariableLengthExpand under Project, got {:?}",
-                source
-            );
-        }
-    } else {
-        panic!("Expected Project at root, got {:?}", plan.root);
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project at root, got {:?}", plan.root);
+    };
+    let PlanOperator::VariableLengthExpand(ref p) = *source else {
+        panic!(
+            "expected VariableLengthExpand under Project, got {:?}",
+            source
+        );
+    };
+    assert_eq!(
+        p.limit,
+        Some(1),
+        "LIMIT should be pushed into VariableLengthExpand when Filter is eliminated"
+    );
+    assert!(
+        p.target_property_filter.is_some(),
+        "Target property filter should be pushed"
+    );
+    let PlanOperator::NodeScan {
+        ref property_filter,
+        ..
+    } = *p.source
+    else {
+        panic!(
+            "expected NodeScan under VariableLengthExpand, got {:?}",
+            p.source
+        );
+    };
+    assert!(
+        property_filter.is_some(),
+        "Source property filter should be pushed into NodeScan"
+    );
 }
 
 #[test]
@@ -158,57 +160,57 @@ fn test_plan_source_filter_pushdown_to_nodescan() {
     let plan = plan_query("MATCH (a)-[*1..20]->(b) WHERE a.objectid = 'USER_0' RETURN b.objectid");
     // Plan should be: Project -> VariableLengthExpand(source: NodeScan(prop_filter))
     // No Filter should remain.
-    if let PlanOperator::Project { source, .. } = plan.root {
-        if let PlanOperator::VariableLengthExpand(ref p) = *source {
-            if let PlanOperator::NodeScan {
-                ref property_filter,
-                ..
-            } = *p.source
-            {
-                assert!(
-                    property_filter.is_some(),
-                    "Source predicate should be pushed into NodeScan"
-                );
-                let (ref prop, ref val) = property_filter.as_ref().unwrap();
-                assert_eq!(prop, "objectid");
-                assert_eq!(*val, serde_json::Value::String("USER_0".to_string()));
-            } else {
-                panic!("Expected NodeScan under VariableLengthExpand");
-            }
-        } else {
-            panic!("Expected VariableLengthExpand under Project");
-        }
-    } else {
-        panic!("Expected Project at root");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project at root, got {:?}", plan.root);
+    };
+    let PlanOperator::VariableLengthExpand(ref p) = *source else {
+        panic!(
+            "expected VariableLengthExpand under Project, got {:?}",
+            source
+        );
+    };
+    let PlanOperator::NodeScan {
+        ref property_filter,
+        ..
+    } = *p.source
+    else {
+        panic!(
+            "expected NodeScan under VariableLengthExpand, got {:?}",
+            p.source
+        );
+    };
+    assert!(
+        property_filter.is_some(),
+        "Source predicate should be pushed into NodeScan"
+    );
+    let (ref prop, ref val) = property_filter.as_ref().unwrap();
+    assert_eq!(prop, "objectid");
+    assert_eq!(*val, serde_json::Value::String("USER_0".to_string()));
 }
 
 #[test]
 fn test_plan_boolean_target_filter_pushdown() {
     // Boolean target property filters should be pushed into VariableLengthExpand
     let plan = plan_query("MATCH (a)-[*1..20]->(b) WHERE b.tier = 0 RETURN b.objectid");
-    if let PlanOperator::Project { source, .. } = plan.root {
-        if let PlanOperator::VariableLengthExpand(ref p) = *source {
-            assert!(
-                p.target_property_filter.is_some(),
-                "Boolean target property filter should be pushed into VariableLengthExpand"
-            );
-            if let Some(TargetPropertyFilter::Eq {
-                ref property,
-                ref value,
-            }) = p.target_property_filter
-            {
-                assert_eq!(property, "tier");
-                assert_eq!(*value, serde_json::Value::Number(0.into()));
-            } else {
-                panic!("Expected Eq filter");
-            }
-        } else {
-            panic!("Expected VariableLengthExpand, got {:?}", source);
-        }
-    } else {
-        panic!("Expected Project");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project, got {:?}", plan.root);
+    };
+    let PlanOperator::VariableLengthExpand(ref p) = *source else {
+        panic!("expected VariableLengthExpand, got {:?}", source);
+    };
+    assert!(
+        p.target_property_filter.is_some(),
+        "Boolean target property filter should be pushed into VariableLengthExpand"
+    );
+    let Some(TargetPropertyFilter::Eq {
+        ref property,
+        ref value,
+    }) = p.target_property_filter
+    else {
+        panic!("expected Eq filter, got {:?}", p.target_property_filter);
+    };
+    assert_eq!(property, "tier");
+    assert_eq!(*value, serde_json::Value::Number(0.into()));
 }
 
 #[test]
@@ -216,16 +218,15 @@ fn test_plan_relationship_count_pushdown() {
     // MATCH (n)-[r]->(m) RETURN count(r) AS edges LIMIT 1
     // should produce: Limit(1, RelationshipCountPushdown)
     let plan = plan_query("MATCH (n)-[r]->(m) RETURN count(r) AS edges LIMIT 1");
-    if let PlanOperator::Limit { source, count } = plan.root {
-        assert_eq!(count, 1);
-        assert!(
-            matches!(*source, PlanOperator::RelationshipCountPushdown { .. }),
-            "Expected RelationshipCountPushdown, got {:?}",
-            source
-        );
-    } else {
-        panic!("Expected Limit at root, got {:?}", plan.root);
-    }
+    let PlanOperator::Limit { source, count } = plan.root else {
+        panic!("expected Limit at root, got {:?}", plan.root);
+    };
+    assert_eq!(count, 1);
+    assert!(
+        matches!(*source, PlanOperator::RelationshipCountPushdown { .. }),
+        "expected RelationshipCountPushdown, got {:?}",
+        source
+    );
 }
 
 #[test]
@@ -233,15 +234,13 @@ fn test_plan_expand_limit_pushdown() {
     // MATCH (n)-[r]->(m) RETURN type(r) AS rel_type LIMIT 5
     // should push LIMIT into Expand
     let plan = plan_query("MATCH (n)-[r]->(m) RETURN type(r) AS rel_type LIMIT 5");
-    if let PlanOperator::Project { source, .. } = plan.root {
-        if let PlanOperator::Expand(ref p) = *source {
-            assert_eq!(p.limit, Some(5), "LIMIT 5 should be pushed into Expand");
-        } else {
-            panic!("Expected Expand under Project, got {:?}", source);
-        }
-    } else {
-        panic!("Expected Project at root, got {:?}", plan.root);
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project at root, got {:?}", plan.root);
+    };
+    let PlanOperator::Expand(ref p) = *source else {
+        panic!("expected Expand under Project, got {:?}", source);
+    };
+    assert_eq!(p.limit, Some(5), "LIMIT 5 should be pushed into Expand");
 }
 
 #[test]
@@ -250,19 +249,17 @@ fn test_limit_through_filter_into_expand() {
     // Filter should be eliminated (pushed into Expand target_property_filter)
     // and LIMIT should be pushed into Expand
     let plan = plan_query("MATCH (a)-[:KNOWS]->(b) WHERE b.name = 'Alice' RETURN b LIMIT 3");
-    if let PlanOperator::Project { source, .. } = plan.root {
-        if let PlanOperator::Expand(ref p) = *source {
-            assert_eq!(p.limit, Some(3), "LIMIT should be pushed into Expand");
-            assert!(
-                p.target_property_filter.is_some(),
-                "target filter should be pushed into Expand"
-            );
-        } else {
-            panic!("Expected Expand under Project, got {:?}", source);
-        }
-    } else {
-        panic!("Expected Project at root");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project at root, got {:?}", plan.root);
+    };
+    let PlanOperator::Expand(ref p) = *source else {
+        panic!("expected Expand under Project, got {:?}", source);
+    };
+    assert_eq!(p.limit, Some(3), "LIMIT should be pushed into Expand");
+    assert!(
+        p.target_property_filter.is_some(),
+        "target filter should be pushed into Expand"
+    );
 }
 
 #[test]
@@ -302,58 +299,52 @@ fn test_limit_through_filter_into_shortest_path() {
 fn test_expand_target_filter_pushdown() {
     // WHERE b.name = 'Admin' should be pushed into Expand.target_property_filter
     let plan = plan_query("MATCH (a:User)-[:MEMBER_OF]->(b:Group) WHERE b.name = 'Admin' RETURN a");
-    if let PlanOperator::Project { source, .. } = plan.root {
-        // Filter should be eliminated — predicate pushed into Expand
-        if let PlanOperator::Expand(ref p) = *source {
-            assert!(
-                p.target_property_filter.is_some(),
-                "Target filter should be pushed into Expand"
-            );
-            if let Some(TargetPropertyFilter::Eq {
-                ref property,
-                ref value,
-            }) = p.target_property_filter
-            {
-                assert_eq!(property, "name");
-                assert_eq!(*value, serde_json::Value::String("Admin".to_string()));
-            } else {
-                panic!("Expected Eq filter, got {:?}", p.target_property_filter);
-            }
-        } else {
-            panic!(
-                "Expected Expand directly under Project (Filter eliminated), got {:?}",
-                source
-            );
-        }
-    } else {
-        panic!("Expected Project at root");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project at root, got {:?}", plan.root);
+    };
+    // Filter should be eliminated -- predicate pushed into Expand
+    let PlanOperator::Expand(ref p) = *source else {
+        panic!(
+            "expected Expand directly under Project (Filter eliminated), got {:?}",
+            source
+        );
+    };
+    assert!(
+        p.target_property_filter.is_some(),
+        "Target filter should be pushed into Expand"
+    );
+    let Some(TargetPropertyFilter::Eq {
+        ref property,
+        ref value,
+    }) = p.target_property_filter
+    else {
+        panic!("expected Eq filter, got {:?}", p.target_property_filter);
+    };
+    assert_eq!(property, "name");
+    assert_eq!(*value, serde_json::Value::String("Admin".to_string()));
 }
 
 #[test]
 fn test_expand_source_filter_pushdown() {
     // WHERE a.id = 'user1' should be pushed into the NodeScan under Expand
     let plan = plan_query("MATCH (a)-[:KNOWS]->(b) WHERE a.id = 'user1' RETURN b");
-    if let PlanOperator::Project { source, .. } = plan.root {
-        if let PlanOperator::Expand(ref p) = *source {
-            if let PlanOperator::NodeScan {
-                ref property_filter,
-                ..
-            } = *p.source
-            {
-                assert!(
-                    property_filter.is_some(),
-                    "Source predicate should be pushed into NodeScan"
-                );
-            } else {
-                panic!("Expected NodeScan under Expand");
-            }
-        } else {
-            panic!("Expected Expand under Project, got {:?}", source);
-        }
-    } else {
-        panic!("Expected Project at root");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project at root, got {:?}", plan.root);
+    };
+    let PlanOperator::Expand(ref p) = *source else {
+        panic!("expected Expand under Project, got {:?}", source);
+    };
+    let PlanOperator::NodeScan {
+        ref property_filter,
+        ..
+    } = *p.source
+    else {
+        panic!("expected NodeScan under Expand, got {:?}", p.source);
+    };
+    assert!(
+        property_filter.is_some(),
+        "Source predicate should be pushed into NodeScan"
+    );
 }
 
 #[test]
@@ -362,34 +353,31 @@ fn test_expand_both_filters_pushdown() {
     let plan = plan_query(
         "MATCH (a)-[:KNOWS]->(b) WHERE a.id = 'user1' AND b.name ENDS WITH '-admin' RETURN b",
     );
-    if let PlanOperator::Project { source, .. } = plan.root {
-        // Filter should be eliminated entirely
-        if let PlanOperator::Expand(ref p) = *source {
-            assert!(
-                p.target_property_filter.is_some(),
-                "Target filter should be pushed into Expand"
-            );
-            if let PlanOperator::NodeScan {
-                ref property_filter,
-                ..
-            } = *p.source
-            {
-                assert!(
-                    property_filter.is_some(),
-                    "Source filter should be pushed into NodeScan"
-                );
-            } else {
-                panic!("Expected NodeScan under Expand");
-            }
-        } else {
-            panic!(
-                "Expected Expand under Project (Filter eliminated), got {:?}",
-                source
-            );
-        }
-    } else {
-        panic!("Expected Project at root");
-    }
+    let PlanOperator::Project { source, .. } = plan.root else {
+        panic!("expected Project at root, got {:?}", plan.root);
+    };
+    // Filter should be eliminated entirely
+    let PlanOperator::Expand(ref p) = *source else {
+        panic!(
+            "expected Expand under Project (Filter eliminated), got {:?}",
+            source
+        );
+    };
+    assert!(
+        p.target_property_filter.is_some(),
+        "Target filter should be pushed into Expand"
+    );
+    let PlanOperator::NodeScan {
+        ref property_filter,
+        ..
+    } = *p.source
+    else {
+        panic!("expected NodeScan under Expand, got {:?}", p.source);
+    };
+    assert!(
+        property_filter.is_some(),
+        "Source filter should be pushed into NodeScan"
+    );
 }
 
 // =========================================================================
@@ -415,19 +403,18 @@ fn test_shortest_path_ends_with_filter_pushdown() {
         sp.target_property_filter.is_some(),
         "ENDS WITH should be pushed into ShortestPath"
     );
-    if let Some(TargetPropertyFilter::EndsWith {
+    let Some(TargetPropertyFilter::EndsWith {
         ref property,
         ref suffix,
     }) = sp.target_property_filter
-    {
-        assert_eq!(property, "name");
-        assert_eq!(suffix, "-512");
-    } else {
+    else {
         panic!(
-            "Expected EndsWith filter, got {:?}",
+            "expected EndsWith filter, got {:?}",
             sp.target_property_filter
         );
-    }
+    };
+    assert_eq!(property, "name");
+    assert_eq!(suffix, "-512");
 }
 
 #[test]
@@ -466,18 +453,17 @@ fn test_shortest_path_source_filter_pushdown() {
     }
     let sp = find_shortest_path(&plan.root).expect("Should contain ShortestPath");
     // Source filter should be pushed into the NodeScan under ShortestPath
-    if let PlanOperator::NodeScan {
+    let PlanOperator::NodeScan {
         ref property_filter,
         ..
     } = *sp.source
-    {
-        assert!(
-            property_filter.is_some(),
-            "Source predicate should be pushed into NodeScan"
-        );
-    } else {
-        panic!("Expected NodeScan under ShortestPath, got {:?}", sp.source);
-    }
+    else {
+        panic!("expected NodeScan under ShortestPath, got {:?}", sp.source);
+    };
+    assert!(
+        property_filter.is_some(),
+        "Source predicate should be pushed into NodeScan"
+    );
 }
 
 #[test]
@@ -499,18 +485,17 @@ fn test_shortest_path_both_filters_pushdown() {
         sp.target_property_filter.is_some(),
         "Target filter should be pushed into ShortestPath"
     );
-    if let PlanOperator::NodeScan {
+    let PlanOperator::NodeScan {
         ref property_filter,
         ..
     } = *sp.source
-    {
-        assert!(
-            property_filter.is_some(),
-            "Source filter should be pushed into NodeScan"
-        );
-    } else {
-        panic!("Expected NodeScan under ShortestPath");
-    }
+    else {
+        panic!("expected NodeScan under ShortestPath, got {:?}", sp.source);
+    };
+    assert!(
+        property_filter.is_some(),
+        "Source filter should be pushed into NodeScan"
+    );
 }
 
 // =========================================================================

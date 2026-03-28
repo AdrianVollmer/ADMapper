@@ -329,144 +329,147 @@ mod tests {
     #[test]
     fn test_parse_create_single_node() {
         let stmt = parse("CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
-        match stmt {
-            Statement::Create(create) => {
-                assert_eq!(create.pattern.elements.len(), 1);
-                match &create.pattern.elements[0] {
-                    PatternElement::Node(node) => {
-                        assert_eq!(node.variable, Some("n".to_string()));
-                        assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
-                        assert!(node.properties.is_some());
-                    }
-                    _ => panic!("Expected node pattern"),
-                }
-            }
-            _ => panic!("Expected CREATE statement"),
-        }
+        let Statement::Create(create) = stmt else {
+            panic!("expected CREATE statement, got {:?}", stmt);
+        };
+        assert_eq!(create.pattern.elements.len(), 1);
+        let PatternElement::Node(node) = &create.pattern.elements[0] else {
+            panic!(
+                "expected node pattern, got {:?}",
+                create.pattern.elements[0]
+            );
+        };
+        assert_eq!(node.variable, Some("n".to_string()));
+        assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
+        assert!(node.properties.is_some());
     }
 
     #[test]
     fn test_parse_create_node_no_properties() {
         let stmt = parse("CREATE (n:Person)").unwrap();
-        match stmt {
-            Statement::Create(create) => {
-                assert_eq!(create.pattern.elements.len(), 1);
-                match &create.pattern.elements[0] {
-                    PatternElement::Node(node) => {
-                        assert_eq!(node.variable, Some("n".to_string()));
-                        assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
-                        assert!(node.properties.is_none());
-                    }
-                    _ => panic!("Expected node pattern"),
-                }
-            }
-            _ => panic!("Expected CREATE statement"),
-        }
+        let Statement::Create(create) = stmt else {
+            panic!("expected CREATE statement, got {:?}", stmt);
+        };
+        assert_eq!(create.pattern.elements.len(), 1);
+        let PatternElement::Node(node) = &create.pattern.elements[0] else {
+            panic!(
+                "expected node pattern, got {:?}",
+                create.pattern.elements[0]
+            );
+        };
+        assert_eq!(node.variable, Some("n".to_string()));
+        assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
+        assert!(node.properties.is_none());
     }
 
     #[test]
     fn test_parse_create_node_multiple_labels() {
         let stmt = parse("CREATE (n:Person:Actor {name: 'Charlie'})").unwrap();
-        match stmt {
-            Statement::Create(create) => match &create.pattern.elements[0] {
-                PatternElement::Node(node) => {
-                    assert_eq!(
-                        node.labels,
-                        vec![vec!["Person".to_string()], vec!["Actor".to_string()]]
-                    );
-                }
-                _ => panic!("Expected node pattern"),
-            },
-            _ => panic!("Expected CREATE statement"),
-        }
+        let Statement::Create(create) = stmt else {
+            panic!("expected CREATE statement, got {:?}", stmt);
+        };
+        let PatternElement::Node(node) = &create.pattern.elements[0] else {
+            panic!(
+                "expected node pattern, got {:?}",
+                create.pattern.elements[0]
+            );
+        };
+        assert_eq!(
+            node.labels,
+            vec![vec!["Person".to_string()], vec!["Actor".to_string()]]
+        );
     }
 
     #[test]
     fn test_parse_create_relationship() {
         let stmt =
             parse("CREATE (a:Person {name: 'Alice'})-[:KNOWS]->(b:Person {name: 'Bob'})").unwrap();
-        match stmt {
-            Statement::Create(create) => {
-                assert_eq!(create.pattern.elements.len(), 3);
+        let Statement::Create(create) = stmt else {
+            panic!("expected CREATE statement, got {:?}", stmt);
+        };
+        assert_eq!(create.pattern.elements.len(), 3);
 
-                // First node
-                match &create.pattern.elements[0] {
-                    PatternElement::Node(node) => {
-                        assert_eq!(node.variable, Some("a".to_string()));
-                        assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
-                    }
-                    _ => panic!("Expected node pattern"),
-                }
+        // First node
+        let PatternElement::Node(node) = &create.pattern.elements[0] else {
+            panic!(
+                "expected node pattern, got {:?}",
+                create.pattern.elements[0]
+            );
+        };
+        assert_eq!(node.variable, Some("a".to_string()));
+        assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
 
-                // Relationship
-                match &create.pattern.elements[1] {
-                    PatternElement::Relationship(rel) => {
-                        assert_eq!(rel.types, vec!["KNOWS".to_string()]);
-                        assert_eq!(rel.direction, Direction::Outgoing);
-                    }
-                    _ => panic!("Expected relationship pattern"),
-                }
+        // Relationship
+        let PatternElement::Relationship(rel) = &create.pattern.elements[1] else {
+            panic!(
+                "expected relationship pattern, got {:?}",
+                create.pattern.elements[1]
+            );
+        };
+        assert_eq!(rel.types, vec!["KNOWS".to_string()]);
+        assert_eq!(rel.direction, Direction::Outgoing);
 
-                // Second node
-                match &create.pattern.elements[2] {
-                    PatternElement::Node(node) => {
-                        assert_eq!(node.variable, Some("b".to_string()));
-                    }
-                    _ => panic!("Expected node pattern"),
-                }
-            }
-            _ => panic!("Expected CREATE statement"),
-        }
+        // Second node
+        let PatternElement::Node(node) = &create.pattern.elements[2] else {
+            panic!(
+                "expected node pattern, got {:?}",
+                create.pattern.elements[2]
+            );
+        };
+        assert_eq!(node.variable, Some("b".to_string()));
     }
 
     #[test]
     fn test_parse_create_relationship_with_properties() {
         let stmt = parse("CREATE (a:Person)-[:KNOWS {since: 2020}]->(b:Person)").unwrap();
-        match stmt {
-            Statement::Create(create) => match &create.pattern.elements[1] {
-                PatternElement::Relationship(rel) => {
-                    assert_eq!(rel.types, vec!["KNOWS".to_string()]);
-                    assert!(rel.properties.is_some());
-                }
-                _ => panic!("Expected relationship pattern"),
-            },
-            _ => panic!("Expected CREATE statement"),
-        }
+        let Statement::Create(create) = stmt else {
+            panic!("expected CREATE statement, got {:?}", stmt);
+        };
+        let PatternElement::Relationship(rel) = &create.pattern.elements[1] else {
+            panic!(
+                "expected relationship pattern, got {:?}",
+                create.pattern.elements[1]
+            );
+        };
+        assert_eq!(rel.types, vec!["KNOWS".to_string()]);
+        assert!(rel.properties.is_some());
     }
 
     #[test]
     fn test_parse_create_anonymous_node() {
         let stmt = parse("CREATE (:Person {name: 'Alice'})").unwrap();
-        match stmt {
-            Statement::Create(create) => match &create.pattern.elements[0] {
-                PatternElement::Node(node) => {
-                    assert_eq!(node.variable, None);
-                    assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
-                }
-                _ => panic!("Expected node pattern"),
-            },
-            _ => panic!("Expected CREATE statement"),
-        }
+        let Statement::Create(create) = stmt else {
+            panic!("expected CREATE statement, got {:?}", stmt);
+        };
+        let PatternElement::Node(node) = &create.pattern.elements[0] else {
+            panic!(
+                "expected node pattern, got {:?}",
+                create.pattern.elements[0]
+            );
+        };
+        assert_eq!(node.variable, None);
+        assert_eq!(node.labels, vec![vec!["Person".to_string()]]);
     }
 
     #[test]
     fn test_parse_map_properties() {
         let stmt = parse("CREATE (n:Person {name: 'Alice', age: 30, active: true})").unwrap();
-        match stmt {
-            Statement::Create(create) => match &create.pattern.elements[0] {
-                PatternElement::Node(node) => match node.properties.as_ref().unwrap() {
-                    Expression::Map(entries) => {
-                        assert_eq!(entries.len(), 3);
-                        assert_eq!(entries[0].0, "name");
-                        assert_eq!(entries[1].0, "age");
-                        assert_eq!(entries[2].0, "active");
-                    }
-                    _ => panic!("Expected map expression"),
-                },
-                _ => panic!("Expected node pattern"),
-            },
-            _ => panic!("Expected CREATE statement"),
-        }
+        let Statement::Create(create) = stmt else {
+            panic!("expected CREATE statement, got {:?}", stmt);
+        };
+        let PatternElement::Node(node) = &create.pattern.elements[0] else {
+            panic!(
+                "expected node pattern, got {:?}",
+                create.pattern.elements[0]
+            );
+        };
+        let Expression::Map(entries) = node.properties.as_ref().unwrap() else {
+            panic!("expected map expression, got {:?}", node.properties);
+        };
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].0, "name");
+        assert_eq!(entries[1].0, "age");
+        assert_eq!(entries[2].0, "active");
     }
 
     #[test]
@@ -474,218 +477,209 @@ mod tests {
         let stmt =
             parse("CREATE (n {str: 'hello', int: 42, float: 3.14, bool: true, null_val: null})")
                 .unwrap();
-        match stmt {
-            Statement::Create(create) => match &create.pattern.elements[0] {
-                PatternElement::Node(node) => match node.properties.as_ref().unwrap() {
-                    Expression::Map(entries) => {
-                        assert!(matches!(
-                            entries[0].1,
-                            Expression::Literal(Literal::String(_))
-                        ));
-                        assert!(matches!(
-                            entries[1].1,
-                            Expression::Literal(Literal::Integer(42))
-                        ));
-                        assert!(matches!(
-                            entries[2].1,
-                            Expression::Literal(Literal::Float(_))
-                        ));
-                        assert!(matches!(
-                            entries[3].1,
-                            Expression::Literal(Literal::Boolean(true))
-                        ));
-                        assert!(matches!(entries[4].1, Expression::Literal(Literal::Null)));
-                    }
-                    _ => panic!("Expected map expression"),
-                },
-                _ => panic!("Expected node pattern"),
-            },
-            _ => panic!("Expected CREATE statement"),
-        }
+        let Statement::Create(create) = stmt else {
+            panic!("expected CREATE statement, got {:?}", stmt);
+        };
+        let PatternElement::Node(node) = &create.pattern.elements[0] else {
+            panic!(
+                "expected node pattern, got {:?}",
+                create.pattern.elements[0]
+            );
+        };
+        let Expression::Map(entries) = node.properties.as_ref().unwrap() else {
+            panic!("expected map expression, got {:?}", node.properties);
+        };
+        assert!(
+            matches!(entries[0].1, Expression::Literal(Literal::String(_))),
+            "expected String literal, got {:?}",
+            entries[0].1
+        );
+        assert!(
+            matches!(entries[1].1, Expression::Literal(Literal::Integer(42))),
+            "expected Integer(42), got {:?}",
+            entries[1].1
+        );
+        assert!(
+            matches!(entries[2].1, Expression::Literal(Literal::Float(_))),
+            "expected Float literal, got {:?}",
+            entries[2].1
+        );
+        assert!(
+            matches!(entries[3].1, Expression::Literal(Literal::Boolean(true))),
+            "expected Boolean(true), got {:?}",
+            entries[3].1
+        );
+        assert!(
+            matches!(entries[4].1, Expression::Literal(Literal::Null)),
+            "expected Null, got {:?}",
+            entries[4].1
+        );
     }
 
     // MATCH tests
     #[test]
     fn test_parse_simple_match() {
         let stmt = parse("MATCH (n) RETURN n").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                assert_eq!(m.pattern.elements.len(), 1);
-                assert!(m.return_clause.is_some());
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        assert_eq!(m.pattern.elements.len(), 1);
+        assert!(m.return_clause.is_some());
     }
 
     #[test]
     fn test_parse_match_with_where() {
         let stmt = parse("MATCH (n:Person) WHERE n.age > 30 RETURN n").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                assert!(m.where_clause.is_some());
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        assert!(m.where_clause.is_some());
     }
 
     #[test]
     fn test_parse_match_relationship() {
         let stmt = parse("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                assert_eq!(m.pattern.elements.len(), 3);
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        assert_eq!(m.pattern.elements.len(), 3);
     }
 
     #[test]
     fn test_parse_variable_length_path() {
         let stmt = parse("MATCH (a)-[:KNOWS*1..3]->(b) RETURN a, b").unwrap();
-        match stmt {
-            Statement::Match(m) => match &m.pattern.elements[1] {
-                PatternElement::Relationship(rel) => {
-                    let length = rel.length.as_ref().unwrap();
-                    assert_eq!(length.min, Some(1));
-                    assert_eq!(length.max, Some(3));
-                }
-                _ => panic!("Expected relationship pattern"),
-            },
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let PatternElement::Relationship(rel) = &m.pattern.elements[1] else {
+            panic!(
+                "expected relationship pattern, got {:?}",
+                m.pattern.elements[1]
+            );
+        };
+        let length = rel.length.as_ref().unwrap();
+        assert_eq!(length.min, Some(1));
+        assert_eq!(length.max, Some(3));
     }
 
     #[test]
     fn test_parse_return_with_alias() {
         let stmt = parse("MATCH (n:Person) RETURN n.name AS personName").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                let ret = m.return_clause.unwrap();
-                assert_eq!(ret.items[0].alias, Some("personName".to_string()));
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let ret = m.return_clause.unwrap();
+        assert_eq!(ret.items[0].alias, Some("personName".to_string()));
     }
 
     #[test]
     fn test_parse_order_by_limit() {
         let stmt = parse("MATCH (n:Person) RETURN n ORDER BY n.age DESC LIMIT 10").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                let ret = m.return_clause.unwrap();
-                assert!(ret.order_by.is_some());
-                let order = ret.order_by.unwrap();
-                assert!(order[0].descending);
-                assert_eq!(ret.limit, Some(10));
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let ret = m.return_clause.unwrap();
+        assert!(ret.order_by.is_some());
+        let order = ret.order_by.unwrap();
+        assert!(order[0].descending);
+        assert_eq!(ret.limit, Some(10));
     }
 
     // DELETE tests
     #[test]
     fn test_parse_delete() {
         let stmt = parse("MATCH (n:Person {name: 'Bob'}) DELETE n").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                let del = m.delete_clause.expect("Expected delete clause");
-                assert!(!del.detach);
-                assert_eq!(del.expressions.len(), 1);
-            }
-            _ => panic!("Expected MATCH statement with DELETE clause"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!(
+                "expected MATCH statement with DELETE clause, got {:?}",
+                stmt
+            );
+        };
+        let del = m.delete_clause.expect("expected delete clause");
+        assert!(!del.detach);
+        assert_eq!(del.expressions.len(), 1);
     }
 
     #[test]
     fn test_parse_detach_delete() {
         let stmt = parse("MATCH (n:Person) DETACH DELETE n").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                let del = m.delete_clause.expect("Expected delete clause");
-                assert!(del.detach);
-            }
-            _ => panic!("Expected MATCH statement with DELETE clause"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!(
+                "expected MATCH statement with DELETE clause, got {:?}",
+                stmt
+            );
+        };
+        let del = m.delete_clause.expect("expected delete clause");
+        assert!(del.detach);
     }
 
     // SET tests
     #[test]
     fn test_parse_set_property() {
         let stmt = parse("MATCH (n:Person) SET n.age = 31").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                let set = m.set_clause.expect("Expected set clause");
-                assert_eq!(set.items.len(), 1);
-                match &set.items[0] {
-                    SetItem::Property {
-                        variable, property, ..
-                    } => {
-                        assert_eq!(variable, "n");
-                        assert_eq!(property, "age");
-                    }
-                    _ => panic!("Expected property set item"),
-                }
-            }
-            _ => panic!("Expected MATCH statement with SET clause"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement with SET clause, got {:?}", stmt);
+        };
+        let set = m.set_clause.expect("expected set clause");
+        assert_eq!(set.items.len(), 1);
+        let SetItem::Property {
+            variable, property, ..
+        } = &set.items[0]
+        else {
+            panic!("expected property set item, got {:?}", set.items[0]);
+        };
+        assert_eq!(variable, "n");
+        assert_eq!(property, "age");
     }
 
     #[test]
     fn test_parse_set_label() {
         let stmt = parse("MATCH (n:Person) SET n:Employee").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                let set = m.set_clause.expect("Expected set clause");
-                assert_eq!(set.items.len(), 1);
-                match &set.items[0] {
-                    SetItem::Labels { variable, labels } => {
-                        assert_eq!(variable, "n");
-                        assert_eq!(labels, &["Employee"]);
-                    }
-                    _ => panic!("Expected label set item"),
-                }
-            }
-            _ => panic!("Expected MATCH statement with SET clause"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement with SET clause, got {:?}", stmt);
+        };
+        let set = m.set_clause.expect("expected set clause");
+        assert_eq!(set.items.len(), 1);
+        let SetItem::Labels { variable, labels } = &set.items[0] else {
+            panic!("expected label set item, got {:?}", set.items[0]);
+        };
+        assert_eq!(variable, "n");
+        assert_eq!(labels, &["Employee"]);
     }
 
     #[test]
     fn test_parse_label_or() {
         let stmt = parse("MATCH (n:Person|Company) RETURN n").unwrap();
-        match stmt {
-            Statement::Match(m) => match &m.pattern.elements[0] {
-                PatternElement::Node(node) => {
-                    // Single label group with two alternatives
-                    assert_eq!(
-                        node.labels,
-                        vec![vec!["Person".to_string(), "Company".to_string()]]
-                    );
-                }
-                _ => panic!("Expected node pattern"),
-            },
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let PatternElement::Node(node) = &m.pattern.elements[0] else {
+            panic!("expected node pattern, got {:?}", m.pattern.elements[0]);
+        };
+        // Single label group with two alternatives
+        assert_eq!(
+            node.labels,
+            vec![vec!["Person".to_string(), "Company".to_string()]]
+        );
     }
 
     #[test]
     fn test_parse_label_or_with_and() {
         let stmt = parse("MATCH (n:Person:Actor|Director) RETURN n").unwrap();
-        match stmt {
-            Statement::Match(m) => match &m.pattern.elements[0] {
-                PatternElement::Node(node) => {
-                    // First group: just Person; second group: Actor or Director
-                    assert_eq!(
-                        node.labels,
-                        vec![
-                            vec!["Person".to_string()],
-                            vec!["Actor".to_string(), "Director".to_string()]
-                        ]
-                    );
-                }
-                _ => panic!("Expected node pattern"),
-            },
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let PatternElement::Node(node) = &m.pattern.elements[0] else {
+            panic!("expected node pattern, got {:?}", m.pattern.elements[0]);
+        };
+        // First group: just Person; second group: Actor or Director
+        assert_eq!(
+            node.labels,
+            vec![
+                vec!["Person".to_string()],
+                vec!["Actor".to_string(), "Director".to_string()]
+            ]
+        );
     }
 
     // Expression tests
@@ -740,19 +734,15 @@ mod tests {
     #[test]
     fn test_parse_function_call() {
         let stmt = parse("MATCH (n:Person) RETURN count(n)").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                let ret = m.return_clause.unwrap();
-                match &ret.items[0].expression {
-                    Expression::FunctionCall { name, args } => {
-                        assert_eq!(name, "count");
-                        assert_eq!(args.len(), 1);
-                    }
-                    _ => panic!("Expected function call"),
-                }
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let ret = m.return_clause.unwrap();
+        let Expression::FunctionCall { name, args } = &ret.items[0].expression else {
+            panic!("expected function call, got {:?}", ret.items[0].expression);
+        };
+        assert_eq!(name, "count");
+        assert_eq!(args.len(), 1);
     }
 
     #[test]
@@ -766,85 +756,88 @@ mod tests {
     #[test]
     fn test_parse_variable_length_range() {
         let stmt = parse("MATCH (a)-[:KNOWS*1..3]->(b) RETURN a, b").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                assert_eq!(m.pattern.elements.len(), 3);
-                match &m.pattern.elements[1] {
-                    PatternElement::Relationship(rel) => {
-                        assert_eq!(rel.types, vec!["KNOWS".to_string()]);
-                        let len = rel.length.as_ref().unwrap();
-                        assert_eq!(len.min, Some(1));
-                        assert_eq!(len.max, Some(3));
-                    }
-                    _ => panic!("Expected relationship pattern"),
-                }
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        assert_eq!(m.pattern.elements.len(), 3);
+        let PatternElement::Relationship(rel) = &m.pattern.elements[1] else {
+            panic!(
+                "expected relationship pattern, got {:?}",
+                m.pattern.elements[1]
+            );
+        };
+        assert_eq!(rel.types, vec!["KNOWS".to_string()]);
+        let len = rel.length.as_ref().unwrap();
+        assert_eq!(len.min, Some(1));
+        assert_eq!(len.max, Some(3));
     }
 
     #[test]
     fn test_parse_variable_length_unbounded() {
         let stmt = parse("MATCH (a)-[:KNOWS*]->(b) RETURN a, b").unwrap();
-        match stmt {
-            Statement::Match(m) => match &m.pattern.elements[1] {
-                PatternElement::Relationship(rel) => {
-                    let len = rel.length.as_ref().unwrap();
-                    assert_eq!(len.min, None);
-                    assert_eq!(len.max, None);
-                }
-                _ => panic!("Expected relationship pattern"),
-            },
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let PatternElement::Relationship(rel) = &m.pattern.elements[1] else {
+            panic!(
+                "expected relationship pattern, got {:?}",
+                m.pattern.elements[1]
+            );
+        };
+        let len = rel.length.as_ref().unwrap();
+        assert_eq!(len.min, None);
+        assert_eq!(len.max, None);
     }
 
     #[test]
     fn test_parse_variable_length_exact() {
         let stmt = parse("MATCH (a)-[:KNOWS*2]->(b) RETURN a, b").unwrap();
-        match stmt {
-            Statement::Match(m) => match &m.pattern.elements[1] {
-                PatternElement::Relationship(rel) => {
-                    let len = rel.length.as_ref().unwrap();
-                    assert_eq!(len.min, Some(2));
-                    assert_eq!(len.max, Some(2));
-                }
-                _ => panic!("Expected relationship pattern"),
-            },
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let PatternElement::Relationship(rel) = &m.pattern.elements[1] else {
+            panic!(
+                "expected relationship pattern, got {:?}",
+                m.pattern.elements[1]
+            );
+        };
+        let len = rel.length.as_ref().unwrap();
+        assert_eq!(len.min, Some(2));
+        assert_eq!(len.max, Some(2));
     }
 
     #[test]
     fn test_parse_variable_length_min_only() {
         let stmt = parse("MATCH (a)-[:KNOWS*2..]->(b) RETURN a, b").unwrap();
-        match stmt {
-            Statement::Match(m) => match &m.pattern.elements[1] {
-                PatternElement::Relationship(rel) => {
-                    let len = rel.length.as_ref().unwrap();
-                    assert_eq!(len.min, Some(2));
-                    assert_eq!(len.max, None);
-                }
-                _ => panic!("Expected relationship pattern"),
-            },
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let PatternElement::Relationship(rel) = &m.pattern.elements[1] else {
+            panic!(
+                "expected relationship pattern, got {:?}",
+                m.pattern.elements[1]
+            );
+        };
+        let len = rel.length.as_ref().unwrap();
+        assert_eq!(len.min, Some(2));
+        assert_eq!(len.max, None);
     }
 
     #[test]
     fn test_parse_variable_length_max_only() {
         let stmt = parse("MATCH (a)-[*..3]->(b) RETURN a, b").unwrap();
-        match stmt {
-            Statement::Match(m) => match &m.pattern.elements[1] {
-                PatternElement::Relationship(rel) => {
-                    let len = rel.length.as_ref().unwrap();
-                    assert_eq!(len.min, None);
-                    assert_eq!(len.max, Some(3));
-                }
-                _ => panic!("Expected relationship pattern"),
-            },
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let PatternElement::Relationship(rel) = &m.pattern.elements[1] else {
+            panic!(
+                "expected relationship pattern, got {:?}",
+                m.pattern.elements[1]
+            );
+        };
+        let len = rel.length.as_ref().unwrap();
+        assert_eq!(len.min, None);
+        assert_eq!(len.max, Some(3));
     }
 
     #[test]
@@ -852,56 +845,55 @@ mod tests {
         // openCypher 9 shortestPath() syntax
         let stmt =
             parse("MATCH (a:Person), (b:Person) RETURN shortestPath((a)-[:KNOWS*]->(b))").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                let ret = m.return_clause.as_ref().expect("Expected RETURN clause");
-                assert_eq!(ret.items.len(), 1);
-                match &ret.items[0].expression {
-                    Expression::ShortestPath(pattern) => {
-                        assert_eq!(pattern.elements.len(), 3); // node-rel-node
-                    }
-                    _ => panic!("Expected ShortestPath expression"),
-                }
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let ret = m.return_clause.as_ref().expect("Expected RETURN clause");
+        assert_eq!(ret.items.len(), 1);
+        let Expression::ShortestPath(pattern) = &ret.items[0].expression else {
+            panic!(
+                "expected ShortestPath expression, got {:?}",
+                ret.items[0].expression
+            );
+        };
+        assert_eq!(pattern.elements.len(), 3); // node-rel-node
     }
 
     #[test]
     fn test_parse_all_shortest_paths_function() {
         // openCypher 9 allShortestPaths() syntax
         let stmt = parse("MATCH (a), (b) RETURN allShortestPaths((a)-[:KNOWS*1..5]->(b))").unwrap();
-        match stmt {
-            Statement::Match(m) => {
-                let ret = m.return_clause.as_ref().expect("Expected RETURN clause");
-                assert_eq!(ret.items.len(), 1);
-                match &ret.items[0].expression {
-                    Expression::AllShortestPaths(pattern) => {
-                        assert_eq!(pattern.elements.len(), 3);
-                    }
-                    _ => panic!("Expected AllShortestPaths expression"),
-                }
-            }
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let ret = m.return_clause.as_ref().expect("Expected RETURN clause");
+        assert_eq!(ret.items.len(), 1);
+        let Expression::AllShortestPaths(pattern) = &ret.items[0].expression else {
+            panic!(
+                "expected AllShortestPaths expression, got {:?}",
+                ret.items[0].expression
+            );
+        };
+        assert_eq!(pattern.elements.len(), 3);
     }
 
     #[test]
     fn test_parse_variable_length_one_or_more() {
         // Variable length with range (openCypher 9 syntax using *1..)
         let stmt = parse("MATCH (a)-[:LINK*1..]->(b) RETURN a, b").unwrap();
-        match stmt {
-            Statement::Match(m) => match &m.pattern.elements[1] {
-                PatternElement::Relationship(rel) => {
-                    assert!(rel.length.is_some());
-                    let len = rel.length.as_ref().unwrap();
-                    assert_eq!(len.min, Some(1));
-                    assert_eq!(len.max, None);
-                }
-                _ => panic!("Expected relationship pattern"),
-            },
-            _ => panic!("Expected MATCH statement"),
-        }
+        let Statement::Match(m) = stmt else {
+            panic!("expected MATCH statement, got {:?}", stmt);
+        };
+        let PatternElement::Relationship(rel) = &m.pattern.elements[1] else {
+            panic!(
+                "expected relationship pattern, got {:?}",
+                m.pattern.elements[1]
+            );
+        };
+        assert!(rel.length.is_some());
+        let len = rel.length.as_ref().unwrap();
+        assert_eq!(len.min, Some(1));
+        assert_eq!(len.max, None);
     }
 
     // is_read_only() tests
@@ -928,11 +920,10 @@ mod tests {
         let stmt = parse("MATCH (a:Person), (b:Person) CREATE (a)-[:KNOWS]->(b)").unwrap();
         assert!(!stmt.is_read_only());
         // Should be parsed as Statement::Match with create_clause
-        if let Statement::Match(m) = &stmt {
-            assert!(m.create_clause.is_some());
-        } else {
-            panic!("Expected Statement::Match, got {:?}", stmt);
-        }
+        let Statement::Match(m) = &stmt else {
+            panic!("expected Statement::Match, got {:?}", stmt);
+        };
+        assert!(m.create_clause.is_some());
     }
 
     #[test]
