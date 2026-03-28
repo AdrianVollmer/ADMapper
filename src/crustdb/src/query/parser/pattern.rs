@@ -60,7 +60,7 @@ pub(super) fn build_pattern_part(
         }
     }
     Err(Error::Parse(
-        "PatternPart requires AnonymousPatternPart".into(),
+        "expected anonymous pattern part in pattern part".into(),
     ))
 }
 
@@ -88,7 +88,7 @@ fn build_anonymous_pattern_part(
         }
     }
     Err(Error::Parse(
-        "AnonymousPatternPart requires PatternElement or ShortestPathPattern".into(),
+        "expected pattern element or shortest path pattern in anonymous pattern part".into(),
     ))
 }
 
@@ -111,7 +111,7 @@ pub(super) fn build_shortest_path_pattern_elements(
         }
     }
     Err(Error::Parse(
-        "ShortestPathPattern requires PatternElement".into(),
+        "expected pattern element in shortest path pattern".into(),
     ))
 }
 
@@ -158,8 +158,9 @@ fn build_pattern_element_chain(pair: Pair<Rule>) -> Result<(RelationshipPattern,
         }
     }
 
-    let rel = rel.ok_or_else(|| Error::Parse("Chain requires relationship".into()))?;
-    let node = node.ok_or_else(|| Error::Parse("Chain requires node".into()))?;
+    let rel =
+        rel.ok_or_else(|| Error::Parse("expected relationship in pattern element chain".into()))?;
+    let node = node.ok_or_else(|| Error::Parse("expected node in pattern element chain".into()))?;
     Ok((rel, node))
 }
 
@@ -341,5 +342,7 @@ pub(super) fn build_properties(pair: Pair<Rule>) -> Result<Expression> {
             _ => {}
         }
     }
-    Err(Error::Parse("Properties requires map or parameter".into()))
+    Err(Error::Parse(
+        "expected map or parameter in properties".into(),
+    ))
 }

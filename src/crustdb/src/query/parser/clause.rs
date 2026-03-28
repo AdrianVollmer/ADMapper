@@ -22,7 +22,7 @@ pub(super) fn build_create_clause(pair: Pair<Rule>) -> Result<CreateClause> {
             return Ok(CreateClause { pattern });
         }
     }
-    Err(Error::Parse("CREATE requires a pattern".into()))
+    Err(Error::Parse("expected pattern in create clause".into()))
 }
 
 /// Build a MATCH statement.
@@ -48,7 +48,7 @@ pub(super) fn build_match_statement(
         }
     }
 
-    let pattern = pattern.ok_or_else(|| Error::Parse("MATCH requires a pattern".into()))?;
+    let pattern = pattern.ok_or_else(|| Error::Parse("expected pattern in match clause".into()))?;
     Ok(Statement::Match(MatchClause {
         pattern,
         where_clause,
@@ -87,7 +87,7 @@ pub(super) fn build_merge_statement(pair: Pair<Rule>) -> Result<Statement> {
         }
     }
 
-    let pattern = pattern.ok_or_else(|| Error::Parse("MERGE requires a pattern".into()))?;
+    let pattern = pattern.ok_or_else(|| Error::Parse("expected pattern in merge clause".into()))?;
     Ok(Statement::Merge(MergeClause {
         pattern,
         on_create,
@@ -109,7 +109,8 @@ pub(super) fn build_merge_action(pair: Pair<Rule>) -> Result<(bool, SetClause)> 
         }
     }
 
-    let set_clause = set_clause.ok_or_else(|| Error::Parse("Merge action requires SET".into()))?;
+    let set_clause =
+        set_clause.ok_or_else(|| Error::Parse("expected set clause in merge action".into()))?;
     Ok((is_create, set_clause))
 }
 
@@ -186,7 +187,7 @@ pub(super) fn build_set_item(pair: Pair<Rule>) -> Result<SetItem> {
                     Rule::Expression => {
                         // This is actually setting a variable to a value, treat as error for now
                         return Err(Error::Parse(
-                            "Setting variable to expression not supported, use property access"
+                            "expected property access in set item, setting variable to expression not supported"
                                 .into(),
                         ));
                     }
@@ -196,7 +197,7 @@ pub(super) fn build_set_item(pair: Pair<Rule>) -> Result<SetItem> {
         }
     }
 
-    Err(Error::Parse("Invalid SET item".into()))
+    Err(Error::Parse("expected valid set item".into()))
 }
 
 /// Extract variable and property from a PropertyExpression.
@@ -226,9 +227,9 @@ pub(super) fn build_property_expression_parts(pair: Pair<Rule>) -> Result<(Strin
     }
 
     let variable =
-        variable.ok_or_else(|| Error::Parse("Property expression missing variable".into()))?;
+        variable.ok_or_else(|| Error::Parse("expected variable in property expression".into()))?;
     let property =
-        property.ok_or_else(|| Error::Parse("Property expression missing property".into()))?;
+        property.ok_or_else(|| Error::Parse("expected property in property expression".into()))?;
     Ok((variable, property))
 }
 
@@ -240,7 +241,7 @@ pub(super) fn build_where_clause(pair: Pair<Rule>) -> Result<WhereClause> {
             return Ok(WhereClause { predicate });
         }
     }
-    Err(Error::Parse("WHERE requires an expression".into()))
+    Err(Error::Parse("expected expression in where clause".into()))
 }
 
 /// Build a RETURN clause.
@@ -250,7 +251,9 @@ pub(super) fn build_return_clause(pair: Pair<Rule>) -> Result<ReturnClause> {
             return build_projection_body(inner);
         }
     }
-    Err(Error::Parse("RETURN requires projection body".into()))
+    Err(Error::Parse(
+        "expected projection body in return clause".into(),
+    ))
 }
 
 /// Build projection body (the part after RETURN/WITH).
@@ -330,7 +333,7 @@ pub(super) fn build_projection_item(pair: Pair<Rule>) -> Result<ReturnItem> {
     }
 
     let expression =
-        expression.ok_or_else(|| Error::Parse("Projection item requires expression".into()))?;
+        expression.ok_or_else(|| Error::Parse("expected expression in projection item".into()))?;
     Ok(ReturnItem { expression, alias })
 }
 
@@ -364,7 +367,7 @@ pub(super) fn build_sort_item(pair: Pair<Rule>) -> Result<OrderByItem> {
     }
 
     let expression =
-        expression.ok_or_else(|| Error::Parse("Sort item requires expression".into()))?;
+        expression.ok_or_else(|| Error::Parse("expected expression in sort item".into()))?;
     Ok(OrderByItem {
         expression,
         descending,
@@ -379,8 +382,10 @@ pub(super) fn build_skip_or_limit(pair: Pair<Rule>) -> Result<u64> {
             if let Expression::Literal(super::super::ast::Literal::Integer(n)) = expr {
                 return Ok(n as u64);
             }
-            return Err(Error::Parse("SKIP/LIMIT requires integer literal".into()));
+            return Err(Error::Parse(
+                "expected integer literal in skip/limit".into(),
+            ));
         }
     }
-    Err(Error::Parse("SKIP/LIMIT requires expression".into()))
+    Err(Error::Parse("expected expression in skip/limit".into()))
 }

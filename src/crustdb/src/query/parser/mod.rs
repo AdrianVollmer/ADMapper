@@ -73,7 +73,7 @@ fn build_ast(pairs: Pairs<Rule>) -> Result<Statement> {
             _ => continue,
         }
     }
-    Err(Error::Parse("Empty query".into()))
+    Err(Error::Parse("expected at least one query statement".into()))
 }
 
 /// Build AST from a RegularQuery, which may contain UNION ALL clauses.
@@ -139,7 +139,8 @@ fn build_multi_part_query(pair: Pair<Rule>) -> Result<Statement> {
             }
             Rule::UpdatingClause => {
                 return Err(Error::Parse(
-                    "Updating clauses before WITH not yet supported".into(),
+                    "expected supported clause, updating clauses before with not yet supported"
+                        .into(),
                 ));
             }
             Rule::With => {
@@ -159,8 +160,9 @@ fn build_multi_part_query(pair: Pair<Rule>) -> Result<Statement> {
                     }
                 }
 
-                let with_clause = with_clause
-                    .ok_or_else(|| Error::Parse("WITH requires projection body".into()))?;
+                let with_clause = with_clause.ok_or_else(|| {
+                    Error::Parse("expected projection body in with clause".into())
+                })?;
 
                 // Build the MatchClause for this stage if there was a MATCH
                 let match_clause = if let Some(match_pair) = current_reading.take() {
@@ -177,8 +179,8 @@ fn build_multi_part_query(pair: Pair<Rule>) -> Result<Statement> {
                             _ => {}
                         }
                     }
-                    let pattern =
-                        pattern.ok_or_else(|| Error::Parse("MATCH requires a pattern".into()))?;
+                    let pattern = pattern
+                        .ok_or_else(|| Error::Parse("expected pattern in match clause".into()))?;
                     Some(MatchClause {
                         pattern,
                         where_clause,
@@ -204,8 +206,8 @@ fn build_multi_part_query(pair: Pair<Rule>) -> Result<Statement> {
         }
     }
 
-    let final_query =
-        final_query.ok_or_else(|| Error::Parse("Multi-part query requires a final part".into()))?;
+    let final_query = final_query
+        .ok_or_else(|| Error::Parse("expected final part in multi-part query".into()))?;
 
     Ok(Statement::Pipeline {
         stages,
@@ -291,7 +293,9 @@ fn build_single_part_query(pair: Pair<Rule>) -> Result<Statement> {
 
     // Standalone DELETE or SET without MATCH is not supported
     if delete_clause.is_some() || set_clause.is_some() {
-        return Err(Error::Parse("DELETE and SET require a MATCH clause".into()));
+        return Err(Error::Parse(
+            "expected match clause before delete or set".into(),
+        ));
     }
 
     // Standalone RETURN (e.g., RETURN 1, RETURN "hello")
@@ -299,7 +303,7 @@ fn build_single_part_query(pair: Pair<Rule>) -> Result<Statement> {
         return Ok(Statement::Return(ret));
     }
 
-    Err(Error::Parse("Unsupported query type".into()))
+    Err(Error::Parse("expected supported query type".into()))
 }
 
 /// Check if a Cypher query is syntactically valid without building an AST.
