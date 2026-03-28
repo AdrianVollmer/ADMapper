@@ -183,20 +183,24 @@ function subscribeTauri<T>(
 ): Unsubscribe {
   let unlistenFn: (() => void) | null = null;
   let cancelled = false;
+  let abortController: AbortController | null = null;
 
   // For sseOnly channels, fetch initial state via the sseUrl
   // In Tauri mode, this maps to a command (e.g., GET /api/query/activity -> get_query_activity)
   if (channel.sseOnly) {
     const url = typeof channel.sseUrl === "function" ? channel.sseUrl(params) : channel.sseUrl;
+    abortController = new AbortController();
     api
-      .get<T>(url)
+      .get<T>(url, abortController.signal)
       .then((initial) => {
         if (!cancelled) {
           handler(initial);
         }
       })
       .catch((err) => {
-        console.warn(`Failed to fetch initial state for ${channel.name}:`, err);
+        if (!cancelled) {
+          console.warn(`Failed to fetch initial state for ${channel.name}:`, err);
+        }
       });
   }
 
@@ -225,6 +229,9 @@ function subscribeTauri<T>(
 
   return () => {
     cancelled = true;
+    if (abortController) {
+      abortController.abort();
+    }
     if (unlistenFn) {
       unlistenFn();
     }
