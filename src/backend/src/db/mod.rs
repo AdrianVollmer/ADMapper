@@ -9,6 +9,8 @@ pub mod algorithms;
 pub mod backend;
 #[cfg(feature = "crustdb")]
 pub mod crustdb;
+#[cfg(any(feature = "falkordb", feature = "neo4j"))]
+pub(crate) mod cypher_common;
 #[cfg(feature = "falkordb")]
 pub mod falkordb;
 #[cfg(feature = "neo4j")]

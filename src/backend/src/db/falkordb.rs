@@ -2,17 +2,21 @@
 //!
 //! FalkorDB is a Redis-based graph database that supports Cypher queries.
 //! Uses the `falkordb` crate for connection.
+//!
+//! Shared Cypher logic lives in `cypher_common`; this file contains only
+//! FalkorDB-specific connection handling and methods that require
+//! FalkorDB-specific query syntax.
 
 use falkordb::{FalkorClientBuilder, FalkorConnectionInfo, SyncGraph};
 use serde_json::{json, Map, Value as JsonValue};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Mutex;
 use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
+use super::cypher_common::{self, CypherExecutor};
 use super::types::{
-    json_to_cypher_props, CypherEscapeStyle, DbEdge, DbError, DbNode, DetailedStats,
-    ReachabilityInsight, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbError, DbNode, DetailedStats, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX,
 };
 
 /// FalkorDB database backend.
@@ -89,7 +93,7 @@ impl FalkorDbDatabase {
         Ok((headers, rows))
     }
 
-    /// Execute a query and parse the results (rows only).
+    /// Execute a query and return rows only.
     fn execute_query(&self, cypher: &str) -> Result<Vec<Vec<JsonValue>>> {
         let (_, rows) = self.execute_query_full(cypher)?;
         Ok(rows)
@@ -109,51 +113,25 @@ impl FalkorDbDatabase {
 
         Ok(())
     }
+}
 
-    /// Parse a node from FalkorDB result.
-    fn parse_node(value: &JsonValue) -> Option<DbNode> {
-        let obj = value.as_object()?;
+// ========================================================================
+// CypherExecutor implementation
+// ========================================================================
 
-        let id = obj
-            .get("properties")
-            .and_then(|p| p.get("objectid"))
-            .and_then(|v| v.as_str())
-            .or_else(|| obj.get("id").and_then(|v| v.as_i64()).map(|_| ""))
-            .map(|s| s.to_string())
-            .unwrap_or_default();
+impl CypherExecutor for FalkorDbDatabase {
+    fn exec_rows(&self, cypher: &str) -> Result<Vec<Vec<JsonValue>>> {
+        self.execute_query(cypher)
+    }
 
-        let name = obj
-            .get("properties")
-            .and_then(|p| p.get("name"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| id.clone());
-
-        let label = obj
-            .get("labels")
-            .and_then(|l| l.as_array())
-            .and_then(|arr| {
-                arr.iter()
-                    .find(|v| v.as_str() != Some("Base"))
-                    .or_else(|| arr.first())
-            })
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        let properties = obj
-            .get("properties")
-            .cloned()
-            .unwrap_or(JsonValue::Object(Map::new()));
-
-        Some(DbNode {
-            id,
-            name,
-            label,
-            properties,
-        })
+    fn exec_write(&self, cypher: &str) -> Result<()> {
+        self.run_query(cypher)
     }
 }
+
+// ========================================================================
+// FalkorDB value conversion
+// ========================================================================
 
 /// Convert FalkorDB value to JSON.
 fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
@@ -176,7 +154,6 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
             JsonValue::Object(obj)
         }
         falkordb::FalkorValue::Node(node) => {
-            // Get objectid from properties if available
             let objectid = node
                 .properties
                 .get("objectid")
@@ -232,13 +209,14 @@ fn falkor_value_to_json(value: falkordb::FalkorValue) -> JsonValue {
         falkordb::FalkorValue::Point(point) => {
             json!({ "latitude": point.latitude, "longitude": point.longitude })
         }
-        falkordb::FalkorValue::Vec32(_) => {
-            // Vec32 is a special vector type, represent as string
-            JsonValue::String("[vector]".to_string())
-        }
+        falkordb::FalkorValue::Vec32(_) => JsonValue::String("[vector]".to_string()),
         falkordb::FalkorValue::Unparseable(s) => JsonValue::String(s),
     }
 }
+
+// ========================================================================
+// DatabaseBackend implementation
+// ========================================================================
 
 impl DatabaseBackend for FalkorDbDatabase {
     fn name(&self) -> &'static str {
@@ -260,34 +238,14 @@ impl DatabaseBackend for FalkorDbDatabase {
 
     fn clear(&self) -> Result<()> {
         info!("Clearing all data from FalkorDB");
-        // Delete all nodes and relationships in one pass
         self.run_query("MATCH (n) DETACH DELETE n")?;
 
-        // Create indexes on objectid for fast MERGE lookups during import
-        // BloodHound node types that need indexes
         debug!("Creating objectid indexes for faster imports");
-        let labels = [
-            "User",
-            "Computer",
-            "Group",
-            "Domain",
-            "OU",
-            "GPO",
-            "Container",
-            "CertTemplate",
-            "EnterpriseCA",
-            "RootCA",
-            "AIACA",
-            "NTAuthStore",
-            "Base", // For placeholder nodes
-        ];
-
-        for label in labels {
-            // FalkorDB uses CREATE INDEX syntax
-            // Base label is used on all nodes for index-backed MERGE lookups
+        for label in cypher_common::NODE_LABELS {
             let index_query = format!("CREATE INDEX FOR (n:{}) ON (n.objectid)", label);
-            // Ignore errors (index may already exist)
-            let _ = self.run_query(&index_query);
+            if let Err(e) = self.run_query(&index_query) {
+                debug!("Index creation skipped for {}: {}", label, e);
+            }
         }
 
         debug!("Database cleared and indexes created");
@@ -305,51 +263,7 @@ impl DatabaseBackend for FalkorDbDatabase {
     }
 
     fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
-        if nodes.is_empty() {
-            return Ok(0);
-        }
-
-        // Group nodes by label for efficient batching
-        let mut nodes_by_label: std::collections::HashMap<String, Vec<&DbNode>> =
-            std::collections::HashMap::new();
-        for node in nodes {
-            nodes_by_label
-                .entry(node.label.clone())
-                .or_default()
-                .push(node);
-        }
-
-        // Batch insert nodes of each label using UNWIND with flattened properties
-        // MERGE on :Base label so the Base.objectid index is used for fast lookups.
-        // All nodes carry :Base as a secondary label to enable index-backed MERGE.
-        const BATCH_SIZE: usize = 500;
-        for (cypher_label, label_nodes) in nodes_by_label {
-            for chunk in label_nodes.chunks(BATCH_SIZE) {
-                // Build list of flattened property maps
-                let items: Vec<String> = chunk
-                    .iter()
-                    .map(|n| {
-                        let flat_props = n.flatten_properties(true);
-                        json_to_cypher_props(&flat_props, CypherEscapeStyle::Backslash)
-                    })
-                    .collect();
-
-                // MERGE on :Base to use the objectid index, then add the real label
-                // REMOVE n.placeholder clears the placeholder marker if this was a placeholder
-                let cypher = format!(
-                    "UNWIND [{}] AS props \
-                     MERGE (n:Base {{objectid: props.objectid}}) \
-                     SET n:{}, n += props \
-                     REMOVE n.placeholder",
-                    items.join(", "),
-                    cypher_label
-                );
-
-                self.run_query(&cypher)?;
-            }
-        }
-
-        Ok(nodes.len())
+        cypher_common::insert_nodes(self, nodes)
     }
 
     fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
@@ -367,17 +281,16 @@ impl DatabaseBackend for FalkorDbDatabase {
                 .push(relationship);
         }
 
-        // Batch insert relationships of each type using UNWIND
-        // MERGE on :Base label so the Base.objectid index is used for fast lookups
-        const BATCH_SIZE: usize = 500;
+        // FalkorDB requires a two-step approach: ensure placeholder nodes exist
+        // first, then create edges. This avoids FalkorDB's UNWIND+MERGE row
+        // collapsing which causes subsequent CREATE to lose edges when multiple
+        // rows reference the same source/target node.
         let mut inserted = 0;
         for (rel_type, type_edges) in edges_by_type {
-            for chunk in type_edges.chunks(BATCH_SIZE) {
-                // Build the list literal for UNWIND
+            for chunk in type_edges.chunks(cypher_common::BATCH_SIZE) {
                 let items: Vec<String> = chunk
                     .iter()
                     .map(|e| {
-                        // Escape backslashes first, then quotes, to avoid double-escaping
                         let src = e.source.replace('\\', "\\\\").replace('\'', "\\'");
                         let tgt = e.target.replace('\\', "\\\\").replace('\'', "\\'");
                         let src_type = e
@@ -406,10 +319,6 @@ impl DatabaseBackend for FalkorDbDatabase {
                 let items_str = items.join(", ");
 
                 // Step 1: Ensure all referenced nodes exist (placeholder if needed).
-                // Done as a separate query to avoid FalkorDB's UNWIND+MERGE row
-                // collapsing, which causes subsequent CREATE to lose edges when
-                // multiple rows reference the same source/target node.
-                // MERGE on :Base to use the objectid index for fast lookups.
                 let ensure_nodes = format!(
                     "UNWIND [{}] AS row \
                      MERGE (a:Base {{objectid: row.src}}) \
@@ -445,132 +354,36 @@ impl DatabaseBackend for FalkorDbDatabase {
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {
-        let node_rows = self.execute_query("MATCH (n) RETURN count(n) AS count")?;
-        let node_count = node_rows
-            .first()
-            .and_then(|r| r.first())
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as usize;
-
-        let edge_rows = self.execute_query("MATCH ()-[r]->() RETURN count(r) AS count")?;
-        let edge_count = edge_rows
-            .first()
-            .and_then(|r| r.first())
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as usize;
-
-        Ok((node_count, edge_count))
+        cypher_common::get_stats(self)
     }
 
     fn get_detailed_stats(&self) -> Result<DetailedStats> {
-        let (total_nodes, total_edges) = self.get_stats()?;
-
-        // Get counts by label (filter out Base which is a secondary label on all nodes)
-        let rows = self.execute_query(
-            "MATCH (n) WITH [l IN labels(n) WHERE l <> 'Base'][0] AS label \
-             RETURN label, count(*) AS count",
-        )?;
-
-        let mut type_counts: HashMap<String, usize> = HashMap::new();
-        for row in rows {
-            if row.len() >= 2 {
-                if let (Some(label), Some(count)) = (row[0].as_str(), row[1].as_i64()) {
-                    type_counts.insert(label.to_string(), count as usize);
-                }
-            }
-        }
-
-        Ok(DetailedStats {
-            total_nodes,
-            total_edges,
-            users: type_counts.get("User").copied().unwrap_or(0),
-            computers: type_counts.get("Computer").copied().unwrap_or(0),
-            groups: type_counts.get("Group").copied().unwrap_or(0),
-            domains: type_counts.get("Domain").copied().unwrap_or(0),
-            ous: type_counts.get("OU").copied().unwrap_or(0),
-            gpos: type_counts.get("GPO").copied().unwrap_or(0),
-            database_size_bytes: None,
-            cache_entries: None,
-            cache_size_bytes: None,
-        })
+        cypher_common::get_detailed_stats(self)
     }
 
     fn get_security_insights(&self) -> Result<SecurityInsights> {
         debug!("Computing security insights");
 
-        // Count total users
-        let user_rows = self.execute_query("MATCH (n:User) RETURN count(n) AS count")?;
-        let total_users = user_rows
-            .first()
-            .and_then(|r| r.first())
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as usize;
+        let total_users = cypher_common::count_total_users(self)?;
 
-        // Find real DAs
-        let real_da_query = format!(
+        // FalkorDB requires WITH shortestPath(...) syntax
+        let real_da_rows = self.exec_rows(&format!(
             "MATCH (u:User), (g:Group) \
              WHERE g.objectid ENDS WITH '{}' \
              WITH u, g, shortestPath((u)-[:MemberOf*1..]->(g)) AS p \
              WHERE p IS NOT NULL \
              RETURN DISTINCT u.objectid AS id, u.name AS name",
             DOMAIN_ADMIN_SID_SUFFIX
-        );
-        let real_da_rows = self.execute_query(&real_da_query)?;
+        ))?;
+        let real_das = cypher_common::parse_real_das(&real_da_rows);
 
-        let real_das: Vec<(String, String)> = real_da_rows
-            .iter()
-            .filter_map(|r| {
-                let id = r.first()?.as_str()?.to_string();
-                let name = r.get(1).and_then(|v| v.as_str()).unwrap_or(&id).to_string();
-                Some((id, name))
-            })
-            .collect();
-
-        // Find effective DAs by reusing the paths-to-DA query with no exclusions.
         let effective_das: Vec<(String, String, usize)> = self
             .find_paths_to_domain_admins(&[])?
             .into_iter()
             .map(|(id, _label, name, hops)| (id, name, hops))
             .collect();
 
-        // Compute reachability from well-known principals.
-        // Look up each principal but skip the expensive untyped variable-length
-        // path traversal (OPTIONAL MATCH -[*1..5]->) which causes timeouts in
-        // FalkorDB. Use a simple direct-neighbor count instead.
-        let mut reachability = Vec::new();
-        for (name, pattern) in WELL_KNOWN_PRINCIPALS {
-            let cypher = if pattern.starts_with('-') {
-                format!(
-                    "MATCH (p) WHERE p.objectid ENDS WITH '{}' \
-                     OPTIONAL MATCH (p)-[r]->(t) WHERE type(r) <> 'MemberOf' \
-                     RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
-                    pattern
-                )
-            } else {
-                format!(
-                    "MATCH (p {{objectid: '{}'}}) \
-                     OPTIONAL MATCH (p)-[r]->(t) WHERE type(r) <> 'MemberOf' \
-                     RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
-                    pattern
-                )
-            };
-
-            let rows = self.execute_query(&cypher).unwrap_or_default();
-            let (principal_id, reachable_count) = rows
-                .first()
-                .map(|r| {
-                    let id = r.first().and_then(|v| v.as_str()).map(|s| s.to_string());
-                    let cnt = r.get(1).and_then(|v| v.as_i64()).unwrap_or(0) as usize;
-                    (id, cnt)
-                })
-                .unwrap_or((None, 0));
-
-            reachability.push(ReachabilityInsight {
-                principal_name: name.to_string(),
-                principal_id,
-                reachable_count,
-            });
-        }
+        let reachability = cypher_common::compute_reachability(self);
 
         Ok(SecurityInsights::from_counts(
             total_users,
@@ -581,199 +394,35 @@ impl DatabaseBackend for FalkorDbDatabase {
     }
 
     fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
-        let rows = self.execute_query("MATCH (n) RETURN n")?;
-
-        let nodes: Vec<DbNode> = rows
-            .iter()
-            .filter_map(|r| r.first())
-            .filter_map(Self::parse_node)
-            .collect();
-
-        Ok(nodes)
+        cypher_common::get_all_nodes(self)
     }
 
     fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
-        let rows = self.execute_query(
-            "MATCH (a)-[r]->(b) RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel"
-        )?;
-
-        let relationships: Vec<DbEdge> = rows
-            .iter()
-            .filter_map(|r| {
-                let src = r.first()?.as_str()?.to_string();
-                let tgt = r.get(1)?.as_str()?.to_string();
-                let typ = r.get(2)?.as_str()?.to_string();
-                let props = r
-                    .get(3)
-                    .and_then(|v| v.get("properties"))
-                    .cloned()
-                    .unwrap_or(JsonValue::Object(Map::new()));
-                Some(DbEdge {
-                    source: src,
-                    target: tgt,
-                    rel_type: typ,
-                    properties: props,
-                    ..Default::default()
-                })
-            })
-            .collect();
-
-        Ok(relationships)
+        cypher_common::get_all_edges(self)
     }
 
     fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let id_list: Vec<String> = ids
-            .iter()
-            .map(|id| format!("'{}'", id.replace('\'', "\\'")))
-            .collect();
-
-        let cypher = format!(
-            "MATCH (n) WHERE n.objectid IN [{}] RETURN n",
-            id_list.join(", ")
-        );
-
-        let rows = self.execute_query(&cypher)?;
-        let nodes: Vec<DbNode> = rows
-            .iter()
-            .filter_map(|r| r.first())
-            .filter_map(Self::parse_node)
-            .collect();
-
-        Ok(nodes)
+        cypher_common::get_nodes_by_ids(self, ids)
     }
 
     fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>> {
-        if node_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let id_list: Vec<String> = node_ids
-            .iter()
-            .map(|id| format!("'{}'", id.replace('\'', "\\'")))
-            .collect();
-        let id_set = id_list.join(", ");
-
-        let cypher = format!(
-            "MATCH (a)-[r]->(b) \
-             WHERE a.objectid IN [{}] AND b.objectid IN [{}] \
-             RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel",
-            id_set, id_set
-        );
-
-        let rows = self.execute_query(&cypher)?;
-        let relationships: Vec<DbEdge> = rows
-            .iter()
-            .filter_map(|r| {
-                let src = r.first()?.as_str()?.to_string();
-                let tgt = r.get(1)?.as_str()?.to_string();
-                let typ = r.get(2)?.as_str()?.to_string();
-                let props = r
-                    .get(3)
-                    .and_then(|v| v.get("properties"))
-                    .cloned()
-                    .unwrap_or(JsonValue::Object(Map::new()));
-                Some(DbEdge {
-                    source: src,
-                    target: tgt,
-                    rel_type: typ,
-                    properties: props,
-                    ..Default::default()
-                })
-            })
-            .collect();
-
-        Ok(relationships)
+        cypher_common::get_edges_between(self, node_ids)
     }
 
     fn get_edge_types(&self) -> Result<Vec<String>> {
-        let rows = self.execute_query("MATCH ()-[r]->() RETURN DISTINCT type(r) AS typ")?;
-
-        let types: Vec<String> = rows
-            .iter()
-            .filter_map(|r| r.first())
-            .filter_map(|v| v.as_str())
-            .map(|s| s.to_string())
-            .collect();
-
-        Ok(types)
+        cypher_common::get_edge_types(self)
     }
 
     fn get_node_types(&self) -> Result<Vec<String>> {
-        // Use UNWIND + DISTINCT to get all labels, filtering out "Base"
-        let rows = self.execute_query(
-            "MATCH (n) UNWIND labels(n) AS label \
-             WITH DISTINCT label WHERE label <> 'Base' \
-             RETURN label ORDER BY label",
-        )?;
-
-        let types: Vec<String> = rows
-            .iter()
-            .filter_map(|r| r.first())
-            .filter_map(|v| v.as_str())
-            .map(|s| s.to_string())
-            .collect();
-
-        Ok(types)
+        cypher_common::get_node_types(self)
     }
 
-    fn search_nodes(&self, search_query: &str, limit: usize) -> Result<Vec<DbNode>> {
-        let pattern = search_query.replace('\'', "\\'").to_lowercase();
-
-        let cypher = format!(
-            "MATCH (n) WHERE toLower(n.name) CONTAINS '{}' OR toLower(n.objectid) CONTAINS '{}' \
-             RETURN n LIMIT {}",
-            pattern, pattern, limit
-        );
-
-        let rows = self.execute_query(&cypher)?;
-        let nodes: Vec<DbNode> = rows
-            .iter()
-            .filter_map(|r| r.first())
-            .filter_map(Self::parse_node)
-            .collect();
-
-        debug!(query = %search_query, found = nodes.len(), "Search complete");
-        Ok(nodes)
+    fn search_nodes(&self, query: &str, limit: usize) -> Result<Vec<DbNode>> {
+        cypher_common::search_nodes(self, query, limit)
     }
 
     fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {
-        let id_escaped = identifier.replace('\'', "\\'");
-
-        // Try exact objectid match
-        let cypher = format!(
-            "MATCH (n {{objectid: '{}'}}) RETURN n.objectid AS id LIMIT 1",
-            id_escaped
-        );
-
-        let rows = self.execute_query(&cypher)?;
-        if let Some(id) = rows
-            .first()
-            .and_then(|r| r.first())
-            .and_then(|v| v.as_str())
-        {
-            return Ok(Some(id.to_string()));
-        }
-
-        // Try case-insensitive name match
-        let cypher = format!(
-            "MATCH (n) WHERE toLower(n.name) = toLower('{}') RETURN n.objectid AS id LIMIT 1",
-            id_escaped
-        );
-
-        let rows = self.execute_query(&cypher)?;
-        if let Some(id) = rows
-            .first()
-            .and_then(|r| r.first())
-            .and_then(|v| v.as_str())
-        {
-            return Ok(Some(id.to_string()));
-        }
-
-        Ok(None)
+        cypher_common::resolve_node_identifier(self, identifier)
     }
 
     fn get_node_connections(
@@ -781,80 +430,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         node_id: &str,
         direction: &str,
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
-        debug!(node_id = %node_id, direction = %direction, "Getting node connections");
-
-        let id_escaped = node_id.replace('\'', "\\'");
-
-        let cypher = match direction {
-            "incoming" => format!(
-                "MATCH (a)-[r]->(b {{objectid: '{}'}}) RETURN a, r, b",
-                id_escaped
-            ),
-            "outgoing" => format!(
-                "MATCH (a {{objectid: '{}'}})-[r]->(b) RETURN a, r, b",
-                id_escaped
-            ),
-            "admin" => format!(
-                "MATCH (a {{objectid: '{}'}})-[r]->(b) \
-                 WHERE type(r) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember'] \
-                 RETURN a, r, b",
-                id_escaped
-            ),
-            "memberof" => format!(
-                "MATCH (a {{objectid: '{}'}})-[r:MemberOf]->(b) RETURN a, r, b",
-                id_escaped
-            ),
-            "members" => format!(
-                "MATCH (a)-[r:MemberOf]->(b {{objectid: '{}'}}) RETURN a, r, b",
-                id_escaped
-            ),
-            _ => format!(
-                "MATCH (a {{objectid: '{}'}})-[r]-(b) RETURN a, r, b",
-                id_escaped
-            ),
-        };
-
-        let rows = self.execute_query(&cypher)?;
-
-        let mut node_ids: HashSet<String> = HashSet::new();
-        node_ids.insert(node_id.to_string());
-
-        let mut relationships = Vec::new();
-        for row in &rows {
-            if row.len() >= 3 {
-                if let (Some(src_node), Some(tgt_node)) =
-                    (Self::parse_node(&row[0]), Self::parse_node(&row[2]))
-                {
-                    node_ids.insert(src_node.id.clone());
-                    node_ids.insert(tgt_node.id.clone());
-
-                    if let Some(rel) = row[1].as_object() {
-                        let rel_type = rel
-                            .get("type")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("RELATED")
-                            .to_string();
-                        let props = rel
-                            .get("properties")
-                            .cloned()
-                            .unwrap_or(JsonValue::Object(Map::new()));
-
-                        relationships.push(DbEdge {
-                            source: src_node.id,
-                            target: tgt_node.id,
-                            rel_type,
-                            properties: props,
-                            ..Default::default()
-                        });
-                    }
-                }
-            }
-        }
-
-        let node_id_vec: Vec<String> = node_ids.into_iter().collect();
-        let nodes = self.get_nodes_by_ids(&node_id_vec)?;
-
-        Ok((nodes, relationships))
+        cypher_common::get_node_connections(self, node_id, direction)
     }
 
     fn get_node_relationship_counts(
@@ -862,22 +438,22 @@ impl DatabaseBackend for FalkorDbDatabase {
         node_id: &str,
     ) -> Result<(usize, usize, usize, usize, usize)> {
         let id_escaped = node_id.replace('\'', "\\'");
+        let admin_types = cypher_common::admin_types_cypher_list();
 
-        // Use WITH to chain counts and avoid Cartesian product explosion
-        // Each OPTIONAL MATCH is followed by aggregation before the next
+        // Use WITH chaining to avoid Cartesian product explosion.
+        // FalkorDB doesn't support CALL subqueries, so we chain aggregations.
         let cypher = format!(
-            "MATCH (n {{objectid: '{}'}})
+            "MATCH (n {{objectid: '{id_escaped}'}})
              OPTIONAL MATCH (n)<-[]-(in_node)
              WITH n, count(DISTINCT in_node) AS incoming
              OPTIONAL MATCH (n)-[]->(out_node)
              WITH n, incoming, count(DISTINCT out_node) AS outgoing
-             OPTIONAL MATCH (n)-[admin]->(admin_node) WHERE type(admin) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember']
+             OPTIONAL MATCH (n)-[admin]->(admin_node) WHERE type(admin) IN [{admin_types}]
              WITH n, incoming, outgoing, count(DISTINCT admin_node) AS admin_to
              OPTIONAL MATCH (n)-[:MemberOf]->(mo_node)
              WITH n, incoming, outgoing, admin_to, count(DISTINCT mo_node) AS member_of
              OPTIONAL MATCH (n)<-[:MemberOf]-(mem_node)
-             RETURN incoming, outgoing, admin_to, member_of, count(DISTINCT mem_node) AS members",
-            id_escaped
+             RETURN incoming, outgoing, admin_to, member_of, count(DISTINCT mem_node) AS members"
         );
 
         let rows = self.execute_query(&cypher)?;
@@ -902,7 +478,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let id_escaped = node_id.replace('\'', "\\'");
         let suffix_escaped = sid_suffix.replace('\'', "\\'");
 
-        // Use variable-length path to find transitive MemberOf membership
+        // FalkorDB requires WITH shortestPath(...) syntax
         let cypher = format!(
             "MATCH (n {{objectid: '{}'}}), (g) \
              WHERE g.objectid ENDS WITH '{}' \
@@ -923,7 +499,11 @@ impl DatabaseBackend for FalkorDbDatabase {
         Ok(None)
     }
 
-    fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
+    fn shortest_path(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));
         }
@@ -931,8 +511,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         let from_escaped = from.replace('\'', "\\'");
         let to_escaped = to.replace('\'', "\\'");
 
-        // FalkorDB requires endpoints to be resolved before shortestPath call
-        // and uses WITH clause syntax per docs: WITH shortestPath(...) as p
+        // FalkorDB requires WITH shortestPath(...) syntax
         let cypher = format!(
             "MATCH (a {{objectid: '{}'}}), (b {{objectid: '{}'}}) \
              WITH shortestPath((a)-[*..20]->(b)) AS p \
@@ -961,7 +540,7 @@ impl DatabaseBackend for FalkorDbDatabase {
                         let rel_type = if i < rels.len() {
                             rels[i]
                                 .as_object()
-                                .and_then(|o| o.get("type"))
+                                .and_then(|o| o.get("rel_type"))
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string())
                         } else {
@@ -971,7 +550,6 @@ impl DatabaseBackend for FalkorDbDatabase {
                         path.push((node_id, rel_type));
                     }
 
-                    // Last node has no outgoing relationship
                     if let Some(last) = path.last_mut() {
                         last.1 = None;
                     }
@@ -990,21 +568,9 @@ impl DatabaseBackend for FalkorDbDatabase {
     ) -> Result<Vec<(String, String, String, usize)>> {
         debug!(exclude = ?exclude_edge_types, "Finding paths to Domain Admins");
 
-        let exclude_clause = if exclude_edge_types.is_empty() {
-            String::new()
-        } else {
-            let types: Vec<String> = exclude_edge_types
-                .iter()
-                .map(|t| format!("'{}'", t))
-                .collect();
-            format!(
-                "AND NONE(r IN relationships(p) WHERE type(r) IN [{}])",
-                types.join(", ")
-            )
-        };
+        let exclude_clause = cypher_common::build_exclude_clause(exclude_edge_types);
 
-        // FalkorDB only supports shortestPath in WITH/RETURN clauses,
-        // not in MATCH patterns.
+        // FalkorDB requires WITH shortestPath(...) syntax
         let cypher = format!(
             "MATCH (u:User), (da:Group) \
              WHERE da.objectid ENDS WITH '-512' \
@@ -1016,27 +582,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         );
 
         let rows = self.execute_query(&cypher)?;
-
-        let mut results = Vec::new();
-        let mut seen: HashSet<String> = HashSet::new();
-
-        for row in rows {
-            if row.len() >= 3 {
-                if let (Some(id), Some(name), Some(hops)) =
-                    (row[0].as_str(), row[1].as_str(), row[2].as_i64())
-                {
-                    if !seen.contains(id) {
-                        seen.insert(id.to_string());
-                        results.push((
-                            id.to_string(),
-                            "User".to_string(),
-                            name.to_string(),
-                            hops as usize,
-                        ));
-                    }
-                }
-            }
-        }
+        let results = cypher_common::parse_paths_to_da_results(&rows);
 
         debug!(result_count = results.len(), "Found users with paths to DA");
         Ok(results)
@@ -1044,9 +590,7 @@ impl DatabaseBackend for FalkorDbDatabase {
 
     fn run_custom_query(&self, cypher: &str) -> Result<JsonValue> {
         debug!(query = %cypher, "Running custom Cypher query");
-
         let (headers, rows) = self.execute_query_full(cypher)?;
-
         Ok(json!({ "headers": headers, "rows": rows }))
     }
 }

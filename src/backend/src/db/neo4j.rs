@@ -1,18 +1,25 @@
 //! Neo4j database backend.
 //!
 //! Uses the `neo4rs` crate for connecting to Neo4j via Bolt protocol.
+//!
+//! Shared Cypher logic lives in `cypher_common`; this file contains only
+//! Neo4j-specific connection handling and methods that require
+//! Neo4j-specific query syntax.
 
-use neo4rs::{query, ConfigBuilder, Graph, Node as Neo4jNode, Path, Query, Relation, Row};
+use neo4rs::{
+    query, ConfigBuilder, Graph, Node as Neo4jNode, Path, Query, Relation, Row,
+    UnboundedRelation,
+};
 use serde_json::{json, Map, Value as JsonValue};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::runtime::{Handle, Runtime};
 use tracing::{debug, info};
 
 use super::backend::{DatabaseBackend, QueryLanguage};
+use super::cypher_common::{self, CypherExecutor};
 use super::types::{
-    json_to_cypher_props, CypherEscapeStyle, DbEdge, DbNode, DetailedStats, ReachabilityInsight,
-    Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbNode, DetailedStats, Result, SecurityInsights, DOMAIN_ADMIN_SID_SUFFIX,
 };
 
 /// Neo4j database backend.
@@ -57,7 +64,6 @@ impl Neo4jDatabase {
 
         info!(uri = %uri, user = %user, use_ssl = %use_ssl, "Connecting to Neo4j");
 
-        // Try to get existing runtime handle, or create our own runtime
         let runtime = match Handle::try_current() {
             Ok(handle) => RuntimeHandle::Handle(handle),
             Err(_) => {
@@ -68,7 +74,6 @@ impl Neo4jDatabase {
             }
         };
 
-        // Connect to Neo4j with limited connection pool to reduce retry attempts
         let config = ConfigBuilder::default()
             .uri(&uri)
             .user(&user)
@@ -105,7 +110,6 @@ impl Neo4jDatabase {
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
 
-        // Convert all properties to JSON
         let mut properties = Map::new();
         for key in node.keys() {
             if let Ok(val) = node.get::<String>(key) {
@@ -129,32 +133,135 @@ impl Neo4jDatabase {
         }
     }
 
-    /// Convert a Neo4j relation to DbEdge.
-    fn neo4j_relation_to_db_edge(rel: &Relation, source_id: &str, target_id: &str) -> DbEdge {
-        let rel_type = rel.typ().to_string();
-
-        // Convert properties to JSON
-        let mut properties = Map::new();
-        for key in rel.keys() {
-            if let Ok(val) = rel.get::<String>(key) {
-                properties.insert(key.to_string(), JsonValue::String(val));
-            } else if let Ok(val) = rel.get::<i64>(key) {
-                properties.insert(key.to_string(), JsonValue::Number(val.into()));
-            } else if let Ok(val) = rel.get::<bool>(key) {
-                properties.insert(key.to_string(), JsonValue::Bool(val));
-            }
-        }
-
-        DbEdge {
-            source: source_id.to_string(),
-            target: target_id.to_string(),
-            rel_type,
-            properties: JsonValue::Object(properties),
-            ..Default::default()
-        }
+    /// Convert a Neo4j Row to a positional Vec<JsonValue>.
+    ///
+    /// Handles Node, Relation, Path, and scalar types so that shared logic
+    /// in `cypher_common` can parse results identically to FalkorDB.
+    fn row_to_json_vec(row: &Row) -> Vec<JsonValue> {
+        let keys: Vec<String> = row.keys().iter().map(|k| k.to_string()).collect();
+        keys.iter()
+            .map(|col| {
+                if let Ok(node) = row.get::<Neo4jNode>(col) {
+                    let db_node = Self::neo4j_node_to_db_node(&node);
+                    json!({
+                        "_type": "node",
+                        "id": node.id(),
+                        "objectid": db_node.id,
+                        "labels": node.labels(),
+                        "properties": db_node.properties,
+                    })
+                } else if let Ok(rel) = row.get::<Relation>(col) {
+                    Self::relation_to_json(&rel)
+                } else if let Ok(path) = row.get::<Path>(col) {
+                    Self::path_to_json(&path)
+                } else if let Ok(val) = row.get::<String>(col) {
+                    JsonValue::String(val)
+                } else if let Ok(val) = row.get::<i64>(col) {
+                    JsonValue::Number(val.into())
+                } else if let Ok(val) = row.get::<f64>(col) {
+                    serde_json::Number::from_f64(val)
+                        .map(JsonValue::Number)
+                        .unwrap_or(JsonValue::Null)
+                } else if let Ok(val) = row.get::<bool>(col) {
+                    JsonValue::Bool(val)
+                } else if let Ok(val) = row.get::<Vec<String>>(col) {
+                    JsonValue::Array(val.into_iter().map(JsonValue::String).collect())
+                } else if let Ok(val) = row.get::<Vec<i64>>(col) {
+                    JsonValue::Array(
+                        val.into_iter()
+                            .map(|v| JsonValue::Number(v.into()))
+                            .collect(),
+                    )
+                } else {
+                    JsonValue::Null
+                }
+            })
+            .collect()
     }
 
-    /// Execute a query and return all rows.
+    /// Convert a Neo4j Relation to JSON.
+    fn relation_to_json(rel: &Relation) -> JsonValue {
+        let mut props = Map::new();
+        for key in rel.keys() {
+            if let Ok(v) = rel.get::<String>(key) {
+                props.insert(key.to_string(), JsonValue::String(v));
+            } else if let Ok(v) = rel.get::<i64>(key) {
+                props.insert(key.to_string(), JsonValue::Number(v.into()));
+            } else if let Ok(v) = rel.get::<bool>(key) {
+                props.insert(key.to_string(), JsonValue::Bool(v));
+            }
+        }
+        json!({
+            "_type": "relationship",
+            "id": rel.id(),
+            "source": rel.start_node_id(),
+            "target": rel.end_node_id(),
+            "rel_type": rel.typ(),
+            "properties": props,
+        })
+    }
+
+    /// Convert a Neo4j UnboundedRelation (from paths) to JSON.
+    fn unbounded_relation_to_json(rel: &UnboundedRelation) -> JsonValue {
+        let mut props = Map::new();
+        for key in rel.keys() {
+            if let Ok(v) = rel.get::<String>(key) {
+                props.insert(key.to_string(), JsonValue::String(v));
+            } else if let Ok(v) = rel.get::<i64>(key) {
+                props.insert(key.to_string(), JsonValue::Number(v.into()));
+            } else if let Ok(v) = rel.get::<bool>(key) {
+                props.insert(key.to_string(), JsonValue::Bool(v));
+            }
+        }
+        json!({
+            "_type": "relationship",
+            "id": rel.id(),
+            "rel_type": rel.typ(),
+            "properties": props,
+        })
+    }
+
+    /// Convert a Neo4j Path to JSON.
+    fn path_to_json(path: &Path) -> JsonValue {
+        let path_nodes = path.nodes();
+        let nodes: Vec<JsonValue> = path_nodes
+            .iter()
+            .map(|node| {
+                let db_node = Self::neo4j_node_to_db_node(node);
+                json!({
+                    "_type": "node",
+                    "id": node.id(),
+                    "objectid": db_node.id,
+                    "labels": node.labels(),
+                    "properties": db_node.properties,
+                })
+            })
+            .collect();
+        let relationships: Vec<JsonValue> = path
+            .rels()
+            .iter()
+            .enumerate()
+            .map(|(i, rel)| {
+                let mut rel_json = Self::unbounded_relation_to_json(rel);
+                // Override source/target from path node positions
+                if let Some(obj) = rel_json.as_object_mut() {
+                    let source = path_nodes.get(i).map(|n| n.id()).unwrap_or(0);
+                    let target = path_nodes.get(i + 1).map(|n| n.id()).unwrap_or(0);
+                    obj.insert("source".to_string(), json!(source));
+                    obj.insert("target".to_string(), json!(target));
+                }
+                rel_json
+            })
+            .collect();
+        json!({
+            "_type": "path",
+            "nodes": nodes,
+            "relationships": relationships,
+        })
+    }
+
+    /// Execute a typed query and return all rows.
+    /// Used by backend-specific methods that need parameterized queries.
     fn execute_query(&self, q: Query) -> Result<Vec<Row>> {
         let graph = self.graph.clone();
         self.runtime.block_on(async {
@@ -167,7 +274,8 @@ impl Neo4jDatabase {
         })
     }
 
-    /// Execute a write-only query.
+    /// Execute a typed write-only query.
+    /// Used by backend-specific methods that need parameterized queries.
     fn run_query(&self, q: Query) -> Result<()> {
         let graph = self.graph.clone();
         self.runtime.block_on(async {
@@ -176,6 +284,25 @@ impl Neo4jDatabase {
         })
     }
 }
+
+// ========================================================================
+// CypherExecutor implementation
+// ========================================================================
+
+impl CypherExecutor for Neo4jDatabase {
+    fn exec_rows(&self, cypher: &str) -> Result<Vec<Vec<JsonValue>>> {
+        let rows = self.execute_query(query(cypher))?;
+        Ok(rows.iter().map(|row| Self::row_to_json_vec(row)).collect())
+    }
+
+    fn exec_write(&self, cypher: &str) -> Result<()> {
+        self.run_query(query(cypher))
+    }
+}
+
+// ========================================================================
+// DatabaseBackend implementation
+// ========================================================================
 
 impl DatabaseBackend for Neo4jDatabase {
     fn name(&self) -> &'static str {
@@ -197,29 +324,10 @@ impl DatabaseBackend for Neo4jDatabase {
 
     fn clear(&self) -> Result<()> {
         info!("Clearing all data from Neo4j");
-        // Delete all nodes and relationships in one pass
         self.run_query(query("MATCH (n) DETACH DELETE n"))?;
 
-        // Create indexes on objectid for fast MERGE lookups during import
-        // BloodHound node types that need indexes
         debug!("Creating objectid indexes for faster imports");
-        let labels = [
-            "User",
-            "Computer",
-            "Group",
-            "Domain",
-            "OU",
-            "GPO",
-            "Container",
-            "CertTemplate",
-            "EnterpriseCA",
-            "RootCA",
-            "AIACA",
-            "NTAuthStore",
-            "Base", // For placeholder nodes and index-backed MERGE lookups
-        ];
-
-        for label in labels {
+        for label in cypher_common::NODE_LABELS {
             // Try modern syntax first (Neo4j 4.0+)
             let modern_query = format!(
                 "CREATE INDEX idx_{}_objectid IF NOT EXISTS FOR (n:{}) ON (n.objectid)",
@@ -229,7 +337,9 @@ impl DatabaseBackend for Neo4jDatabase {
             if self.run_query(query(&modern_query)).is_err() {
                 // Fall back to legacy syntax
                 let legacy_query = format!("CREATE INDEX ON :{}(objectid)", label);
-                let _ = self.run_query(query(&legacy_query));
+                if let Err(e) = self.run_query(query(&legacy_query)) {
+                    debug!("Index creation skipped for {}: {}", label, e);
+                }
             }
         }
 
@@ -248,50 +358,7 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
-        if nodes.is_empty() {
-            return Ok(0);
-        }
-
-        // Group nodes by label for efficient batching
-        let mut nodes_by_label: HashMap<String, Vec<&DbNode>> = HashMap::new();
-        for node in nodes {
-            nodes_by_label
-                .entry(node.label.clone())
-                .or_default()
-                .push(node);
-        }
-
-        // Batch insert nodes of each label using UNWIND with flattened properties
-        // MERGE on :Base label so the Base.objectid index is used for fast lookups.
-        // All nodes carry :Base as a secondary label to enable index-backed MERGE.
-        const BATCH_SIZE: usize = 500;
-        for (cypher_label, label_nodes) in nodes_by_label {
-            for chunk in label_nodes.chunks(BATCH_SIZE) {
-                // Build list of flattened property maps
-                let items: Vec<String> = chunk
-                    .iter()
-                    .map(|n| {
-                        let flat_props = n.flatten_properties(true);
-                        json_to_cypher_props(&flat_props, CypherEscapeStyle::Backslash)
-                    })
-                    .collect();
-
-                // MERGE on :Base to use the objectid index, then add the real label
-                // REMOVE n.placeholder clears the placeholder marker if this was a placeholder
-                let cypher = format!(
-                    "UNWIND [{}] AS props \
-                     MERGE (n:Base {{objectid: props.objectid}}) \
-                     SET n:{}, n += props \
-                     REMOVE n.placeholder",
-                    items.join(", "),
-                    cypher_label
-                );
-
-                self.run_query(query(&cypher))?;
-            }
-        }
-
-        Ok(nodes.len())
+        cypher_common::insert_nodes(self, nodes)
     }
 
     fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
@@ -300,7 +367,8 @@ impl DatabaseBackend for Neo4jDatabase {
         }
 
         // Group relationships by type for efficient batching
-        let mut edges_by_type: HashMap<String, Vec<&DbEdge>> = HashMap::new();
+        let mut edges_by_type: std::collections::HashMap<String, Vec<&DbEdge>> =
+            std::collections::HashMap::new();
         for relationship in relationships {
             edges_by_type
                 .entry(relationship.rel_type.clone())
@@ -308,12 +376,11 @@ impl DatabaseBackend for Neo4jDatabase {
                 .push(relationship);
         }
 
-        // Batch insert relationships of each type using UNWIND
-        // MERGE on :Base label so the Base.objectid index is used for fast lookups
-        const BATCH_SIZE: usize = 1000;
+        // Neo4j supports parameterized UNWIND with a single MERGE for both
+        // placeholder nodes and edge creation.
         let mut inserted = 0;
         for (rel_type, type_edges) in edges_by_type {
-            for chunk in type_edges.chunks(BATCH_SIZE) {
+            for chunk in type_edges.chunks(cypher_common::BATCH_SIZE) {
                 let srcs: Vec<String> = chunk.iter().map(|e| e.source.clone()).collect();
                 let tgts: Vec<String> = chunk.iter().map(|e| e.target.clone()).collect();
                 let src_types: Vec<String> = chunk
@@ -329,8 +396,6 @@ impl DatabaseBackend for Neo4jDatabase {
                     .map(|e| serde_json::to_string(&e.properties).unwrap_or_default())
                     .collect();
 
-                // MERGE on :Base to use the objectid index for fast lookups.
-                // Placeholder nodes are created with :Base label if they don't exist.
                 let q = query(&format!(
                     "UNWIND range(0, size($srcs)-1) AS i \
                      MERGE (a:Base {{objectid: $srcs[i]}}) \
@@ -367,63 +432,19 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {
-        let node_rows = self.execute_query(query("MATCH (n) RETURN count(n) AS count"))?;
-        let node_count = node_rows
-            .first()
-            .and_then(|r| r.get::<i64>("count").ok())
-            .unwrap_or(0) as usize;
-
-        let edge_rows = self.execute_query(query("MATCH ()-[r]->() RETURN count(r) AS count"))?;
-        let edge_count = edge_rows
-            .first()
-            .and_then(|r| r.get::<i64>("count").ok())
-            .unwrap_or(0) as usize;
-
-        Ok((node_count, edge_count))
+        cypher_common::get_stats(self)
     }
 
     fn get_detailed_stats(&self) -> Result<DetailedStats> {
-        let (total_nodes, total_edges) = self.get_stats()?;
-
-        // Get counts by label (filter out Base which is a secondary label on all nodes)
-        let rows = self.execute_query(query(
-            "MATCH (n) WITH [l IN labels(n) WHERE l <> 'Base'][0] AS label \
-             RETURN label, count(*) AS count",
-        ))?;
-
-        let mut type_counts: HashMap<String, usize> = HashMap::new();
-        for row in rows {
-            if let (Ok(label), Ok(count)) = (row.get::<String>("label"), row.get::<i64>("count")) {
-                type_counts.insert(label, count as usize);
-            }
-        }
-
-        Ok(DetailedStats {
-            total_nodes,
-            total_edges,
-            users: type_counts.get("User").copied().unwrap_or(0),
-            computers: type_counts.get("Computer").copied().unwrap_or(0),
-            groups: type_counts.get("Group").copied().unwrap_or(0),
-            domains: type_counts.get("Domain").copied().unwrap_or(0),
-            ous: type_counts.get("OU").copied().unwrap_or(0),
-            gpos: type_counts.get("GPO").copied().unwrap_or(0),
-            database_size_bytes: None,
-            cache_entries: None,
-            cache_size_bytes: None,
-        })
+        cypher_common::get_detailed_stats(self)
     }
 
     fn get_security_insights(&self) -> Result<SecurityInsights> {
         debug!("Computing security insights");
 
-        // Count total users
-        let user_rows = self.execute_query(query("MATCH (n:User) RETURN count(n) AS count"))?;
-        let total_users = user_rows
-            .first()
-            .and_then(|r| r.get::<i64>("count").ok())
-            .unwrap_or(0) as usize;
+        let total_users = cypher_common::count_total_users(self)?;
 
-        // Find real DAs (direct MemberOf path to DA groups)
+        // Neo4j supports p = shortestPath(...) in MATCH
         let real_da_query = format!(
             "MATCH (u:User), (g:Group), p = shortestPath((u)-[:MemberOf*1..]->(g)) \
              WHERE g.objectid ENDS WITH '{}' \
@@ -431,7 +452,6 @@ impl DatabaseBackend for Neo4jDatabase {
             DOMAIN_ADMIN_SID_SUFFIX
         );
         let real_da_rows = self.execute_query(query(&real_da_query))?;
-
         let real_das: Vec<(String, String)> = real_da_rows
             .iter()
             .filter_map(|r| {
@@ -441,51 +461,13 @@ impl DatabaseBackend for Neo4jDatabase {
             })
             .collect();
 
-        // Find effective DAs by reusing the paths-to-DA query with no exclusions.
         let effective_das: Vec<(String, String, usize)> = self
             .find_paths_to_domain_admins(&[])?
             .into_iter()
             .map(|(id, _label, name, hops)| (id, name, hops))
             .collect();
 
-        // Compute reachability from well-known principals.
-        // Use direct-neighbor count to avoid expensive untyped variable-length
-        // path traversals. Full transitive reachability is deferred to a
-        // future dedicated analysis pass.
-        let mut reachability = Vec::new();
-        for (name, pattern) in WELL_KNOWN_PRINCIPALS {
-            let q = if pattern.starts_with('-') {
-                query(&format!(
-                    "MATCH (p) WHERE p.objectid ENDS WITH '{}' \
-                     OPTIONAL MATCH (p)-[r]->(t) WHERE type(r) <> 'MemberOf' \
-                     RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
-                    pattern
-                ))
-            } else {
-                query(&format!(
-                    "MATCH (p {{objectid: '{}'}}) \
-                     OPTIONAL MATCH (p)-[r]->(t) WHERE type(r) <> 'MemberOf' \
-                     RETURN p.objectid AS id, count(DISTINCT t) AS cnt LIMIT 1",
-                    pattern
-                ))
-            };
-
-            let rows = self.execute_query(q).unwrap_or_default();
-            let (principal_id, reachable_count) = rows
-                .first()
-                .map(|r| {
-                    let id = r.get::<String>("id").ok();
-                    let cnt = r.get::<i64>("cnt").ok().unwrap_or(0) as usize;
-                    (id, cnt)
-                })
-                .unwrap_or((None, 0));
-
-            reachability.push(ReachabilityInsight {
-                principal_name: name.to_string(),
-                principal_id,
-                reachable_count,
-            });
-        }
+        let reachability = cypher_common::compute_reachability(self);
 
         Ok(SecurityInsights::from_counts(
             total_users,
@@ -496,150 +478,35 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn get_all_nodes(&self) -> Result<Vec<DbNode>> {
-        let rows = self.execute_query(query("MATCH (n) RETURN n"))?;
-
-        let nodes: Vec<DbNode> = rows
-            .iter()
-            .filter_map(|r| r.get::<Neo4jNode>("n").ok())
-            .map(|n| Self::neo4j_node_to_db_node(&n))
-            .collect();
-
-        Ok(nodes)
+        cypher_common::get_all_nodes(self)
     }
 
     fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
-        let rows = self.execute_query(query(
-            "MATCH (a)-[r]->(b) RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel"
-        ))?;
-
-        let relationships: Vec<DbEdge> = rows
-            .iter()
-            .filter_map(|r| {
-                let src = r.get::<String>("src").ok()?;
-                let tgt = r.get::<String>("tgt").ok()?;
-                let rel = r.get::<Relation>("rel").ok()?;
-                Some(Self::neo4j_relation_to_db_edge(&rel, &src, &tgt))
-            })
-            .collect();
-
-        Ok(relationships)
+        cypher_common::get_all_edges(self)
     }
 
     fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let q = query("MATCH (n) WHERE n.objectid IN $ids RETURN n").param("ids", ids.to_vec());
-
-        let rows = self.execute_query(q)?;
-        let nodes: Vec<DbNode> = rows
-            .iter()
-            .filter_map(|r| r.get::<Neo4jNode>("n").ok())
-            .map(|n| Self::neo4j_node_to_db_node(&n))
-            .collect();
-
-        Ok(nodes)
+        cypher_common::get_nodes_by_ids(self, ids)
     }
 
     fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>> {
-        if node_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let q = query(
-            "MATCH (a)-[r]->(b) \
-             WHERE a.objectid IN $ids AND b.objectid IN $ids \
-             RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel",
-        )
-        .param("ids", node_ids.to_vec());
-
-        let rows = self.execute_query(q)?;
-        let relationships: Vec<DbEdge> = rows
-            .iter()
-            .filter_map(|r| {
-                let src = r.get::<String>("src").ok()?;
-                let tgt = r.get::<String>("tgt").ok()?;
-                let rel = r.get::<Relation>("rel").ok()?;
-                Some(Self::neo4j_relation_to_db_edge(&rel, &src, &tgt))
-            })
-            .collect();
-
-        Ok(relationships)
+        cypher_common::get_edges_between(self, node_ids)
     }
 
     fn get_edge_types(&self) -> Result<Vec<String>> {
-        let rows = self.execute_query(query("MATCH ()-[r]->() RETURN DISTINCT type(r) AS typ"))?;
-
-        let types: Vec<String> = rows
-            .iter()
-            .filter_map(|r| r.get::<String>("typ").ok())
-            .collect();
-
-        Ok(types)
+        cypher_common::get_edge_types(self)
     }
 
     fn get_node_types(&self) -> Result<Vec<String>> {
-        // Use UNWIND + DISTINCT to get all labels, filtering out "Base"
-        let rows = self.execute_query(query(
-            "MATCH (n) UNWIND labels(n) AS label \
-             WITH DISTINCT label WHERE label <> 'Base' \
-             RETURN label ORDER BY label",
-        ))?;
-
-        let types: Vec<String> = rows
-            .iter()
-            .filter_map(|r| r.get::<String>("label").ok())
-            .collect();
-
-        Ok(types)
+        cypher_common::get_node_types(self)
     }
 
     fn search_nodes(&self, search_query: &str, limit: usize) -> Result<Vec<DbNode>> {
-        // Use toLower and CONTAINS for case-insensitive search (simpler than regex)
-        let q = query(
-            "MATCH (n) WHERE toLower(n.name) CONTAINS toLower($search) OR toLower(n.objectid) CONTAINS toLower($search) RETURN n LIMIT $limit"
-        )
-        .param("search", search_query.to_string())
-        .param("limit", limit as i64);
-
-        let rows = self.execute_query(q)?;
-        let nodes: Vec<DbNode> = rows
-            .iter()
-            .filter_map(|r| r.get::<Neo4jNode>("n").ok())
-            .map(|n| Self::neo4j_node_to_db_node(&n))
-            .collect();
-
-        debug!(query = %search_query, found = nodes.len(), "Search complete");
-        Ok(nodes)
+        cypher_common::search_nodes(self, search_query, limit)
     }
 
     fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {
-        // Try exact objectid match
-        let q = query("MATCH (n {objectid: $id}) RETURN n.objectid AS id LIMIT 1")
-            .param("id", identifier.to_string());
-
-        let rows = self.execute_query(q)?;
-        if let Some(row) = rows.first() {
-            if let Ok(id) = row.get::<String>("id") {
-                return Ok(Some(id));
-            }
-        }
-
-        // Try case-insensitive name match
-        let q = query(
-            "MATCH (n) WHERE toLower(n.name) = toLower($name) RETURN n.objectid AS id LIMIT 1",
-        )
-        .param("name", identifier.to_string());
-
-        let rows = self.execute_query(q)?;
-        if let Some(row) = rows.first() {
-            if let Ok(id) = row.get::<String>("id") {
-                return Ok(Some(id));
-            }
-        }
-
-        Ok(None)
+        cypher_common::resolve_node_identifier(self, identifier)
     }
 
     fn get_node_connections(
@@ -647,73 +514,25 @@ impl DatabaseBackend for Neo4jDatabase {
         node_id: &str,
         direction: &str,
     ) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
-        debug!(node_id = %node_id, direction = %direction, "Getting node connections");
-
-        let q = match direction {
-            "incoming" => query(
-                "MATCH (a)-[r]->(b {objectid: $id}) RETURN a, r, b"
-            ),
-            "outgoing" => query(
-                "MATCH (a {objectid: $id})-[r]->(b) RETURN a, r, b"
-            ),
-            "admin" => query(
-                "MATCH (a {objectid: $id})-[r]->(b) \
-                 WHERE type(r) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember'] \
-                 RETURN a, r, b"
-            ),
-            "memberof" => query(
-                "MATCH (a {objectid: $id})-[r:MemberOf]->(b) RETURN a, r, b"
-            ),
-            "members" => query(
-                "MATCH (a)-[r:MemberOf]->(b {objectid: $id}) RETURN a, r, b"
-            ),
-            _ => query(
-                "MATCH (a {objectid: $id})-[r]-(b) RETURN a, r, b"
-            ),
-        }
-        .param("id", node_id.to_string());
-
-        let rows = self.execute_query(q)?;
-
-        let mut node_ids: HashSet<String> = HashSet::new();
-        node_ids.insert(node_id.to_string());
-
-        let mut relationships = Vec::new();
-        for row in &rows {
-            if let (Ok(a), Ok(r), Ok(b)) = (
-                row.get::<Neo4jNode>("a"),
-                row.get::<Relation>("r"),
-                row.get::<Neo4jNode>("b"),
-            ) {
-                let src = Self::neo4j_node_to_db_node(&a);
-                let tgt = Self::neo4j_node_to_db_node(&b);
-                node_ids.insert(src.id.clone());
-                node_ids.insert(tgt.id.clone());
-                relationships.push(Self::neo4j_relation_to_db_edge(&r, &src.id, &tgt.id));
-            }
-        }
-
-        let node_id_vec: Vec<String> = node_ids.into_iter().collect();
-        let nodes = self.get_nodes_by_ids(&node_id_vec)?;
-
-        Ok((nodes, relationships))
+        cypher_common::get_node_connections(self, node_id, direction)
     }
 
     fn get_node_relationship_counts(
         &self,
         node_id: &str,
     ) -> Result<(usize, usize, usize, usize, usize)> {
-        // Use separate CALL subqueries to avoid Cartesian product explosion
-        // Each count is independent and efficient
-        let q = query(
-            "MATCH (n {objectid: $id})
-             CALL { WITH n MATCH (n)<-[]-(in_node) RETURN count(DISTINCT in_node) AS incoming }
-             CALL { WITH n MATCH (n)-[]->(out_node) RETURN count(DISTINCT out_node) AS outgoing }
-             CALL { WITH n MATCH (n)-[admin]->(admin_node) WHERE type(admin) IN ['AdminTo', 'GenericAll', 'GenericWrite', 'Owns', 'WriteDacl', 'WriteOwner', 'AllExtendedRights', 'ForceChangePassword', 'AddMember'] RETURN count(DISTINCT admin_node) AS admin_to }
-             CALL { WITH n MATCH (n)-[:MemberOf]->(mo_node) RETURN count(DISTINCT mo_node) AS member_of }
-             CALL { WITH n MATCH (n)<-[:MemberOf]-(mem_node) RETURN count(DISTINCT mem_node) AS members }
+        let admin_types = cypher_common::admin_types_cypher_list();
+
+        // Neo4j supports CALL subqueries to avoid Cartesian product explosion
+        let q = query(&format!(
+            "MATCH (n {{objectid: $id}})
+             CALL {{ WITH n MATCH (n)<-[]-(in_node) RETURN count(DISTINCT in_node) AS incoming }}
+             CALL {{ WITH n MATCH (n)-[]->(out_node) RETURN count(DISTINCT out_node) AS outgoing }}
+             CALL {{ WITH n MATCH (n)-[admin]->(admin_node) WHERE type(admin) IN [{admin_types}] RETURN count(DISTINCT admin_node) AS admin_to }}
+             CALL {{ WITH n MATCH (n)-[:MemberOf]->(mo_node) RETURN count(DISTINCT mo_node) AS member_of }}
+             CALL {{ WITH n MATCH (n)<-[:MemberOf]-(mem_node) RETURN count(DISTINCT mem_node) AS members }}
              RETURN incoming, outgoing, admin_to, member_of, members"
-        )
+        ))
         .param("id", node_id.to_string());
 
         let rows = self.execute_query(q)?;
@@ -735,9 +554,6 @@ impl DatabaseBackend for Neo4jDatabase {
         node_id: &str,
         sid_suffix: &str,
     ) -> Result<Option<String>> {
-        // Use variable-length path to find transitive MemberOf membership.
-        // The n <> g guard prevents Neo4j's "start and end nodes are the same"
-        // error when the node itself matches the SID suffix.
         let q = query(
             "MATCH p = shortestPath((n {objectid: $id})-[:MemberOf*1..20]->(g)) \
              WHERE g.objectid ENDS WITH $suffix AND n <> g \
@@ -757,7 +573,11 @@ impl DatabaseBackend for Neo4jDatabase {
         Ok(None)
     }
 
-    fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
+    fn shortest_path(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));
         }
@@ -787,7 +607,6 @@ impl DatabaseBackend for Neo4jDatabase {
                     };
                     path.push((node_id.clone(), rel_type));
                 }
-                // Last node has no outgoing relationship
                 if let Some(last) = path.last_mut() {
                     last.1 = None;
                 }
@@ -804,19 +623,9 @@ impl DatabaseBackend for Neo4jDatabase {
     ) -> Result<Vec<(String, String, String, usize)>> {
         debug!(exclude = ?exclude_edge_types, "Finding paths to Domain Admins");
 
-        let exclude_clause = if exclude_edge_types.is_empty() {
-            String::new()
-        } else {
-            let types: Vec<String> = exclude_edge_types
-                .iter()
-                .map(|t| format!("'{}'", t))
-                .collect();
-            format!(
-                "AND NONE(r IN relationships(p) WHERE type(r) IN [{}])",
-                types.join(", ")
-            )
-        };
+        let exclude_clause = cypher_common::build_exclude_clause(exclude_edge_types);
 
+        // Neo4j supports p = shortestPath(...) in MATCH
         let q = query(&format!(
             "MATCH (u:User), (da:Group), \
              p = shortestPath((u)-[*1..10]->(da)) \
@@ -830,7 +639,6 @@ impl DatabaseBackend for Neo4jDatabase {
 
         let mut results = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
-
         for row in rows {
             if let (Ok(id), Ok(name), Ok(hops)) = (
                 row.get::<String>("id"),
@@ -851,7 +659,6 @@ impl DatabaseBackend for Neo4jDatabase {
     fn run_custom_query(&self, cypher: &str) -> Result<JsonValue> {
         debug!(query = %cypher, "Running custom Cypher query");
 
-        // Execute the query and collect results
         let graph = self.graph.clone();
         let cypher = cypher.to_string();
         let (headers, rows) = self.runtime.block_on(async {
@@ -860,125 +667,10 @@ impl DatabaseBackend for Neo4jDatabase {
             let mut headers: Vec<String> = Vec::new();
 
             while let Some(row) = stream.next().await? {
-                // Extract column names from the first row
                 if headers.is_empty() {
                     headers = row.keys().iter().map(|k| k.to_string()).collect();
                 }
-
-                let mut row_values: Vec<JsonValue> = Vec::new();
-
-                for col in &headers {
-                    // Try different types for each column
-                    let val: Option<JsonValue> = if let Ok(node) =
-                        row.get::<Neo4jNode>(col.as_str())
-                    {
-                        // Convert node with _type marker for graph extraction
-                        let db_node = Neo4jDatabase::neo4j_node_to_db_node(&node);
-                        Some(json!({
-                            "_type": "node",
-                            "id": node.id(),
-                            "objectid": db_node.id,
-                            "labels": node.labels(),
-                            "properties": db_node.properties,
-                        }))
-                    } else if let Ok(rel) = row.get::<Relation>(col) {
-                        // Convert relationship with _type marker for graph extraction
-                        let mut props = Map::new();
-                        for key in rel.keys() {
-                            if let Ok(v) = rel.get::<String>(key) {
-                                props.insert(key.to_string(), JsonValue::String(v));
-                            } else if let Ok(v) = rel.get::<i64>(key) {
-                                props.insert(key.to_string(), JsonValue::Number(v.into()));
-                            } else if let Ok(v) = rel.get::<bool>(key) {
-                                props.insert(key.to_string(), JsonValue::Bool(v));
-                            }
-                        }
-                        Some(json!({
-                            "_type": "relationship",
-                            "id": rel.id(),
-                            "source": rel.start_node_id(),
-                            "target": rel.end_node_id(),
-                            "rel_type": rel.typ(),
-                            "properties": props,
-                        }))
-                    } else if let Ok(path) = row.get::<Path>(col) {
-                        // Convert path with _type marker for graph extraction
-                        // Get all nodes first so we can derive relationship endpoints
-                        let path_nodes = path.nodes();
-                        let nodes: Vec<JsonValue> = path_nodes
-                            .iter()
-                            .map(|node| {
-                                let db_node = Neo4jDatabase::neo4j_node_to_db_node(node);
-                                json!({
-                                    "_type": "node",
-                                    "id": node.id(),
-                                    "objectid": db_node.id,
-                                    "labels": node.labels(),
-                                    "properties": db_node.properties,
-                                })
-                            })
-                            .collect();
-                        // Relationships connect consecutive nodes in the path
-                        // Relationship i connects node i to node i+1
-                        let relationships: Vec<JsonValue> = path
-                            .rels()
-                            .iter()
-                            .enumerate()
-                            .map(|(i, rel)| {
-                                let mut props = Map::new();
-                                for key in rel.keys() {
-                                    if let Ok(v) = rel.get::<String>(key) {
-                                        props.insert(key.to_string(), JsonValue::String(v));
-                                    } else if let Ok(v) = rel.get::<i64>(key) {
-                                        props.insert(key.to_string(), JsonValue::Number(v.into()));
-                                    } else if let Ok(v) = rel.get::<bool>(key) {
-                                        props.insert(key.to_string(), JsonValue::Bool(v));
-                                    }
-                                }
-                                // Get source/target from adjacent nodes in the path
-                                let source = path_nodes.get(i).map(|n| n.id()).unwrap_or(0);
-                                let target = path_nodes.get(i + 1).map(|n| n.id()).unwrap_or(0);
-                                json!({
-                                    "_type": "relationship",
-                                    "id": rel.id(),
-                                    "source": source,
-                                    "target": target,
-                                    "rel_type": rel.typ(),
-                                    "properties": props,
-                                })
-                            })
-                            .collect();
-                        Some(json!({
-                            "_type": "path",
-                            "nodes": nodes,
-                            "relationships": relationships,
-                        }))
-                    } else if let Ok(val) = row.get::<String>(col) {
-                        Some(JsonValue::String(val))
-                    } else if let Ok(val) = row.get::<i64>(col) {
-                        Some(JsonValue::Number(val.into()))
-                    } else if let Ok(val) = row.get::<f64>(col) {
-                        serde_json::Number::from_f64(val).map(JsonValue::Number)
-                    } else if let Ok(val) = row.get::<bool>(col) {
-                        Some(JsonValue::Bool(val))
-                    } else if let Ok(val) = row.get::<Vec<String>>(col) {
-                        Some(JsonValue::Array(
-                            val.into_iter().map(JsonValue::String).collect(),
-                        ))
-                    } else if let Ok(val) = row.get::<Vec<i64>>(col) {
-                        Some(JsonValue::Array(
-                            val.into_iter()
-                                .map(|v| JsonValue::Number(v.into()))
-                                .collect(),
-                        ))
-                    } else {
-                        None
-                    };
-
-                    row_values.push(val.unwrap_or(JsonValue::Null));
-                }
-
-                rows.push(JsonValue::Array(row_values));
+                rows.push(JsonValue::Array(Self::row_to_json_vec(&row)));
             }
 
             Ok::<_, neo4rs::Error>((headers, rows))
