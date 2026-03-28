@@ -138,10 +138,11 @@ impl CrustDatabase {
             .stats()
             .map_err(|e| DbError::Database(e.to_string()))?;
 
-        // Get all label counts in a single SQL query
+        // Get label counts excluding placeholder nodes (created during
+        // relationship import for referenced-but-not-yet-imported nodes).
         let label_counts = self
             .db
-            .get_label_counts()
+            .get_label_counts_excluding("placeholder")
             .map_err(|e| DbError::Database(e.to_string()))?;
 
         // Get database size and cache stats

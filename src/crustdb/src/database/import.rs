@@ -165,6 +165,16 @@ impl super::Database {
         storage.get_label_counts()
     }
 
+    /// Like `get_label_counts`, but excludes nodes where the given property
+    /// is truthy. Useful for filtering out placeholder nodes from statistics.
+    pub fn get_label_counts_excluding(&self, property: &str) -> Result<HashMap<String, usize>> {
+        let storage = self
+            .write_conn
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        storage.get_label_counts_excluding(property)
+    }
+
     /// Find outgoing relationships from a node by objectid.
     ///
     /// Returns `(target_objectid, rel_type)` tuples for all outgoing relationships.

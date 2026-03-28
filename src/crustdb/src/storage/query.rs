@@ -787,4 +787,35 @@ impl SqliteStorage {
 
         Ok(counts)
     }
+
+    /// Get counts for all node labels, excluding nodes where a given property
+    /// is truthy (`= 1` in JSON). Useful for filtering out placeholder or
+    /// synthetic nodes from stats.
+    pub fn get_label_counts_excluding(
+        &self,
+        property: &str,
+    ) -> Result<std::collections::HashMap<String, usize>> {
+        let query = format!(
+            "SELECT nl.name, COUNT(*) as cnt
+             FROM node_labels nl
+             JOIN node_label_map nlm ON nl.id = nlm.label_id
+             JOIN nodes n ON n.id = nlm.node_id
+             WHERE json_extract(n.properties, '$.{}') IS NULL
+             GROUP BY nl.id, nl.name",
+            property
+        );
+        let mut stmt = self.conn.prepare_cached(&query)?;
+
+        let mut counts = std::collections::HashMap::new();
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+        })?;
+
+        for row in rows {
+            let (label, count) = row?;
+            counts.insert(label, count);
+        }
+
+        Ok(counts)
+    }
 }

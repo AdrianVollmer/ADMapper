@@ -1272,3 +1272,43 @@ async fn test_insert_edges_same_objectid_different_types_no_conflict() {
     assert!(result.is_ok(), "insert_edges should not fail: {:?}", result);
     assert_eq!(result.unwrap(), 2);
 }
+
+/// Regression test: detailed stats must not count placeholder nodes in
+/// per-type counts. Placeholders are synthetic nodes created during
+/// relationship import and should not inflate group/user/etc. counts.
+#[tokio::test]
+async fn test_detailed_stats_excludes_placeholder_nodes() {
+    let app = TestApp::new();
+
+    // Insert a real Group node
+    app.db()
+        .insert_nodes(&[DbNode {
+            id: "real-group".to_string(),
+            name: "Real Group".to_string(),
+            label: "Group".to_string(),
+            properties: json!({}),
+        }])
+        .unwrap();
+
+    // Insert an edge that creates a placeholder Group node
+    app.db()
+        .insert_edges(&[DbEdge {
+            source: "some-user".to_string(),
+            target: "phantom-group".to_string(),
+            rel_type: "MemberOf".to_string(),
+            properties: json!({}),
+            source_type: Some("User".to_string()),
+            target_type: Some("Group".to_string()),
+        }])
+        .unwrap();
+
+    let (status, json) = get_json(app.router(), "/api/graph/detailed-stats").await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Only the real group should be counted, not the placeholder
+    let groups = json["groups"].as_u64().unwrap();
+    assert_eq!(
+        groups, 1,
+        "placeholder Group should not be counted in stats"
+    );
+}
