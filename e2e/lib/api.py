@@ -94,7 +94,9 @@ class APIClient:
         """Make a GET request."""
         return self._request("GET", endpoint, **kwargs)
 
-    def post(self, endpoint: str, data: dict[str, Any] | None = None, **kwargs: Any) -> APIResponse:
+    def post(
+        self, endpoint: str, data: dict[str, Any] | None = None, **kwargs: Any
+    ) -> APIResponse:
         """Make a POST request."""
         return self._request("POST", endpoint, data=data, **kwargs)
 
@@ -136,7 +138,9 @@ class APIClient:
         """Get query history."""
         return self.get(f"/api/query-history?page={page}&per_page={per_page}")
 
-    def search(self, query: str, limit: int = 10, node_type: str | None = None) -> APIResponse:
+    def search(
+        self, query: str, limit: int = 10, node_type: str | None = None
+    ) -> APIResponse:
         """Search the graph."""
         params = {"q": query, "limit": str(limit)}
         if node_type:
@@ -280,9 +284,7 @@ class APIClient:
             elapsed += poll_interval
         return None
 
-    def query(
-        self, cypher: str, timeout: int = 60, sync: bool = True
-    ) -> APIResponse:
+    def query(self, cypher: str, timeout: int = 60, sync: bool = True) -> APIResponse:
         """
         Execute a Cypher query.
 
@@ -332,7 +334,7 @@ class APIClient:
     def _get_query_progress(self, query_id: str) -> dict[str, Any] | None:
         """Get query progress via query history endpoint."""
         try:
-            resp = self.get(f"/api/query-history?page=1&per_page=50")
+            resp = self.get("/api/query-history?page=1&per_page=50")
             if not resp.ok or not isinstance(resp.body, dict):
                 return None
             for entry in resp.body.get("entries", []):
@@ -419,8 +421,10 @@ def start_server(
             [
                 str(binary),
                 "--headless",
-                "--port", str(port),
-                "--bind", "0.0.0.0",
+                "--port",
+                str(port),
+                "--bind",
+                "0.0.0.0",
                 db_url,
             ],
             stdout=subprocess.PIPE,

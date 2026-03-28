@@ -222,7 +222,7 @@ class E2ETestRunner:
         for name, sid in domain_map.items():
             prefix = name + "-"
             if objectid.startswith(prefix):
-                return sid + "-" + objectid[len(prefix):]
+                return sid + "-" + objectid[len(prefix) :]
         return objectid
 
     def _signal_handler(self, signum: int, frame: FrameType | None) -> None:
