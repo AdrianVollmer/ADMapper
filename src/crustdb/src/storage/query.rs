@@ -267,6 +267,35 @@ impl SqliteStorage {
         self.collect_relationships_from_stmt(&mut stmt, params![rel_type])
     }
 
+    /// Scan relationship topology without loading properties.
+    ///
+    /// Returns `(id, source_id, target_id, rel_type)` tuples. Skips the
+    /// properties column and JSON deserialization, making it significantly
+    /// faster than `scan_all_relationships()` for topology-only use cases
+    /// like building adjacency caches.
+    pub fn scan_relationship_topology(&self) -> Result<Vec<(i64, i64, i64, String)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT r.id, r.source_id, r.target_id, rt.name
+             FROM relationships r
+             JOIN rel_types rt ON r.type_id = rt.id",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
     /// Scan all relationships in the database.
     pub fn scan_all_relationships(&self) -> Result<Vec<Relationship>> {
         let mut stmt = self.conn.prepare_cached(

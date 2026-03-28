@@ -25,24 +25,23 @@ pub struct AdjacencyCache {
 impl AdjacencyCache {
     /// Build the adjacency cache from the storage backend.
     ///
-    /// Issues a single `scan_all_relationships()` query and partitions
-    /// the results into outgoing/incoming adjacency lists.
+    /// Uses `scan_relationship_topology()` which skips JSON property
+    /// deserialization, only loading (id, source, target, type) tuples.
     pub fn build(storage: &super::SqliteStorage) -> crate::error::Result<Self> {
-        let relationships = storage.scan_all_relationships()?;
+        let topology = storage.scan_relationship_topology()?;
 
         let mut outgoing: HashMap<i64, Vec<AdjEntry>> = HashMap::new();
         let mut incoming: HashMap<i64, Vec<AdjEntry>> = HashMap::new();
 
-        for rel in relationships {
-            outgoing.entry(rel.source).or_default().push((
-                rel.target,
-                rel.id,
-                rel.rel_type.clone(),
-            ));
-            incoming
-                .entry(rel.target)
+        for (rel_id, source, target, rel_type) in topology {
+            outgoing
+                .entry(source)
                 .or_default()
-                .push((rel.source, rel.id, rel.rel_type));
+                .push((target, rel_id, rel_type.clone()));
+            incoming
+                .entry(target)
+                .or_default()
+                .push((source, rel_id, rel_type));
         }
 
         Ok(Self { outgoing, incoming })

@@ -646,4 +646,80 @@ mod tests {
             .unwrap();
         assert!(nobody_rels.is_empty());
     }
+
+    #[test]
+    fn test_scan_relationship_topology() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        let alice_id = storage
+            .insert_node(
+                &["Person".to_string()],
+                &serde_json::json!({"name": "Alice"}),
+            )
+            .unwrap();
+        let bob_id = storage
+            .insert_node(&["Person".to_string()], &serde_json::json!({"name": "Bob"}))
+            .unwrap();
+
+        storage
+            .insert_relationship(
+                alice_id,
+                bob_id,
+                "KNOWS",
+                &serde_json::json!({"since": 2020}),
+            )
+            .unwrap();
+
+        let topology = storage.scan_relationship_topology().unwrap();
+        assert_eq!(topology.len(), 1);
+
+        let (id, source, target, rel_type) = &topology[0];
+        assert_eq!(*source, alice_id);
+        assert_eq!(*target, bob_id);
+        assert_eq!(rel_type, "KNOWS");
+        assert!(*id > 0);
+    }
+
+    #[test]
+    fn test_scan_relationship_topology_empty() {
+        let storage = SqliteStorage::in_memory().unwrap();
+        let topology = storage.scan_relationship_topology().unwrap();
+        assert!(topology.is_empty());
+    }
+
+    #[test]
+    fn test_get_node_labels() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        let node_id = storage
+            .insert_node(
+                &["Person".to_string(), "Actor".to_string()],
+                &serde_json::json!({"name": "Alice", "age": 30}),
+            )
+            .unwrap();
+
+        // Should return labels without properties
+        let labels = storage.get_node_labels(node_id).unwrap().unwrap();
+        assert_eq!(labels.len(), 2);
+        assert!(labels.contains(&"Person".to_string()));
+        assert!(labels.contains(&"Actor".to_string()));
+    }
+
+    #[test]
+    fn test_get_node_labels_nonexistent() {
+        let storage = SqliteStorage::in_memory().unwrap();
+        assert!(storage.get_node_labels(999).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_node_labels_no_labels() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        let node_id = storage
+            .insert_node(&[], &serde_json::json!({"name": "Orphan"}))
+            .unwrap();
+
+        let labels = storage.get_node_labels(node_id).unwrap().unwrap();
+        assert!(labels.is_empty());
+    }
 }

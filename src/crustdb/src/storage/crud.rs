@@ -393,6 +393,36 @@ impl SqliteStorage {
         }))
     }
 
+    /// Get only the labels for a node, skipping property deserialization.
+    ///
+    /// Much cheaper than `get_node()` when only labels are needed (e.g.,
+    /// label-based filtering during BFS expand).
+    pub fn get_node_labels(&self, id: i64) -> Result<Option<Vec<String>>> {
+        // Check node exists
+        let exists: bool = self
+            .conn
+            .query_row("SELECT 1 FROM nodes WHERE id = ?1", params![id], |_| {
+                Ok(true)
+            })
+            .optional()?
+            .unwrap_or(false);
+
+        if !exists {
+            return Ok(None);
+        }
+
+        let mut label_stmt = self.conn.prepare_cached(
+            "SELECT nl.name FROM node_labels nl
+             JOIN node_label_map nlm ON nl.id = nlm.label_id
+             WHERE nlm.node_id = ?1",
+        )?;
+        let labels: Vec<String> = label_stmt
+            .query_map(params![id], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(Some(labels))
+    }
+
     /// Get a relationship by ID.
     pub fn get_relationship(&self, id: i64) -> Result<Option<Relationship>> {
         // Use json() to convert JSONB blob back to JSON text
