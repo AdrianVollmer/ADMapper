@@ -111,7 +111,6 @@ impl CrustDatabase {
         Ok((stats.node_count, stats.relationship_count))
     }
 
-
     /// Get detailed stats including counts by node type.
     ///
     /// Uses efficient SQL queries via get_label_counts() instead of

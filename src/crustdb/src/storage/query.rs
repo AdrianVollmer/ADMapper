@@ -476,7 +476,6 @@ impl SqliteStorage {
         self.collect_relationships_from_stmt(&mut stmt, params![node_id])
     }
 
-
     /// Get all relationships for a node by objectid (both incoming and outgoing).
     /// Returns (source_objectid, target_objectid, rel_type) tuples.
     /// Uses the dedicated objectid column for efficient indexed lookup.

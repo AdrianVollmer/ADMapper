@@ -418,7 +418,6 @@ fn execute_operator(
                 }
             }
         }
-
     }
 }
 

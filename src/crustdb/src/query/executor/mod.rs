@@ -100,7 +100,6 @@ impl Binding {
         self.nodes.iter()
     }
 
-
     pub fn with_node(mut self, var: &str, node: Node) -> Self {
         self.nodes.push((var.to_string(), node));
         self

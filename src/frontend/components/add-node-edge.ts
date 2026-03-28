@@ -293,7 +293,9 @@ async function performSearch(
   hiddenEl: HTMLInputElement
 ): Promise<void> {
   try {
-    const results = await api.get<SearchResult[]>(`/api/graph/search?q=${encodeURIComponent(query)}&limit=${SEARCH_RESULT_LIMIT}`);
+    const results = await api.get<SearchResult[]>(
+      `/api/graph/search?q=${encodeURIComponent(query)}&limit=${SEARCH_RESULT_LIMIT}`
+    );
 
     if (results.length === 0) {
       resultsEl.innerHTML = '<div class="search-result-empty">No nodes found</div>';

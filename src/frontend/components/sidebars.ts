@@ -757,8 +757,8 @@ export function updateDetailPanelForEdge(
   const isMulti = types.length > 1;
 
   // Header: show count for multi, type name for single
-  const headerType = isMulti ? `${types.length} Relationships` : types[0] ?? "Unknown";
-  const headerColor = isMulti ? "#6c757d" : EDGE_COLORS[types[0]!] ?? "#6c757d";
+  const headerType = isMulti ? `${types.length} Relationships` : (types[0] ?? "Unknown");
+  const headerColor = isMulti ? "#6c757d" : (EDGE_COLORS[types[0]!] ?? "#6c757d");
   const badgeLabel = isMulti ? "Relationships" : "Relationship";
 
   // Endpoints section

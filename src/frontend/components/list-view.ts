@@ -310,4 +310,3 @@ function downloadCSV(): void {
     showSuccess(`Downloaded ${filteredNodes.length} nodes`);
   });
 }
-

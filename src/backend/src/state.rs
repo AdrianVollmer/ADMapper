@@ -131,10 +131,7 @@ impl AppState {
         let history_service = Self::create_history_service(db_type, db_path.as_deref());
 
         Self {
-            connection: Arc::new(RwLock::new(Some(DatabaseConnection {
-                backend,
-                db_type,
-            }))),
+            connection: Arc::new(RwLock::new(Some(DatabaseConnection { backend, db_type }))),
             history_service: Arc::new(RwLock::new(Some(Arc::new(history_service)))),
             import_jobs: Arc::new(DashMap::new()),
             running_queries: Arc::new(DashMap::new()),
@@ -381,10 +378,7 @@ impl AppState {
         // Create history service based on backend type
         let history_service = Self::create_history_service(db_type, db_path.as_deref());
 
-        *self.connection.write() = Some(DatabaseConnection {
-            backend,
-            db_type,
-        });
+        *self.connection.write() = Some(DatabaseConnection { backend, db_type });
         *self.history_service.write() = Some(Arc::new(history_service));
 
         info!(database_type = %db_type.name(), "Connected to database");

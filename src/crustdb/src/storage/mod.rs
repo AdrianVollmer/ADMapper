@@ -146,7 +146,6 @@ impl SqliteStorage {
             .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
     }
-
 }
 
 /// Cache statistics.

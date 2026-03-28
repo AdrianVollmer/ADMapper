@@ -128,7 +128,9 @@ fn build_comparison_expression(pair: Pair<Rule>) -> Result<Expression> {
     let mut parts: Vec<Pair<Rule>> = pair.into_inner().collect();
 
     if parts.is_empty() {
-        return Err(Error::Parse("expected operand in comparison expression".into()));
+        return Err(Error::Parse(
+            "expected operand in comparison expression".into(),
+        ));
     }
 
     // First element should be AddOrSubtractExpression
@@ -193,7 +195,9 @@ fn build_add_or_subtract_expression(pair: Pair<Rule>) -> Result<Expression> {
     }
 
     if parts.is_empty() {
-        return Err(Error::Parse("expected operand in add/subtract expression".into()));
+        return Err(Error::Parse(
+            "expected operand in add/subtract expression".into(),
+        ));
     }
 
     let (_, first) = parts.remove(0);
@@ -230,7 +234,9 @@ fn build_multiply_divide_expression(pair: Pair<Rule>) -> Result<Expression> {
     }
 
     if parts.is_empty() {
-        return Err(Error::Parse("expected operand in multiply/divide expression".into()));
+        return Err(Error::Parse(
+            "expected operand in multiply/divide expression".into(),
+        ));
     }
 
     let (_, first) = parts.remove(0);
@@ -378,8 +384,8 @@ pub(super) fn apply_string_list_null_operator(
             }
 
             let op = op.ok_or_else(|| Error::Parse("expected string operator".into()))?;
-            let operand =
-                operand.ok_or_else(|| Error::Parse("expected operand for string operator".into()))?;
+            let operand = operand
+                .ok_or_else(|| Error::Parse("expected operand for string operator".into()))?;
             Ok(Expression::BinaryOp {
                 left: Box::new(base),
                 op,
@@ -403,14 +409,18 @@ pub(super) fn apply_string_list_null_operator(
                     Rule::Expression => {
                         // List indexing [expr] or slicing [expr..expr]
                         // For now, return an error as we don't have List indexing in our AST
-                        return Err(Error::Parse("expected supported operator, list indexing not yet supported".into()));
+                        return Err(Error::Parse(
+                            "expected supported operator, list indexing not yet supported".into(),
+                        ));
                     }
                     _ => {}
                 }
             }
             Err(Error::Parse("expected valid list operator".into()))
         }
-        _ => Err(Error::Parse("expected known string/list/null operator".into())),
+        _ => Err(Error::Parse(
+            "expected known string/list/null operator".into(),
+        )),
     }
 }
 
@@ -488,7 +498,9 @@ pub(super) fn build_atom(pair: Pair<Rule>) -> Result<Expression> {
                 });
             }
             Rule::ListComprehension => {
-                return Err(Error::Parse("expected supported expression, list comprehension not yet supported".into()));
+                return Err(Error::Parse(
+                    "expected supported expression, list comprehension not yet supported".into(),
+                ));
             }
             Rule::PatternComprehension => {
                 return Err(Error::Parse(
@@ -555,8 +567,8 @@ fn build_list_predicate(filter_pair: Pair<Rule>, kind: ListPredicateKind) -> Res
 
     let variable =
         variable.ok_or_else(|| Error::Parse("expected variable in list predicate".into()))?;
-    let list =
-        list_expr.ok_or_else(|| Error::Parse("expected list expression in list predicate".into()))?;
+    let list = list_expr
+        .ok_or_else(|| Error::Parse("expected list expression in list predicate".into()))?;
 
     Ok(Expression::ListPredicate {
         kind,
