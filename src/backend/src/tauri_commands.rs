@@ -4,7 +4,7 @@
 //! but communicate via Tauri's IPC mechanism instead of HTTP.
 
 use crate::api::core;
-use crate::api::types::GenerateSize;
+use crate::api::types::{CacheStats, GenerateSize};
 use crate::db::DbNode;
 use crate::graph::{FullGraph, GraphEdge};
 use crate::settings::Settings;
@@ -561,14 +561,6 @@ pub fn add_query_history(
 // ============================================================================
 // Cache Commands
 // ============================================================================
-
-/// Cache statistics.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct CacheStats {
-    pub supported: bool,
-    pub entry_count: Option<usize>,
-    pub size_bytes: Option<usize>,
-}
 
 /// Get cache statistics.
 #[tauri::command]

@@ -81,6 +81,17 @@ pub enum QueryStatus {
     Aborted,
 }
 
+impl From<&str> for QueryStatus {
+    fn from(s: &str) -> Self {
+        match s {
+            "running" => QueryStatus::Running,
+            "failed" => QueryStatus::Failed,
+            "aborted" => QueryStatus::Aborted,
+            _ => QueryStatus::Completed,
+        }
+    }
+}
+
 impl std::fmt::Display for QueryStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -534,4 +545,19 @@ pub struct BrowseResponse {
     pub parent: Option<String>,
     /// Entries in the directory
     pub entries: Vec<BrowseEntry>,
+}
+
+// ============================================================================
+// Cache Types
+// ============================================================================
+
+/// Cache statistics response.
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheStats {
+    /// Whether the connected database supports caching.
+    pub supported: bool,
+    /// Number of cached entries (if supported).
+    pub entry_count: Option<usize>,
+    /// Total size of cached data in bytes (if supported).
+    pub size_bytes: Option<usize>,
 }

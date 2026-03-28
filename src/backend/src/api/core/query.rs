@@ -76,12 +76,7 @@ pub fn get_query_history(
     let entries: Vec<QueryHistoryEntry> = history_rows
         .into_iter()
         .map(|row| {
-            let status = match row.status.as_str() {
-                "running" => QueryStatus::Running,
-                "failed" => QueryStatus::Failed,
-                "aborted" => QueryStatus::Aborted,
-                _ => QueryStatus::Completed,
-            };
+            let status = QueryStatus::from(row.status.as_str());
             QueryHistoryEntry {
                 id: row.id,
                 name: row.name,
@@ -129,12 +124,7 @@ pub fn add_query_history(
         .as_secs() as i64;
 
     let status_str = body.status.as_deref().unwrap_or("completed");
-    let status = match status_str {
-        "running" => QueryStatus::Running,
-        "failed" => QueryStatus::Failed,
-        "aborted" => QueryStatus::Aborted,
-        _ => QueryStatus::Completed,
-    };
+    let status = QueryStatus::from(status_str);
 
     history
         .add(NewQueryHistoryEntry {

@@ -31,13 +31,7 @@ pub async fn get_query_history(
     let entries: Vec<QueryHistoryEntry> = history
         .into_iter()
         .map(|row| {
-            let status = match row.status.as_str() {
-                "running" => QueryStatus::Running,
-                "completed" => QueryStatus::Completed,
-                "failed" => QueryStatus::Failed,
-                "aborted" => QueryStatus::Aborted,
-                _ => QueryStatus::Completed, // Default fallback
-            };
+            let status = QueryStatus::from(row.status.as_str());
             QueryHistoryEntry {
                 id: row.id,
                 name: row.name,

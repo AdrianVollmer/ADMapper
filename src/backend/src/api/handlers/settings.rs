@@ -2,7 +2,7 @@
 
 use super::run_db;
 use crate::api::core;
-use crate::api::types::{ApiError, BrowseParams, BrowseResponse};
+use crate::api::types::{ApiError, BrowseParams, BrowseResponse, CacheStats};
 use crate::settings::Settings;
 use crate::state::AppState;
 use axum::{
@@ -15,17 +15,6 @@ use tracing::{debug, info, instrument};
 // ============================================================================
 // Cache Endpoints
 // ============================================================================
-
-/// Cache statistics response.
-#[derive(Debug, serde::Serialize)]
-pub struct CacheStats {
-    /// Whether the connected database supports caching.
-    pub supported: bool,
-    /// Number of cached entries (if supported).
-    pub entry_count: Option<usize>,
-    /// Total size of cached data in bytes (if supported).
-    pub size_bytes: Option<usize>,
-}
 
 /// Get cache statistics.
 #[instrument(skip(state))]
