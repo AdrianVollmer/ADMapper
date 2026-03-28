@@ -243,7 +243,7 @@ pub(super) fn execute_variable_length_expand(
         // BFS traversal with global visited set to prevent exponential explosion.
         // Without this, dense graphs would explore the same node via every possible path,
         // leading to O(relationships^depth) complexity instead of O(V+E).
-        let mut queue: VecDeque<(i64, Vec<i64>, Vec<Relationship>)> = VecDeque::new();
+        let mut queue: VecDeque<(i64, Vec<i64>, Vec<i64>)> = VecDeque::new();
         let mut visited: HashSet<i64> = HashSet::new();
         let mut prev_depth: u32 = 0;
 
@@ -298,28 +298,65 @@ pub(super) fn execute_variable_length_expand(
                             let mut new_binding =
                                 binding.clone().with_node(req.target_variable, target_node);
 
-                            if let Some(pv) = req.path_variable {
-                                // Build full path
-                                let mut nodes = Vec::new();
-                                for &nid in &path_nodes {
-                                    if let Some(n) =
-                                        get_node_cached(nid, storage, cache.as_deref_mut())?
+                            // Resolve relationship IDs to full objects when needed
+                            let need_rels =
+                                req.path_variable.is_some() || req.rel_variable.is_some();
+                            let resolved_rels = if need_rels {
+                                let mut rels = Vec::with_capacity(path_rels.len());
+                                for &rid in &path_rels {
+                                    if let Some(r) =
+                                        get_relationship_cached(rid, storage, cache.as_deref_mut())?
                                     {
-                                        nodes.push(n);
+                                        rels.push(r);
                                     }
                                 }
-                                new_binding = new_binding.with_path(
-                                    pv,
-                                    Path {
-                                        nodes,
-                                        relationships: path_rels.clone(),
-                                    },
-                                );
-                            }
+                                rels
+                            } else {
+                                Vec::new()
+                            };
 
-                            if let Some(rv) = req.rel_variable {
-                                new_binding =
-                                    new_binding.with_relationship_list(rv, path_rels.clone());
+                            match (req.path_variable, req.rel_variable) {
+                                (Some(pv), Some(rv)) => {
+                                    let mut nodes = Vec::with_capacity(path_nodes.len());
+                                    for &nid in &path_nodes {
+                                        if let Some(n) =
+                                            get_node_cached(nid, storage, cache.as_deref_mut())?
+                                        {
+                                            nodes.push(n);
+                                        }
+                                    }
+                                    new_binding = new_binding.with_path(
+                                        pv,
+                                        Path {
+                                            nodes,
+                                            relationships: resolved_rels.clone(),
+                                        },
+                                    );
+                                    new_binding =
+                                        new_binding.with_relationship_list(rv, resolved_rels);
+                                }
+                                (Some(pv), None) => {
+                                    let mut nodes = Vec::with_capacity(path_nodes.len());
+                                    for &nid in &path_nodes {
+                                        if let Some(n) =
+                                            get_node_cached(nid, storage, cache.as_deref_mut())?
+                                        {
+                                            nodes.push(n);
+                                        }
+                                    }
+                                    new_binding = new_binding.with_path(
+                                        pv,
+                                        Path {
+                                            nodes,
+                                            relationships: resolved_rels,
+                                        },
+                                    );
+                                }
+                                (None, Some(rv)) => {
+                                    new_binding =
+                                        new_binding.with_relationship_list(rv, resolved_rels);
+                                }
+                                (None, None) => {}
                             }
 
                             result.push(new_binding);
@@ -358,7 +395,7 @@ pub(super) fn execute_variable_length_expand(
                 new_path_nodes.push(next_id);
 
                 let mut new_path_rels = path_rels.clone();
-                new_path_rels.push(relationship);
+                new_path_rels.push(relationship.id);
 
                 queue.push_back((next_id, new_path_nodes, new_path_rels));
                 ctx.check_frontier(queue.len())?;
