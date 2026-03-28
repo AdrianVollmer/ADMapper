@@ -307,7 +307,6 @@ impl DatabaseBackend for FalkorDbDatabase {
                             .replace('\'', "\\'");
                         let props = serde_json::to_string(&e.properties)
                             .unwrap_or_default()
-                            .replace('\\', "\\\\")
                             .replace('\'', "\\'");
                         format!(
                             "{{src: '{}', tgt: '{}', src_type: '{}', tgt_type: '{}', props: '{}'}}",
@@ -499,11 +498,7 @@ impl DatabaseBackend for FalkorDbDatabase {
         Ok(None)
     }
 
-    fn shortest_path(
-        &self,
-        from: &str,
-        to: &str,
-    ) -> Result<Option<Vec<(String, Option<String>)>>> {
+    fn shortest_path(&self, from: &str, to: &str) -> Result<Option<Vec<(String, Option<String>)>>> {
         if from == to {
             return Ok(Some(vec![(from.to_string(), None)]));
         }
