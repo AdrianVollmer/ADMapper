@@ -59,7 +59,12 @@ pub fn compute_layout(req: &LayoutRequest) -> Vec<NodePosition> {
         }
         LayoutAlgorithm::Hierarchical => {
             let direction = req.direction.unwrap_or(LayoutDirection::LeftToRight);
-            hierarchical(&req.nodes, &req.edges, direction, req.node_labels.as_deref())
+            hierarchical(
+                &req.nodes,
+                &req.edges,
+                direction,
+                req.node_labels.as_deref(),
+            )
         }
         LayoutAlgorithm::Circular => circular(&req.nodes),
         LayoutAlgorithm::Grid => grid(&req.nodes),
@@ -564,8 +569,7 @@ mod tests {
     /// The positions should span a significant range (not all bunched together).
     #[test]
     fn full_pipeline_spread() {
-        let edges: &[[usize; 2]] =
-            &[[0, 5], [1, 5], [2, 6], [3, 6], [4, 7], [5, 7], [6, 7]];
+        let edges: &[[usize; 2]] = &[[0, 5], [1, 5], [2, 6], [3, 6], [4, 7], [5, 7], [6, 7]];
         let req = make_request(8, edges);
         let positions = compute_layout(&req);
 

@@ -74,10 +74,7 @@ pub(crate) fn assign_coordinates(graph: &LayeredGraph, config: &CoordConfig) -> 
 
     // Indices 1 and 3 are the right-aligned passes — anchor them to the right
     for &idx in &[1, 3] {
-        let cur_max = all_x[idx]
-            .iter()
-            .copied()
-            .fold(f32::NEG_INFINITY, f32::max);
+        let cur_max = all_x[idx].iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let shift = max_width - cur_max;
         for x in &mut all_x[idx] {
             *x += shift;
@@ -113,11 +110,7 @@ pub(crate) fn assign_coordinates(graph: &LayeredGraph, config: &CoordConfig) -> 
 
 /// Push apart nodes that are too close within the same layer, preserving
 /// the crossing-minimized order and the centre of mass.
-fn enforce_layer_spacing(
-    coords: &mut [(f32, f32)],
-    graph: &LayeredGraph,
-    node_sep: f32,
-) {
+fn enforce_layer_spacing(coords: &mut [(f32, f32)], graph: &LayeredGraph, node_sep: f32) {
     for layer in &graph.layers {
         preserve_order_spacing(layer, coords, node_sep);
     }
@@ -164,8 +157,8 @@ fn barycenter_refine(coords: &mut [(f32, f32)], graph: &LayeredGraph, node_sep: 
             for &node in &graph.layers[l] {
                 let preds = &graph.in_adj[node];
                 if !preds.is_empty() {
-                    coords[node].0 = preds.iter().map(|&p| coords[p].0).sum::<f32>()
-                        / preds.len() as f32;
+                    coords[node].0 =
+                        preds.iter().map(|&p| coords[p].0).sum::<f32>() / preds.len() as f32;
                 }
             }
             preserve_order_spacing(&graph.layers[l], coords, node_sep);
@@ -176,8 +169,8 @@ fn barycenter_refine(coords: &mut [(f32, f32)], graph: &LayeredGraph, node_sep: 
             for &node in &graph.layers[l] {
                 let succs = &graph.out_adj[node];
                 if !succs.is_empty() {
-                    coords[node].0 = succs.iter().map(|&c| coords[c].0).sum::<f32>()
-                        / succs.len() as f32;
+                    coords[node].0 =
+                        succs.iter().map(|&c| coords[c].0).sum::<f32>() / succs.len() as f32;
                 }
             }
             preserve_order_spacing(&graph.layers[l], coords, node_sep);
@@ -492,12 +485,10 @@ fn place_block(
             if sink[v] != sink[u_root] {
                 match hdir {
                     HDir::Left => {
-                        shift[sink[u_root]] =
-                            shift[sink[u_root]].min(x[v] - x[u_root] - node_sep);
+                        shift[sink[u_root]] = shift[sink[u_root]].min(x[v] - x[u_root] - node_sep);
                     }
                     HDir::Right => {
-                        shift[sink[u_root]] =
-                            shift[sink[u_root]].max(x[v] - x[u_root] + node_sep);
+                        shift[sink[u_root]] = shift[sink[u_root]].max(x[v] - x[u_root] + node_sep);
                     }
                 }
             } else {

@@ -114,11 +114,7 @@ fn rebuild_positions(layers: &[Vec<usize>], pos: &mut [usize]) {
 }
 
 /// Total edge crossings across all adjacent layer pairs.
-fn count_all_crossings(
-    layers: &[Vec<usize>],
-    out_adj: &[Vec<usize>],
-    pos: &[usize],
-) -> usize {
+fn count_all_crossings(layers: &[Vec<usize>], out_adj: &[Vec<usize>], pos: &[usize]) -> usize {
     layers
         .iter()
         .take(layers.len().saturating_sub(1))

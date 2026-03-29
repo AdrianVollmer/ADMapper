@@ -102,7 +102,12 @@ mod tests {
 
     #[test]
     fn chain() {
-        let coords = layout(4, &[[0, 1], [1, 2], [2, 3]], &SugiyamaConfig::default(), None);
+        let coords = layout(
+            4,
+            &[[0, 1], [1, 2], [2, 3]],
+            &SugiyamaConfig::default(),
+            None,
+        );
         assert_eq!(coords.len(), 4);
         // Y should strictly increase along the chain
         for i in 0..3 {
@@ -138,7 +143,12 @@ mod tests {
     #[test]
     fn graph_with_cycle() {
         // A->B->C->A — cycle should be broken, layout should still work
-        let coords = layout(3, &[[0, 1], [1, 2], [2, 0]], &SugiyamaConfig::default(), None);
+        let coords = layout(
+            3,
+            &[[0, 1], [1, 2], [2, 0]],
+            &SugiyamaConfig::default(),
+            None,
+        );
         assert_eq!(coords.len(), 3);
     }
 
@@ -484,8 +494,7 @@ mod tests {
         // Children should be ordered: Container/Alpha(2), Container/Beta(5),
         // Domain/Beta(4), OU/Alpha(3), OU/Zebra(1)
         let expected_order = [2, 5, 4, 3, 1];
-        let mut children: Vec<(usize, f32)> =
-            (1..=5).map(|i| (i, coords[i].0)).collect();
+        let mut children: Vec<(usize, f32)> = (1..=5).map(|i| (i, coords[i].0)).collect();
         children.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
         let actual_order: Vec<usize> = children.iter().map(|c| c.0).collect();
         assert_eq!(
