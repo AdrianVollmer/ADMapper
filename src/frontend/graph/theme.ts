@@ -110,12 +110,12 @@ export const LABEL_COLOR = {
 export function getNodeColor(type: string, highlighted?: boolean, dimmed?: boolean): string {
   if (highlighted) return HIGHLIGHT_COLORS.node;
   if (dimmed) return DIM_COLORS.node;
-  return NODE_COLORS[type] ?? NODE_COLORS.Unknown;
+  return NODE_COLORS[type] ?? "#adb5bd";
 }
 
 /** Get relationship color, considering highlight state */
 export function getEdgeColor(type: string, highlighted?: boolean, dimmed?: boolean): string {
   if (highlighted) return HIGHLIGHT_COLORS.relationship;
   if (dimmed) return DIM_COLORS.relationship;
-  return EDGE_COLORS[type] ?? EDGE_COLORS.Unknown;
+  return EDGE_COLORS[type] ?? "#adb5bd";
 }

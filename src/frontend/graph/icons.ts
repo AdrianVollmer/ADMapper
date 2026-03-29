@@ -70,17 +70,20 @@ function generateIcons(): Record<string, string> {
   return icons;
 }
 
+/** Fallback icon for unknown node types */
+const FALLBACK_ICON = HelpCircle;
+
 /** Pre-generated icon data URLs */
 export const NODE_ICONS: Record<string, string> = generateIcons();
 
 /** Get the icon URL for a node type */
 export function getNodeIcon(type: string): string {
-  return NODE_ICONS[type] ?? NODE_ICONS.Unknown;
+  return NODE_ICONS[type] ?? svgToDataUrl(iconNodeToSvg(FALLBACK_ICON, "#ffffff", 64));
 }
 
 /** Get the color for a node type */
 export function getNodeTypeColor(type: string): string {
-  return NODE_COLORS[type] ?? NODE_COLORS.Unknown;
+  return NODE_COLORS[type] ?? "#adb5bd";
 }
 
 /** Default node size (uniform for all types) */
@@ -88,12 +91,12 @@ export const NODE_SIZE = 12;
 
 /** Get Lucide icon node for a node type (for inline rendering) */
 export function getNodeIconNode(type: string): IconNode {
-  return LUCIDE_ICONS[type] ?? LUCIDE_ICONS.Unknown;
+  return LUCIDE_ICONS[type] ?? FALLBACK_ICON;
 }
 
 /** Get SVG inner content for inline rendering (stroke-based, for use inside an SVG element) */
 export function getNodeIconPath(type: string): string {
-  const iconNode = LUCIDE_ICONS[type] ?? LUCIDE_ICONS.Unknown;
+  const iconNode = LUCIDE_ICONS[type] ?? FALLBACK_ICON;
   return iconNode
     .map(([tag, attrs]) => {
       const attrStr = Object.entries(attrs)

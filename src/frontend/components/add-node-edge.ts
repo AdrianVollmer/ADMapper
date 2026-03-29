@@ -290,7 +290,7 @@ function setupSearchInput(inputId: string, resultsId: string, hiddenId: string):
     }
   });
 
-  input.addEventListener("blur", (e: FocusEvent) => {
+  input.addEventListener("blur", (e) => {
     // Only hide results if focus moved outside the results container
     const relatedTarget = e.relatedTarget as HTMLElement | null;
     if (!relatedTarget || !results.contains(relatedTarget)) {
