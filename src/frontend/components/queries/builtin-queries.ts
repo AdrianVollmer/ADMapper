@@ -48,7 +48,7 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
         id: "domain-trusts",
         name: "Domain Trusts",
         description: "All domains and their trust relationships",
-        query: `MATCH (d:Domain) RETURN d AS result UNION ALL MATCH p = (d:Domain)-[:TrustedBy]->(t:Domain) RETURN p AS result`,
+        query: `MATCH (d:Domain) RETURN d AS result UNION ALL MATCH p = (d:Domain)-[:SameForestTrust|CrossForestTrust]->(t:Domain) RETURN p AS result`,
       },
     ],
   },
