@@ -28,13 +28,13 @@ export const EDGE_COLORS: Record<string, string> = {
   MemberOf: "#6c757d",
   Contains: "#6c757d",
   GPLink: "#6c757d",
-  LocalGroupMember: "#6c757d",
 
   // Session/access (blue)
   HasSession: "#0d6efd",
   CanRDP: "#0d6efd",
   CanPSRemote: "#0d6efd",
   ExecuteDCOM: "#0d6efd",
+  RemoteInteractiveLogonRight: "#0d6efd",
 
   // Dangerous permissions (red/orange)
   AdminTo: "#dc3545",
@@ -45,6 +45,7 @@ export const EDGE_COLORS: Record<string, string> = {
   Owns: "#dc3545",
   ForceChangePassword: "#fd7e14",
   AddMember: "#fd7e14",
+  AddSelf: "#fd7e14",
   AllExtendedRights: "#fd7e14",
   AddKeyCredentialLink: "#fd7e14",
   WriteSPN: "#fd7e14",
@@ -54,7 +55,11 @@ export const EDGE_COLORS: Record<string, string> = {
   AllowedToDelegate: "#6f42c1",
   AllowedToAct: "#6f42c1",
   AddAllowedToAct: "#6f42c1",
-  TrustedBy: "#6f42c1",
+  CoerceToTGT: "#6f42c1",
+
+  // Trust (purple)
+  SameForestTrust: "#6f42c1",
+  CrossForestTrust: "#6f42c1",
 
   // DCSync / replication (critical - bright red)
   DCSync: "#ff0040",
@@ -65,9 +70,23 @@ export const EDGE_COLORS: Record<string, string> = {
   // Credential access (pink)
   ReadLAPSPassword: "#e83e8c",
   ReadGMSAPassword: "#e83e8c",
+  SyncLAPSPassword: "#e83e8c",
+  DumpSMSAPassword: "#e83e8c",
 
-  // Generic ACE (gray)
-  ACE: "#adb5bd",
+  // PKI / ADCS (rose)
+  Enroll: "#f06595",
+  ManageCA: "#f06595",
+  ManageCertificates: "#f06595",
+  WritePKINameFlag: "#f06595",
+  WritePKIEnrollmentFlag: "#f06595",
+  HostsCAService: "#f06595",
+  DelegatedEnrollmentAgent: "#f06595",
+  PublishedTo: "#f06595",
+  IssuedSignedBy: "#f06595",
+  EnterpriseCAFor: "#f06595",
+  RootCAFor: "#f06595",
+  NTAuthStoreFor: "#f06595",
+  TrustedForNTAuth: "#f06595",
 
   Unknown: "#adb5bd",
 };
@@ -111,11 +130,4 @@ export function getNodeColor(type: string, highlighted?: boolean, dimmed?: boole
   if (highlighted) return HIGHLIGHT_COLORS.node;
   if (dimmed) return DIM_COLORS.node;
   return NODE_COLORS[type] ?? "#adb5bd";
-}
-
-/** Get relationship color, considering highlight state */
-export function getEdgeColor(type: string, highlighted?: boolean, dimmed?: boolean): string {
-  if (highlighted) return HIGHLIGHT_COLORS.relationship;
-  if (dimmed) return DIM_COLORS.relationship;
-  return EDGE_COLORS[type] ?? "#adb5bd";
 }

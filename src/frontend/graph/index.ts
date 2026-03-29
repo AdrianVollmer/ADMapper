@@ -74,15 +74,7 @@ export type {
 } from "./layout";
 
 // Theme
-export {
-  NODE_COLORS,
-  EDGE_COLORS,
-  HIGHLIGHT_COLORS,
-  DIM_COLORS,
-  BACKGROUND_COLOR,
-  getNodeColor,
-  getEdgeColor,
-} from "./theme";
+export { NODE_COLORS, EDGE_COLORS, HIGHLIGHT_COLORS, DIM_COLORS, BACKGROUND_COLOR, getNodeColor } from "./theme";
 
 // Collapse functionality
 export {
