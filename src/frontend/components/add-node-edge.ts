@@ -19,33 +19,41 @@ const MIN_SEARCH_LENGTH = 2;
 /** Maximum number of search results to fetch */
 const SEARCH_RESULT_LIMIT = 10;
 
-/** Available relationship types */
-const COMMON_EDGE_TYPES = [
-  "MemberOf",
-  "HasSession",
-  "AdminTo",
-  "CanRDP",
-  "CanPSRemote",
-  "ExecuteDCOM",
-  "AllowedToDelegate",
-  "AllowedToAct",
-  "Contains",
-  "GPLink",
-  "TrustedBy",
-  "GenericAll",
-  "GenericWrite",
-  "WriteDacl",
-  "WriteOwner",
-  "Owns",
-  "ForceChangePassword",
-  "AddMember",
-  "ReadLAPSPassword",
-  "ReadGMSAPassword",
-  "DCSync",
-];
+/** Cached relationship types from the backend */
+let cachedEdgeTypes: string[] | null = null;
 
-/** Available node types */
-const COMMON_NODE_TYPES = ["User", "Computer", "Group", "Domain", "OU", "GPO", "Container"];
+/** Cached node types from the backend */
+let cachedNodeTypes: string[] | null = null;
+
+/** Fetch relationship types from the backend (cached) */
+async function getEdgeTypes(): Promise<string[]> {
+  if (!cachedEdgeTypes) {
+    try {
+      cachedEdgeTypes = await api.get<string[]>("/api/graph/relationship-types");
+    } catch {
+      cachedEdgeTypes = [];
+    }
+  }
+  return cachedEdgeTypes;
+}
+
+/** Fetch node types from the backend (cached) */
+async function getNodeTypes(): Promise<string[]> {
+  if (!cachedNodeTypes) {
+    try {
+      cachedNodeTypes = await api.get<string[]>("/api/graph/node-types");
+    } catch {
+      cachedNodeTypes = [];
+    }
+  }
+  return cachedNodeTypes;
+}
+
+/** Invalidate cached types (call after import or schema changes) */
+export function invalidateTypeCache(): void {
+  cachedEdgeTypes = null;
+  cachedNodeTypes = null;
+}
 
 /** Search result from API */
 interface SearchResult {
@@ -64,25 +72,23 @@ let addNodeModal: HTMLElement | null = null;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Open the Add Relationship modal */
-export function openAddEdge(): void {
-  if (!addEdgeModal) {
-    createAddEdgeModal();
-  }
+export async function openAddEdge(): Promise<void> {
+  // Always recreate to pick up latest types from backend
+  const edgeTypes = await getEdgeTypes();
+  createAddEdgeModal(edgeTypes);
   addEdgeModal!.hidden = false;
   resetAddEdgeForm();
-  // Focus first input
   const sourceInput = document.getElementById("add-relationship-source") as HTMLInputElement;
   sourceInput?.focus();
 }
 
 /** Open the Add Node modal */
-export function openAddNode(): void {
-  if (!addNodeModal) {
-    createAddNodeModal();
-  }
+export async function openAddNode(): Promise<void> {
+  // Always recreate to pick up latest types from backend
+  const nodeTypes = await getNodeTypes();
+  createAddNodeModal(nodeTypes);
   addNodeModal!.hidden = false;
   resetAddNodeForm();
-  // Focus first input
   const idInput = document.getElementById("add-node-id") as HTMLInputElement;
   idInput?.focus();
 }
@@ -102,15 +108,19 @@ function closeAddNodeModal(): void {
 }
 
 /** Create the Add Relationship modal */
-function createAddEdgeModal(): void {
+function createAddEdgeModal(edgeTypes: string[]): void {
+  // Remove previous instance if exists
+  if (addEdgeModal) {
+    addEdgeModal.remove();
+  }
   addEdgeModal = document.createElement("div");
   addEdgeModal.id = "add-relationship-modal";
   addEdgeModal.className = "modal-overlay";
 
-  // Build relationship type options
-  const edgeTypeOptions = COMMON_EDGE_TYPES.map(
-    (type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`
-  ).join("");
+  // Build relationship type options from backend data
+  const edgeTypeOptions = edgeTypes
+    .map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)
+    .join("");
 
   addEdgeModal.innerHTML = `
     <div class="modal-content">
@@ -180,15 +190,19 @@ function createAddEdgeModal(): void {
 }
 
 /** Create the Add Node modal */
-function createAddNodeModal(): void {
+function createAddNodeModal(nodeTypes: string[]): void {
+  // Remove previous instance if exists
+  if (addNodeModal) {
+    addNodeModal.remove();
+  }
   addNodeModal = document.createElement("div");
   addNodeModal.id = "add-node-modal";
   addNodeModal.className = "modal-overlay";
 
-  // Build node type options
-  const nodeTypeOptions = COMMON_NODE_TYPES.map(
-    (type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`
-  ).join("");
+  // Build node type options from backend data
+  const nodeTypeOptions = nodeTypes
+    .map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)
+    .join("");
 
   addNodeModal.innerHTML = `
     <div class="modal-content">

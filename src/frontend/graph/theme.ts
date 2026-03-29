@@ -5,10 +5,8 @@
  * being accessible and distinguishable.
  */
 
-import type { ADNodeType, ADEdgeType } from "./types";
-
 /** Color palette for node types - vibrant, modern colors for visual appeal */
-export const NODE_COLORS: Record<ADNodeType, string> = {
+export const NODE_COLORS: Record<string, string> = {
   User: "#22b8cf", // Cyan - users are common, approachable color
   Group: "#fab005", // Golden yellow - groups connect users to permissions
   Computer: "#f03e3e", // Vibrant red - computers are attack targets
@@ -25,7 +23,7 @@ export const NODE_COLORS: Record<ADNodeType, string> = {
 };
 
 /** Color palette for relationship types (grouped by category) */
-export const EDGE_COLORS: Record<ADEdgeType, string> = {
+export const EDGE_COLORS: Record<string, string> = {
   // Membership/structure (neutral)
   MemberOf: "#6c757d",
   Contains: "#6c757d",
@@ -109,15 +107,15 @@ export const LABEL_COLOR = {
 };
 
 /** Get node color, considering highlight state */
-export function getNodeColor(type: ADNodeType, highlighted?: boolean, dimmed?: boolean): string {
+export function getNodeColor(type: string, highlighted?: boolean, dimmed?: boolean): string {
   if (highlighted) return HIGHLIGHT_COLORS.node;
   if (dimmed) return DIM_COLORS.node;
-  return NODE_COLORS[type];
+  return NODE_COLORS[type] ?? NODE_COLORS.Unknown;
 }
 
 /** Get relationship color, considering highlight state */
-export function getEdgeColor(type: ADEdgeType, highlighted?: boolean, dimmed?: boolean): string {
+export function getEdgeColor(type: string, highlighted?: boolean, dimmed?: boolean): string {
   if (highlighted) return HIGHLIGHT_COLORS.relationship;
   if (dimmed) return DIM_COLORS.relationship;
-  return EDGE_COLORS[type];
+  return EDGE_COLORS[type] ?? EDGE_COLORS.Unknown;
 }

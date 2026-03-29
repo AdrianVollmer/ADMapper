@@ -19,7 +19,6 @@ import {
   HelpCircle,
   type IconNode,
 } from "lucide";
-import type { ADNodeType } from "./types";
 import { NODE_COLORS } from "./theme";
 
 /** Convert Lucide IconNode to SVG string */
@@ -43,7 +42,7 @@ function svgToDataUrl(svg: string): string {
 }
 
 // Map AD node types to Lucide icons
-const LUCIDE_ICONS: Record<ADNodeType, IconNode> = {
+const LUCIDE_ICONS: Record<string, IconNode> = {
   User: User,
   Group: Users, // Shows 3 people
   Computer: Monitor,
@@ -60,27 +59,27 @@ const LUCIDE_ICONS: Record<ADNodeType, IconNode> = {
 };
 
 /** Generate icon data URLs for all node types */
-function generateIcons(): Record<ADNodeType, string> {
-  const icons: Partial<Record<ADNodeType, string>> = {};
+function generateIcons(): Record<string, string> {
+  const icons: Record<string, string> = {};
 
   for (const [type, iconNode] of Object.entries(LUCIDE_ICONS)) {
     const svg = iconNodeToSvg(iconNode, "#ffffff", 64);
-    icons[type as ADNodeType] = svgToDataUrl(svg);
+    icons[type] = svgToDataUrl(svg);
   }
 
-  return icons as Record<ADNodeType, string>;
+  return icons;
 }
 
 /** Pre-generated icon data URLs */
-export const NODE_ICONS: Record<ADNodeType, string> = generateIcons();
+export const NODE_ICONS: Record<string, string> = generateIcons();
 
 /** Get the icon URL for a node type */
-export function getNodeIcon(type: ADNodeType): string {
+export function getNodeIcon(type: string): string {
   return NODE_ICONS[type] ?? NODE_ICONS.Unknown;
 }
 
 /** Get the color for a node type */
-export function getNodeTypeColor(type: ADNodeType): string {
+export function getNodeTypeColor(type: string): string {
   return NODE_COLORS[type] ?? NODE_COLORS.Unknown;
 }
 
@@ -88,12 +87,12 @@ export function getNodeTypeColor(type: ADNodeType): string {
 export const NODE_SIZE = 12;
 
 /** Get Lucide icon node for a node type (for inline rendering) */
-export function getNodeIconNode(type: ADNodeType): IconNode {
+export function getNodeIconNode(type: string): IconNode {
   return LUCIDE_ICONS[type] ?? LUCIDE_ICONS.Unknown;
 }
 
 /** Get SVG inner content for inline rendering (stroke-based, for use inside an SVG element) */
-export function getNodeIconPath(type: ADNodeType): string {
+export function getNodeIconPath(type: string): string {
   const iconNode = LUCIDE_ICONS[type] ?? LUCIDE_ICONS.Unknown;
   return iconNode
     .map(([tag, attrs]) => {

@@ -5,56 +5,14 @@
  * as they appear in BloodHound-style graph data.
  */
 
-/** AD object types that can appear as nodes */
-export type ADNodeType =
-  | "User"
-  | "Group"
-  | "Computer"
-  | "Domain"
-  | "GPO"
-  | "OU"
-  | "Container"
-  | "CertTemplate"
-  | "EnterpriseCA"
-  | "RootCA"
-  | "AIACA"
-  | "NTAuthStore"
-  | "Unknown";
-
-/** Common AD relationship/relationship types */
-export type ADEdgeType =
-  | "MemberOf"
-  | "HasSession"
-  | "AdminTo"
-  | "CanRDP"
-  | "CanPSRemote"
-  | "ExecuteDCOM"
-  | "AllowedToDelegate"
-  | "AllowedToAct"
-  | "AddMember"
-  | "ForceChangePassword"
-  | "GenericAll"
-  | "GenericWrite"
-  | "WriteOwner"
-  | "WriteDacl"
-  | "Owns"
-  | "Contains"
-  | "GPLink"
-  | "TrustedBy"
-  | "DCSync"
-  | "GetChanges"
-  | "GetChangesAll"
-  | "AllExtendedRights"
-  | "AddKeyCredentialLink"
-  | "AddAllowedToAct"
-  | "ReadLAPSPassword"
-  | "ReadGMSAPassword"
-  | "GetChangesInFilteredSet"
-  | "WriteSPN"
-  | "WriteAccountRestrictions"
-  | "LocalGroupMember"
-  | "ACE"
-  | "Unknown";
+/**
+ * AD node and edge types are plain strings. The backend is the single source
+ * of truth (GET /api/graph/node-types, GET /api/graph/relationship-types).
+ * The frontend must handle any type the backend sends, falling back to
+ * "Unknown" styling when no visual mapping exists.
+ */
+export type ADNodeType = string;
+export type ADEdgeType = string;
 
 /** Node data stored in graphology */
 export interface ADNodeAttributes {

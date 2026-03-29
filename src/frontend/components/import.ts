@@ -6,11 +6,12 @@
  */
 
 import { loadGraphData } from "./graph-view";
-import type { RawADGraph, ADNodeType, ADEdgeType } from "../graph/types";
+import type { RawADGraph } from "../graph/types";
 import { showError as showNotification } from "../utils/notifications";
 import { executeQuery, QueryAbortedError } from "../utils/query";
 import { subscribe, IMPORT_PROGRESS_CHANNEL, type ImportProgressEvent, type Unsubscribe } from "../api/transport";
 import { isRunningInTauri } from "../api/client";
+import { invalidateTypeCache } from "./add-node-edge";
 
 // DOM element references
 let fileInput: HTMLInputElement | null = null;
@@ -288,6 +289,8 @@ function showCompleted(): void {
   if (progressPercent) progressPercent.textContent = "100%";
   if (doneBtn) doneBtn.hidden = false;
   if (cancelBtn) cancelBtn.hidden = true;
+  // New types may have been introduced by the import
+  invalidateTypeCache();
 }
 
 /** Show error */
@@ -335,17 +338,8 @@ async function loadDomainAdmins(): Promise<void> {
     if (result.graph && result.graph.nodes.length > 0) {
       // Convert to RawADGraph format
       const graph: RawADGraph = {
-        nodes: result.graph.nodes.map((n) => ({
-          id: n.id,
-          name: n.name,
-          type: mapNodeType(n.type),
-          properties: n.properties,
-        })),
-        relationships: result.graph.relationships.map((e) => ({
-          source: e.source,
-          target: e.target,
-          type: mapEdgeType(e.type),
-        })),
+        nodes: result.graph.nodes,
+        relationships: result.graph.relationships,
       };
 
       loadGraphData(graph);
@@ -361,61 +355,4 @@ async function loadDomainAdmins(): Promise<void> {
     console.error("Failed to load Domain Admins:", err);
     showNotification("Failed to load Domain Admin members. Use the query panel to explore the data.");
   }
-}
-
-/** Map API node type to ADNodeType */
-function mapNodeType(type: string): ADNodeType {
-  const known: ADNodeType[] = [
-    "User",
-    "Group",
-    "Computer",
-    "Domain",
-    "GPO",
-    "OU",
-    "Container",
-    "CertTemplate",
-    "EnterpriseCA",
-    "RootCA",
-    "AIACA",
-    "NTAuthStore",
-  ];
-  return known.includes(type as ADNodeType) ? (type as ADNodeType) : "Unknown";
-}
-
-/** Map API relationship type to ADEdgeType */
-function mapEdgeType(type: string): ADEdgeType {
-  const known: ADEdgeType[] = [
-    "MemberOf",
-    "HasSession",
-    "AdminTo",
-    "CanRDP",
-    "CanPSRemote",
-    "ExecuteDCOM",
-    "AllowedToDelegate",
-    "AllowedToAct",
-    "AddMember",
-    "ForceChangePassword",
-    "GenericAll",
-    "GenericWrite",
-    "WriteOwner",
-    "WriteDacl",
-    "Owns",
-    "Contains",
-    "GPLink",
-    "TrustedBy",
-    "DCSync",
-    "GetChanges",
-    "GetChangesAll",
-    "AllExtendedRights",
-    "AddKeyCredentialLink",
-    "AddAllowedToAct",
-    "ReadLAPSPassword",
-    "ReadGMSAPassword",
-    "GetChangesInFilteredSet",
-    "WriteSPN",
-    "WriteAccountRestrictions",
-    "LocalGroupMember",
-    "ACE",
-  ];
-  return known.includes(type as ADEdgeType) ? (type as ADEdgeType) : "Unknown";
 }
