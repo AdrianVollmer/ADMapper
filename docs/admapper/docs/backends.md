@@ -111,42 +111,71 @@ admapper falkordb://localhost:6379
 
 ### Running with Docker
 
-Keep a separate data directory per project so you can switch between
-environments by swapping the mount.
+CrustDB is an experimental embedded graph database which supports
+[openCypher](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf).
+It uses SQLite under the hood and is written in Rust. It does not aim
+at competing with a commercial product like Neo4j in terms of
+performance. Especially for larger datasets, it is recommended to use
+Neo4j or FalkorDB.
 
-**Neo4j:**
+It's easiest to run these in a container using Docker or Podman.
 
-```bash
-# Create data directories per project
-mkdir -p ~/admapper/neo4j/{corp,staging}
-
-# Run Neo4j with a specific project directory
-docker run -d --name admapper-neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/password \
-  -v ~/admapper/neo4j/corp:/data \
-  neo4j:5
-
-# To switch projects, stop the container and start a new one
-# pointing at a different directory
-docker stop admapper-neo4j && docker rm admapper-neo4j
-docker run -d --name admapper-neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/password \
-  -v ~/admapper/neo4j/staging:/data \
-  neo4j:5
+``` bash
+docker run --rm -it --init -p 7687:7687 \
+    --userns $UID=7474 \
+    -e NEO4J_AUTH=none -v ./data:/data \
+    neo4j:5
 ```
 
-**FalkorDB:**
+Just like CrustDB or most other local data storage, this does not use
+authentication. Adjust according to your threat model. Being able to
+mount different volumes to `/data` means you can easily switch between
+separate projects.
 
-```bash
-mkdir -p ~/admapper/falkor/corp
+Similarly, for FalkorDB:
 
-docker run -d --name admapper-falkor \
-  -p 6379:6379 \
-  -v ~/admapper/falkor/corp:/data \
-  falkordb/falkordb:latest
+``` bash
+docker run --rm -it --init -p 6379:6379 \
+    -v ./data:/data \
+    docker.io/falkordb/falkordb:v4.2.1
 ```
+
+If you run ADMapper natively, just connect to `localhost` in the
+respective tab of the connection dialog.
+
+If you run ADMapper also inside a container, it's best to use a
+`docker-compose.yml` file. Example:
+
+``` yaml
+services:
+  admapper:
+    image: ghcr.io/adrianvollmer/admapper
+    ports:
+      - "9191:9191"
+    command: ["neo4j://neo4j"]
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
+  neo4j:
+    image: docker.io/neo4j:5
+    init: true
+    environment:
+      NEO4J_AUTH: none
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ${DATA_DIR}:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7474"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+```
+
+Then you can easily get going by running
+`DATA_DIR=./data docker compose up`.
 
 Replace `docker` with `podman` if you prefer a rootless setup.
 

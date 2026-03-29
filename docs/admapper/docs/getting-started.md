@@ -77,75 +77,25 @@ Access the web interface at `http://localhost:9191`.
 
 ### Docker
 
-## Alternative Databases
-
-CrustDB is an experimental embedded graph database which supports
-[openCypher](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf).
-It uses SQLite under the hood and is written in Rust. It does not aim at
-competing with a commercial product like Neo4j in terms of performance.
-Especially for larger datasets, it is recommended to use Neo4j or
-FalkorDB.
-
-It's easiest to run these in a container using Docker or Podman.
+There is also a Docker image you can run. Only headless mode is
+supported. Mount a data directory for usage with CrustDB:
 
 ``` bash
-docker run --rm -it --init -p 7687:7687 \
-    --userns $UID=7474 \
-    -e NEO4J_AUTH=none -v ./data:/data \
-    neo4j:5
+docker run --rm -it --init -p 9191:9191 -v ./data:/data \
+    ghcr.io/adrianvollmer/admapper crustdb:///data/admapper.db
 ```
 
-Just like CrustDB or most other local data storage, this does not use
-authentication. Adjust according to your threat model. Being able to
-mount different volumes to `/data` means you can easily switch between
-separate projects.
+Environment variables:
 
-Similarly, for FalkorDB:
+- `ADMAPPER_HOST`: Bind address (default: `0.0.0.0`)
+- `ADMAPPER_PORT`: HTTP server port (default: `9191`)
+- `RUST_LOG`: Log level (default: `info`)
 
-``` bash
-docker run --rm -it --init -p 6379:6379 \
-    -v ./data:/data \
-    docker.io/falkordb/falkordb:v4.2.1
-```
 
-If you run ADMapper natively, just connect to `localhost` in the
-respective tab of the connection dialog.
+### Alternative Databases
 
-If you run ADMapper also inside a container, it's best to use
-`docker-compose`. Example:
-
-``` yml
-services:
-  admapper:
-    image: admapper
-    ports:
-      - "9191:9191"
-    volumes:
-      - ${DATA_DIR}:/data
-    command: ["crustdb:///data/admapper.db"]
-    depends_on:
-      neo4j:
-        condition: service_healthy
-
-  neo4j:
-    image: docker.io/neo4j:5
-    init: true
-    environment:
-      NEO4J_AUTH: none
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    volumes:
-      - ${DATA_DIR}/neo4j:/data
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7474"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-```
-
-Then you can easily get going by running
-`DATA_DIR=./data docker compose up`.
+See [Database Backends](backends.md#running-with-docker) for how to run ADMapper
+alongside Neo4j or FalkorDB.
 
 ## Importing Data
 
@@ -185,8 +135,8 @@ RETURN g
 ### Show users with sessions
 
 ``` cypher
-MATCH (u:User)-[:HasSession]->(c:Computer)
-RETURN u.name, c.name
+MATCH p=(u:User)-[:HasSession]->(c:Computer)
+RETURN p
 LIMIT 10
 ```
 

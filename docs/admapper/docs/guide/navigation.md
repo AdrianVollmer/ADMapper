@@ -32,49 +32,9 @@ Clicking a node shows its properties in the side panel:
 - **Labels**: Node type (User, Computer, Group, etc.)
 - **Properties**: All AD attributes
 - **Connections**: Incoming and outgoing relationships
-- **Value**: Security-relevant flags such as tier 0 membership, paths
-  to privileged groups, ownership status, and whether the account is
+- **Value**: Security-relevant flags such as tier 0 membership, paths to
+  privileged groups, ownership status, and whether the account is
   disabled
-
-## Expanding Nodes
-
-Double-click a node to load its connections. This fetches:
-
-- Direct incoming relationships
-- Direct outgoing relationships
-
-Connected nodes appear around the selected node.
-
-## Filtering
-
-### By Node Type
-
-Toggle visibility of node types using the filter panel:
-
-- Show/hide Users
-- Show/hide Computers
-- Show/hide Groups
-- etc.
-
-### By Relationship Type
-
-Filter which relationship types are displayed:
-
-- Membership relationships
-- Session relationships
-- Dangerous permission relationships
-- etc.
-
-## Layout
-
-The graph uses a force-directed layout that automatically positions
-nodes. Controls:
-
-| Action       | Effect                   |
-|--------------|--------------------------|
-| Reset layout | Recompute positions      |
-| Pin node     | Fix node position        |
-| Unpin all    | Release all pinned nodes |
 
 ## Search
 
@@ -90,17 +50,7 @@ Search matches against:
 
 Results appear in a dropdown. Click to navigate to the node.
 
-## Highlighting
+## Shortest Path
 
-### Path Highlighting
-
-When viewing a path (from shortest path query or path finding), the path
-is highlighted:
-
-- Path nodes: Full color
-- Path relationships: Highlighted
-- Other elements: Dimmed
-
-### Neighbor Highlighting
-
-Hovering over a node highlights its direct neighbors.
+Find the shortest path between two objects by entering search terms in
+the respective input fields in the navigation bar.

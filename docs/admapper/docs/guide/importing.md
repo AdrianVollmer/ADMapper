@@ -1,6 +1,7 @@
 # Importing Data
 
-ADMapper imports BloodHound collection data in JSON format (typically packaged as ZIP files).
+ADMapper imports BloodHound collection data in JSON format (typically
+packaged as ZIP files).
 
 ## Supported Formats
 
@@ -13,7 +14,7 @@ ADMapper imports BloodHound collection data in JSON format (typically packaged a
 
 Run SharpHound on a domain-joined Windows machine:
 
-```powershell
+``` powershell
 .\SharpHound.exe -c All
 ```
 
@@ -21,54 +22,44 @@ This produces a ZIP file like `20240101_BloodHound.zip`.
 
 ### BloodHound.py (Python)
 
-Run from any machine with network access to the domain:
+SharpHound as been implemented in
+[Python](https://github.com/dirkjanm/bloodhound.py). Run from any
+machine with network access to the domain:
 
-```bash
-bloodhound-python -u user -p password -d domain.local -c All
+``` bash
+bloodhound-python -u user -p password -d DOMAIN.LOCAL -c All
 ```
 
 This produces individual JSON files. ZIP them before importing:
 
-```bash
+``` bash
 zip bloodhound_data.zip *.json
+```
+
+### RustHound-CE
+
+There is also a Rust-implementation called
+[RustHound-CE](https://github.com/g0h4n/RustHound-CE):
+
+``` bash
+rusthound-ce -d DOMAIN.LOCAL -u USERNAME@DOMAIN.LOCAL -z
 ```
 
 ## Import Methods
 
 ### UI Import
 
-1. Click the import icon in the toolbar
-2. Select your ZIP file
-3. Monitor progress in the status bar
-
-### API Import
-
-```bash
-curl -X POST http://localhost:9191/api/import \
-  -F "file=@bloodhound_data.zip"
-```
-
-Response:
-
-```json
-{
-  "job_id": "abc123",
-  "status": "processing"
-}
-```
-
-### Check Progress
-
-```bash
-curl http://localhost:9191/api/import/progress/abc123
-```
+1.  Click on Tools-\>Import BloodHound data...
+2.  Select your ZIP file
+3.  Monitor progress in the status dialog
 
 ## Import Behavior
 
 ### Node Handling
 
 - Nodes are identified by their `objectid` property
-- Duplicate imports update existing nodes rather than creating duplicates
+- Duplicate imports update existing nodes rather than creating
+  duplicates
 - Properties are merged on re-import
 
 ### Relationship Handling
@@ -79,22 +70,4 @@ curl http://localhost:9191/api/import/progress/abc123
 
 ## Clearing Data
 
-To start fresh, clear the database:
-
-### Via UI
-
-Use the clear button in the database menu.
-
-### Via API
-
-```bash
-curl -X POST http://localhost:9191/api/graph/clear
-```
-
-## Large Imports
-
-For large environments (100k+ objects):
-
-- CrustDB handles imports efficiently with batch operations
-- Import progress is streamed via Server-Sent Events
-- The UI remains responsive during background imports
+To start fresh, use the clear button in the database menu.
