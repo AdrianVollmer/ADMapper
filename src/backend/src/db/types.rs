@@ -2,7 +2,6 @@
 
 use serde::Serialize;
 use serde_json::{Map, Value as JsonValue};
-use std::collections::HashSet;
 use thiserror::Error;
 
 /// A node stored in the database.
@@ -73,6 +72,7 @@ impl DbNode {
 /// Relationship types that represent administrative or privileged access.
 ///
 /// Used when computing admin relationship counts for node details.
+#[cfg(any(feature = "crustdb", feature = "neo4j", feature = "falkordb"))]
 pub const ADMIN_RELATIONSHIP_TYPES: &[&str] = &[
     "AdminTo",
     "GenericAll",
@@ -86,7 +86,8 @@ pub const ADMIN_RELATIONSHIP_TYPES: &[&str] = &[
 ];
 
 /// Build a HashSet from `ADMIN_RELATIONSHIP_TYPES` for O(1) lookups.
-pub fn admin_types_set() -> HashSet<&'static str> {
+#[cfg(feature = "crustdb")]
+pub fn admin_types_set() -> std::collections::HashSet<&'static str> {
     ADMIN_RELATIONSHIP_TYPES.iter().copied().collect()
 }
 
@@ -195,6 +196,7 @@ pub struct ReachabilityInsight {
 /// Format: (display_name, SID_pattern)
 /// - Patterns starting with '-' are domain-relative SID suffixes
 /// - Other patterns are exact well-known SIDs
+#[cfg(any(feature = "crustdb", feature = "neo4j", feature = "falkordb"))]
 pub const WELL_KNOWN_PRINCIPALS: &[(&str, &str)] = &[
     ("Everyone", "S-1-1-0"),
     ("Authenticated Users", "S-1-5-11"),
@@ -203,6 +205,7 @@ pub const WELL_KNOWN_PRINCIPALS: &[(&str, &str)] = &[
 ];
 
 /// SID suffix for Domain Admins group.
+#[cfg(any(feature = "crustdb", feature = "neo4j", feature = "falkordb"))]
 pub const DOMAIN_ADMIN_SID_SUFFIX: &str = "-512";
 
 /// Security insights computed from the graph.

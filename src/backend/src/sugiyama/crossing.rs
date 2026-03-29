@@ -119,11 +119,11 @@ fn count_all_crossings(
     out_adj: &[Vec<usize>],
     pos: &[usize],
 ) -> usize {
-    let mut total = 0;
-    for l in 0..layers.len().saturating_sub(1) {
-        total += count_crossings_between(&layers[l], out_adj, pos);
-    }
-    total
+    layers
+        .iter()
+        .take(layers.len().saturating_sub(1))
+        .map(|layer| count_crossings_between(layer, out_adj, pos))
+        .sum()
 }
 
 /// Count crossings between a layer and the one below it.

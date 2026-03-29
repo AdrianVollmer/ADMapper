@@ -239,7 +239,7 @@ fn circular(node_ids: &[String]) -> Vec<NodePosition> {
 fn grid(node_ids: &[String]) -> Vec<NodePosition> {
     let n = node_ids.len();
     let cols = (n as f32).sqrt().ceil() as usize;
-    let rows = (n + cols - 1) / cols;
+    let rows = n.div_ceil(cols);
     let sx = if cols > 1 {
         (TARGET_SIZE * 2.0) / (cols - 1) as f32
     } else {
@@ -273,7 +273,7 @@ fn lattice(node_ids: &[String]) -> Vec<NodePosition> {
     let angle: f32 = 0.5_f32.atan(); // 26.57°
     let (cos, sin) = (angle.cos(), angle.sin());
 
-    let rows = (n + cols - 1) / cols;
+    let rows = n.div_ceil(cols);
     let start_x = -((cols.saturating_sub(1)) as f32 * spacing) / 2.0;
     let start_y = -((rows.saturating_sub(1)) as f32 * spacing) / 2.0;
 

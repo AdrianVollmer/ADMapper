@@ -86,11 +86,11 @@ pub(crate) fn assign_coordinates(graph: &LayeredGraph, config: &CoordConfig) -> 
 
     // Balance: median of 4 (average of middle two)
     let mut result = Vec::with_capacity(n);
-    for i in 0..n {
+    for (i, layer) in graph.layer_of.iter().enumerate().take(n) {
         let mut vals = [all_x[0][i], all_x[1][i], all_x[2][i], all_x[3][i]];
         vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let x = (vals[1] + vals[2]) / 2.0;
-        let y = graph.layer_of[i] as f32 * config.layer_sep;
+        let y = *layer as f32 * config.layer_sep;
         result.push((x, y));
     }
 
@@ -402,16 +402,8 @@ fn horizontal_compaction(
 
     // Initialize shift sentinel
     match hdir {
-        HDir::Left => {
-            for s in &mut shift {
-                *s = f32::INFINITY;
-            }
-        }
-        HDir::Right => {
-            for s in &mut shift {
-                *s = f32::NEG_INFINITY;
-            }
-        }
+        HDir::Left => shift.fill(f32::INFINITY),
+        HDir::Right => shift.fill(f32::NEG_INFINITY),
     }
 
     // Place every block root
@@ -452,6 +444,7 @@ fn horizontal_compaction(
 }
 
 /// Recursively place a block and all blocks it depends on.
+#[allow(clippy::too_many_arguments)]
 fn place_block(
     v: usize,
     graph: &LayeredGraph,

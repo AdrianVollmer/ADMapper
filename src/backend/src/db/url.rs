@@ -51,6 +51,7 @@ impl DatabaseType {
 
 /// Parsed database URL.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Fields are read by feature-gated database backends.
 pub struct DatabaseUrl {
     /// Type of database.
     pub db_type: DatabaseType,
