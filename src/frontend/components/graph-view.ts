@@ -8,12 +8,12 @@ import { loadGraph, createRenderer, applyLayoutAsync as applyLayoutFromModule, g
 import type { ADGraphRenderer, LayoutType } from "../graph";
 import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel, updateDetailPanelForEdge } from "./sidebars";
-import { clearCollapseState } from "../graph/collapse";
+import { clearCollapseState, autoCollapseGraph } from "../graph/collapse";
 import { destroyMagnifier } from "../graph/magnifier";
 import { dispatchAction, Actions, type Action } from "./actions";
 import { api } from "../api/client";
 import { cycleLabelVisibility, getLabelVisibilityName } from "../graph/label-visibility";
-import { getDefaultLayout } from "./settings";
+import { getDefaultLayout, getAutoCollapseThreshold } from "./settings";
 import { getCurrentTheme } from "../utils/theme";
 import { showConfirm } from "../utils/notifications";
 import { escapeHtml } from "../utils/html";
@@ -264,6 +264,12 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
   const graph = loadGraph(data);
   const layoutToUse = edgeCount === 0 ? "lattice" : currentLayout;
   await applyLayoutAsync(graph, layoutToUse);
+
+  // Auto-collapse high-connectivity nodes before rendering
+  const threshold = getAutoCollapseThreshold();
+  if (threshold > 0) {
+    autoCollapseGraph(graph, threshold);
+  }
 
   // Create renderer
   renderer = createRenderer({

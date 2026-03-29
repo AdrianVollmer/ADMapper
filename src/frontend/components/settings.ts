@@ -31,12 +31,16 @@ const DEFAULT_LAYOUT: LayoutSettings = {
   direction: "left_to_right",
 };
 
+/** Default auto-collapse threshold */
+const DEFAULT_AUTO_COLLAPSE_THRESHOLD = 20;
+
 /** Current settings (cached) */
 let currentSettings: Settings = {
   theme: "dark",
   defaultGraphLayout: "force",
   layout: DEFAULT_LAYOUT,
   fixedNodeSizes: true,
+  autoCollapseThreshold: DEFAULT_AUTO_COLLAPSE_THRESHOLD,
 };
 
 /** Callback for when fixedNodeSizes changes */
@@ -74,6 +78,11 @@ export function getDefaultLayout(): GraphLayout {
 /** Get current layout settings */
 export function getServerLayoutSettings(): LayoutSettings {
   return currentSettings.layout ?? DEFAULT_LAYOUT;
+}
+
+/** Get auto-collapse threshold from settings */
+export function getAutoCollapseThreshold(): number {
+  return currentSettings.autoCollapseThreshold ?? DEFAULT_AUTO_COLLAPSE_THRESHOLD;
 }
 
 /** Toggle between dark and light theme */
@@ -287,6 +296,16 @@ function renderGraphTab(): string {
           <span class="settings-checkbox-label">Fixed node and relationship sizes</span>
         </label>
         <p class="settings-slider-help">When enabled, nodes and relationships stay the same visual size regardless of zoom level</p>
+
+        <div class="settings-slider">
+          <div class="settings-slider-header">
+            <span class="settings-slider-label">Auto-collapse threshold</span>
+            <span class="settings-slider-value" id="auto-collapse-value">20</span>
+          </div>
+          <input type="range" name="autoCollapseThreshold" id="auto-collapse-slider"
+                 min="0" max="100" step="1" value="20">
+          <p class="settings-slider-help">Nodes with more than this many incoming connections are collapsed when a graph loads. Set to 0 to disable.</p>
+        </div>
       </div>
     </div>
   `;
@@ -334,6 +353,14 @@ function attachSliderListeners(): void {
   if (temperatureSlider && temperatureValue) {
     temperatureSlider.addEventListener("input", () => {
       temperatureValue.textContent = parseFloat(temperatureSlider.value).toFixed(2);
+    });
+  }
+
+  const autoCollapseSlider = modalEl.querySelector("#auto-collapse-slider") as HTMLInputElement | null;
+  const autoCollapseValue = modalEl.querySelector("#auto-collapse-value") as HTMLElement | null;
+  if (autoCollapseSlider && autoCollapseValue) {
+    autoCollapseSlider.addEventListener("input", () => {
+      autoCollapseValue.textContent = autoCollapseSlider.value;
     });
   }
 }
@@ -406,6 +433,15 @@ function populateForm(): void {
   if (fixedNodeSizesCheckbox) {
     fixedNodeSizesCheckbox.checked = currentSettings.fixedNodeSizes ?? true;
   }
+
+  // Auto-collapse threshold
+  const autoCollapseSlider = modalEl.querySelector("#auto-collapse-slider") as HTMLInputElement | null;
+  const autoCollapseValue = modalEl.querySelector("#auto-collapse-value") as HTMLElement | null;
+  const threshold = currentSettings.autoCollapseThreshold ?? DEFAULT_AUTO_COLLAPSE_THRESHOLD;
+  if (autoCollapseSlider && autoCollapseValue) {
+    autoCollapseSlider.value = String(threshold);
+    autoCollapseValue.textContent = String(threshold);
+  }
 }
 
 /** Handle tab switching clicks */
@@ -441,6 +477,7 @@ async function saveSettings(): Promise<void> {
   const temperatureSlider = modalEl.querySelector("#temperature-slider") as HTMLInputElement | null;
   const directionSelect = modalEl.querySelector("#direction-select") as HTMLSelectElement | null;
   const fixedNodeSizesCheckbox = modalEl.querySelector("#fixed-node-sizes-checkbox") as HTMLInputElement | null;
+  const autoCollapseSlider = modalEl.querySelector("#auto-collapse-slider") as HTMLInputElement | null;
 
   const layout: LayoutSettings = {
     iterations: iterationsSlider ? parseInt(iterationsSlider.value, 10) : DEFAULT_LAYOUT.iterations,
@@ -449,12 +486,16 @@ async function saveSettings(): Promise<void> {
   };
 
   const fixedNodeSizes = fixedNodeSizesCheckbox ? fixedNodeSizesCheckbox.checked : true;
+  const autoCollapseThreshold = autoCollapseSlider
+    ? parseInt(autoCollapseSlider.value, 10)
+    : DEFAULT_AUTO_COLLAPSE_THRESHOLD;
 
   const newSettings: Settings = {
     theme: (themeRadio?.value as Theme) || currentSettings.theme,
     defaultGraphLayout: (layoutRadio?.value as GraphLayout) || currentSettings.defaultGraphLayout,
     layout,
     fixedNodeSizes,
+    autoCollapseThreshold,
   };
 
   try {

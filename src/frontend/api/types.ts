@@ -217,6 +217,8 @@ export interface Settings {
   layout?: LayoutSettings;
   /** If true, nodes and relationships stay same visual size regardless of zoom level */
   fixedNodeSizes?: boolean;
+  /** Nodes with more than this many incoming connections are auto-collapsed on load (0 = disabled) */
+  autoCollapseThreshold?: number;
 }
 
 // ============================================================================

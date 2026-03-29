@@ -61,15 +61,7 @@ export type { LayoutType, LayoutOptions } from "./layout";
 export { NODE_COLORS, EDGE_COLORS, HIGHLIGHT_COLORS, DIM_COLORS, BACKGROUND_COLOR, getNodeColor } from "./theme";
 
 // Collapse functionality
-export {
-  isNodeCollapsed,
-  getHiddenChildCount,
-  collapseNode,
-  expandNode,
-  toggleNodeCollapse,
-  clearCollapseState,
-  getNodeCollapseInfo,
-} from "./collapse";
+export { isNodeCollapsed, getHiddenChildCount, toggleNodeCollapse, clearCollapseState } from "./collapse";
 
 // Label visibility
 export {

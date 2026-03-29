@@ -60,6 +60,9 @@ pub struct Settings {
     /// Whether nodes and relationships stay same visual size regardless of zoom level
     #[serde(default = "default_fixed_node_sizes")]
     pub fixed_node_sizes: bool,
+    /// Nodes with more than this many incoming connections are auto-collapsed on load (0 = disabled)
+    #[serde(default = "default_auto_collapse_threshold")]
+    pub auto_collapse_threshold: u32,
 }
 
 fn default_fixed_node_sizes() -> bool {
@@ -70,6 +73,10 @@ fn default_query_caching() -> bool {
     true
 }
 
+fn default_auto_collapse_threshold() -> u32 {
+    20
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -78,6 +85,7 @@ impl Default for Settings {
             query_caching: true,
             layout: LayoutSettings::default(),
             fixed_node_sizes: true,
+            auto_collapse_threshold: default_auto_collapse_threshold(),
         }
     }
 }
@@ -143,6 +151,7 @@ mod tests {
         assert!((settings.layout.temperature - 0.1).abs() < f32::EPSILON);
         assert_eq!(settings.layout.direction, "left_to_right");
         assert!(settings.fixed_node_sizes);
+        assert_eq!(settings.auto_collapse_threshold, 20);
     }
 
     #[test]
@@ -157,6 +166,7 @@ mod tests {
                 direction: "top_to_bottom".to_string(),
             },
             fixed_node_sizes: false,
+            auto_collapse_threshold: 50,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -165,6 +175,7 @@ mod tests {
         assert!(json.contains("\"queryCaching\":false"));
         assert!(json.contains("\"layout\""));
         assert!(json.contains("\"fixedNodeSizes\":false"));
+        assert!(json.contains("\"autoCollapseThreshold\":50"));
 
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.theme, "light");
@@ -174,16 +185,18 @@ mod tests {
         assert!((parsed.layout.temperature - 0.05).abs() < f32::EPSILON);
         assert_eq!(parsed.layout.direction, "top_to_bottom");
         assert!(!parsed.fixed_node_sizes);
+        assert_eq!(parsed.auto_collapse_threshold, 50);
     }
 
     #[test]
     fn test_settings_backwards_compatibility() {
-        // Old settings files without layout or fixedNodeSizes should still parse
+        // Old settings files without layout, fixedNodeSizes, or autoCollapseThreshold should still parse
         let json = r#"{"theme":"dark","defaultGraphLayout":"force"}"#;
         let parsed: Settings = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.theme, "dark");
         assert!(parsed.query_caching); // Default to true
         assert!(parsed.fixed_node_sizes); // Default to true
         assert_eq!(parsed.layout.iterations, 300); // Default
+        assert_eq!(parsed.auto_collapse_threshold, 20); // Default
     }
 }

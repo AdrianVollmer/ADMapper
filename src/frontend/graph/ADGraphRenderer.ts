@@ -169,52 +169,56 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     return closestEdge;
   }
 
-  // Custom label renderer: draws label below node, centered
-  // Also draws collapse badge for collapsed nodes
-  function drawLabel(
+  /** Draw the red collapse badge at the top-right of a node. */
+  function drawCollapseBadge(
     context: CanvasRenderingContext2D,
-    data: { label: string | null; x: number; y: number; size: number; color: string },
-    settings: { labelSize: number; labelWeight: string; labelColor: { color?: string } },
-    nodeId?: string
+    data: { key?: string; x: number; y: number; size: number }
   ): void {
-    drawNodeLabel(context, data, settings, currentTheme);
+    const nodeId = data.key;
+    if (!nodeId || !isNodeCollapsed(nodeId)) return;
 
-    // Draw collapse badge if node is collapsed
-    if (nodeId && isNodeCollapsed(nodeId)) {
-      const hiddenCount = getHiddenChildCount(nodeId);
-      if (hiddenCount > 0) {
-        const badgeText = hiddenCount > 99 ? "99+" : String(hiddenCount);
-        const badgeSize = Math.max(12, data.size * 0.6);
+    const hiddenCount = getHiddenChildCount(nodeId);
+    if (hiddenCount === 0) return;
 
-        // Position badge at top-right of node
-        const badgeX = data.x + data.size * 0.7;
-        const badgeY = data.y - data.size * 0.7;
+    const badgeText = hiddenCount > 99 ? "99+" : String(hiddenCount);
+    const badgeSize = Math.max(12, data.size * 0.6);
 
-        // Draw badge background (red circle)
-        context.beginPath();
-        context.arc(badgeX, badgeY, badgeSize / 2, 0, Math.PI * 2);
-        context.fillStyle = "#ef4444";
-        context.fill();
+    // Position badge at top-right of node
+    const badgeX = data.x + data.size * 0.7;
+    const badgeY = data.y - data.size * 0.7;
 
-        // Draw badge text
-        context.font = `bold ${badgeSize * 0.7}px sans-serif`;
-        context.fillStyle = "#ffffff";
-        context.textAlign = "center";
-        context.textBaseline = "middle";
-        context.fillText(badgeText, badgeX, badgeY);
-      }
-    }
+    // Draw badge background (red circle)
+    context.beginPath();
+    context.arc(badgeX, badgeY, badgeSize / 2, 0, Math.PI * 2);
+    context.fillStyle = "#ef4444";
+    context.fill();
+
+    // Draw badge text
+    context.font = `bold ${badgeSize * 0.7}px sans-serif`;
+    context.fillStyle = "#ffffff";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(badgeText, badgeX, badgeY);
   }
 
-  // Custom hover renderer: draws a glow effect behind the hovered node
-  // Selected nodes get a red, tighter, more intense glow
+  // Custom label renderer: draws label below node, centered, plus collapse badge
+  function drawLabel(
+    context: CanvasRenderingContext2D,
+    data: { key?: string; label: string | null; x: number; y: number; size: number; color: string },
+    settings: { labelSize: number; labelWeight: string; labelColor: { color?: string } }
+  ): void {
+    drawNodeLabel(context, data, settings, currentTheme);
+    drawCollapseBadge(context, data);
+  }
+
+  // Custom hover renderer: draws a glow effect behind the hovered node,
+  // then redraws the collapse badge on top so it is never occluded.
   function drawNodeHover(
     context: CanvasRenderingContext2D,
-    data: { x: number; y: number; size: number; color: string },
-    _settings: unknown,
-    nodeId?: string
+    data: { key?: string; x: number; y: number; size: number; color: string },
+    _settings: unknown
   ): void {
-    const isSelected = nodeId ? selectedNodes.has(nodeId) : false;
+    const isSelected = data.key ? selectedNodes.has(data.key) : false;
 
     if (isSelected) {
       // Selected: red, tight, intense glow
@@ -241,6 +245,9 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       context.fillStyle = gradient;
       context.fill();
     }
+
+    // Redraw badge on top of glow so it's never hidden
+    drawCollapseBadge(context, data);
   }
 
   // Create shared node image and curved arrow programs
@@ -368,6 +375,19 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     },
   });
 
+  // Move the hovers canvas above the hoverNodes WebGL canvas in DOM order.
+  // Sigma stacks: ... labels (2D) < hovers (2D) < hoverNodes (WebGL) < mouse (div).
+  // Without this fix, hoverNodes paints the highlighted node icon on top of
+  // the collapse badge drawn on the hovers canvas.
+  // We insert hovers right after hoverNodes (but before the mouse div that
+  // captures all pointer events).
+  const canvases = sigma.getCanvases();
+  const hoversCanvas = canvases.hovers;
+  const hoverNodesCanvas = canvases.hoverNodes;
+  if (hoversCanvas && hoverNodesCanvas) {
+    hoverNodesCanvas.after(hoversCanvas);
+  }
+
   // Set initial background and label color
   updateThemeStyles(currentTheme);
 
@@ -492,6 +512,9 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
   // Double-click handler for toggling node collapse
   sigma.on("doubleClickNode", (event) => {
+    // Prevent Sigma's default double-click zoom
+    event.preventSigmaDefault();
+
     // Toggle collapse state
     toggleNodeCollapse(graph, event.node);
     sigma.refresh();
