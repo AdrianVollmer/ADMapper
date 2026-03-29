@@ -8,8 +8,6 @@ pub(crate) struct LayeredGraph {
     pub layers: Vec<Vec<usize>>,
     /// Layer index for each node (real and virtual).
     pub layer_of: Vec<usize>,
-    /// Number of real (non-virtual) nodes. Indices 0..n_real are real.
-    pub n_real: usize,
     /// Outgoing adjacency (extended with virtual nodes).
     pub out_adj: Vec<Vec<usize>>,
     /// Incoming adjacency (extended with virtual nodes).
@@ -64,15 +62,14 @@ pub(crate) fn assign_layers(graph: &DagGraph) -> Vec<usize> {
 /// Build the layered graph, inserting virtual nodes for edges that span
 /// more than one layer.
 pub(crate) fn build_layered_graph(graph: &DagGraph, layer_of_real: &[usize]) -> LayeredGraph {
-    let n_real = graph.n;
     let mut layer_of = layer_of_real.to_vec();
     let mut out_adj: Vec<Vec<usize>> = graph.out_adj.clone();
     let mut in_adj: Vec<Vec<usize>> = graph.in_adj.clone();
-    let mut is_virtual = vec![false; n_real];
+    let mut is_virtual = vec![false; graph.n];
 
     // Collect edges spanning more than one layer.
     let mut long_edges = Vec::new();
-    for s in 0..n_real {
+    for s in 0..graph.n {
         for &t in &graph.out_adj[s] {
             if layer_of[t] - layer_of[s] > 1 {
                 long_edges.push((s, t));
@@ -112,7 +109,6 @@ pub(crate) fn build_layered_graph(graph: &DagGraph, layer_of_real: &[usize]) -> 
     LayeredGraph {
         layers,
         layer_of,
-        n_real,
         out_adj,
         in_adj,
         is_virtual,
@@ -149,7 +145,6 @@ mod tests {
         let lg = build_layered_graph(&g, &layers);
 
         // One virtual node should be inserted for the A->C edge
-        assert_eq!(lg.n_real, 3);
         assert!(lg.layer_of.len() > 3, "virtual nodes should be added");
         assert!(lg.is_virtual[3], "node 3 should be virtual");
         assert_eq!(lg.layer_of[3], 1, "virtual node at layer 1");
