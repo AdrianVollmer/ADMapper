@@ -1,437 +1,44 @@
 /**
  * Layout algorithms for AD graph positioning.
  *
- * Supports:
- * - ForceAtlas2: Force-directed layout, good for exploring relationships
- * - Hierarchical: Left-to-right layered layout, relationships flow from sources to targets
- * - Grid: Simple grid arrangement
- * - Circular: Concentric circles based on node depth, sinks at center
+ * All layouts are computed server-side using visgraph (Rust) via
+ * POST /api/graph/layout. This provides consistent, high-performance
+ * layout computation for graphs of any size.
+ *
+ * Supported algorithms:
+ * - force: Fruchterman-Reingold force-directed layout
+ * - hierarchical: Layered hierarchical layout
+ * - circular: Nodes evenly distributed on a circle
  */
 
-import forceAtlas2 from "graphology-layout-forceatlas2";
-import noverlap from "graphology-layout-noverlap";
-import dagre from "dagre";
 import type { ADGraphType } from "./ADGraph";
-import { applyCircularLayout, type CircularSettings } from "./layout-circular";
-export type { CircularSettings } from "./layout-circular";
+import { api } from "../api/client";
+import type { LayoutResponse, ServerLayoutAlgorithm } from "../api/types";
+import { getServerLayoutSettings } from "../components/settings";
 
 /** Available layout algorithms */
-export type LayoutType = "force" | "hierarchical" | "grid" | "circular" | "lattice";
+export type LayoutType = "force" | "hierarchical" | "circular" | "grid" | "lattice";
 
 export interface LayoutOptions {
   /** Layout algorithm to use */
   type?: LayoutType;
-  /** Number of iterations to run (for force layout) */
-  iterations?: number;
-  /** Settings for ForceAtlas2 */
-  settings?: ForceAtlas2Settings;
-  /** Settings for hierarchical layout */
-  hierarchical?: HierarchicalSettings;
-  /** Settings for grid layout */
-  grid?: GridSettings;
-  /** Settings for circular layout */
-  circular?: CircularSettings;
-  /** Settings for lattice layout */
-  lattice?: LatticeSettings;
 }
 
-export interface HierarchicalSettings {
-  /** Horizontal spacing between layers */
-  layerSpacing?: number;
-  /** Vertical spacing between nodes in the same layer */
-  nodeSpacing?: number;
-  /** Direction of the layout */
-  direction?: "left-to-right" | "top-to-bottom";
-}
-
-export interface GridSettings {
-  /** Horizontal spacing between nodes */
-  columnSpacing?: number;
-  /** Vertical spacing between nodes */
-  rowSpacing?: number;
-  /** Number of columns (if not set, computed from node count) */
-  columns?: number;
-}
-
-export interface LatticeSettings {
-  /** Spacing between nodes (before rotation) */
-  spacing?: number;
-  /** Rotation angle in degrees (default: 26.57 - arctan(0.5) for optimal label separation) */
-  angleDegrees?: number;
-}
-
-export interface ForceAtlas2Settings {
-  /** Attraction strength */
-  gravity?: number;
-  /** Scaling factor */
-  scalingRatio?: number;
-  /** Slow down factor */
-  slowDown?: number;
-  /** Prevent node overlap */
-  barnesHutOptimize?: boolean;
-  /** Theta for Barnes-Hut optimization */
-  barnesHutTheta?: number;
-  /** Adjust speed based on graph size */
-  adjustSizes?: boolean;
-  /** Relationship weight influence */
-  edgeWeightInfluence?: number;
-  /** LinLog mode (better for clusters) */
-  linLogMode?: boolean;
-  /** Strong gravity mode */
-  strongGravityMode?: boolean;
-}
-
-/** Default layout settings optimized for AD graphs */
-const DEFAULT_FORCE_SETTINGS: ForceAtlas2Settings = {
-  gravity: 0.5,
-  scalingRatio: 10,
-  slowDown: 1,
-  barnesHutOptimize: true,
-  barnesHutTheta: 0.5,
-  adjustSizes: true,
-  edgeWeightInfluence: 1,
-  linLogMode: true, // Better for graphs with hub nodes (common in AD)
-  strongGravityMode: false,
+/** Map from LayoutType to the server's algorithm name */
+const ALGORITHM_MAP: Record<LayoutType, ServerLayoutAlgorithm> = {
+  force: "force_directed",
+  hierarchical: "hierarchical",
+  circular: "circular",
+  grid: "grid",
+  lattice: "lattice",
 };
 
-/** User-configurable force layout settings */
-export interface UserForceSettings {
-  gravity: number;
-  scalingRatio: number;
-  adjustSizes: boolean;
-}
-
-/** Current user force settings (loaded from settings API) */
-let userForceSettings: UserForceSettings | null = null;
-
-/** Set user force settings (called from settings component) */
-export function setUserForceSettings(settings: UserForceSettings | null): void {
-  userForceSettings = settings;
-}
-
-/** Get current user force settings */
-export function getUserForceSettings(): UserForceSettings | null {
-  return userForceSettings;
-}
-
-const DEFAULT_HIERARCHICAL_SETTINGS: HierarchicalSettings = {
-  layerSpacing: 200,
-  nodeSpacing: 80,
-  direction: "left-to-right",
-};
-
-const DEFAULT_GRID_SETTINGS: GridSettings = {
-  columnSpacing: 150,
-  rowSpacing: 150,
-};
-
-const DEFAULT_LATTICE_SETTINGS: LatticeSettings = {
-  spacing: 180,
-  // arctan(0.5) ≈ 26.57° - creates a 2:1 aspect ratio tilt
-  // This angle ensures nodes don't align horizontally or vertically,
-  // giving labels maximum separation
-  angleDegrees: 26.57,
-};
-
-/** Default iterations based on graph size */
-function getDefaultIterations(nodeCount: number): number {
-  // ForceAtlas2 needs many iterations to converge properly
-  if (nodeCount < 50) return 500;
-  if (nodeCount < 200) return 400;
-  if (nodeCount < 500) return 300;
-  if (nodeCount < 1000) return 200;
-  if (nodeCount < 5000) return 150;
-  return 100; // Large graphs: fewer iterations, rely on Barnes-Hut
-}
-
 /**
- * Apply layout to the graph.
+ * Apply layout to the graph (async, server-side).
  *
- * This modifies node positions in place.
- */
-export function applyLayout(graph: ADGraphType, options: LayoutOptions = {}): void {
-  const nodeCount = graph.order;
-  if (nodeCount === 0) return;
-
-  const layoutType = options.type ?? "force";
-
-  switch (layoutType) {
-    case "hierarchical":
-      applyHierarchicalLayout(graph, options.hierarchical);
-      break;
-    case "grid":
-      applyGridLayout(graph, options.grid);
-      break;
-    case "circular":
-      applyCircularLayout(graph, options.circular);
-      break;
-    case "lattice":
-      applyLatticeLayout(graph, options.lattice);
-      break;
-    default:
-      applyForceLayout(graph, options);
-      break;
-  }
-}
-
-/** Apply ForceAtlas2 force-directed layout */
-function applyForceLayout(graph: ADGraphType, options: LayoutOptions): void {
-  const nodeCount = graph.order;
-  const iterations = options.iterations ?? getDefaultIterations(nodeCount);
-
-  const settings = mergeForceSettings(userForceSettings, options.settings);
-
-  // Run ForceAtlas2 to compute initial positions
-  forceAtlas2.assign(graph, {
-    iterations,
-    settings,
-  });
-
-  // Post-process with noverlap to eliminate any remaining overlaps
-  // This spreads out nodes that are still too close together
-  noverlap.assign(graph, {
-    maxIterations: 50,
-    settings: {
-      ratio: 1.5, // How much to expand the layout to remove overlaps
-      margin: 10, // Minimum margin between nodes
-    },
-  });
-}
-
-/**
- * Apply hierarchical layout using dagre.
- *
- * Dagre is a JavaScript library for laying out directed graphs.
- * It handles layer assignment, relationship crossing minimization, and coordinate assignment.
- *
- * Falls back to lattice layout if there are no relationships (single level).
- * Scales the layout wider for graphs with few levels.
- *
- * @returns true if hierarchical was applied, false if fell back to grid
- */
-function applyHierarchicalLayout(graph: ADGraphType, options: HierarchicalSettings = {}): boolean {
-  // If no relationships, fall back to lattice layout (all nodes would be on same level)
-  if (graph.size === 0) {
-    applyLatticeLayout(graph);
-    return false;
-  }
-
-  const settings = { ...DEFAULT_HIERARCHICAL_SETTINGS, ...options };
-  const { layerSpacing, nodeSpacing, direction } = settings;
-
-  // Create a dagre graph
-  const g = new dagre.graphlib.Graph();
-
-  // Configure the graph layout
-  g.setGraph({
-    rankdir: direction === "left-to-right" ? "LR" : "TB",
-    nodesep: nodeSpacing,
-    ranksep: layerSpacing,
-    marginx: 0,
-    marginy: 0,
-  });
-
-  // Default relationship label (required by dagre)
-  g.setDefaultEdgeLabel(() => ({}));
-
-  // Add nodes to dagre graph
-  graph.forEachNode((nodeId) => {
-    g.setNode(nodeId, { width: 40, height: 40 });
-  });
-
-  // Add relationships to dagre graph
-  graph.forEachEdge((_, _attrs, source, target) => {
-    g.setEdge(source, target);
-  });
-
-  // Run dagre layout
-  dagre.layout(g);
-
-  // Collect positions from dagre layout
-  const positions: Array<{ nodeId: string; x: number; y: number }> = [];
-
-  g.nodes().forEach((nodeId) => {
-    const node = g.node(nodeId);
-    if (node) {
-      positions.push({ nodeId, x: node.x, y: node.y });
-    }
-  });
-
-  // Normalize and apply positions
-  const normalized = normalizeGraphPositions(positions);
-  for (const pos of normalized) {
-    if (graph.hasNode(pos.nodeId)) {
-      graph.setNodeAttribute(pos.nodeId, "x", pos.x);
-      graph.setNodeAttribute(pos.nodeId, "y", pos.y);
-    }
-  }
-
-  return true;
-}
-
-/**
- * Apply grid layout - arranges nodes in a simple grid pattern.
- */
-function applyGridLayout(graph: ADGraphType, options: GridSettings = {}): void {
-  const settings = { ...DEFAULT_GRID_SETTINGS, ...options };
-  const { columnSpacing, rowSpacing } = settings;
-
-  // Get all nodes and sort for consistent ordering
-  const nodes: string[] = [];
-  graph.forEachNode((nodeId) => nodes.push(nodeId));
-  nodes.sort((a, b) => {
-    // Sort by type first, then by label
-    const typeA = graph.getNodeAttribute(a, "nodeType") ?? "";
-    const typeB = graph.getNodeAttribute(b, "nodeType") ?? "";
-    if (typeA !== typeB) return typeA.localeCompare(typeB);
-    const labelA = graph.getNodeAttribute(a, "label") ?? a;
-    const labelB = graph.getNodeAttribute(b, "label") ?? b;
-    return labelA.localeCompare(labelB);
-  });
-
-  // Compute grid dimensions
-  const columns = settings.columns ?? Math.ceil(Math.sqrt(nodes.length));
-  const rows = Math.ceil(nodes.length / columns);
-
-  // Center the grid
-  const gridWidth = (columns - 1) * columnSpacing!;
-  const gridHeight = (rows - 1) * rowSpacing!;
-  const startX = -gridWidth / 2;
-  const startY = -gridHeight / 2;
-
-  // Assign positions
-  for (let i = 0; i < nodes.length; i++) {
-    const col = i % columns;
-    const row = Math.floor(i / columns);
-    graph.setNodeAttribute(nodes[i], "x", startX + col * columnSpacing!);
-    graph.setNodeAttribute(nodes[i], "y", startY + row * rowSpacing!);
-  }
-}
-
-/**
- * Apply lattice layout - a tilted grid that prevents horizontal label collision.
- *
- * Creates a grid pattern rotated by ~26.57° (arctan(0.5)), which ensures
- * nodes don't align horizontally or vertically, giving labels maximum separation.
- * This is ideal for displaying isolated nodes (e.g., stale objects query results).
- */
-function applyLatticeLayout(graph: ADGraphType, options: LatticeSettings = {}): void {
-  const settings = { ...DEFAULT_LATTICE_SETTINGS, ...options };
-  const { spacing, angleDegrees } = settings;
-
-  // Get all nodes and sort for consistent ordering
-  const nodes: string[] = [];
-  graph.forEachNode((nodeId) => nodes.push(nodeId));
-  nodes.sort((a, b) => {
-    // Sort by type first, then by label
-    const typeA = graph.getNodeAttribute(a, "nodeType") ?? "";
-    const typeB = graph.getNodeAttribute(b, "nodeType") ?? "";
-    if (typeA !== typeB) return typeA.localeCompare(typeB);
-    const labelA = graph.getNodeAttribute(a, "label") ?? a;
-    const labelB = graph.getNodeAttribute(b, "label") ?? b;
-    return labelA.localeCompare(labelB);
-  });
-
-  // Compute grid dimensions
-  const columns = Math.ceil(Math.sqrt(nodes.length));
-  const rows = Math.ceil(nodes.length / columns);
-
-  // Create grid positions centered at origin
-  const gridWidth = (columns - 1) * spacing!;
-  const gridHeight = (rows - 1) * spacing!;
-  const startX = -gridWidth / 2;
-  const startY = -gridHeight / 2;
-
-  // Convert angle to radians
-  const angle = (angleDegrees! * Math.PI) / 180;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-
-  // Assign positions with rotation
-  for (let i = 0; i < nodes.length; i++) {
-    const col = i % columns;
-    const row = Math.floor(i / columns);
-
-    // Original grid position
-    const x = startX + col * spacing!;
-    const y = startY + row * spacing!;
-
-    // Apply rotation around origin
-    const rotatedX = x * cos - y * sin;
-    const rotatedY = x * sin + y * cos;
-
-    graph.setNodeAttribute(nodes[i], "x", rotatedX);
-    graph.setNodeAttribute(nodes[i], "y", rotatedY);
-  }
-}
-
-/**
- * Apply hierarchical layout asynchronously using a Web Worker.
- *
- * Runs dagre in a separate thread to avoid blocking the UI.
- */
-async function applyHierarchicalLayoutAsync(graph: ADGraphType, options: HierarchicalSettings = {}): Promise<boolean> {
-  // If no relationships, fall back to lattice layout (all nodes would be on same level)
-  if (graph.size === 0) {
-    applyLatticeLayout(graph);
-    return false;
-  }
-
-  const settings = { ...DEFAULT_HIERARCHICAL_SETTINGS, ...options };
-
-  // Extract node and relationship data for the worker
-  const nodes: Array<{ id: string }> = [];
-  const relationships: Array<{ source: string; target: string }> = [];
-
-  graph.forEachNode((nodeId) => {
-    nodes.push({ id: nodeId });
-  });
-
-  graph.forEachEdge((_, _attrs, source, target) => {
-    relationships.push({ source, target });
-  });
-
-  // Create worker and run layout
-  const worker = new Worker(new URL("./layout-worker.ts", import.meta.url), { type: "module" });
-
-  const positions = await new Promise<Array<{ nodeId: string; x: number; y: number }>>((resolve, reject) => {
-    worker.onmessage = (event) => {
-      resolve(event.data.positions);
-      worker.terminate();
-    };
-    worker.onerror = (error) => {
-      reject(error);
-      worker.terminate();
-    };
-
-    worker.postMessage({
-      nodes,
-      relationships,
-      settings: {
-        layerSpacing: settings.layerSpacing,
-        nodeSpacing: settings.nodeSpacing,
-        direction: settings.direction,
-      },
-    });
-  });
-
-  // Normalize and apply positions
-  const normalized = normalizeGraphPositions(positions);
-  for (const pos of normalized) {
-    if (graph.hasNode(pos.nodeId)) {
-      graph.setNodeAttribute(pos.nodeId, "x", pos.x);
-      graph.setNodeAttribute(pos.nodeId, "y", pos.y);
-    }
-  }
-
-  return true;
-}
-
-/**
- * Apply layout with progress callback.
- *
- * Runs layout asynchronously to allow UI updates.
- * Hierarchical uses a Web Worker; force layout runs in chunks.
+ * Sends the graph structure to the backend, which uses visgraph (Rust) to
+ * compute positions. Reads iterations, temperature, and direction from the
+ * persisted layout settings.
  */
 export async function applyLayoutAsync(
   graph: ADGraphType,
@@ -442,150 +49,49 @@ export async function applyLayoutAsync(
   if (nodeCount === 0) return;
 
   const layoutType = options.type ?? "force";
+  const algorithm = ALGORITHM_MAP[layoutType];
+  const settings = getServerLayoutSettings();
 
-  // Hierarchical layout runs in a Web Worker
-  if (layoutType === "hierarchical") {
-    await applyHierarchicalLayoutAsync(graph, options.hierarchical);
-    validateAndFixPositions(graph);
-    if (onProgress) onProgress(1);
-    return;
-  }
-
-  // Grid, circular, and lattice are fast enough to run synchronously
-  if (layoutType === "grid") {
-    applyGridLayout(graph, options.grid);
-    validateAndFixPositions(graph);
-    if (onProgress) onProgress(1);
-    return;
-  }
-  if (layoutType === "circular") {
-    applyCircularLayout(graph, options.circular);
-    validateAndFixPositions(graph);
-    if (onProgress) onProgress(1);
-    return;
-  }
-  if (layoutType === "lattice") {
-    applyLatticeLayout(graph, options.lattice);
-    validateAndFixPositions(graph);
-    if (onProgress) onProgress(1);
-    return;
-  }
-
-  // Force layout: run in chunks
-  const totalIterations = options.iterations ?? getDefaultIterations(nodeCount);
-
-  const settings = mergeForceSettings(userForceSettings, options.settings);
-
-  const chunkSize = 20;
-  let completed = 0;
-
-  while (completed < totalIterations) {
-    const remaining = totalIterations - completed;
-    const iterations = Math.min(chunkSize, remaining);
-
-    forceAtlas2.assign(graph, {
-      iterations,
-      settings,
-    });
-
-    completed += iterations;
-
-    if (onProgress) {
-      // Reserve last 5% for noverlap
-      onProgress((completed / totalIterations) * 0.95);
-    }
-
-    // Yield to allow UI updates
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-
-  // Post-process with noverlap to eliminate any remaining overlaps
-  noverlap.assign(graph, {
-    maxIterations: 50,
-    settings: {
-      ratio: 1.5,
-      margin: 10,
-    },
+  // Build node list, labels, and index map
+  const nodes: string[] = [];
+  const nodeLabels: string[] = [];
+  const nodeIndexMap = new Map<string, number>();
+  graph.forEachNode((nodeId, attrs) => {
+    nodeIndexMap.set(nodeId, nodes.length);
+    nodes.push(nodeId);
+    nodeLabels.push(attrs.nodeType ?? "");
   });
 
-  // Validate positions - ForceAtlas2 can produce NaN/Infinity in edge cases
+  // Build edge list as index pairs
+  const edges: [number, number][] = [];
+  graph.forEachEdge((_, _attrs, source, target) => {
+    const si = nodeIndexMap.get(source);
+    const ti = nodeIndexMap.get(target);
+    if (si !== undefined && ti !== undefined) {
+      edges.push([si, ti]);
+    }
+  });
+
+  const response = await api.post<LayoutResponse>("/api/graph/layout", {
+    nodes,
+    edges,
+    algorithm,
+    direction: settings.direction,
+    iterations: settings.iterations,
+    temperature: settings.temperature,
+    node_labels: nodeLabels,
+  });
+
+  // Apply positions from server response
+  for (const pos of response.positions) {
+    if (graph.hasNode(pos.id)) {
+      graph.setNodeAttribute(pos.id, "x", pos.x);
+      graph.setNodeAttribute(pos.id, "y", pos.y);
+    }
+  }
+
   validateAndFixPositions(graph);
-
-  if (onProgress) {
-    onProgress(1);
-  }
-}
-
-/**
- * Normalize positions to fill a standard coordinate space centered at origin.
- *
- * Calculates bounds, computes per-axis scale factors, and centers the positions.
- * Target: fit within [-targetSize, targetSize] on each axis (default 800,
- * leaving 20% padding in a [-1000, 1000] viewport).
- *
- * This is the canonical implementation — used by both sync and async
- * hierarchical layout paths.
- */
-export function normalizeGraphPositions(
-  positions: Array<{ nodeId: string; x: number; y: number }>,
-  targetSize = 800
-): Array<{ nodeId: string; x: number; y: number }> {
-  if (positions.length === 0) return positions;
-
-  // Calculate bounds
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
-  for (const pos of positions) {
-    minX = Math.min(minX, pos.x);
-    minY = Math.min(minY, pos.y);
-    maxX = Math.max(maxX, pos.x);
-    maxY = Math.max(maxY, pos.y);
-  }
-
-  const currentWidth = maxX - minX || 1;
-  const currentHeight = maxY - minY || 1;
-
-  // Scale per-axis to fill the target bounds
-  const scaleX = (targetSize * 2) / currentWidth;
-  const scaleY = (targetSize * 2) / currentHeight;
-
-  // Center around origin
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-
-  return positions.map((pos) => ({
-    nodeId: pos.nodeId,
-    x: (pos.x - centerX) * scaleX,
-    y: (pos.y - centerY) * scaleY,
-  }));
-}
-
-/**
- * Merge force layout settings: defaults + user overrides + explicit options.
- *
- * Canonical implementation used by both sync (applyForceLayout) and async
- * (applyLayoutAsync) force layout paths.
- */
-export function mergeForceSettings(
-  userSettings: UserForceSettings | null,
-  explicitSettings?: ForceAtlas2Settings
-): ForceAtlas2Settings {
-  let settings: ForceAtlas2Settings = { ...DEFAULT_FORCE_SETTINGS };
-  if (userSettings) {
-    settings = {
-      ...settings,
-      gravity: userSettings.gravity,
-      scalingRatio: userSettings.scalingRatio,
-      adjustSizes: userSettings.adjustSizes,
-    };
-  }
-  if (explicitSettings) {
-    settings = { ...settings, ...explicitSettings };
-  }
-  return settings;
+  if (onProgress) onProgress(1);
 }
 
 /**

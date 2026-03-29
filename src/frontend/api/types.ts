@@ -198,22 +198,59 @@ export interface ApiError {
 export type Theme = "dark" | "light";
 
 /** Graph layout options */
-export type GraphLayout = "force" | "hierarchical" | "grid" | "circular" | "lattice";
+export type GraphLayout = "force" | "hierarchical" | "circular" | "grid" | "lattice";
 
-/** Force layout settings */
-export interface ForceLayoutSettings {
-  gravity: number;
-  scalingRatio: number;
-  adjustSizes: boolean;
+/** Layout settings (visgraph) */
+export interface LayoutSettings {
+  /** Iterations for force-directed layout (1-5000, default 1000) */
+  iterations: number;
+  /** Initial temperature for force-directed layout (0.01-1.0, default 0.1) */
+  temperature: number;
+  /** Direction for hierarchical layout */
+  direction: LayoutDirection;
 }
 
 /** Application settings */
 export interface Settings {
   theme: Theme;
   defaultGraphLayout: GraphLayout;
-  forceLayout?: ForceLayoutSettings;
+  layout?: LayoutSettings;
   /** If true, nodes and relationships stay same visual size regardless of zoom level */
   fixedNodeSizes?: boolean;
+}
+
+// ============================================================================
+// Server-Side Layout Types
+// ============================================================================
+
+/** Available server-side layout algorithms */
+export type ServerLayoutAlgorithm = "force_directed" | "hierarchical" | "circular" | "grid" | "lattice";
+
+/** Direction for hierarchical layout */
+export type LayoutDirection = "top_to_bottom" | "bottom_to_top" | "left_to_right" | "right_to_left";
+
+/** Request body for POST /api/graph/layout */
+export interface LayoutRequest {
+  nodes: string[];
+  edges: [number, number][];
+  algorithm: ServerLayoutAlgorithm;
+  direction?: LayoutDirection;
+  iterations?: number;
+  temperature?: number;
+  /** Node type labels for tiebreaking in hierarchical layout ordering. */
+  node_labels?: string[];
+}
+
+/** Single node position from layout response */
+export interface NodePosition {
+  id: string;
+  x: number;
+  y: number;
+}
+
+/** Response from POST /api/graph/layout */
+export interface LayoutResponse {
+  positions: NodePosition[];
 }
 
 // ============================================================================

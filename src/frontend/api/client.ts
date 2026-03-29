@@ -125,6 +125,8 @@ const COMMAND_MAPPING: Record<string, string> = {
   "GET /api/health": "health_check",
   // Query activity
   "GET /api/query/activity": "get_query_activity",
+  // Layout
+  "POST /api/graph/layout": "graph_layout",
 };
 
 /**

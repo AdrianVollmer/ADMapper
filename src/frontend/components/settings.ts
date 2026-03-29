@@ -3,14 +3,13 @@
  *
  * Modal for configuring application settings, organized into tabs:
  * - Appearance: Theme (dark/light)
- * - Graph: Default layout, force layout parameters, display options
+ * - Graph: Default layout, layout parameters, display options
  */
 
 import { api } from "../api/client";
-import type { Settings, Theme, GraphLayout, ForceLayoutSettings } from "../api/types";
+import type { Settings, Theme, GraphLayout, LayoutSettings, LayoutDirection } from "../api/types";
 import { applyTheme } from "../utils/theme";
 import { showSuccess, showError } from "../utils/notifications";
-import { setUserForceSettings } from "../graph";
 import { createModal, type ModalHandle } from "../utils/modal";
 
 /** Tab identifiers */
@@ -25,18 +24,18 @@ let modalEl: HTMLElement | null = null;
 /** Active tab */
 let activeTab: SettingsTab = "appearance";
 
-/** Default force layout settings */
-const DEFAULT_FORCE_LAYOUT: ForceLayoutSettings = {
-  gravity: 0.5,
-  scalingRatio: 10,
-  adjustSizes: true,
+/** Default layout settings (visgraph) */
+const DEFAULT_LAYOUT: LayoutSettings = {
+  iterations: 300,
+  temperature: 0.1,
+  direction: "left_to_right",
 };
 
 /** Current settings (cached) */
 let currentSettings: Settings = {
   theme: "dark",
   defaultGraphLayout: "force",
-  forceLayout: DEFAULT_FORCE_LAYOUT,
+  layout: DEFAULT_LAYOUT,
   fixedNodeSizes: true,
 };
 
@@ -61,10 +60,6 @@ export async function applyInitialSettings(): Promise<void> {
   try {
     currentSettings = await api.get<Settings>("/api/settings");
     applyTheme(currentSettings.theme);
-    // Apply force layout settings
-    if (currentSettings.forceLayout) {
-      setUserForceSettings(currentSettings.forceLayout);
-    }
   } catch {
     // Use defaults if settings can't be loaded
     applyTheme("dark");
@@ -74,6 +69,11 @@ export async function applyInitialSettings(): Promise<void> {
 /** Get the default graph layout from settings */
 export function getDefaultLayout(): GraphLayout {
   return currentSettings.defaultGraphLayout;
+}
+
+/** Get current layout settings */
+export function getServerLayoutSettings(): LayoutSettings {
+  return currentSettings.layout ?? DEFAULT_LAYOUT;
 }
 
 /** Toggle between dark and light theme */
@@ -178,7 +178,7 @@ function renderGraphTab(): string {
               <line x1="8" y1="16" x2="10" y2="14"/>
               <line x1="14" y1="14" x2="16" y2="16"/>
             </svg>
-            <span class="settings-option-label">Force</span>
+            <span class="settings-option-label">Force-Directed</span>
           </span>
         </label>
         <label class="settings-option">
@@ -197,6 +197,17 @@ function renderGraphTab(): string {
           </span>
         </label>
         <label class="settings-option">
+          <input type="radio" name="layout" value="circular">
+          <span class="settings-option-content">
+            <svg class="settings-option-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="9"/>
+              <circle cx="12" cy="12" r="5"/>
+              <circle cx="12" cy="12" r="1"/>
+            </svg>
+            <span class="settings-option-label">Circular</span>
+          </span>
+        </label>
+        <label class="settings-option">
           <input type="radio" name="layout" value="grid">
           <span class="settings-option-content">
             <svg class="settings-option-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -206,17 +217,6 @@ function renderGraphTab(): string {
               <rect x="14" y="14" width="7" height="7" rx="1"/>
             </svg>
             <span class="settings-option-label">Grid</span>
-          </span>
-        </label>
-        <label class="settings-option">
-          <input type="radio" name="layout" value="circular">
-          <span class="settings-option-content">
-            <svg class="settings-option-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="9"/>
-              <circle cx="12" cy="12" r="5"/>
-              <circle cx="12" cy="12" r="1"/>
-            </svg>
-            <span class="settings-option-label">Circular</span>
           </span>
         </label>
         <label class="settings-option">
@@ -236,36 +236,44 @@ function renderGraphTab(): string {
       </div>
     </div>
 
-    <!-- Force Layout Settings -->
-    <div class="form-group" id="force-layout-settings">
-      <label class="form-label">Force Layout Settings</label>
-      <p class="form-help">Fine-tune how force-directed layout spreads nodes</p>
+    <!-- Layout Settings (visgraph) -->
+    <div class="form-group" id="layout-settings">
+      <label class="form-label">Layout Settings</label>
+      <p class="form-help">Fine-tune the visgraph layout algorithms</p>
 
       <div class="settings-slider-group">
         <div class="settings-slider">
           <div class="settings-slider-header">
-            <span class="settings-slider-label">Gravity</span>
-            <span class="settings-slider-value" id="gravity-value">0.5</span>
+            <span class="settings-slider-label">Iterations</span>
+            <span class="settings-slider-value" id="iterations-value">300</span>
           </div>
-          <input type="range" name="gravity" id="gravity-slider"
-                 min="0.1" max="2" step="0.1" value="0.5">
-          <p class="settings-slider-help">How strongly nodes pull toward center (lower = more spread)</p>
+          <input type="range" name="iterations" id="iterations-slider"
+                 min="100" max="1000" step="50" value="300">
+          <p class="settings-slider-help">Number of force simulation steps (more = better convergence, slower)</p>
         </div>
 
         <div class="settings-slider">
           <div class="settings-slider-header">
-            <span class="settings-slider-label">Spread</span>
-            <span class="settings-slider-value" id="spread-value">10</span>
+            <span class="settings-slider-label">Temperature</span>
+            <span class="settings-slider-value" id="temperature-value">0.10</span>
           </div>
-          <input type="range" name="scalingRatio" id="spread-slider"
-                 min="1" max="50" step="1" value="10">
-          <p class="settings-slider-help">How far apart nodes spread (higher = more spacing)</p>
+          <input type="range" name="temperature" id="temperature-slider"
+                 min="0.01" max="1.0" step="0.01" value="0.1">
+          <p class="settings-slider-help">Initial movement speed — lower values produce tighter layouts</p>
         </div>
 
-        <label class="settings-checkbox">
-          <input type="checkbox" name="adjustSizes" id="adjust-sizes-checkbox" checked>
-          <span class="settings-checkbox-label">Prevent node overlap</span>
-        </label>
+        <div class="settings-slider">
+          <div class="settings-slider-header">
+            <span class="settings-slider-label">Hierarchical Direction</span>
+          </div>
+          <select name="direction" id="direction-select" class="form-select">
+            <option value="left_to_right">Left to Right</option>
+            <option value="right_to_left">Right to Left</option>
+            <option value="top_to_bottom">Top to Bottom</option>
+            <option value="bottom_to_top">Bottom to Top</option>
+          </select>
+          <p class="settings-slider-help">Flow direction for hierarchical layout</p>
+        </div>
       </div>
     </div>
 
@@ -313,19 +321,19 @@ function renderBody(): void {
 function attachSliderListeners(): void {
   if (!modalEl) return;
 
-  const gravitySlider = modalEl.querySelector("#gravity-slider") as HTMLInputElement | null;
-  const gravityValue = modalEl.querySelector("#gravity-value") as HTMLElement | null;
-  if (gravitySlider && gravityValue) {
-    gravitySlider.addEventListener("input", () => {
-      gravityValue.textContent = gravitySlider.value;
+  const iterationsSlider = modalEl.querySelector("#iterations-slider") as HTMLInputElement | null;
+  const iterationsValue = modalEl.querySelector("#iterations-value") as HTMLElement | null;
+  if (iterationsSlider && iterationsValue) {
+    iterationsSlider.addEventListener("input", () => {
+      iterationsValue.textContent = iterationsSlider.value;
     });
   }
 
-  const spreadSlider = modalEl.querySelector("#spread-slider") as HTMLInputElement | null;
-  const spreadValue = modalEl.querySelector("#spread-value") as HTMLElement | null;
-  if (spreadSlider && spreadValue) {
-    spreadSlider.addEventListener("input", () => {
-      spreadValue.textContent = spreadSlider.value;
+  const temperatureSlider = modalEl.querySelector("#temperature-slider") as HTMLInputElement | null;
+  const temperatureValue = modalEl.querySelector("#temperature-value") as HTMLElement | null;
+  if (temperatureSlider && temperatureValue) {
+    temperatureSlider.addEventListener("input", () => {
+      temperatureValue.textContent = parseFloat(temperatureSlider.value).toFixed(2);
     });
   }
 }
@@ -371,26 +379,26 @@ function populateForm(): void {
   ) as HTMLInputElement | null;
   if (layoutRadio) layoutRadio.checked = true;
 
-  // Force layout settings
-  const forceLayout = currentSettings.forceLayout ?? DEFAULT_FORCE_LAYOUT;
+  // Layout settings
+  const layout = currentSettings.layout ?? DEFAULT_LAYOUT;
 
-  const gravitySlider = modalEl.querySelector("#gravity-slider") as HTMLInputElement | null;
-  const gravityValue = modalEl.querySelector("#gravity-value") as HTMLElement | null;
-  if (gravitySlider && gravityValue) {
-    gravitySlider.value = String(forceLayout.gravity);
-    gravityValue.textContent = String(forceLayout.gravity);
+  const iterationsSlider = modalEl.querySelector("#iterations-slider") as HTMLInputElement | null;
+  const iterationsValue = modalEl.querySelector("#iterations-value") as HTMLElement | null;
+  if (iterationsSlider && iterationsValue) {
+    iterationsSlider.value = String(layout.iterations);
+    iterationsValue.textContent = String(layout.iterations);
   }
 
-  const spreadSlider = modalEl.querySelector("#spread-slider") as HTMLInputElement | null;
-  const spreadValue = modalEl.querySelector("#spread-value") as HTMLElement | null;
-  if (spreadSlider && spreadValue) {
-    spreadSlider.value = String(forceLayout.scalingRatio);
-    spreadValue.textContent = String(forceLayout.scalingRatio);
+  const temperatureSlider = modalEl.querySelector("#temperature-slider") as HTMLInputElement | null;
+  const temperatureValue = modalEl.querySelector("#temperature-value") as HTMLElement | null;
+  if (temperatureSlider && temperatureValue) {
+    temperatureSlider.value = String(layout.temperature);
+    temperatureValue.textContent = layout.temperature.toFixed(2);
   }
 
-  const adjustSizesCheckbox = modalEl.querySelector("#adjust-sizes-checkbox") as HTMLInputElement | null;
-  if (adjustSizesCheckbox) {
-    adjustSizesCheckbox.checked = forceLayout.adjustSizes;
+  const directionSelect = modalEl.querySelector("#direction-select") as HTMLSelectElement | null;
+  if (directionSelect) {
+    directionSelect.value = layout.direction;
   }
 
   // Fixed node sizes
@@ -429,15 +437,15 @@ async function saveSettings(): Promise<void> {
   // Get form values
   const themeRadio = modalEl.querySelector('input[name="theme"]:checked') as HTMLInputElement | null;
   const layoutRadio = modalEl.querySelector('input[name="layout"]:checked') as HTMLInputElement | null;
-  const gravitySlider = modalEl.querySelector("#gravity-slider") as HTMLInputElement | null;
-  const spreadSlider = modalEl.querySelector("#spread-slider") as HTMLInputElement | null;
-  const adjustSizesCheckbox = modalEl.querySelector("#adjust-sizes-checkbox") as HTMLInputElement | null;
+  const iterationsSlider = modalEl.querySelector("#iterations-slider") as HTMLInputElement | null;
+  const temperatureSlider = modalEl.querySelector("#temperature-slider") as HTMLInputElement | null;
+  const directionSelect = modalEl.querySelector("#direction-select") as HTMLSelectElement | null;
   const fixedNodeSizesCheckbox = modalEl.querySelector("#fixed-node-sizes-checkbox") as HTMLInputElement | null;
 
-  const forceLayout: ForceLayoutSettings = {
-    gravity: gravitySlider ? parseFloat(gravitySlider.value) : DEFAULT_FORCE_LAYOUT.gravity,
-    scalingRatio: spreadSlider ? parseFloat(spreadSlider.value) : DEFAULT_FORCE_LAYOUT.scalingRatio,
-    adjustSizes: adjustSizesCheckbox ? adjustSizesCheckbox.checked : DEFAULT_FORCE_LAYOUT.adjustSizes,
+  const layout: LayoutSettings = {
+    iterations: iterationsSlider ? parseInt(iterationsSlider.value, 10) : DEFAULT_LAYOUT.iterations,
+    temperature: temperatureSlider ? parseFloat(temperatureSlider.value) : DEFAULT_LAYOUT.temperature,
+    direction: (directionSelect?.value as LayoutDirection) || DEFAULT_LAYOUT.direction,
   };
 
   const fixedNodeSizes = fixedNodeSizesCheckbox ? fixedNodeSizesCheckbox.checked : true;
@@ -445,7 +453,7 @@ async function saveSettings(): Promise<void> {
   const newSettings: Settings = {
     theme: (themeRadio?.value as Theme) || currentSettings.theme,
     defaultGraphLayout: (layoutRadio?.value as GraphLayout) || currentSettings.defaultGraphLayout,
-    forceLayout,
+    layout,
     fixedNodeSizes,
   };
 
@@ -454,9 +462,6 @@ async function saveSettings(): Promise<void> {
 
     // Apply theme immediately
     applyTheme(currentSettings.theme);
-
-    // Apply force layout settings immediately
-    setUserForceSettings(currentSettings.forceLayout ?? null);
 
     // Apply fixed node sizes setting
     if (onFixedNodeSizesChange) {

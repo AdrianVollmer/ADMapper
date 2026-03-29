@@ -6,39 +6,39 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-/// Force layout settings for graph visualization.
+/// Layout settings (visgraph).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ForceLayoutSettings {
-    /// Gravity - how strongly nodes pull toward center (0.1 to 2.0)
-    #[serde(default = "default_gravity")]
-    pub gravity: f64,
-    /// Scaling ratio - how spread out nodes are (1 to 50)
-    #[serde(default = "default_scaling_ratio")]
-    pub scaling_ratio: f64,
-    /// Whether to prevent node overlap
-    #[serde(default = "default_adjust_sizes")]
-    pub adjust_sizes: bool,
+pub struct LayoutSettings {
+    /// Iterations for force-directed layout (1 to 5000, default 1000)
+    #[serde(default = "default_iterations")]
+    pub iterations: u32,
+    /// Initial temperature for force-directed layout (0.01 to 1.0, default 0.1)
+    #[serde(default = "default_temperature")]
+    pub temperature: f32,
+    /// Direction for hierarchical layout
+    #[serde(default = "default_direction")]
+    pub direction: String,
 }
 
-fn default_gravity() -> f64 {
-    0.5
+fn default_iterations() -> u32 {
+    300
 }
 
-fn default_scaling_ratio() -> f64 {
-    10.0
+fn default_temperature() -> f32 {
+    0.1
 }
 
-fn default_adjust_sizes() -> bool {
-    true
+fn default_direction() -> String {
+    "left_to_right".to_string()
 }
 
-impl Default for ForceLayoutSettings {
+impl Default for LayoutSettings {
     fn default() -> Self {
         Self {
-            gravity: default_gravity(),
-            scaling_ratio: default_scaling_ratio(),
-            adjust_sizes: default_adjust_sizes(),
+            iterations: default_iterations(),
+            temperature: default_temperature(),
+            direction: default_direction(),
         }
     }
 }
@@ -49,14 +49,14 @@ impl Default for ForceLayoutSettings {
 pub struct Settings {
     /// UI theme: "dark" or "light"
     pub theme: String,
-    /// Default graph layout: "force", "hierarchical", "grid", or "circular"
+    /// Default graph layout: "force", "hierarchical", or "circular"
     pub default_graph_layout: String,
     /// Whether to enable query caching for CrustDB (default: true)
     #[serde(default = "default_query_caching")]
     pub query_caching: bool,
-    /// Force layout settings
+    /// Layout settings (visgraph)
     #[serde(default)]
-    pub force_layout: ForceLayoutSettings,
+    pub layout: LayoutSettings,
     /// Whether nodes and relationships stay same visual size regardless of zoom level
     #[serde(default = "default_fixed_node_sizes")]
     pub fixed_node_sizes: bool,
@@ -76,7 +76,7 @@ impl Default for Settings {
             theme: "dark".to_string(),
             default_graph_layout: "force".to_string(),
             query_caching: true,
-            force_layout: ForceLayoutSettings::default(),
+            layout: LayoutSettings::default(),
             fixed_node_sizes: true,
         }
     }
@@ -139,9 +139,9 @@ mod tests {
         assert_eq!(settings.theme, "dark");
         assert_eq!(settings.default_graph_layout, "force");
         assert!(settings.query_caching);
-        assert!((settings.force_layout.gravity - 0.5).abs() < f64::EPSILON);
-        assert!((settings.force_layout.scaling_ratio - 10.0).abs() < f64::EPSILON);
-        assert!(settings.force_layout.adjust_sizes);
+        assert_eq!(settings.layout.iterations, 300);
+        assert!((settings.layout.temperature - 0.1).abs() < f32::EPSILON);
+        assert_eq!(settings.layout.direction, "left_to_right");
         assert!(settings.fixed_node_sizes);
     }
 
@@ -151,10 +151,10 @@ mod tests {
             theme: "light".to_string(),
             default_graph_layout: "hierarchical".to_string(),
             query_caching: false,
-            force_layout: ForceLayoutSettings {
-                gravity: 1.0,
-                scaling_ratio: 20.0,
-                adjust_sizes: false,
+            layout: LayoutSettings {
+                iterations: 500,
+                temperature: 0.05,
+                direction: "top_to_bottom".to_string(),
             },
             fixed_node_sizes: false,
         };
@@ -163,26 +163,27 @@ mod tests {
         assert!(json.contains("\"theme\":\"light\""));
         assert!(json.contains("\"defaultGraphLayout\":\"hierarchical\""));
         assert!(json.contains("\"queryCaching\":false"));
-        assert!(json.contains("\"forceLayout\""));
+        assert!(json.contains("\"layout\""));
         assert!(json.contains("\"fixedNodeSizes\":false"));
 
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.theme, "light");
         assert_eq!(parsed.default_graph_layout, "hierarchical");
         assert!(!parsed.query_caching);
-        assert!((parsed.force_layout.gravity - 1.0).abs() < f64::EPSILON);
-        assert!((parsed.force_layout.scaling_ratio - 20.0).abs() < f64::EPSILON);
-        assert!(!parsed.force_layout.adjust_sizes);
+        assert_eq!(parsed.layout.iterations, 500);
+        assert!((parsed.layout.temperature - 0.05).abs() < f32::EPSILON);
+        assert_eq!(parsed.layout.direction, "top_to_bottom");
         assert!(!parsed.fixed_node_sizes);
     }
 
     #[test]
     fn test_settings_backwards_compatibility() {
-        // Old settings files without query_caching or fixedNodeSizes should still parse
+        // Old settings files without layout or fixedNodeSizes should still parse
         let json = r#"{"theme":"dark","defaultGraphLayout":"force"}"#;
         let parsed: Settings = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.theme, "dark");
         assert!(parsed.query_caching); // Default to true
         assert!(parsed.fixed_node_sizes); // Default to true
+        assert_eq!(parsed.layout.iterations, 300); // Default
     }
 }

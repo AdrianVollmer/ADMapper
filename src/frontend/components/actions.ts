@@ -68,8 +68,8 @@ export const Actions = {
   LAYOUT_GRAPH: "layout-graph",
   LAYOUT_FORCE: "layout-force",
   LAYOUT_HIERARCHICAL: "layout-hierarchical",
-  LAYOUT_GRID: "layout-grid",
   LAYOUT_CIRCULAR: "layout-circular",
+  LAYOUT_GRID: "layout-grid",
   LAYOUT_LATTICE: "layout-lattice",
   CYCLE_LAYOUT: "cycle-layout",
   LIST_VIEW: "list-view",
@@ -158,8 +158,8 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "layout-graph": () => relayoutGraph(),
   "layout-force": () => setLayout("force"),
   "layout-hierarchical": () => setLayout("hierarchical"),
-  "layout-grid": () => setLayout("grid"),
   "layout-circular": () => setLayout("circular"),
+  "layout-grid": () => setLayout("grid"),
   "layout-lattice": () => setLayout("lattice"),
   "cycle-layout": async () => {
     const layoutName = await cycleLayout();

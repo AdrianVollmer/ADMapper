@@ -10,6 +10,7 @@ mod history;
 mod import;
 mod settings;
 mod state;
+mod sugiyama;
 
 #[cfg(feature = "desktop")]
 mod tauri_commands;
@@ -209,6 +210,8 @@ pub fn run_desktop(database_url: Option<&str>) {
             tauri_commands::get_query_activity,
             // Import
             tauri_commands::import_from_paths,
+            // Layout
+            tauri_commands::graph_layout,
             // File operations
             tauri_commands::write_file,
         ])
@@ -330,6 +333,8 @@ pub fn create_api_router(state: AppState) -> Router {
         // Settings
         .route("/api/settings", get(handlers::get_settings))
         .route("/api/settings", put(handlers::update_settings))
+        // Layout (server-side, visgraph)
+        .route("/api/graph/layout", post(handlers::graph_layout))
         // File browser
         .route("/api/browse", get(handlers::browse_directory))
         .with_state(state)

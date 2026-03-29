@@ -6,13 +6,13 @@
  *
  * @example
  * ```ts
- * import { loadGraph, createRenderer, applyLayout } from "./graph";
+ * import { loadGraph, createRenderer, applyLayoutAsync } from "./graph";
  *
  * // Load graph from server data
  * const graph = loadGraph(serverData);
  *
- * // Apply force-directed layout
- * applyLayout(graph);
+ * // Apply force-directed layout (server-side via visgraph)
+ * await applyLayoutAsync(graph);
  *
  * // Create renderer
  * const renderer = createRenderer({
@@ -54,24 +54,8 @@ export { createRenderer } from "./ADGraphRenderer";
 export type { RendererOptions, ADGraphRenderer } from "./ADGraphRenderer";
 
 // Layout
-export {
-  applyLayout,
-  applyLayoutAsync,
-  normalizeGraphPositions,
-  mergeForceSettings,
-  validateAndFixPositions,
-  setUserForceSettings,
-  getUserForceSettings,
-} from "./layout";
-export type {
-  LayoutType,
-  LayoutOptions,
-  ForceAtlas2Settings,
-  HierarchicalSettings,
-  GridSettings,
-  CircularSettings,
-  UserForceSettings,
-} from "./layout";
+export { applyLayoutAsync, validateAndFixPositions } from "./layout";
+export type { LayoutType, LayoutOptions } from "./layout";
 
 // Theme
 export { NODE_COLORS, EDGE_COLORS, HIGHLIGHT_COLORS, DIM_COLORS, BACKGROUND_COLOR, getNodeColor } from "./theme";

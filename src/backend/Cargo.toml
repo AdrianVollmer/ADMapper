@@ -49,6 +49,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri = { version = "2", features = [], optional = true }
 tauri-plugin-shell = { version = "2", optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
+fastrand = "2.3.0"
 
 [features]
 default = ["desktop", "crustdb", "neo4j", "falkordb"]

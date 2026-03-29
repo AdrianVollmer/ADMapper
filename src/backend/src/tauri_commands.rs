@@ -886,3 +886,43 @@ pub fn write_file(path: String, contents: Vec<u8>) -> Result<(), String> {
 
     Ok(())
 }
+
+// ============================================================================
+// Layout
+// ============================================================================
+
+/// Compute graph layout positions using visgraph.
+#[tauri::command]
+pub fn graph_layout(
+    nodes: Vec<String>,
+    edges: Vec<[usize; 2]>,
+    algorithm: crate::api::types::LayoutAlgorithm,
+    direction: Option<crate::api::types::LayoutDirection>,
+    iterations: Option<u32>,
+    temperature: Option<f32>,
+    node_labels: Option<Vec<String>>,
+) -> Result<crate::api::types::LayoutResponse, String> {
+    let req = crate::api::types::LayoutRequest {
+        nodes,
+        edges,
+        algorithm,
+        direction,
+        iterations,
+        temperature,
+        node_labels,
+    };
+
+    // Validate edge indices
+    let node_count = req.nodes.len();
+    for edge in &req.edges {
+        if edge[0] >= node_count || edge[1] >= node_count {
+            return Err(format!(
+                "Edge index out of bounds: [{}, {}] (node count: {node_count})",
+                edge[0], edge[1]
+            ));
+        }
+    }
+
+    let positions = crate::api::handlers::compute_layout(&req);
+    Ok(crate::api::types::LayoutResponse { positions })
+}

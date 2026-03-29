@@ -28,6 +28,7 @@ dependencies = [
  "dashmap",
  "dirs",
  "falkordb",
+ "fastrand",
  "futures",
  "http-body-util",
  "mime",

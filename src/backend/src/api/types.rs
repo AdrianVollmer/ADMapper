@@ -553,6 +553,78 @@ pub struct BrowseResponse {
 }
 
 // ============================================================================
+// Layout Types
+// ============================================================================
+
+/// Available server-side layout algorithms (powered by visgraph).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutAlgorithm {
+    /// Fruchterman-Reingold force-directed layout
+    ForceDirected,
+    /// Layered hierarchical layout
+    Hierarchical,
+    /// Nodes evenly distributed on a circle
+    Circular,
+    /// Simple grid arrangement
+    Grid,
+    /// Tilted grid for optimal label separation
+    Lattice,
+}
+
+/// Hierarchical layout direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutDirection {
+    TopToBottom,
+    BottomToTop,
+    LeftToRight,
+    RightToLeft,
+}
+
+/// Request body for the layout endpoint.
+#[derive(Debug, Deserialize)]
+pub struct LayoutRequest {
+    /// Node IDs (order is preserved in the response).
+    pub nodes: Vec<String>,
+    /// Edges as `[source_id, target_id]` pairs (indexes into `nodes`).
+    pub edges: Vec<[usize; 2]>,
+    /// Layout algorithm to use.
+    pub algorithm: LayoutAlgorithm,
+    /// Direction for hierarchical layout (ignored for other algorithms).
+    #[serde(default)]
+    pub direction: Option<LayoutDirection>,
+    /// Iterations for force-directed layout (default: 1000).
+    #[serde(default)]
+    pub iterations: Option<u32>,
+    /// Initial temperature for force-directed layout (default: 0.1).
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    /// Node type labels (e.g. "User", "Computer"), one per node.
+    /// Used as tiebreaker in hierarchical layout ordering.
+    #[serde(default)]
+    pub node_labels: Option<Vec<String>>,
+}
+
+/// A single node position in the layout response.
+#[derive(Debug, Clone, Serialize)]
+pub struct NodePosition {
+    /// Node ID (matches input order).
+    pub id: String,
+    /// X coordinate (normalized, then scaled to target size).
+    pub x: f32,
+    /// Y coordinate (normalized, then scaled to target size).
+    pub y: f32,
+}
+
+/// Response from the layout endpoint.
+#[derive(Debug, Clone, Serialize)]
+pub struct LayoutResponse {
+    /// Positions for each node, in the same order as the input `nodes` array.
+    pub positions: Vec<NodePosition>,
+}
+
+// ============================================================================
 // Cache Types
 // ============================================================================
 

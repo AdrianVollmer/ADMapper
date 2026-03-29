@@ -260,7 +260,7 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
   clearCollapseState();
 
   // Load and layout the graph
-  // Use lattice layout for graphs with no relationships (e.g., stale objects) to avoid label collision
+  // Use lattice layout for graphs with no relationships (e.g., stale objects)
   const graph = loadGraph(data);
   const layoutToUse = edgeCount === 0 ? "lattice" : currentLayout;
   await applyLayoutAsync(graph, layoutToUse);
@@ -311,7 +311,7 @@ export async function setLayout(layout: LayoutType): Promise<void> {
 
 /** Cycle through available layouts and return the new layout name */
 export async function cycleLayout(): Promise<string> {
-  const layouts: LayoutType[] = ["force", "hierarchical", "grid", "circular", "lattice"];
+  const layouts: LayoutType[] = ["force", "hierarchical", "circular", "grid", "lattice"];
   const currentIndex = layouts.indexOf(currentLayout);
   const nextIndex = (currentIndex + 1) % layouts.length;
   currentLayout = layouts[nextIndex]!;
@@ -325,12 +325,7 @@ export function updateLayoutIndicator(): void {
   // Update radio-style menu checkmarks
   for (const el of document.querySelectorAll("[data-action^='layout-']")) {
     const action = el.getAttribute("data-action");
-    const isActive =
-      (action === "layout-force" && currentLayout === "force") ||
-      (action === "layout-hierarchical" && currentLayout === "hierarchical") ||
-      (action === "layout-grid" && currentLayout === "grid") ||
-      (action === "layout-circular" && currentLayout === "circular") ||
-      (action === "layout-lattice" && currentLayout === "lattice");
+    const isActive = action === `layout-${currentLayout}`;
     el.setAttribute("data-checked", isActive ? "true" : "false");
   }
 }
