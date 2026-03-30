@@ -3,7 +3,8 @@
  *
  * Modal for configuring application settings, organized into tabs:
  * - Appearance: Theme (dark/light)
- * - Graph: Default layout, layout parameters, display options
+ * - Graph: Default layout, hierarchical direction
+ * - Layout: Layout tuning (iterations, temperature), display options
  */
 
 import { api } from "../api/client";
@@ -13,7 +14,7 @@ import { showSuccess, showError } from "../utils/notifications";
 import { createModal, type ModalHandle } from "../utils/modal";
 
 /** Tab identifiers */
-type SettingsTab = "appearance" | "graph";
+type SettingsTab = "appearance" | "graph" | "layout";
 
 /** Modal handle */
 let modal: ModalHandle | null = null;
@@ -245,9 +246,26 @@ function renderGraphTab(): string {
       </div>
     </div>
 
-    <!-- Layout Settings (visgraph) -->
+    <!-- Hierarchical Direction -->
+    <div class="form-group">
+      <label class="form-label">Hierarchical Direction</label>
+      <p class="form-help">Flow direction for hierarchical layout</p>
+      <select name="direction" id="direction-select" class="form-select">
+        <option value="left_to_right">Left to Right</option>
+        <option value="right_to_left">Right to Left</option>
+        <option value="top_to_bottom">Top to Bottom</option>
+        <option value="bottom_to_top">Bottom to Top</option>
+      </select>
+    </div>
+  `;
+}
+
+/** Render the Layout tab content */
+function renderLayoutTab(): string {
+  return `
+    <!-- Layout Tuning -->
     <div class="form-group" id="layout-settings">
-      <label class="form-label">Layout Settings</label>
+      <label class="form-label">Algorithm Tuning</label>
       <p class="form-help">Fine-tune the visgraph layout algorithms</p>
 
       <div class="settings-slider-group">
@@ -270,23 +288,10 @@ function renderGraphTab(): string {
                  min="0.01" max="1.0" step="0.01" value="0.1">
           <p class="settings-slider-help">Initial movement speed — lower values produce tighter layouts</p>
         </div>
-
-        <div class="settings-slider">
-          <div class="settings-slider-header">
-            <span class="settings-slider-label">Hierarchical Direction</span>
-          </div>
-          <select name="direction" id="direction-select" class="form-select">
-            <option value="left_to_right">Left to Right</option>
-            <option value="right_to_left">Right to Left</option>
-            <option value="top_to_bottom">Top to Bottom</option>
-            <option value="bottom_to_top">Bottom to Top</option>
-          </select>
-          <p class="settings-slider-help">Flow direction for hierarchical layout</p>
-        </div>
       </div>
     </div>
 
-    <!-- Graph Display Settings -->
+    <!-- Display Settings -->
     <div class="form-group">
       <label class="form-label">Display</label>
       <p class="form-help">Visual appearance of the graph</p>
@@ -324,6 +329,9 @@ function renderBody(): void {
       <button class="db-type-tab ${activeTab === "graph" ? "active" : ""}" data-tab="graph">
         Graph
       </button>
+      <button class="db-type-tab ${activeTab === "layout" ? "active" : ""}" data-tab="layout">
+        Layout
+      </button>
     </div>
     <div class="settings-form">
       <div ${activeTab !== "appearance" ? "hidden" : ""} id="tab-appearance">
@@ -331,6 +339,9 @@ function renderBody(): void {
       </div>
       <div ${activeTab !== "graph" ? "hidden" : ""} id="tab-graph">
         ${renderGraphTab()}
+      </div>
+      <div ${activeTab !== "layout" ? "hidden" : ""} id="tab-layout">
+        ${renderLayoutTab()}
       </div>
     </div>
   `;
@@ -458,7 +469,7 @@ function handleTabClick(e: Event): void {
       btn.classList.toggle("active", btn.getAttribute("data-tab") === activeTab);
     });
     // Toggle tab content visibility
-    const tabs: SettingsTab[] = ["appearance", "graph"];
+    const tabs: SettingsTab[] = ["appearance", "graph", "layout"];
     for (const id of tabs) {
       const el = modalEl?.querySelector(`#tab-${id}`) as HTMLElement | null;
       if (el) el.hidden = id !== activeTab;
