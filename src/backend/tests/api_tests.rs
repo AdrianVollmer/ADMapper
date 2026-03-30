@@ -972,7 +972,7 @@ async fn test_debug_actual_db() {
 
     // Search for ADMINISTRATOR
     println!("\n=== SEARCHING FOR ADMINISTRATOR ===");
-    let results = db.search_nodes("ADMINISTRATOR", 10).unwrap();
+    let results = db.search_nodes("ADMINISTRATOR", 10, None).unwrap();
     for node in &results {
         println!("  Found: ID={}, Label={}", node.id, node.label);
 
@@ -983,7 +983,7 @@ async fn test_debug_actual_db() {
 
     // Search for Domain Admins
     println!("\n=== SEARCHING FOR DOMAIN ADMINS ===");
-    let results = db.search_nodes("DOMAIN ADMINS", 10).unwrap();
+    let results = db.search_nodes("DOMAIN ADMINS", 10, None).unwrap();
     for node in &results {
         println!("  Found: ID={}, Label={}", node.id, node.label);
 
@@ -992,8 +992,8 @@ async fn test_debug_actual_db() {
     }
 
     // Try to find path between them if we found both
-    let admin_results = db.search_nodes("ADMINISTRATOR", 1).unwrap();
-    let da_results = db.search_nodes("DOMAIN ADMINS", 1).unwrap();
+    let admin_results = db.search_nodes("ADMINISTRATOR", 1, None).unwrap();
+    let da_results = db.search_nodes("DOMAIN ADMINS", 1, None).unwrap();
 
     if !admin_results.is_empty() && !da_results.is_empty() {
         let from_id = &admin_results[0].id;
@@ -1296,5 +1296,118 @@ async fn test_detailed_stats_excludes_placeholder_nodes() {
     assert_eq!(
         groups, 1,
         "placeholder Group should not be counted in stats"
+    );
+}
+
+// ============================================================================
+// Search ordering tests
+// ============================================================================
+
+/// Search results should be ordered by label priority:
+/// Domain > User > Group > Computer > others (alphabetical).
+/// Within each label, results are sorted by name.
+#[tokio::test]
+async fn search_results_ordered_by_label_priority() {
+    let app = TestApp::new();
+
+    // Seed nodes across multiple labels, all containing "corp"
+    app.db()
+        .insert_nodes(&[
+            DbNode {
+                id: "container-1".into(),
+                name: "CERT PUBLISHERS@CORP.LOCAL".into(),
+                label: "Container".into(),
+                properties: json!({}),
+            },
+            DbNode {
+                id: "group-1".into(),
+                name: "DOMAIN ADMINS@CORP.LOCAL".into(),
+                label: "Group".into(),
+                properties: json!({}),
+            },
+            DbNode {
+                id: "user-1".into(),
+                name: "ADMIN@CORP.LOCAL".into(),
+                label: "User".into(),
+                properties: json!({}),
+            },
+            DbNode {
+                id: "computer-1".into(),
+                name: "DC01@CORP.LOCAL".into(),
+                label: "Computer".into(),
+                properties: json!({}),
+            },
+            DbNode {
+                id: "domain-1".into(),
+                name: "CORP.LOCAL".into(),
+                label: "Domain".into(),
+                properties: json!({}),
+            },
+            DbNode {
+                id: "user-2".into(),
+                name: "ZCORP-SVC@CORP.LOCAL".into(),
+                label: "User".into(),
+                properties: json!({}),
+            },
+            DbNode {
+                id: "ou-1".into(),
+                name: "SERVERS@CORP.LOCAL".into(),
+                label: "OU".into(),
+                properties: json!({}),
+            },
+        ])
+        .unwrap();
+
+    let (status, json) = get_json(app.router(), "/api/graph/search?q=corp&limit=10").await;
+    assert_eq!(status, StatusCode::OK);
+
+    let types: Vec<&str> = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["type"].as_str().unwrap())
+        .collect();
+
+    // Domain first, then Users, then Group, then Computer, then others
+    assert_eq!(
+        types,
+        [
+            "Domain",
+            "User",
+            "User",
+            "Group",
+            "Computer",
+            "Container",
+            "OU"
+        ],
+        "Search results should be ordered: Domain > User > Group > Computer > others"
+    );
+
+    // Within User, sorted by name
+    let user_names: Vec<&str> = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|n| n["type"].as_str().unwrap() == "User")
+        .map(|n| n["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        user_names,
+        ["ADMIN@CORP.LOCAL", "ZCORP-SVC@CORP.LOCAL"],
+        "Users should be sorted by name"
+    );
+
+    // Others sorted alphabetically by label
+    let other_labels: Vec<&str> = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|n| !["Domain", "User", "Group", "Computer"].contains(&n["type"].as_str().unwrap()))
+        .map(|n| n["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        other_labels,
+        ["Container", "OU"],
+        "Non-priority labels should be sorted alphabetically"
     );
 }

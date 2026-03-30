@@ -188,16 +188,27 @@ impl CrustDatabase {
     }
 
     /// Search nodes by name (case-insensitive substring match).
-    pub fn search_nodes(&self, search_query: &str, limit: usize) -> Result<Vec<DbNode>> {
+    /// If `label` is `Some`, restrict to nodes with that Cypher label.
+    pub fn search_nodes(
+        &self,
+        search_query: &str,
+        limit: usize,
+        label: Option<&str>,
+    ) -> Result<Vec<DbNode>> {
         let query_escaped = search_query.replace('\'', "''").to_lowercase();
+
+        let match_clause = match label {
+            Some(l) => format!("MATCH (n:{l})"),
+            None => "MATCH (n)".to_string(),
+        };
 
         // CrustDB supports CONTAINS for string matching
         // Use toLower() for case-insensitive search
         // Search both n.name (BloodHound property) and n.objectid
         let query = format!(
-            "MATCH (n) WHERE toLower(n.name) CONTAINS '{}' OR toLower(n.objectid) CONTAINS '{}' \
-             RETURN n LIMIT {}",
-            query_escaped, query_escaped, limit
+            "{match_clause} WHERE toLower(n.name) CONTAINS '{query_escaped}' \
+             OR toLower(n.objectid) CONTAINS '{query_escaped}' \
+             RETURN n LIMIT {limit}"
         );
 
         let result = self.execute(&query)?;
@@ -208,6 +219,13 @@ impl CrustDatabase {
                 nodes.push(node);
             }
         }
+
+        nodes.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then_with(|| a.id.cmp(&b.id))
+        });
 
         debug!(query = %search_query, found = nodes.len(), "Search complete");
         Ok(nodes)

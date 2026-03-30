@@ -120,8 +120,9 @@ pub trait DatabaseBackend: Send + Sync {
     // Search
     // ========================================================================
 
-    /// Search nodes by label (case-insensitive substring match).
-    fn search_nodes(&self, query: &str, limit: usize) -> Result<Vec<DbNode>>;
+    /// Search nodes by name/objectid (case-insensitive substring match).
+    /// If `label` is `Some`, restrict to nodes with that Cypher label.
+    fn search_nodes(&self, query: &str, limit: usize, label: Option<&str>) -> Result<Vec<DbNode>>;
 
     /// Resolve a node identifier (object ID or label) to an object ID.
     fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>>;

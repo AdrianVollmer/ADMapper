@@ -85,8 +85,8 @@ impl DatabaseBackend for CrustDatabase {
         CrustDatabase::get_node_types(self)
     }
 
-    fn search_nodes(&self, query: &str, limit: usize) -> Result<Vec<DbNode>> {
-        CrustDatabase::search_nodes(self, query, limit)
+    fn search_nodes(&self, query: &str, limit: usize, label: Option<&str>) -> Result<Vec<DbNode>> {
+        CrustDatabase::search_nodes(self, query, limit, label)
     }
 
     fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {

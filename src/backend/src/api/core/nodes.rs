@@ -26,7 +26,14 @@ pub fn graph_all(db: &dyn DatabaseBackend) -> Result<FullGraph, String> {
     })
 }
 
-/// Search nodes.
+/// Labels queried first, in priority order.
+const PRIORITY_LABELS: &[&str] = &["Domain", "User", "Group", "Computer"];
+
+/// Search nodes, returning results grouped by label priority.
+///
+/// Queries Domain, User, Group, Computer in that order, then all remaining
+/// labels. Each group is sorted by name within the DB query. Stops once
+/// `limit` results are collected.
 pub fn graph_search(
     db: &dyn DatabaseBackend,
     query: &str,
@@ -35,8 +42,45 @@ pub fn graph_search(
     if query.len() < 2 {
         return Ok(Vec::new());
     }
-    db.search_nodes(query, limit.unwrap_or(50))
-        .map_err(|e| e.to_string())
+
+    let limit = limit.unwrap_or(50);
+    let mut results: Vec<DbNode> = Vec::with_capacity(limit);
+    let mut remaining = limit;
+
+    // Query each priority label in order
+    for label in PRIORITY_LABELS {
+        if remaining == 0 {
+            break;
+        }
+        let nodes = db
+            .search_nodes(query, remaining, Some(label))
+            .map_err(|e| e.to_string())?;
+        remaining = remaining.saturating_sub(nodes.len());
+        results.extend(nodes);
+    }
+
+    // Fill remainder with non-priority labels.
+    // Request the full limit since we need to filter out priority labels
+    // that will also appear in the unfiltered results.
+    if remaining > 0 {
+        let others = db
+            .search_nodes(query, limit, None)
+            .map_err(|e| e.to_string())?;
+        for node in others {
+            if !PRIORITY_LABELS
+                .iter()
+                .any(|l| l.eq_ignore_ascii_case(&node.label))
+            {
+                results.push(node);
+                remaining = remaining.saturating_sub(1);
+                if remaining == 0 {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 /// Get a node by ID.

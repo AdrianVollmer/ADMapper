@@ -48,7 +48,10 @@ pub async fn graph_all(State(state): State<AppState>) -> Result<Json<FullGraph>,
     Ok(Json(result))
 }
 
-/// Search nodes by label (for autocomplete).
+/// Search nodes by name (for autocomplete).
+///
+/// Results are ordered by label priority (Domain, User, Group, Computer,
+/// then remaining labels alphabetically), with names sorted within each group.
 #[instrument(skip(state))]
 pub async fn graph_search(
     State(state): State<AppState>,
@@ -62,7 +65,10 @@ pub async fn graph_search(
 
     let query = params.q.clone();
     let limit = params.limit;
-    let nodes: Vec<DbNode> = run_db(db, move |db| db.search_nodes(&query, limit)).await?;
+    let nodes: Vec<DbNode> = run_db(db, move |db| {
+        core::graph_search(db, &query, Some(limit)).map_err(crate::db::DbError::Database)
+    })
+    .await?;
 
     debug!(query = %params.q, results = nodes.len(), "Search complete");
     Ok(Json(nodes))

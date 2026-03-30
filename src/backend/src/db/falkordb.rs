@@ -415,8 +415,8 @@ impl DatabaseBackend for FalkorDbDatabase {
         cypher_common::get_node_types(self)
     }
 
-    fn search_nodes(&self, query: &str, limit: usize) -> Result<Vec<DbNode>> {
-        cypher_common::search_nodes(self, query, limit)
+    fn search_nodes(&self, query: &str, limit: usize, label: Option<&str>) -> Result<Vec<DbNode>> {
+        cypher_common::search_nodes(self, query, limit, label)
     }
 
     fn resolve_node_identifier(&self, identifier: &str) -> Result<Option<String>> {

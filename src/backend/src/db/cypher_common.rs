@@ -415,21 +415,34 @@ pub fn search_nodes(
     exec: &impl CypherExecutor,
     search_query: &str,
     limit: usize,
+    label: Option<&str>,
 ) -> Result<Vec<DbNode>> {
     let pattern = search_query.replace('\'', "\\'").to_lowercase();
 
+    let match_clause = match label {
+        Some(l) => format!("MATCH (n:{l})"),
+        None => "MATCH (n)".to_string(),
+    };
+
     let cypher = format!(
-        "MATCH (n) WHERE toLower(n.name) CONTAINS '{pattern}' \
+        "{match_clause} WHERE toLower(n.name) CONTAINS '{pattern}' \
          OR toLower(n.objectid) CONTAINS '{pattern}' \
          RETURN n LIMIT {limit}"
     );
 
     let rows = exec.exec_rows(&cypher)?;
-    let nodes: Vec<DbNode> = rows
+    let mut nodes: Vec<DbNode> = rows
         .iter()
         .filter_map(|r| r.first())
         .filter_map(parse_node_from_value)
         .collect();
+
+    nodes.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.id.cmp(&b.id))
+    });
 
     debug!(query = %search_query, found = nodes.len(), "Search complete");
     Ok(nodes)
