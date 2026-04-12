@@ -607,6 +607,31 @@ pub fn update_settings(settings: Settings) -> Result<Settings, String> {
 }
 
 // ============================================================================
+// Exploit Likelihood Commands
+// ============================================================================
+
+/// Get exploit likelihood configuration.
+#[tauri::command]
+pub fn get_exploit_likelihood(
+    state: State<'_, AppState>,
+) -> crate::exploit_likelihood::ExploitLikelihoodConfig {
+    let db_path = state.db_path();
+    crate::api::core::exploit_likelihood::get_config(db_path.as_deref())
+}
+
+/// Update exploit likelihood configuration and apply to all edges.
+#[tauri::command]
+pub fn update_exploit_likelihood(
+    state: State<'_, AppState>,
+    config: crate::exploit_likelihood::ExploitLikelihoodConfig,
+) -> Result<crate::exploit_likelihood::ExploitLikelihoodConfig, String> {
+    let db = state.db().ok_or("Not connected to database")?;
+    let db_path = state.db_path();
+    info!("Updating exploit likelihood configuration (IPC)");
+    crate::api::core::exploit_likelihood::update_config(db.as_ref(), db_path.as_deref(), config)
+}
+
+// ============================================================================
 // File Browser Commands
 // ============================================================================
 

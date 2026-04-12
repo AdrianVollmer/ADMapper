@@ -205,6 +205,42 @@ describe("relationship curvatures", () => {
     expect(graph.getEdgeAttribute(edge, "label")).toBe("MemberOf +2");
   });
 
+  it("preserves exploit_likelihood on single-type edges", () => {
+    const data: RawADGraph = {
+      nodes: [
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
+      ],
+      relationships: [{ source: "a", target: "b", type: "MemberOf", exploit_likelihood: 0.75 }],
+    };
+
+    const graph = loadGraph(data);
+    const edge = graph.edges()[0]!;
+    const props = graph.getEdgeAttribute(edge, "properties") as Record<string, unknown>;
+    expect(props).toBeDefined();
+    expect(props["exploit_likelihood"]).toBe(0.75);
+  });
+
+  it("collects per-type exploit_likelihood when collapsing parallel edges", () => {
+    const data: RawADGraph = {
+      nodes: [
+        { id: "a", name: "A", type: "User" },
+        { id: "b", name: "B", type: "Group" },
+      ],
+      relationships: [
+        { source: "a", target: "b", type: "MemberOf", exploit_likelihood: 0.9 },
+        { source: "a", target: "b", type: "GenericAll", exploit_likelihood: 0.3 },
+      ],
+    };
+
+    const graph = loadGraph(data);
+    const edge = graph.edges()[0]!;
+    const typeEl = graph.getEdgeAttribute(edge, "typeExploitLikelihoods") as Record<string, number>;
+    expect(typeEl).toBeDefined();
+    expect(typeEl["MemberOf"]).toBe(0.9);
+    expect(typeEl["GenericAll"]).toBe(0.3);
+  });
+
   it("handles self-loops", () => {
     const data: RawADGraph = {
       nodes: [{ id: "a", name: "A", type: "User" }],

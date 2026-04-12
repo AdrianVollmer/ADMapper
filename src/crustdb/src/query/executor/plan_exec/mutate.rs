@@ -112,6 +112,10 @@ pub(super) fn execute_set_properties(
                         let prop_val = evaluate_expr(value, binding)?;
                         storage.update_node_property(node.id, property, &prop_val)?;
                         stats.properties_set += 1;
+                    } else if let Some(rel) = binding.get_relationship(variable) {
+                        let prop_val = evaluate_expr(value, binding)?;
+                        storage.update_relationship_property(rel.id, property, &prop_val)?;
+                        stats.properties_set += 1;
                     }
                 }
                 SetOperation::AddLabel { variable, label } => {

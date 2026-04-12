@@ -4,6 +4,7 @@
 
 mod api;
 mod db;
+mod exploit_likelihood;
 mod generate;
 mod graph;
 mod history;
@@ -88,6 +89,7 @@ use tauri::Manager;
 // Re-export public types
 pub use api::types::ApiError;
 pub use db::{DatabaseBackend, DatabaseType, DbEdge, DbNode};
+pub use exploit_likelihood::ExploitLikelihoodConfig;
 pub use graph::{FullGraph, GraphEdge, GraphNode};
 pub use state::AppState;
 
@@ -200,6 +202,9 @@ pub fn run_desktop(database_url: Option<&str>) {
             // Settings
             tauri_commands::get_settings,
             tauri_commands::update_settings,
+            // Exploit likelihood
+            tauri_commands::get_exploit_likelihood,
+            tauri_commands::update_exploit_likelihood,
             // File browser
             tauri_commands::browse_directory,
             // Data generation
@@ -333,6 +338,15 @@ pub fn create_api_router(state: AppState) -> Router {
         // Settings
         .route("/api/settings", get(handlers::get_settings))
         .route("/api/settings", put(handlers::update_settings))
+        // Exploit likelihood
+        .route(
+            "/api/exploit-likelihood",
+            get(handlers::get_exploit_likelihood),
+        )
+        .route(
+            "/api/exploit-likelihood",
+            put(handlers::update_exploit_likelihood),
+        )
         // Layout (server-side, visgraph)
         .route("/api/graph/layout", post(handlers::graph_layout))
         // File browser

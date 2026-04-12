@@ -54,6 +54,8 @@ export interface ADEdgeAttributes {
   curvature?: number;
   /** When multiple relationships between same nodes are collapsed, stores all edge types */
   collapsedTypes?: ADEdgeType[];
+  /** Per-type exploit likelihoods for collapsed multi-type edges */
+  typeExploitLikelihoods?: Record<string, number | undefined>;
   /** Original relationship properties */
   properties?: Record<string, unknown>;
 }
@@ -76,6 +78,7 @@ export interface RawADEdge {
   target: string;
   type: ADEdgeType;
   label?: string;
+  exploit_likelihood?: number;
 }
 
 /** Graph data as received from server */

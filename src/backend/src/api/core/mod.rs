@@ -8,7 +8,8 @@
 #![allow(dead_code)]
 
 mod database;
-mod mutation;
+pub mod exploit_likelihood;
+pub mod mutation;
 mod nodes;
 pub(crate) mod paths;
 mod query;

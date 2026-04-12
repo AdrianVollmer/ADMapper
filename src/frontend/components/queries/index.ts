@@ -316,6 +316,7 @@ async function runQuery(queryId: string): Promise<void> {
           source: e.source,
           target: e.target,
           type: e.type as RawADGraph["relationships"][0]["type"],
+          ...(e.exploit_likelihood !== undefined ? { exploit_likelihood: e.exploit_likelihood } : {}),
         })),
       };
       loadGraphData(rawGraph);

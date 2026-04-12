@@ -56,15 +56,35 @@ pub fn add_edge(
         return Err("Relationship type is required".to_string());
     }
 
+    // Add default exploit_likelihood if not present
+    let properties = if properties.is_null() {
+        let likelihood = crate::exploit_likelihood::default_for(&rel_type);
+        serde_json::json!({"exploit_likelihood": likelihood})
+    } else if let Some(obj) = properties.as_object() {
+        if !obj.contains_key("exploit_likelihood") {
+            let mut new_obj = obj.clone();
+            let likelihood = crate::exploit_likelihood::default_for(&rel_type);
+            new_obj.insert(
+                "exploit_likelihood".to_string(),
+                serde_json::json!(likelihood),
+            );
+            serde_json::Value::Object(new_obj)
+        } else {
+            properties
+        }
+    } else {
+        properties
+    };
+
+    let exploit_likelihood = properties
+        .get("exploit_likelihood")
+        .and_then(|v| v.as_f64());
+
     let relationship = DbEdge {
         source: source.clone(),
         target: target.clone(),
         rel_type: rel_type.clone(),
-        properties: if properties.is_null() {
-            serde_json::json!({})
-        } else {
-            properties
-        },
+        properties,
         ..Default::default()
     };
 
@@ -74,6 +94,7 @@ pub fn add_edge(
         source,
         target,
         rel_type,
+        exploit_likelihood,
     })
 }
 

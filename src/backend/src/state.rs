@@ -74,6 +74,7 @@ pub struct ImportJob {
 struct DatabaseConnection {
     backend: Arc<dyn DatabaseBackend>,
     db_type: DatabaseType,
+    db_path: Option<PathBuf>,
 }
 
 // ============================================================================
@@ -131,7 +132,11 @@ impl AppState {
         let history_service = Self::create_history_service(db_type, db_path.as_deref());
 
         Self {
-            connection: Arc::new(RwLock::new(Some(DatabaseConnection { backend, db_type }))),
+            connection: Arc::new(RwLock::new(Some(DatabaseConnection {
+                backend,
+                db_type,
+                db_path,
+            }))),
             history_service: Arc::new(RwLock::new(Some(Arc::new(history_service)))),
             import_jobs: Arc::new(DashMap::new()),
             running_queries: Arc::new(DashMap::new()),
@@ -378,7 +383,11 @@ impl AppState {
         // Create history service based on backend type
         let history_service = Self::create_history_service(db_type, db_path.as_deref());
 
-        *self.connection.write() = Some(DatabaseConnection { backend, db_type });
+        *self.connection.write() = Some(DatabaseConnection {
+            backend,
+            db_type,
+            db_path,
+        });
         *self.history_service.write() = Some(Arc::new(history_service));
 
         info!(database_type = %db_type.name(), "Connected to database");
@@ -406,5 +415,13 @@ impl AppState {
     /// Get the database, returning an error if not connected.
     pub fn require_db(&self) -> Result<Arc<dyn DatabaseBackend>, crate::api::types::ApiError> {
         self.db().ok_or(crate::api::types::ApiError::NotConnected)
+    }
+
+    /// Get the database file path if connected to a file-based backend.
+    pub fn db_path(&self) -> Option<PathBuf> {
+        self.connection
+            .read()
+            .as_ref()
+            .and_then(|c| c.db_path.clone())
     }
 }

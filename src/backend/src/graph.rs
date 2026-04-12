@@ -35,22 +35,54 @@ impl From<DbNode> for GraphNode {
 
 /// Graph relationship response format.
 ///
-/// This is a subset of `DbEdge` used for API responses, excluding
-/// internal fields like `properties`, `source_type`, and `target_type`.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
+/// This is a subset of `DbEdge` used for API responses. Hash and Eq are
+/// implemented manually to consider only (source, target, rel_type) so that
+/// deduplication works correctly while still carrying the exploit_likelihood.
+#[derive(Debug, Clone, Serialize)]
 pub struct GraphEdge {
     pub source: String,
     pub target: String,
     #[serde(rename = "type")]
     pub rel_type: String,
+    /// Exploit likelihood for this relationship (0.0–1.0), if set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exploit_likelihood: Option<f64>,
+}
+
+impl PartialEq for GraphEdge {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+            && self.target == other.target
+            && self.rel_type == other.rel_type
+    }
+}
+
+impl Eq for GraphEdge {}
+
+impl std::hash::Hash for GraphEdge {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.source.hash(state);
+        self.target.hash(state);
+        self.rel_type.hash(state);
+    }
 }
 
 impl From<DbEdge> for GraphEdge {
     fn from(relationship: DbEdge) -> Self {
+        let exploit_likelihood = relationship
+            .properties
+            .get("exploit_likelihood")
+            .and_then(|v| v.as_f64())
+            .or_else(|| {
+                Some(crate::exploit_likelihood::default_for(
+                    &relationship.rel_type,
+                ))
+            });
         GraphEdge {
             source: relationship.source,
             target: relationship.target,
             rel_type: relationship.rel_type,
+            exploit_likelihood,
         }
     }
 }
@@ -308,9 +340,30 @@ fn extract_edge_from_json(
         .map(String::from)
         .unwrap_or_else(|| "RELATED".to_string());
 
+    // The CrustDB relationship JSON has the shape:
+    //   { "_type": "relationship", "source": .., "target": .., "rel_type": ..,
+    //     "properties": { <all CrustDB properties> } }
+    // Properties are inside the "properties" map, not at the top level.
+    let props_map = value.get("properties");
+    let exploit_likelihood = props_map
+        .and_then(|p| p.get("exploit_likelihood"))
+        .and_then(|v| v.as_f64())
+        // Legacy fallback: old encoding stored everything in a "properties" blob string
+        // nested inside the properties map.
+        .or_else(|| {
+            props_map
+                .and_then(|p| p.get("properties"))
+                .and_then(|b| b.as_str())
+                .and_then(|s| serde_json::from_str::<JsonValue>(s).ok())
+                .and_then(|blob| blob.get("exploit_likelihood").and_then(|v| v.as_f64()))
+        })
+        // Final fallback: use configured default for the relationship type.
+        .or_else(|| Some(crate::exploit_likelihood::default_for(&rel_type)));
+
     Some(GraphEdge {
         source,
         target,
         rel_type,
+        exploit_likelihood,
     })
 }

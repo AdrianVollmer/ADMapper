@@ -470,7 +470,7 @@ async function loadConnections(nodeId: string, direction: string): Promise<void>
   try {
     const response = await api.get<{
       nodes: Array<{ id: string; name: string; type: string; properties?: Record<string, unknown> }>;
-      relationships: Array<{ source: string; target: string; type: string }>;
+      relationships: Array<{ source: string; target: string; type: string; exploit_likelihood?: number }>;
     }>(`/api/graph/node/${encodeURIComponent(nodeId)}/connections/${direction}`);
 
     if (!response.nodes || response.nodes.length === 0) {
@@ -490,6 +490,7 @@ async function loadConnections(nodeId: string, direction: string): Promise<void>
         source: e.source,
         target: e.target,
         type: e.type as import("../graph/types").ADEdgeType,
+        ...(e.exploit_likelihood !== undefined ? { exploit_likelihood: e.exploit_likelihood } : {}),
       })),
     });
   } catch (err) {
@@ -777,15 +778,39 @@ export function updateDetailPanelForEdge(
     </div>
   `;
 
-  // Relationship types list with edit and delete buttons
+  // Relationship types list with edit and delete buttons, and per-type exploit likelihood
   const typesHtml = types
     .map((type) => {
       const color = EDGE_COLORS[type] ?? "#6c757d";
+
+      // Resolve exploit likelihood: per-type map for multi, direct props for single
+      const rawEl = isMulti
+        ? (attrs.typeExploitLikelihoods as Record<string, number | undefined> | undefined)?.[type]
+        : (attrs.properties as Record<string, unknown> | undefined)?.exploit_likelihood;
+      const likelihood =
+        typeof rawEl === "number" ? rawEl : typeof rawEl === "string" ? parseFloat(rawEl as string) : null;
+      const elHtml =
+        likelihood !== null && !isNaN(likelihood as number)
+          ? (() => {
+              const pct = Math.round((likelihood as number) * 100);
+              const elColor =
+                (likelihood as number) >= 0.7
+                  ? "var(--color-success, #22c55e)"
+                  : (likelihood as number) >= 0.3
+                    ? "var(--color-warning, #f59e0b)"
+                    : "var(--color-danger, #ef4444)";
+              return `<span style="font-size:0.75rem; color:${elColor}; font-weight:600; flex-shrink:0">${pct}%</span>`;
+            })()
+          : "";
+
       return `
       <div class="detail-prop" style="flex-direction:row; align-items:center; justify-content:space-between; gap:8px">
-        <span class="detail-node-type relationship-badge" style="background-color: ${color}; font-size: 0.75rem">
-          ${escapeHtml(type)}
-        </span>
+        <div style="display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden">
+          <span class="detail-node-type relationship-badge" style="background-color: ${color}; font-size: 0.75rem; flex-shrink:0">
+            ${escapeHtml(type)}
+          </span>
+          ${elHtml}
+        </div>
         <div style="display:flex; gap:4px; flex-shrink:0">
           <button
             class="detail-action-btn"
@@ -824,6 +849,8 @@ export function updateDetailPanelForEdge(
     })
     .join("");
 
+  const exploitLikelihoodHtml = "";
+
   content.innerHTML = `
     <div class="detail-header">
       <div class="detail-header-top">
@@ -847,6 +874,8 @@ export function updateDetailPanelForEdge(
         ${typesHtml}
       </div>
     </div>
+
+    ${exploitLikelihoodHtml}
   `;
 }
 
@@ -960,6 +989,7 @@ async function showPathToTierZero(nodeId: string): Promise<void> {
           source: e.source,
           target: e.target,
           type: e.type as ADEdgeType,
+          ...(e.exploit_likelihood !== undefined ? { exploit_likelihood: e.exploit_likelihood } : {}),
         })),
       };
       loadGraphData(pathGraph);

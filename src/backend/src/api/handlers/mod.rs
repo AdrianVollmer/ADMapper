@@ -4,6 +4,7 @@
 //! re-exported so callers can continue using `handlers::function_name`.
 
 mod database;
+mod exploit_likelihood;
 mod graph;
 mod history;
 mod import;
@@ -16,6 +17,7 @@ mod query;
 mod settings;
 
 pub use database::*;
+pub use exploit_likelihood::*;
 pub use graph::*;
 pub use history::*;
 pub use import::*;

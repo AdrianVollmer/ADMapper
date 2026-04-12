@@ -25,6 +25,7 @@ export interface GraphEdge {
   target: string;
   type: string;
   properties?: Record<string, unknown>;
+  exploit_likelihood?: number;
 }
 
 /** Full graph data from /api/graph/all */

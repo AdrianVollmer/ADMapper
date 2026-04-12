@@ -117,6 +117,9 @@ const COMMAND_MAPPING: Record<string, string> = {
   // Settings
   "GET /api/settings": "get_settings",
   "PUT /api/settings": "update_settings",
+  // Exploit likelihood
+  "GET /api/exploit-likelihood": "get_exploit_likelihood",
+  "PUT /api/exploit-likelihood": "update_exploit_likelihood",
   // File browser
   "GET /api/browse": "browse_directory",
   // Data generation
@@ -159,6 +162,7 @@ function normalizeUrl(url: string): string {
  */
 const BODY_WRAPPER_MAP: Record<string, string> = {
   update_settings: "settings",
+  update_exploit_likelihood: "config",
 };
 
 /**
@@ -353,6 +357,28 @@ export class ApiClient {
       init.body = JSON.stringify(body);
     }
     const response = await fetch(url, init);
+    await this.assertOk(response);
+  }
+
+  /**
+   * Make a PUT request with JSON body, expecting no content response.
+   * @param url - The URL to put to
+   * @param body - The request body (will be JSON stringified)
+   * @param signal - Optional AbortSignal for cancellation
+   * @throws {ApiClientError} If the request fails or response is not OK
+   */
+  async putNoContent(url: string, body: unknown, signal?: AbortSignal): Promise<void> {
+    if (isRunningInTauri()) {
+      await invokeFromUrl<unknown>("PUT", url, body);
+      return;
+    }
+
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: signal ?? null,
+    });
     await this.assertOk(response);
   }
 

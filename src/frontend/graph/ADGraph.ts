@@ -57,6 +57,9 @@ function rawEdgeToAttributes(relationship: RawADEdge): ADEdgeAttributes {
     size: DEFAULT_EDGE_SIZE,
     type: "tapered", // Use tapered for antialiased cone-shaped relationships
   };
+  if (relationship.exploit_likelihood !== undefined) {
+    attrs.properties = { exploit_likelihood: relationship.exploit_likelihood };
+  }
   return attrs;
 }
 
@@ -121,10 +124,19 @@ function collapseParallelEdges(graph: ADGraphType): void {
     const representative = edges[0]!;
     const types = edges.map((e) => e.type);
 
+    // Collect per-type exploit likelihoods before dropping non-representative edges
+    const typeExploitLikelihoods: Record<string, number | undefined> = {};
+    for (const edge of edges) {
+      const props = graph.getEdgeAttribute(edge.key, "properties") as Record<string, unknown> | undefined;
+      const el = props?.exploit_likelihood;
+      typeExploitLikelihoods[edge.type] = typeof el === "number" ? el : undefined;
+    }
+
     // Build a compact label: single type, or "Type +N"
     const label = types.length === 1 ? types[0]! : `${types[0]} +${types.length - 1}`;
 
     graph.setEdgeAttribute(representative.key, "collapsedTypes", types);
+    graph.setEdgeAttribute(representative.key, "typeExploitLikelihoods", typeExploitLikelihoods);
     graph.setEdgeAttribute(representative.key, "label", label);
 
     // Drop all other edges from the graph (they're still in the backend)

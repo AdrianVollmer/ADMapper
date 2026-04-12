@@ -1411,3 +1411,116 @@ async fn search_results_ordered_by_label_priority() {
         "Non-priority labels should be sorted alphabetically"
     );
 }
+
+// ============================================================================
+// Exploit Likelihood Tests
+// ============================================================================
+
+/// Verify that GET /api/graph/all returns relationships with exploit_likelihood set.
+///
+/// This is a contract test: the frontend depends on exploit_likelihood being
+/// present in the graph/all response to display it in the relationship sidebar.
+#[tokio::test]
+async fn test_graph_all_relationships_include_exploit_likelihood() {
+    let app = TestApp::new();
+
+    // Seed two nodes and a relationship with no explicit exploit_likelihood
+    app.db()
+        .insert_nodes(&[
+            DbNode {
+                id: "U-1".into(),
+                name: "Alice".into(),
+                label: "User".into(),
+                properties: serde_json::json!({}),
+            },
+            DbNode {
+                id: "G-1".into(),
+                name: "Domain Admins".into(),
+                label: "Group".into(),
+                properties: serde_json::json!({}),
+            },
+        ])
+        .unwrap();
+    app.db()
+        .insert_edges(&[DbEdge {
+            source: "U-1".into(),
+            target: "G-1".into(),
+            rel_type: "MemberOf".into(),
+            properties: serde_json::json!({}),
+            ..Default::default()
+        }])
+        .unwrap();
+
+    let (status, json) = get_json(app.router(), "/api/graph/all").await;
+    assert_eq!(status, StatusCode::OK);
+
+    let relationships = json["relationships"]
+        .as_array()
+        .expect("relationships array");
+    assert_eq!(
+        relationships.len(),
+        1,
+        "should have exactly one relationship"
+    );
+
+    let rel = &relationships[0];
+    assert_eq!(rel["type"], "MemberOf");
+
+    // exploit_likelihood must be present and be a number (falls back to default 1.0)
+    let el = rel
+        .get("exploit_likelihood")
+        .expect("exploit_likelihood must be present in graph/all response");
+    assert!(
+        el.is_number(),
+        "exploit_likelihood must be a number, got: {el}"
+    );
+    let val = el.as_f64().unwrap();
+    assert!(
+        (0.0..=1.0).contains(&val),
+        "exploit_likelihood must be in [0, 1], got: {val}"
+    );
+}
+
+/// Verify that a stored exploit_likelihood survives the GET /api/graph/all round-trip.
+#[tokio::test]
+async fn test_graph_all_relationships_preserve_stored_exploit_likelihood() {
+    let app = TestApp::new();
+
+    app.db()
+        .insert_nodes(&[
+            DbNode {
+                id: "U-1".into(),
+                name: "Alice".into(),
+                label: "User".into(),
+                properties: serde_json::json!({}),
+            },
+            DbNode {
+                id: "C-1".into(),
+                name: "WEB01".into(),
+                label: "Computer".into(),
+                properties: serde_json::json!({}),
+            },
+        ])
+        .unwrap();
+    app.db()
+        .insert_edges(&[DbEdge {
+            source: "U-1".into(),
+            target: "C-1".into(),
+            rel_type: "AdminTo".into(),
+            properties: serde_json::json!({ "exploit_likelihood": 0.42 }),
+            ..Default::default()
+        }])
+        .unwrap();
+
+    let (status, json) = get_json(app.router(), "/api/graph/all").await;
+    assert_eq!(status, StatusCode::OK);
+
+    let rel = &json["relationships"].as_array().unwrap()[0];
+    let el = rel["exploit_likelihood"]
+        .as_f64()
+        .expect("exploit_likelihood must be present");
+    assert!(
+        (el - 0.42).abs() < 1e-6,
+        "stored exploit_likelihood 0.42 must be preserved, got: {el}"
+    );
+}

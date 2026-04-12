@@ -725,7 +725,7 @@ async function submitEditNode(): Promise<void> {
   const label = properties.label !== undefined ? String(properties.label) : undefined;
 
   try {
-    await api.put(`/api/graph/nodes/${encodeURIComponent(editingNodeId)}`, {
+    await api.putNoContent(`/api/graph/nodes/${encodeURIComponent(editingNodeId)}`, {
       name,
       label,
       properties,
@@ -815,6 +815,30 @@ function createEditEdgeModal(): void {
       </div>
       <div class="modal-body">
         <form id="edit-edge-form" class="add-form">
+          <div class="form-group">
+            <label class="form-label">Exploit Likelihood</label>
+            <div class="flex items-center gap-3">
+              <input
+                type="range"
+                id="edit-edge-likelihood-range"
+                min="0" max="1" step="0.05"
+                value="1"
+                class="flex-1"
+                style="accent-color: var(--color-primary)"
+              />
+              <span id="edit-edge-likelihood-pct" class="text-sm font-mono w-12 text-right">100%</span>
+              <input
+                type="number"
+                id="edit-edge-likelihood-number"
+                min="0" max="1" step="0.05"
+                value="1"
+                data-input="number"
+                class="form-input font-mono"
+                style="width:70px; text-align:right; color-scheme: dark"
+              />
+            </div>
+          </div>
+
           <div id="edit-edge-properties" class="edit-properties-list"></div>
 
           <button type="button" class="btn btn-secondary btn-sm" data-action="add-edge-property" style="margin-top: 8px">
@@ -831,27 +855,56 @@ function createEditEdgeModal(): void {
     </div>
   `;
 
+  // Wire up the exploit likelihood range ↔ number sync (done once at creation)
+  const rangeInput = editEdgeModal.querySelector<HTMLInputElement>("#edit-edge-likelihood-range")!;
+  const numberInput = editEdgeModal.querySelector<HTMLInputElement>("#edit-edge-likelihood-number")!;
+  const pctEl = editEdgeModal.querySelector<HTMLElement>("#edit-edge-likelihood-pct")!;
+
+  rangeInput.addEventListener("input", () => {
+    const v = parseFloat(rangeInput.value);
+    numberInput.value = rangeInput.value;
+    pctEl.textContent = `${Math.round(v * 100)}%`;
+  });
+
+  numberInput.addEventListener("change", () => {
+    let v = parseFloat(numberInput.value);
+    if (isNaN(v)) v = 1.0;
+    v = Math.max(0, Math.min(1, v));
+    numberInput.value = v.toString();
+    rangeInput.value = v.toString();
+    pctEl.textContent = `${Math.round(v * 100)}%`;
+  });
+
   editEdgeModal.addEventListener("click", handleEditEdgeClick);
   document.body.appendChild(editEdgeModal);
 }
 
 /** Populate the edit edge form with current properties */
 function populateEditEdgeForm(properties: Record<string, unknown>): void {
-  const container = document.getElementById("edit-edge-properties");
-  if (!container) return;
-
   const error = document.getElementById("edit-edge-error");
   if (error) error.hidden = true;
 
+  // Set dedicated exploit likelihood controls
+  const rawEl = properties["exploit_likelihood"];
+  let likelihood = typeof rawEl === "number" ? rawEl : typeof rawEl === "string" ? parseFloat(rawEl) : 1.0;
+  if (isNaN(likelihood)) likelihood = 1.0;
+  likelihood = Math.max(0, Math.min(1, likelihood));
+
+  const rangeInput = document.getElementById("edit-edge-likelihood-range") as HTMLInputElement;
+  const numberInput = document.getElementById("edit-edge-likelihood-number") as HTMLInputElement;
+  const pctEl = document.getElementById("edit-edge-likelihood-pct");
+  if (rangeInput) rangeInput.value = likelihood.toString();
+  if (numberInput) numberInput.value = likelihood.toString();
+  if (pctEl) pctEl.textContent = `${Math.round(likelihood * 100)}%`;
+
+  // Generic properties — exclude exploit_likelihood (handled above)
+  const container = document.getElementById("edit-edge-properties");
+  if (!container) return;
   container.innerHTML = "";
 
-  const entries = Object.entries(properties);
+  const entries = Object.entries(properties).filter(([k]) => k !== "exploit_likelihood");
   for (const [key, value] of entries) {
     addPropertyRow(container, key, formatPropertyValue(value), false);
-  }
-
-  if (entries.length === 0) {
-    addPropertyRow(container, "", "", true);
   }
 }
 
@@ -902,8 +955,15 @@ async function submitEditEdge(): Promise<void> {
   const errorEl = document.getElementById("edit-edge-error");
   const properties = collectPropertiesFromForm("edit-edge-properties");
 
+  // Include exploit_likelihood from the dedicated slider
+  const numberInput = document.getElementById("edit-edge-likelihood-number") as HTMLInputElement;
+  let likelihood = parseFloat(numberInput?.value ?? "1");
+  if (isNaN(likelihood)) likelihood = 1.0;
+  likelihood = Math.max(0, Math.min(1, likelihood));
+  properties["exploit_likelihood"] = likelihood;
+
   try {
-    await api.put(
+    await api.putNoContent(
       `/api/graph/relationships/${encodeURIComponent(sourceId)}/${encodeURIComponent(targetId)}/${encodeURIComponent(edgeType)}`,
       { properties }
     );

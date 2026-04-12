@@ -36,6 +36,23 @@ impl BloodHoundImporter {
         // Track state for deferred DCSync derivation
         self.track_dcsync_state(entity, &objectid, &node_type, &relationships);
 
+        // Set exploit_likelihood from default for each relationship type
+        for rel in &mut relationships {
+            let likelihood = crate::exploit_likelihood::default_for(&rel.rel_type);
+            let props = match &rel.properties {
+                serde_json::Value::Object(map) => {
+                    let mut new_map = map.clone();
+                    new_map.insert(
+                        "exploit_likelihood".to_string(),
+                        serde_json::json!(likelihood),
+                    );
+                    serde_json::Value::Object(new_map)
+                }
+                _ => serde_json::json!({"exploit_likelihood": likelihood}),
+            };
+            rel.properties = props;
+        }
+
         relationships
     }
 

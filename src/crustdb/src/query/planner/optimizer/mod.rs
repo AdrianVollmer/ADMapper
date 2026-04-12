@@ -22,7 +22,7 @@ use pushdown::{
 /// VariableLengthExpand, ShortestPath) that have no limit yet. Returns `Ok` with
 /// the modified operator on success, or `Err` with the original operator unchanged
 /// so the caller can fall back to keeping LIMIT on top.
-fn try_push_limit(source: PlanOperator, count: u64) -> Result<PlanOperator, PlanOperator> {
+fn try_push_limit(source: PlanOperator, count: u64) -> Result<PlanOperator, Box<PlanOperator>> {
     match source {
         PlanOperator::NodeScan {
             variable,
@@ -50,7 +50,7 @@ fn try_push_limit(source: PlanOperator, count: u64) -> Result<PlanOperator, Plan
             p.limit = Some(count);
             Ok(PlanOperator::ShortestPath(p))
         }
-        other => Err(other),
+        other => Err(Box::new(other)),
     }
 }
 
@@ -89,7 +89,7 @@ fn push_limit_through_project(
                 },
                 Err(inner) => PlanOperator::Limit {
                     source: Box::new(PlanOperator::Project {
-                        source: Box::new(inner),
+                        source: inner,
                         columns,
                         distinct: false,
                     }),
@@ -108,7 +108,7 @@ fn push_limit_through_project(
         },
         Err(other) => PlanOperator::Limit {
             source: Box::new(PlanOperator::Project {
-                source: Box::new(optimize_operator(other)),
+                source: Box::new(optimize_operator(*other)),
                 columns,
                 distinct: false,
             }),
@@ -226,7 +226,7 @@ fn optimize_operator(op: PlanOperator) -> PlanOperator {
                 source => match try_push_limit(source, count) {
                     Ok(op) => op,
                     Err(inner) => PlanOperator::Limit {
-                        source: Box::new(optimize_operator(inner)),
+                        source: Box::new(optimize_operator(*inner)),
                         count,
                     },
                 },

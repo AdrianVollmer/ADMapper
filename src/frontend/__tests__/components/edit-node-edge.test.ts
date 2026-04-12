@@ -13,6 +13,7 @@ vi.mock("../../api/client", () => ({
     get: vi.fn(),
     post: vi.fn(),
     put: vi.fn(),
+    putNoContent: vi.fn(),
     delete: vi.fn(),
   },
   ApiClientError: class ApiClientError extends Error {
@@ -143,7 +144,7 @@ describe("Edit Node/Edge", () => {
     });
 
     it("calls api.put on save", async () => {
-      vi.mocked(api.put).mockResolvedValueOnce(undefined);
+      vi.mocked(api.putNoContent).mockResolvedValueOnce(undefined);
 
       openEditNode("node-1", { name: "TestUser" });
 
@@ -152,7 +153,7 @@ describe("Edit Node/Edge", () => {
       saveBtn.click();
 
       await vi.waitFor(() => {
-        expect(api.put).toHaveBeenCalledWith(
+        expect(api.putNoContent).toHaveBeenCalledWith(
           "/api/graph/nodes/node-1",
           expect.objectContaining({
             properties: expect.objectContaining({ name: "TestUser" }),
@@ -162,7 +163,7 @@ describe("Edit Node/Edge", () => {
     });
 
     it("closes modal after successful save", async () => {
-      vi.mocked(api.put).mockResolvedValueOnce(undefined);
+      vi.mocked(api.putNoContent).mockResolvedValueOnce(undefined);
 
       openEditNode("node-1", { name: "TestUser" });
 
@@ -176,7 +177,7 @@ describe("Edit Node/Edge", () => {
     });
 
     it("shows error on failed save", async () => {
-      vi.mocked(api.put).mockRejectedValueOnce(new Error("Network error"));
+      vi.mocked(api.putNoContent).mockRejectedValueOnce(new Error("Network error"));
 
       openEditNode("node-1", { name: "TestUser" });
 
@@ -241,7 +242,7 @@ describe("Edit Node/Edge", () => {
     });
 
     it("calls api.put with correct URL on save", async () => {
-      vi.mocked(api.put).mockResolvedValueOnce(undefined);
+      vi.mocked(api.putNoContent).mockResolvedValueOnce(undefined);
 
       openEditEdge("edge-1", "source-id", "target-id", "MemberOf", { notes: "test" });
 
@@ -250,7 +251,7 @@ describe("Edit Node/Edge", () => {
       saveBtn.click();
 
       await vi.waitFor(() => {
-        expect(api.put).toHaveBeenCalledWith(
+        expect(api.putNoContent).toHaveBeenCalledWith(
           "/api/graph/relationships/source-id/target-id/MemberOf",
           expect.objectContaining({
             properties: expect.objectContaining({ notes: "test" }),
@@ -272,7 +273,7 @@ describe("Edit Node/Edge", () => {
 
   describe("property value parsing", () => {
     it("parses string values correctly in saved properties", async () => {
-      vi.mocked(api.put).mockResolvedValueOnce(undefined);
+      vi.mocked(api.putNoContent).mockResolvedValueOnce(undefined);
 
       openEditNode("parse-test", {});
 
@@ -304,7 +305,7 @@ describe("Edit Node/Edge", () => {
       saveBtn.click();
 
       await vi.waitFor(() => {
-        expect(api.put).toHaveBeenCalledWith(
+        expect(api.putNoContent).toHaveBeenCalledWith(
           "/api/graph/nodes/parse-test",
           expect.objectContaining({
             properties: {

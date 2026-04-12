@@ -80,7 +80,9 @@ impl CrustDatabase {
             node_index
         };
 
-        // Convert relationships to the format expected by CrustDB batch insert
+        // Convert relationships to the format expected by CrustDB batch insert.
+        // All DbEdge properties are stored as top-level CrustDB relationship properties,
+        // matching how Neo4j stores them natively. No blob encoding.
         let mut batch: Vec<(i64, i64, String, serde_json::Value)> =
             Vec::with_capacity(relationships.len());
         let mut skipped = 0;
@@ -91,9 +93,10 @@ impl CrustDatabase {
 
             match (source_id, target_id) {
                 (Some(&src), Some(&tgt)) => {
-                    let props = serde_json::json!({
-                        "properties": serde_json::to_string(&relationship.properties).unwrap_or_default()
-                    });
+                    let props = match &relationship.properties {
+                        serde_json::Value::Object(_) => relationship.properties.clone(),
+                        _ => serde_json::json!({}),
+                    };
                     batch.push((src, tgt, relationship.rel_type.clone(), props));
                 }
                 _ => {
@@ -132,19 +135,60 @@ impl CrustDatabase {
         Ok(())
     }
 
+    /// Extract relationship properties from a CrustDB result value.
+    ///
+    /// Handles two formats:
+    /// - **New**: all properties stored directly as top-level CrustDB properties
+    /// - **Legacy**: properties bundled in a `properties` blob string (old encoding)
+    ///
+    /// For the legacy format, the blob is parsed and any top-level properties
+    /// (e.g. `exploit_likelihood` set via `SET r.exploit_likelihood`) take precedence.
+    fn extract_rel_properties(
+        properties: &std::collections::HashMap<String, crustdb::PropertyValue>,
+    ) -> JsonValue {
+        // Check for the legacy blob under the "properties" key.
+        let blob_props = properties.get("properties").and_then(|v| {
+            if let crustdb::PropertyValue::String(s) = v {
+                serde_json::from_str::<JsonValue>(s).ok()
+            } else {
+                None
+            }
+        });
+
+        if let Some(mut props) = blob_props {
+            // Legacy format: start from blob, overlay any top-level properties.
+            if let Some(obj) = props.as_object_mut() {
+                for (k, v) in properties {
+                    if k != "properties" {
+                        obj.insert(k.clone(), Self::property_value_to_json(v));
+                    }
+                }
+            }
+            props
+        } else {
+            // New format: all properties are directly available.
+            Self::properties_to_json(properties)
+        }
+    }
+
     /// Get all relationships.
     pub fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
-        let result = self
-            .execute("MATCH (a)-[r]->(b) RETURN a.objectid, b.objectid, type(r), r.properties")?;
+        let result =
+            self.execute("MATCH (a)-[r]->(b) RETURN a.objectid, b.objectid, type(r), r")?;
 
         let mut relationships = Vec::new();
         for row in &result.rows {
             let source = self.get_string_value(&row.values, "a.objectid");
             let target = self.get_string_value(&row.values, "b.objectid");
             let rel_type = self.get_string_value(&row.values, "type(r)");
-            let props_str = self.get_string_value(&row.values, "r.properties");
 
-            let properties = serde_json::from_str(&props_str).unwrap_or(JsonValue::Null);
+            let properties = match row.values.get("r") {
+                Some(crustdb::ResultValue::Relationship { properties, .. }) => {
+                    Self::extract_rel_properties(properties)
+                }
+                _ => serde_json::json!({}),
+            };
+
             relationships.push(DbEdge {
                 source,
                 target,
@@ -172,7 +216,7 @@ impl CrustDatabase {
         let query = format!(
             "MATCH (a)-[r]->(b) \
              WHERE a.objectid IN [{}] AND b.objectid IN [{}] \
-             RETURN a.objectid, b.objectid, type(r), r.properties",
+             RETURN a.objectid, b.objectid, type(r), r",
             id_set, id_set
         );
 
@@ -183,9 +227,14 @@ impl CrustDatabase {
             let source = self.get_string_value(&row.values, "a.objectid");
             let target = self.get_string_value(&row.values, "b.objectid");
             let rel_type = self.get_string_value(&row.values, "type(r)");
-            let props_str = self.get_string_value(&row.values, "r.properties");
 
-            let properties = serde_json::from_str(&props_str).unwrap_or(JsonValue::Null);
+            let properties = match row.values.get("r") {
+                Some(crustdb::ResultValue::Relationship { properties, .. }) => {
+                    Self::extract_rel_properties(properties)
+                }
+                _ => serde_json::json!({}),
+            };
+
             relationships.push(DbEdge {
                 source,
                 target,

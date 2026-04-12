@@ -433,6 +433,7 @@ async function findPath(): Promise<void> {
           source: e.source,
           target: e.target,
           type: e.type as ADEdgeType,
+          ...(e.exploit_likelihood !== undefined ? { exploit_likelihood: e.exploit_likelihood } : {}),
         })),
       };
       loadGraphData(pathGraph);

@@ -522,6 +522,38 @@ impl SqliteStorage {
         Ok(affected > 0)
     }
 
+    /// Update a single property on a relationship.
+    pub fn update_relationship_property(
+        &self,
+        rel_id: i64,
+        property: &str,
+        value: &PropertyValue,
+    ) -> Result<bool> {
+        let current: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT json(properties) FROM relationships WHERE id = ?1",
+                params![rel_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let Some(current_json) = current else {
+            return Ok(false);
+        };
+
+        let mut properties: std::collections::HashMap<String, PropertyValue> =
+            serde_json::from_str(&current_json)?;
+        properties.insert(property.to_string(), value.clone());
+        let new_json = serde_json::to_string(&properties)?;
+
+        let affected = self.conn.execute(
+            "UPDATE relationships SET properties = jsonb(?1) WHERE id = ?2",
+            params![new_json, rel_id],
+        )?;
+        Ok(affected > 0)
+    }
+
     /// Add a label to a node.
     pub fn add_node_label(&self, node_id: i64, label: &str) -> Result<bool> {
         // Check if node exists

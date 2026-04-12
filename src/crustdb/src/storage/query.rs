@@ -328,7 +328,11 @@ impl SqliteStorage {
             let (id, source, target, rel_type, properties_json) = row_result?;
 
             let properties: std::collections::HashMap<String, PropertyValue> =
-                serde_json::from_str(&properties_json)?;
+                if properties_json == "null" {
+                    std::collections::HashMap::new()
+                } else {
+                    serde_json::from_str(&properties_json)?
+                };
 
             relationships.push(Relationship {
                 id,
