@@ -76,6 +76,7 @@ nav:
     - Graph Navigation: guide/navigation.md
     - Running Queries: guide/queries.md
     - Security Insights: guide/insights.md
+    - Exploit Likelihood: guide/exploit-likelihood.md
     - Tiering Model: guide/tiering.md
   - API Reference:
     - Overview: api/index.md
