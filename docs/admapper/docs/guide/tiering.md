@@ -1,7 +1,7 @@
 # Tiering Model
 
 ADMapper implements an enterprise tiering model to classify Active Directory
-objects by privilege level. This helps identify tier violations — relationships
+objects by privilege level. This helps identify tier violations: relationships
 that cross tier boundaries and could allow privilege escalation.
 
 ## Overview
@@ -38,9 +38,9 @@ The Edit Tiers modal supports several ways to select nodes for tier assignment:
 
 Use a regular expression to match node names. For example:
 
-- `ADMIN` — matches all nodes with "ADMIN" in the name
-- `^DC\d+` — matches nodes starting with "DC" followed by digits
-- `SERVER|SRV` — matches nodes containing "SERVER" or "SRV"
+- `ADMIN`: matches all nodes with "ADMIN" in the name
+- `^DC\d+`: matches nodes starting with "DC" followed by digits
+- `SERVER|SRV`: matches nodes containing "SERVER" or "SRV"
 
 #### Node Type
 
@@ -83,9 +83,9 @@ running a query that surfaces a specific set of objects.
 
 ADMapper distinguishes between two tier concepts:
 
-- **Assigned tier** — the tier you explicitly set on a node (stored as the
+- **Assigned tier**: the tier you explicitly set on a node (stored as the
   `tier` property)
-- **Effective tier** — the lowest (most privileged) tier the node can
+- **Effective tier**: the lowest (most privileged) tier the node can
   transitively reach via any relationship path
 
 A **tier violation** occurs when a node's effective tier is lower than its

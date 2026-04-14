@@ -35,7 +35,7 @@ RETURN u
 ```
 
 ``` cypher
-MATCH p = shortestPath((u:User)-[:MemberOf*1..3]->(g:Group))
+MATCH p = shortestPath((u:User)-[:MemberOf*1..]->(g:Group))
 WHERE g.name = 'DOMAIN ADMINS@CORP.LOCAL'
 RETURN p
 ```
@@ -65,7 +65,7 @@ RETURN p
 Find the shortest path between two nodes:
 
 ``` cypher
-MATCH p = shortestPath((src:User)-[:MemberOf|AdminTo|HasSession*1..]->(dst:Group))
+MATCH p = shortestPath((src:User)-[*1..]->(dst:Group))
 WHERE src.name = 'JSMITH@CORP.LOCAL'
   AND dst.name = 'DOMAIN ADMINS@CORP.LOCAL'
 RETURN p
@@ -117,7 +117,7 @@ path between two nodes is rarely useful -- there can be thousands of
 them, and visual inspection becomes meaningless.
 
 ``` cypher
--- Good: returns one shortest path
+-- Good: returns only shortest paths
 MATCH p = shortestPath(
   (src:User {name: 'JSMITH@CORP.LOCAL'})
   -[:MemberOf|AdminTo|HasSession*1..]->
@@ -192,10 +192,8 @@ Consider these approaches:
     LIMIT 1000
     ```
 
-!!! tip Cleaning up stale objects is not just a performance optimization
--- it also makes your security analysis more accurate. Paths through
-disabled accounts are not exploitable and only distract from real
-findings.
+!!! tip
+    Cleaning up stale objects is not just a performance optimization -- it also makes your security analysis more accurate. Paths through disabled accounts are not exploitable and only distract from real findings.
 
 ## Query Results
 
