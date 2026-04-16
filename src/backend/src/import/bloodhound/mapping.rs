@@ -1,68 +1,100 @@
-//! Helper functions for mapping BloodHound ACE rights and local group names
-//! to edge types.
+//! Helper functions for mapping BloodHound ACE rights and local group
+//! identifiers to relationship types.
+//!
+//! Mappings are derived from the shared relationship type definitions
+//! in `src/shared/relationship_types.json`.
+
+use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 use super::BloodHoundImporter;
 
+/// Parsed shared definitions (compile-time embedded).
+#[derive(Deserialize)]
+struct SharedDefs {
+    relationship_types: Vec<SharedRelType>,
+    local_group_mappings: HashMap<String, String>,
+    local_group_name_fallbacks: HashMap<String, String>,
+}
+
+#[derive(Deserialize)]
+struct SharedRelType {
+    name: String,
+    #[serde(default)]
+    ace_right: bool,
+}
+
+static SHARED: LazyLock<SharedDefs> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../../../shared/relationship_types.json"))
+        .expect("shared relationship_types.json must be valid")
+});
+
+/// Set of recognized ACE right names that produce relationships.
+static ACE_RIGHTS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    SHARED
+        .relationship_types
+        .iter()
+        .filter(|t| t.ace_right)
+        .map(|t| t.name.as_str())
+        .collect()
+});
+
 impl BloodHoundImporter {
-    /// Map local group name to relationship type.
+    /// Map a local group to a relationship type.
     ///
-    /// Returns `None` for unrecognized group names -- BH CE only creates edges
-    /// for the well-known local group types, not a generic fallback.
-    pub(super) fn local_group_to_edge_type(group_name: &str) -> Option<&'static str> {
+    /// Prefers matching by well-known RID suffix on `ObjectIdentifier` (stable
+    /// across locales). Falls back to case-insensitive substring matching on the
+    /// group `Name` for types without a well-known SID (e.g.
+    /// RemoteInteractiveLogonRight) or older data formats.
+    pub(super) fn local_group_to_relationship_type(
+        object_identifier: Option<&str>,
+        group_name: &str,
+    ) -> Option<&'static str> {
+        // Try RID-based matching first (locale-independent).
+        if let Some(sid) = object_identifier {
+            for (rid_suffix, rel_type) in &SHARED.local_group_mappings {
+                if sid.ends_with(rid_suffix.as_str()) {
+                    // Return a &'static str by looking up the name in SHARED.
+                    return SHARED
+                        .relationship_types
+                        .iter()
+                        .find(|t| t.name == *rel_type)
+                        .map(|t| t.name.as_str());
+                }
+            }
+        }
+
+        // Fall back to name-based matching (for types without a well-known SID
+        // or data that doesn't include ObjectIdentifier on local groups).
         let upper = group_name.to_uppercase();
-        if upper.contains("ADMINISTRATORS") {
-            Some("AdminTo")
-        } else if upper.contains("REMOTE DESKTOP") {
-            Some("CanRDP")
-        } else if upper.contains("REMOTE MANAGEMENT") {
-            Some("CanPSRemote")
-        } else if upper.contains("DISTRIBUTED COM") {
-            Some("ExecuteDCOM")
-        } else if upper.contains("REMOTE INTERACTIVE LOGON") {
-            Some("RemoteInteractiveLogonRight")
+        for (pattern, rel_type) in &SHARED.local_group_name_fallbacks {
+            if upper.contains(pattern.as_str()) {
+                return SHARED
+                    .relationship_types
+                    .iter()
+                    .find(|t| t.name == *rel_type)
+                    .map(|t| t.name.as_str());
+            }
+        }
+
+        None
+    }
+
+    /// Map an ACE right name to its relationship type.
+    ///
+    /// Returns `None` for unrecognized rights. Only rights marked as
+    /// `ace_right: true` in the shared definitions produce relationships.
+    pub(super) fn ace_to_relationship_type(right_name: &str) -> Option<&'static str> {
+        if ACE_RIGHTS.contains(right_name) {
+            // Return &'static str from the shared definitions.
+            SHARED
+                .relationship_types
+                .iter()
+                .find(|t| t.name == right_name)
+                .map(|t| t.name.as_str())
         } else {
             None
         }
-    }
-
-    /// Map an ACE right name to its BH CE edge type.
-    ///
-    /// Returns `None` for unrecognized rights -- BH CE never creates generic
-    /// "ACE" edges; only specifically recognized rights produce edges.
-    pub(super) fn ace_to_edge_type(right_name: &str) -> Option<&'static str> {
-        Some(match right_name {
-            // Core AD permissions
-            "GenericAll" => "GenericAll",
-            "GenericWrite" => "GenericWrite",
-            "WriteOwner" => "WriteOwner",
-            "WriteDacl" => "WriteDacl",
-            "Owns" => "Owns",
-            "AddMember" => "AddMember",
-            "AddSelf" => "AddSelf",
-            "ForceChangePassword" => "ForceChangePassword",
-            "AllExtendedRights" => "AllExtendedRights",
-            "AddKeyCredentialLink" => "AddKeyCredentialLink",
-            "AddAllowedToAct" => "AddAllowedToAct",
-            "WriteSPN" => "WriteSPN",
-            "WriteAccountRestrictions" => "WriteAccountRestrictions",
-            // LAPS / gMSA / sMSA
-            "ReadLAPSPassword" => "ReadLAPSPassword",
-            "ReadGMSAPassword" => "ReadGMSAPassword",
-            "SyncLAPSPassword" => "SyncLAPSPassword",
-            "DumpSMSAPassword" => "DumpSMSAPassword",
-            // DCSync components
-            "GetChanges" => "GetChanges",
-            "GetChangesAll" => "GetChangesAll",
-            "GetChangesInFilteredSet" => "GetChangesInFilteredSet",
-            // PKI / ADCS
-            "Enroll" => "Enroll",
-            "ManageCA" => "ManageCA",
-            "ManageCertificates" => "ManageCertificates",
-            "WritePKINameFlag" => "WritePKINameFlag",
-            "WritePKIEnrollmentFlag" => "WritePKIEnrollmentFlag",
-            "HostsCAService" => "HostsCAService",
-            "DelegatedEnrollmentAgent" => "DelegatedEnrollmentAgent",
-            _ => return None,
-        })
     }
 }

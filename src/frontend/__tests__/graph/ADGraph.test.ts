@@ -33,7 +33,7 @@ describe("createGraph", () => {
   it("allows self loops", () => {
     const graph = createGraph();
     graph.addNode("a", { label: "A", nodeType: "User", x: 0, y: 0, size: 10, color: "#000", image: "" });
-    graph.addEdge("a", "a", { edgeType: "MemberOf", label: "Self" });
+    graph.addEdge("a", "a", { relationshipType: "MemberOf", label: "Self" });
     expect(graph.size).toBe(1);
   });
 });

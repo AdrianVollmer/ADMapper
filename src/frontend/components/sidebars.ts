@@ -5,8 +5,8 @@
  */
 
 import { appState } from "../main";
-import type { ADNodeAttributes, ADNodeType, ADEdgeAttributes, RawADGraph, ADEdgeType } from "../graph/types";
-import { NODE_COLORS, EDGE_COLORS } from "../graph/theme";
+import type { ADNodeAttributes, ADNodeType, ADEdgeAttributes, RawADGraph, ADRelationshipType } from "../graph/types";
+import { NODE_COLORS, RELATIONSHIP_COLORS } from "../graph/theme";
 import { escapeHtml } from "../utils/html";
 import { renderPropertyList, renderPlaceholderBanner } from "./detail-panel-formatter";
 import { api } from "../api/client";
@@ -262,8 +262,8 @@ export function handleSidebarClicks(e: MouseEvent): boolean {
       // Handle relationship actions
       const sourceId = button.getAttribute("data-source-id") ?? "";
       const targetId = button.getAttribute("data-target-id") ?? "";
-      const edgeType = button.getAttribute("data-relationship-type") ?? "";
-      handleEdgeAction(action, edgeId, sourceId, targetId, edgeType);
+      const relationshipType = button.getAttribute("data-relationship-type") ?? "";
+      handleEdgeAction(action, edgeId, sourceId, targetId, relationshipType);
       return true;
     }
   }
@@ -365,7 +365,7 @@ async function handleEdgeAction(
   edgeId: string,
   sourceId: string,
   targetId: string,
-  edgeType: string
+  relationshipType: string
 ): Promise<void> {
   const renderer = getRenderer();
   const graph = renderer?.sigma.getGraph();
@@ -374,21 +374,24 @@ async function handleEdgeAction(
     case "edit-relationship": {
       // Get edge properties from graph or use empty object
       const edgeProps = graph?.getEdgeAttribute(edgeId, "properties") ?? {};
-      openEditEdge(edgeId, sourceId, targetId, edgeType, edgeProps);
+      openEditEdge(edgeId, sourceId, targetId, relationshipType, edgeProps);
       break;
     }
 
     case "delete-relationship": {
-      const confirmed = await showConfirm(`Delete relationship "${edgeType}" from "${sourceId}" to "${targetId}"?`, {
-        title: "Delete Relationship",
-        confirmText: "Delete",
-        danger: true,
-      });
+      const confirmed = await showConfirm(
+        `Delete relationship "${relationshipType}" from "${sourceId}" to "${targetId}"?`,
+        {
+          title: "Delete Relationship",
+          confirmText: "Delete",
+          danger: true,
+        }
+      );
       if (confirmed) {
         try {
           // Delete from backend
           await api.delete(
-            `/api/graph/relationships/${encodeURIComponent(sourceId)}/${encodeURIComponent(targetId)}/${encodeURIComponent(edgeType)}`
+            `/api/graph/relationships/${encodeURIComponent(sourceId)}/${encodeURIComponent(targetId)}/${encodeURIComponent(relationshipType)}`
           );
 
           if (graph?.hasEdge(edgeId)) {
@@ -397,13 +400,13 @@ async function handleEdgeAction(
 
             if (collapsed && collapsed.length > 1) {
               // Remove this type from the collapsed group
-              const remaining = collapsed.filter((t) => t !== edgeType);
+              const remaining = collapsed.filter((t) => t !== relationshipType);
               graph.setEdgeAttribute(edgeId, "collapsedTypes", remaining);
 
               if (remaining.length === 1) {
                 // Revert to single edge
                 graph.setEdgeAttribute(edgeId, "label", remaining[0]!);
-                graph.setEdgeAttribute(edgeId, "edgeType", remaining[0]!);
+                graph.setEdgeAttribute(edgeId, "relationshipType", remaining[0]!);
               } else {
                 graph.setEdgeAttribute(edgeId, "label", `${remaining[0]} +${remaining.length - 1}`);
               }
@@ -489,7 +492,7 @@ async function loadConnections(nodeId: string, direction: string): Promise<void>
       relationships: response.relationships.map((e) => ({
         source: e.source,
         target: e.target,
-        type: e.type as import("../graph/types").ADEdgeType,
+        type: e.type as import("../graph/types").ADRelationshipType,
         ...(e.exploit_likelihood !== undefined ? { exploit_likelihood: e.exploit_likelihood } : {}),
       })),
     });
@@ -754,12 +757,13 @@ export function updateDetailPanelForEdge(
   appState.selectedNodeId = null;
   appState.selectedEdgeId = edgeId;
 
-  const types = attrs.collapsedTypes && attrs.collapsedTypes.length > 0 ? attrs.collapsedTypes : [attrs.edgeType];
+  const types =
+    attrs.collapsedTypes && attrs.collapsedTypes.length > 0 ? attrs.collapsedTypes : [attrs.relationshipType];
   const isMulti = types.length > 1;
 
   // Header: show count for multi, type name for single
   const headerType = isMulti ? `${types.length} Relationships` : (types[0] ?? "Unknown");
-  const headerColor = isMulti ? "#6c757d" : (EDGE_COLORS[types[0]!] ?? "#6c757d");
+  const headerColor = isMulti ? "#6c757d" : (RELATIONSHIP_COLORS[types[0]!] ?? "#6c757d");
   const badgeLabel = isMulti ? "Relationships" : "Relationship";
 
   // Endpoints section
@@ -781,7 +785,7 @@ export function updateDetailPanelForEdge(
   // Relationship types list with edit and delete buttons, and per-type exploit likelihood
   const typesHtml = types
     .map((type) => {
-      const color = EDGE_COLORS[type] ?? "#6c757d";
+      const color = RELATIONSHIP_COLORS[type] ?? "#6c757d";
 
       // Resolve exploit likelihood: per-type map for multi, direct props for single
       const rawEl = isMulti
@@ -988,7 +992,7 @@ async function showPathToTierZero(nodeId: string): Promise<void> {
         relationships: result.graph.relationships.map((e) => ({
           source: e.source,
           target: e.target,
-          type: e.type as ADEdgeType,
+          type: e.type as ADRelationshipType,
           ...(e.exploit_likelihood !== undefined ? { exploit_likelihood: e.exploit_likelihood } : {}),
         })),
       };

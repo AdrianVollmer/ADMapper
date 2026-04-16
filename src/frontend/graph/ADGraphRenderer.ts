@@ -13,7 +13,7 @@ import {
   HIGHLIGHT_SIZE_MULTIPLIER,
   BACKGROUND_COLOR,
   LABEL_COLOR,
-  DEFAULT_EDGE_COLOR,
+  DEFAULT_RELATIONSHIP_COLOR,
 } from "./theme";
 import { isNodeCollapsed, getHiddenChildCount, getHiddenNodeIds, toggleNodeCollapse } from "./collapse";
 import { createSharedNodeImageProgram, createSharedCurvedArrowProgram, drawNodeLabel } from "./programs";
@@ -368,7 +368,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
         res.zIndex = 1;
       } else {
         // Default: uniform color (no dimming)
-        res.color = DEFAULT_EDGE_COLOR;
+        res.color = DEFAULT_RELATIONSHIP_COLOR;
       }
 
       return res;

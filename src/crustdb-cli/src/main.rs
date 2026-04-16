@@ -144,7 +144,7 @@ fn result_value_to_json(val: &ResultValue) -> serde_json::Value {
                 "_id": id,
                 "_source": source,
                 "_target": target,
-                "_edge_type": rel_type,
+                "_relationship_type": rel_type,
                 "properties": properties_to_json(properties)
             })
         }

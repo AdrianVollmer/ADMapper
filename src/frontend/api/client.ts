@@ -93,7 +93,7 @@ const COMMAND_MAPPING: Record<string, string> = {
   "GET /api/graph/paths-to-da": "paths_to_domain_admins",
   // Insights
   "GET /api/graph/insights": "graph_insights",
-  "GET /api/graph/relationship-types": "graph_edge_types",
+  "GET /api/graph/relationship-types": "graph_relationship_types",
   "GET /api/graph/node-types": "graph_node_types",
   "GET /api/graph/choke-points": "graph_choke_points",
   // Tier management

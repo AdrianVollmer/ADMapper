@@ -183,11 +183,11 @@ export async function exportJSON(): Promise<void> {
       }
     );
 
-    graph.forEachEdge((_edge: string, attrs: { edgeType?: string }, source: string, target: string) => {
+    graph.forEachEdge((_edge: string, attrs: { relationshipType?: string }, source: string, target: string) => {
       relationships.push({
         source,
         target,
-        type: attrs.edgeType ?? "Unknown",
+        type: attrs.relationshipType ?? "Unknown",
       });
     });
 

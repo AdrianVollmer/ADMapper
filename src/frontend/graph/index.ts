@@ -26,7 +26,7 @@
 // Types
 export type {
   ADNodeType,
-  ADEdgeType,
+  ADRelationshipType,
   ADNodeAttributes,
   ADEdgeAttributes,
   RawADNode,
@@ -58,7 +58,14 @@ export { applyLayoutAsync, validateAndFixPositions } from "./layout";
 export type { LayoutType, LayoutOptions } from "./layout";
 
 // Theme
-export { NODE_COLORS, EDGE_COLORS, HIGHLIGHT_COLORS, DIM_COLORS, BACKGROUND_COLOR, getNodeColor } from "./theme";
+export {
+  NODE_COLORS,
+  RELATIONSHIP_COLORS,
+  HIGHLIGHT_COLORS,
+  DIM_COLORS,
+  BACKGROUND_COLOR,
+  getNodeColor,
+} from "./theme";
 
 // Collapse functionality
 export { isNodeCollapsed, getHiddenChildCount, toggleNodeCollapse, clearCollapseState } from "./collapse";

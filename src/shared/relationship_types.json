@@ -1,0 +1,74 @@
+{
+  "relationship_types": [
+    { "name": "MemberOf",                   "color": "#6c757d", "exploit_likelihood": 1.0,  "category": "structure" },
+    { "name": "Contains",                   "color": "#6c757d", "exploit_likelihood": 1.0,  "category": "structure" },
+    { "name": "GPLink",                     "color": "#6c757d", "exploit_likelihood": 1.0,  "category": "structure" },
+
+    { "name": "HasSession",                 "color": "#0d6efd", "exploit_likelihood": 0.6,  "category": "session" },
+    { "name": "CanRDP",                     "color": "#0d6efd", "exploit_likelihood": 0.1,  "category": "session" },
+    { "name": "CanPSRemote",                "color": "#0d6efd", "exploit_likelihood": 0.1,  "category": "session" },
+    { "name": "ExecuteDCOM",                "color": "#0d6efd", "exploit_likelihood": 0.1,  "category": "session" },
+    { "name": "RemoteInteractiveLogonRight","color": "#0d6efd", "exploit_likelihood": 1.0,  "category": "session" },
+
+    { "name": "AdminTo",                    "color": "#dc3545", "exploit_likelihood": 0.8,  "category": "dangerous" },
+    { "name": "GenericAll",                 "color": "#dc3545", "exploit_likelihood": 0.9,  "category": "dangerous", "ace_right": true },
+    { "name": "GenericWrite",               "color": "#fd7e14", "exploit_likelihood": 0.9,  "category": "dangerous", "ace_right": true },
+    { "name": "WriteOwner",                 "color": "#fd7e14", "exploit_likelihood": 0.9,  "category": "dangerous", "ace_right": true },
+    { "name": "WriteDacl",                  "color": "#fd7e14", "exploit_likelihood": 0.9,  "category": "dangerous", "ace_right": true },
+    { "name": "Owns",                       "color": "#dc3545", "exploit_likelihood": 0.9,  "category": "dangerous", "ace_right": true },
+    { "name": "AddMember",                  "color": "#fd7e14", "exploit_likelihood": 0.9,  "category": "dangerous", "ace_right": true },
+    { "name": "AddSelf",                    "color": "#fd7e14", "exploit_likelihood": 0.9,  "category": "dangerous", "ace_right": true },
+    { "name": "ForceChangePassword",        "color": "#fd7e14", "exploit_likelihood": 0.4,  "category": "dangerous", "ace_right": true },
+    { "name": "AllExtendedRights",          "color": "#fd7e14", "exploit_likelihood": 0.9,  "category": "dangerous", "ace_right": true },
+    { "name": "AddKeyCredentialLink",       "color": "#fd7e14", "exploit_likelihood": 0.8,  "category": "dangerous", "ace_right": true },
+    { "name": "AddAllowedToAct",            "color": "#6f42c1", "exploit_likelihood": 1.0,  "category": "delegation", "ace_right": true },
+    { "name": "WriteSPN",                   "color": "#fd7e14", "exploit_likelihood": 1.0,  "category": "dangerous", "ace_right": true },
+    { "name": "WriteAccountRestrictions",   "color": "#fd7e14", "exploit_likelihood": 0.8,  "category": "dangerous", "ace_right": true },
+
+    { "name": "ReadLAPSPassword",           "color": "#e83e8c", "exploit_likelihood": 1.0,  "category": "credential", "ace_right": true },
+    { "name": "ReadGMSAPassword",           "color": "#e83e8c", "exploit_likelihood": 1.0,  "category": "credential", "ace_right": true },
+    { "name": "SyncLAPSPassword",           "color": "#e83e8c", "exploit_likelihood": 1.0,  "category": "credential", "ace_right": true },
+    { "name": "DumpSMSAPassword",           "color": "#e83e8c", "exploit_likelihood": 1.0,  "category": "credential", "ace_right": true },
+
+    { "name": "GetChanges",                 "color": "#ff0040", "exploit_likelihood": 0.7,  "category": "dcsync", "ace_right": true },
+    { "name": "GetChangesAll",              "color": "#ff0040", "exploit_likelihood": 0.7,  "category": "dcsync", "ace_right": true },
+    { "name": "GetChangesInFilteredSet",    "color": "#ff0040", "exploit_likelihood": 1.0,  "category": "dcsync", "ace_right": true },
+    { "name": "DCSync",                     "color": "#ff0040", "exploit_likelihood": 1.0,  "category": "dcsync" },
+
+    { "name": "AllowedToDelegate",          "color": "#6f42c1", "exploit_likelihood": 1.0,  "category": "delegation" },
+    { "name": "AllowedToAct",               "color": "#6f42c1", "exploit_likelihood": 1.0,  "category": "delegation" },
+    { "name": "CoerceToTGT",                "color": "#6f42c1", "exploit_likelihood": 1.0,  "category": "delegation" },
+
+    { "name": "SameForestTrust",            "color": "#6f42c1", "exploit_likelihood": 1.0,  "category": "trust" },
+    { "name": "CrossForestTrust",           "color": "#6f42c1", "exploit_likelihood": 1.0,  "category": "trust" },
+
+    { "name": "Enroll",                     "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },
+    { "name": "ManageCA",                   "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },
+    { "name": "ManageCertificates",         "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },
+    { "name": "WritePKINameFlag",           "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },
+    { "name": "WritePKIEnrollmentFlag",     "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },
+    { "name": "HostsCAService",             "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },
+    { "name": "DelegatedEnrollmentAgent",   "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },
+    { "name": "PublishedTo",                "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki" },
+    { "name": "IssuedSignedBy",             "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki" },
+    { "name": "EnterpriseCAFor",            "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki" },
+    { "name": "RootCAFor",                  "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki" },
+    { "name": "NTAuthStoreFor",             "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki" },
+    { "name": "TrustedForNTAuth",           "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki" }
+  ],
+
+  "local_group_mappings": {
+    "-544":  "AdminTo",
+    "-555":  "CanRDP",
+    "-580":  "CanPSRemote",
+    "-562":  "ExecuteDCOM"
+  },
+
+  "local_group_name_fallbacks": {
+    "ADMINISTRATORS":           "AdminTo",
+    "REMOTE DESKTOP":           "CanRDP",
+    "REMOTE MANAGEMENT":        "CanPSRemote",
+    "DISTRIBUTED COM":          "ExecuteDCOM",
+    "REMOTE INTERACTIVE LOGON": "RemoteInteractiveLogonRight"
+  }
+}

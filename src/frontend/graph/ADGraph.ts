@@ -8,13 +8,13 @@ import Graph from "graphology";
 import type {
   ADNodeAttributes,
   ADEdgeAttributes,
-  ADEdgeType,
+  ADRelationshipType,
   RawADGraph,
   RawADNode,
   RawADEdge,
   ADNodeType,
 } from "./types";
-import { NODE_COLORS, DEFAULT_EDGE_SIZE, DEFAULT_EDGE_COLOR } from "./theme";
+import { NODE_COLORS, DEFAULT_EDGE_SIZE, DEFAULT_RELATIONSHIP_COLOR } from "./theme";
 import { getNodeIcon, getNodeTypeColor, NODE_SIZE } from "./icons";
 
 export type ADGraphType = Graph<ADNodeAttributes, ADEdgeAttributes>;
@@ -51,9 +51,9 @@ function rawNodeToAttributes(node: RawADNode): ADNodeAttributes {
 /** Convert a raw relationship to graphology attributes */
 function rawEdgeToAttributes(relationship: RawADEdge): ADEdgeAttributes {
   const attrs: ADEdgeAttributes = {
-    edgeType: relationship.type,
+    relationshipType: relationship.type,
     label: relationship.label ?? relationship.type, // Use relationship type as label if not provided
-    color: DEFAULT_EDGE_COLOR,
+    color: DEFAULT_RELATIONSHIP_COLOR,
     size: DEFAULT_EDGE_SIZE,
     type: "tapered", // Use tapered for antialiased cone-shaped relationships
   };
@@ -108,12 +108,12 @@ export function loadGraph(data: RawADGraph): ADGraphType {
  *  Preserves direction: A->B and B->A are separate groups, yielding at most 2 edges per node pair. */
 function collapseParallelEdges(graph: ADGraphType): void {
   // Group edges by directed pair (source, target)
-  const directedGroups = new Map<string, Array<{ key: string; type: ADEdgeType }>>();
+  const directedGroups = new Map<string, Array<{ key: string; type: ADRelationshipType }>>();
 
   graph.forEachEdge((edgeKey, attrs, source, target) => {
     const dirKey = `${source}\0${target}`;
     const group = directedGroups.get(dirKey) ?? [];
-    group.push({ key: edgeKey, type: attrs.edgeType });
+    group.push({ key: edgeKey, type: attrs.relationshipType });
     directedGroups.set(dirKey, group);
   });
 
@@ -280,7 +280,7 @@ export function exportGraph(graph: ADGraphType): RawADGraph {
     const relationship: RawADEdge = {
       source,
       target,
-      type: attrs.edgeType,
+      type: attrs.relationshipType,
     };
     if (attrs.label) {
       relationship.label = attrs.label;

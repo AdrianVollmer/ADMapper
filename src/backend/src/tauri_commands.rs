@@ -241,9 +241,9 @@ pub async fn graph_insights(
 
 /// Get relationship types.
 #[tauri::command]
-pub fn graph_edge_types(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+pub fn graph_relationship_types(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let db = state.db().ok_or("Not connected to database")?;
-    core::graph_edge_types(db.as_ref())
+    core::graph_relationship_types(db.as_ref())
 }
 
 /// Get node types.

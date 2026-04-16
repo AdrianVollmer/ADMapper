@@ -111,7 +111,7 @@ pub trait DatabaseBackend: Send + Sync {
     fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>>;
 
     /// Get all distinct relationship types.
-    fn get_edge_types(&self) -> Result<Vec<String>>;
+    fn get_relationship_types(&self) -> Result<Vec<String>>;
 
     /// Get all distinct node types.
     fn get_node_types(&self) -> Result<Vec<String>>;
@@ -183,7 +183,7 @@ pub trait DatabaseBackend: Send + Sync {
     /// Find all users with paths to Domain Admins.
     fn find_paths_to_domain_admins(
         &self,
-        exclude_edge_types: &[String],
+        exclude_relationship_types: &[String],
     ) -> Result<Vec<(String, String, String, usize)>>;
 
     // ========================================================================

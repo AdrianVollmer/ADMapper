@@ -38,11 +38,11 @@ function buildTestGraph(): ADGraphType {
   for (let i = 1; i <= 5; i++) {
     const id = `member-${i}`;
     graph.addNode(id, { ...NODE, label: `Member ${i}`, nodeType: "User" });
-    graph.addEdge(id, "hub", { edgeType: "MemberOf", label: "MemberOf" });
+    graph.addEdge(id, "hub", { relationshipType: "MemberOf", label: "MemberOf" });
   }
 
   graph.addNode("target", { ...NODE, label: "Target", nodeType: "Domain" });
-  graph.addEdge("hub", "target", { edgeType: "GenericAll", label: "GenericAll" });
+  graph.addEdge("hub", "target", { relationshipType: "GenericAll", label: "GenericAll" });
 
   return graph;
 }
@@ -81,10 +81,10 @@ describe("collapseNode", () => {
     graph.addNode("src", { ...NODE, label: "Src", nodeType: "User" });
     graph.addNode("leaf", { ...NODE, label: "Leaf", nodeType: "User" });
 
-    graph.addEdge("hub", "target", { edgeType: "GenericAll", label: "GenericAll" });
-    graph.addEdge("mid", "hub", { edgeType: "MemberOf", label: "MemberOf" });
-    graph.addEdge("src", "mid", { edgeType: "MemberOf", label: "MemberOf" });
-    graph.addEdge("leaf", "hub", { edgeType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("hub", "target", { relationshipType: "GenericAll", label: "GenericAll" });
+    graph.addEdge("mid", "hub", { relationshipType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("src", "mid", { relationshipType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("leaf", "hub", { relationshipType: "MemberOf", label: "MemberOf" });
 
     collapseNode(graph, "hub");
 
@@ -116,8 +116,8 @@ describe("collapseNode", () => {
     graph.addNode("sink", { ...NODE, label: "Sink", nodeType: "Group" });
     graph.addNode("src-1", { ...NODE, label: "Src 1", nodeType: "User" });
     graph.addNode("src-2", { ...NODE, label: "Src 2", nodeType: "User" });
-    graph.addEdge("src-1", "sink", { edgeType: "MemberOf", label: "MemberOf" });
-    graph.addEdge("src-2", "sink", { edgeType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("src-1", "sink", { relationshipType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("src-2", "sink", { relationshipType: "MemberOf", label: "MemberOf" });
 
     collapseNode(graph, "sink");
     expect(isNodeCollapsed("sink")).toBe(false);
@@ -132,9 +132,9 @@ describe("collapseNode", () => {
     graph.addNode("mid", { ...NODE, label: "Mid", nodeType: "Group" });
     graph.addNode("src", { ...NODE, label: "Src", nodeType: "User" });
 
-    graph.addEdge("hub", "target", { edgeType: "GenericAll", label: "GenericAll" });
-    graph.addEdge("mid", "hub", { edgeType: "MemberOf", label: "MemberOf" });
-    graph.addEdge("src", "mid", { edgeType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("hub", "target", { relationshipType: "GenericAll", label: "GenericAll" });
+    graph.addEdge("mid", "hub", { relationshipType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("src", "mid", { relationshipType: "MemberOf", label: "MemberOf" });
 
     collapseNode(graph, "hub");
     // "mid" has inDegree 1, not a leaf -- nothing to collapse
@@ -251,19 +251,19 @@ describe("autoCollapseGraph", () => {
     graph.addNode("hub-b", { ...NODE, label: "Hub B", nodeType: "Group" });
     graph.addNode("domain", { ...NODE, label: "Domain", nodeType: "Domain" });
 
-    graph.addEdge("hub-a", "domain", { edgeType: "GenericAll", label: "GenericAll" });
-    graph.addEdge("hub-b", "domain", { edgeType: "GenericAll", label: "GenericAll" });
+    graph.addEdge("hub-a", "domain", { relationshipType: "GenericAll", label: "GenericAll" });
+    graph.addEdge("hub-b", "domain", { relationshipType: "GenericAll", label: "GenericAll" });
 
     for (let i = 1; i <= 4; i++) {
       const id = `a-member-${i}`;
       graph.addNode(id, { ...NODE, label: id, nodeType: "User" });
-      graph.addEdge(id, "hub-a", { edgeType: "MemberOf", label: "MemberOf" });
+      graph.addEdge(id, "hub-a", { relationshipType: "MemberOf", label: "MemberOf" });
     }
 
     for (let i = 1; i <= 3; i++) {
       const id = `b-member-${i}`;
       graph.addNode(id, { ...NODE, label: id, nodeType: "User" });
-      graph.addEdge(id, "hub-b", { edgeType: "MemberOf", label: "MemberOf" });
+      graph.addEdge(id, "hub-b", { relationshipType: "MemberOf", label: "MemberOf" });
     }
 
     const count = autoCollapseGraph(graph, 2);
@@ -279,7 +279,7 @@ describe("autoCollapseGraph", () => {
     for (let i = 1; i <= 5; i++) {
       const id = `src-${i}`;
       graph.addNode(id, { ...NODE, label: id, nodeType: "User" });
-      graph.addEdge(id, "sink", { edgeType: "MemberOf", label: "MemberOf" });
+      graph.addEdge(id, "sink", { relationshipType: "MemberOf", label: "MemberOf" });
     }
 
     const count = autoCollapseGraph(graph, 2);
@@ -297,10 +297,10 @@ describe("autoCollapseGraph", () => {
     graph.addNode("src", { ...NODE, label: "Src", nodeType: "User" });
     graph.addNode("leaf", { ...NODE, label: "Leaf", nodeType: "User" });
 
-    graph.addEdge("hub", "target", { edgeType: "GenericAll", label: "GenericAll" });
-    graph.addEdge("mid", "hub", { edgeType: "MemberOf", label: "MemberOf" });
-    graph.addEdge("src", "mid", { edgeType: "MemberOf", label: "MemberOf" });
-    graph.addEdge("leaf", "hub", { edgeType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("hub", "target", { relationshipType: "GenericAll", label: "GenericAll" });
+    graph.addEdge("mid", "hub", { relationshipType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("src", "mid", { relationshipType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("leaf", "hub", { relationshipType: "MemberOf", label: "MemberOf" });
 
     // inDegree of hub is 2, but only 1 is a leaf -- threshold 0 should NOT collapse
     // (threshold 0 is a no-op anyway), but threshold 1 should not either
@@ -335,10 +335,10 @@ describe("clearCollapseState", () => {
     graph.addNode("hub-b", { ...NODE, label: "Hub B", nodeType: "Group" });
     graph.addNode("src", { ...NODE, label: "Src", nodeType: "User" });
     graph.addNode("domain", { ...NODE, label: "Domain", nodeType: "Domain" });
-    graph.addEdge("src", "hub-a", { edgeType: "MemberOf", label: "MemberOf" });
-    graph.addEdge("src", "hub-b", { edgeType: "MemberOf", label: "MemberOf" });
-    graph.addEdge("hub-a", "domain", { edgeType: "GenericAll", label: "GenericAll" });
-    graph.addEdge("hub-b", "domain", { edgeType: "GenericAll", label: "GenericAll" });
+    graph.addEdge("src", "hub-a", { relationshipType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("src", "hub-b", { relationshipType: "MemberOf", label: "MemberOf" });
+    graph.addEdge("hub-a", "domain", { relationshipType: "GenericAll", label: "GenericAll" });
+    graph.addEdge("hub-b", "domain", { relationshipType: "GenericAll", label: "GenericAll" });
 
     collapseNode(graph, "hub-a");
     collapseNode(graph, "hub-b");

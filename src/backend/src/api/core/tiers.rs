@@ -6,18 +6,18 @@ use crate::api::types::{
 };
 use crate::db::{DatabaseBackend, DbEdge};
 
-/// Reverse BFS from `root_id`, following edges of `edge_type` in reverse
+/// Reverse BFS from `root_id`, following edges of `rel_type` in reverse
 /// (target -> source), returning all reached node IDs (excluding root).
 pub(crate) fn expand_transitive(
     edges: &[DbEdge],
     root_id: &str,
-    edge_type: &str,
+    rel_type: &str,
 ) -> std::collections::HashSet<String> {
     use std::collections::{HashMap, HashSet, VecDeque};
 
     let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
     for edge in edges {
-        if edge.rel_type.eq_ignore_ascii_case(edge_type) {
+        if edge.rel_type.eq_ignore_ascii_case(rel_type) {
             reverse_adj
                 .entry(edge.target.as_str())
                 .or_default()

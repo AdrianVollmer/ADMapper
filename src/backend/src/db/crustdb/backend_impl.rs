@@ -77,8 +77,8 @@ impl DatabaseBackend for CrustDatabase {
         CrustDatabase::get_edges_between(self, node_ids)
     }
 
-    fn get_edge_types(&self) -> Result<Vec<String>> {
-        CrustDatabase::get_edge_types(self)
+    fn get_relationship_types(&self) -> Result<Vec<String>> {
+        CrustDatabase::get_relationship_types(self)
     }
 
     fn get_node_types(&self) -> Result<Vec<String>> {
@@ -185,9 +185,9 @@ impl DatabaseBackend for CrustDatabase {
 
     fn find_paths_to_domain_admins(
         &self,
-        exclude_edge_types: &[String],
+        exclude_relationship_types: &[String],
     ) -> Result<Vec<(String, String, String, usize)>> {
-        CrustDatabase::find_paths_to_domain_admins(self, exclude_edge_types)
+        CrustDatabase::find_paths_to_domain_admins(self, exclude_relationship_types)
     }
 
     fn run_custom_query(&self, query: &str) -> Result<JsonValue> {

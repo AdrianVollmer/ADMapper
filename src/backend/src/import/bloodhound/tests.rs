@@ -12,9 +12,9 @@ use rstest::rstest;
 #[case("Enroll", Some("Enroll"))]
 #[case("AddSelf", Some("AddSelf"))]
 #[case("Unknown", None)]
-fn test_ace_to_edge_type(#[case] right_name: &str, #[case] expected: Option<&str>) {
+fn test_ace_to_relationship_type(#[case] right_name: &str, #[case] expected: Option<&str>) {
     assert_eq!(
-        BloodHoundImporter::ace_to_edge_type(right_name),
+        BloodHoundImporter::ace_to_relationship_type(right_name),
         expected,
         "ACE right '{}' should map to {:?}",
         right_name,
@@ -23,13 +23,25 @@ fn test_ace_to_edge_type(#[case] right_name: &str, #[case] expected: Option<&str
 }
 
 #[rstest]
-#[case("Administrators", Some("AdminTo"))]
-#[case("Remote Desktop Users", Some("CanRDP"))]
-#[case("Remote Interactive Logon", Some("RemoteInteractiveLogonRight"))]
-#[case("Unknown Group", None)]
-fn test_local_group_to_edge_type(#[case] group_name: &str, #[case] expected: Option<&str>) {
+// RID-based matching (preferred)
+#[case(Some("S-1-5-32-544"), "Administrators", Some("AdminTo"))]
+#[case(Some("S-1-5-32-555"), "Remote Desktop Users", Some("CanRDP"))]
+#[case(Some("S-1-5-32-580"), "Remote Management Users", Some("CanPSRemote"))]
+#[case(Some("S-1-5-32-562"), "Distributed COM Users", Some("ExecuteDCOM"))]
+// Name-based fallback (no ObjectIdentifier)
+#[case(None, "Administrators", Some("AdminTo"))]
+#[case(None, "Remote Desktop Users", Some("CanRDP"))]
+#[case(None, "Remote Interactive Logon", Some("RemoteInteractiveLogonRight"))]
+#[case(None, "Unknown Group", None)]
+// RID takes precedence over name
+#[case(Some("S-1-5-32-544"), "Wrong Name", Some("AdminTo"))]
+fn test_local_group_to_relationship_type(
+    #[case] object_identifier: Option<&str>,
+    #[case] group_name: &str,
+    #[case] expected: Option<&str>,
+) {
     assert_eq!(
-        BloodHoundImporter::local_group_to_edge_type(group_name),
+        BloodHoundImporter::local_group_to_relationship_type(object_identifier, group_name),
         expected,
     );
 }
@@ -489,12 +501,14 @@ fn test_extract_edges_local_groups() {
         "ObjectIdentifier": "S-1-5-21-COMP1",
         "LocalGroups": [
             {
+                "ObjectIdentifier": "S-1-5-32-544",
                 "Name": "Administrators",
                 "Results": [
                     {"ObjectIdentifier": "S-1-5-21-ADMIN1"}
                 ]
             },
             {
+                "ObjectIdentifier": "S-1-5-32-555",
                 "Name": "Remote Desktop Users",
                 "Results": [
                     {"ObjectIdentifier": "S-1-5-21-USER1"}
@@ -962,12 +976,14 @@ fn test_bhce_computer_full_edges() {
         "RegistrySessions": {"Results": [], "Collected": true},
         "LocalGroups": [
             {
+                "ObjectIdentifier": "S-1-5-32-544",
                 "Name": "Administrators",
                 "Results": [
                     {"ObjectIdentifier": "S-1-5-21-1234-512", "ObjectType": "Group"}
                 ]
             },
             {
+                "ObjectIdentifier": "S-1-5-32-555",
                 "Name": "Remote Desktop Users",
                 "Results": [
                     {"ObjectIdentifier": "S-1-5-21-1234-513", "ObjectType": "Group"}
@@ -1270,6 +1286,7 @@ fn test_bhce_no_local_group_member_fallback() {
         "ObjectIdentifier": "S-1-5-21-COMP-1",
         "LocalGroups": [
             {
+                "ObjectIdentifier": "S-1-5-32-544",
                 "Name": "Administrators",
                 "Results": [
                     {"ObjectIdentifier": "S-1-5-21-ADMIN", "ObjectType": "User"}

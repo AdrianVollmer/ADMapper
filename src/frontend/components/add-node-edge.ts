@@ -20,21 +20,21 @@ const MIN_SEARCH_LENGTH = 2;
 const SEARCH_RESULT_LIMIT = 10;
 
 /** Cached relationship types from the backend */
-let cachedEdgeTypes: string[] | null = null;
+let cachedRelationshipTypes: string[] | null = null;
 
 /** Cached node types from the backend */
 let cachedNodeTypes: string[] | null = null;
 
 /** Fetch relationship types from the backend (cached) */
-async function getEdgeTypes(): Promise<string[]> {
-  if (!cachedEdgeTypes) {
+async function getRelationshipTypes(): Promise<string[]> {
+  if (!cachedRelationshipTypes) {
     try {
-      cachedEdgeTypes = await api.get<string[]>("/api/graph/relationship-types");
+      cachedRelationshipTypes = await api.get<string[]>("/api/graph/relationship-types");
     } catch {
-      cachedEdgeTypes = [];
+      cachedRelationshipTypes = [];
     }
   }
-  return cachedEdgeTypes;
+  return cachedRelationshipTypes;
 }
 
 /** Fetch node types from the backend (cached) */
@@ -51,7 +51,7 @@ async function getNodeTypes(): Promise<string[]> {
 
 /** Invalidate cached types (call after import or schema changes) */
 export function invalidateTypeCache(): void {
-  cachedEdgeTypes = null;
+  cachedRelationshipTypes = null;
   cachedNodeTypes = null;
 }
 
@@ -74,8 +74,8 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 /** Open the Add Relationship modal */
 export async function openAddEdge(): Promise<void> {
   // Always recreate to pick up latest types from backend
-  const edgeTypes = await getEdgeTypes();
-  createAddEdgeModal(edgeTypes);
+  const relationshipTypes = await getRelationshipTypes();
+  createAddEdgeModal(relationshipTypes);
   addEdgeModal!.hidden = false;
   resetAddEdgeForm();
   const sourceInput = document.getElementById("add-relationship-source") as HTMLInputElement;
@@ -108,7 +108,7 @@ function closeAddNodeModal(): void {
 }
 
 /** Create the Add Relationship modal */
-function createAddEdgeModal(edgeTypes: string[]): void {
+function createAddEdgeModal(relationshipTypes: string[]): void {
   // Remove previous instance if exists
   if (addEdgeModal) {
     addEdgeModal.remove();
@@ -118,7 +118,7 @@ function createAddEdgeModal(edgeTypes: string[]): void {
   addEdgeModal.className = "modal-overlay";
 
   // Build relationship type options from backend data
-  const edgeTypeOptions = edgeTypes
+  const relationshipTypeOptions = relationshipTypes
     .map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)
     .join("");
 
@@ -153,7 +153,7 @@ function createAddEdgeModal(edgeTypes: string[]): void {
             <label for="add-relationship-type" class="form-label">Relationship Type</label>
             <select id="add-relationship-type" class="form-select">
               <option value="">Select relationship type...</option>
-              ${edgeTypeOptions}
+              ${relationshipTypeOptions}
             </select>
           </div>
 
@@ -398,7 +398,7 @@ function handleAddNodeClick(e: Event): void {
 async function submitAddEdge(): Promise<void> {
   const sourceId = (document.getElementById("add-relationship-source-id") as HTMLInputElement).value;
   const targetId = (document.getElementById("add-relationship-target-id") as HTMLInputElement).value;
-  const edgeType = (document.getElementById("add-relationship-type") as HTMLSelectElement).value;
+  const relationshipType = (document.getElementById("add-relationship-type") as HTMLSelectElement).value;
   const errorEl = document.getElementById("add-relationship-error");
 
   // Validate
@@ -406,7 +406,7 @@ async function submitAddEdge(): Promise<void> {
     showError(errorEl, "Please select a source node from the search results");
     return;
   }
-  if (!edgeType) {
+  if (!relationshipType) {
     showError(errorEl, "Please select a relationship type");
     return;
   }
@@ -419,7 +419,7 @@ async function submitAddEdge(): Promise<void> {
     await api.post("/api/graph/relationship", {
       source: sourceId,
       target: targetId,
-      rel_type: edgeType,
+      rel_type: relationshipType,
     });
 
     closeAddEdgeModal();
@@ -765,7 +765,7 @@ let editingEdgeContext: {
   edgeId: string;
   sourceId: string;
   targetId: string;
-  edgeType: string;
+  relationshipType: string;
 } | null = null;
 
 /** Open the Edit Edge modal with current properties */
@@ -773,18 +773,18 @@ export function openEditEdge(
   edgeId: string,
   sourceId: string,
   targetId: string,
-  edgeType: string,
+  relationshipType: string,
   properties: Record<string, unknown>
 ): void {
   if (!editEdgeModal) {
     createEditEdgeModal();
   }
-  editingEdgeContext = { edgeId, sourceId, targetId, edgeType };
+  editingEdgeContext = { edgeId, sourceId, targetId, relationshipType };
   editEdgeModal!.hidden = false;
 
   // Update the title to show relationship type
   const titleEl = editEdgeModal!.querySelector(".modal-title");
-  if (titleEl) titleEl.textContent = `Edit ${edgeType} Relationship`;
+  if (titleEl) titleEl.textContent = `Edit ${relationshipType} Relationship`;
 
   populateEditEdgeForm(properties);
 }
@@ -951,7 +951,7 @@ function handleEditEdgeClick(e: Event): void {
 async function submitEditEdge(): Promise<void> {
   if (!editingEdgeContext) return;
 
-  const { edgeId, sourceId, targetId, edgeType } = editingEdgeContext;
+  const { edgeId, sourceId, targetId, relationshipType } = editingEdgeContext;
   const errorEl = document.getElementById("edit-edge-error");
   const properties = collectPropertiesFromForm("edit-edge-properties");
 
@@ -964,7 +964,7 @@ async function submitEditEdge(): Promise<void> {
 
   try {
     await api.putNoContent(
-      `/api/graph/relationships/${encodeURIComponent(sourceId)}/${encodeURIComponent(targetId)}/${encodeURIComponent(edgeType)}`,
+      `/api/graph/relationships/${encodeURIComponent(sourceId)}/${encodeURIComponent(targetId)}/${encodeURIComponent(relationshipType)}`,
       { properties }
     );
 

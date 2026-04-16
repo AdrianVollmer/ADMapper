@@ -295,8 +295,8 @@ pub fn graph_insights(db: &dyn DatabaseBackend) -> Result<crate::db::SecurityIns
 }
 
 /// Get relationship types.
-pub fn graph_edge_types(db: &dyn DatabaseBackend) -> Result<Vec<String>, String> {
-    db.get_edge_types().map_err(|e| e.to_string())
+pub fn graph_relationship_types(db: &dyn DatabaseBackend) -> Result<Vec<String>, String> {
+    db.get_relationship_types().map_err(|e| e.to_string())
 }
 
 /// Get node types.

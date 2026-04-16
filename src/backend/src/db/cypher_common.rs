@@ -57,11 +57,11 @@ pub fn admin_types_cypher_list() -> String {
 
 /// Build a WHERE clause fragment to exclude certain edge types from a path.
 /// Returns an empty string if no types are excluded.
-pub fn build_exclude_clause(exclude_edge_types: &[String]) -> String {
-    if exclude_edge_types.is_empty() {
+pub fn build_exclude_clause(exclude_relationship_types: &[String]) -> String {
+    if exclude_relationship_types.is_empty() {
         String::new()
     } else {
-        let types: Vec<String> = exclude_edge_types
+        let types: Vec<String> = exclude_relationship_types
             .iter()
             .map(|t| format!("'{}'", t))
             .collect();
@@ -385,7 +385,7 @@ pub fn get_edges_between(exec: &impl CypherExecutor, node_ids: &[String]) -> Res
     Ok(relationships)
 }
 
-pub fn get_edge_types(exec: &impl CypherExecutor) -> Result<Vec<String>> {
+pub fn get_relationship_types(exec: &impl CypherExecutor) -> Result<Vec<String>> {
     let rows = exec.exec_rows("MATCH ()-[r]->() RETURN DISTINCT type(r) AS typ")?;
     let types = rows
         .iter()

@@ -503,8 +503,8 @@ impl DatabaseBackend for Neo4jDatabase {
         cypher_common::get_edges_between(self, node_ids)
     }
 
-    fn get_edge_types(&self) -> Result<Vec<String>> {
-        cypher_common::get_edge_types(self)
+    fn get_relationship_types(&self) -> Result<Vec<String>> {
+        cypher_common::get_relationship_types(self)
     }
 
     fn get_node_types(&self) -> Result<Vec<String>> {
@@ -642,11 +642,11 @@ impl DatabaseBackend for Neo4jDatabase {
 
     fn find_paths_to_domain_admins(
         &self,
-        exclude_edge_types: &[String],
+        exclude_relationship_types: &[String],
     ) -> Result<Vec<(String, String, String, usize)>> {
-        debug!(exclude = ?exclude_edge_types, "Finding paths to Domain Admins");
+        debug!(exclude = ?exclude_relationship_types, "Finding paths to Domain Admins");
 
-        let exclude_clause = cypher_common::build_exclude_clause(exclude_edge_types);
+        let exclude_clause = cypher_common::build_exclude_clause(exclude_relationship_types);
 
         // Neo4j supports p = shortestPath(...) in MATCH
         let q = query(&format!(

@@ -7,7 +7,7 @@
 
 import Sigma from "sigma";
 import { TaperedEdgeProgram } from "./TaperedEdgeProgram";
-import { BACKGROUND_COLOR, LABEL_COLOR, DEFAULT_EDGE_COLOR } from "./theme";
+import { BACKGROUND_COLOR, LABEL_COLOR, DEFAULT_RELATIONSHIP_COLOR } from "./theme";
 import { getHiddenNodeIds } from "./collapse";
 import { createSharedNodeImageProgram, createSharedCurvedArrowProgram, drawNodeLabel } from "./programs";
 
@@ -172,7 +172,7 @@ function initLensSigma(): void {
       if (hiddenNodes.has(edgeSource) || hiddenNodes.has(edgeTarget)) {
         res.hidden = true;
       } else {
-        res.color = DEFAULT_EDGE_COLOR;
+        res.color = DEFAULT_RELATIONSHIP_COLOR;
       }
       return res;
     },

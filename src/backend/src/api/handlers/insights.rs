@@ -27,11 +27,11 @@ pub async fn graph_insights(
 
 /// Get all distinct relationship types in the database.
 #[instrument(skip(state))]
-pub async fn graph_edge_types(
+pub async fn graph_relationship_types(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<String>>, ApiError> {
     let db = state.require_db()?;
-    let types: Vec<String> = run_db(db, |db| db.get_edge_types()).await?;
+    let types: Vec<String> = run_db(db, |db| db.get_relationship_types()).await?;
     debug!(count = types.len(), "Relationship types retrieved");
     Ok(Json(types))
 }

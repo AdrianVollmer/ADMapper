@@ -65,9 +65,9 @@ impl CrustDatabase {
     /// Uses reverse BFS from DA groups for O(V+E) instead of per-user BFS.
     pub fn find_paths_to_domain_admins(
         &self,
-        exclude_edge_types: &[String],
+        exclude_relationship_types: &[String],
     ) -> Result<Vec<(String, String, String, usize)>> {
-        debug!(exclude = ?exclude_edge_types, "Finding paths to Domain Admins");
+        debug!(exclude = ?exclude_relationship_types, "Finding paths to Domain Admins");
 
         let nodes = self.get_all_nodes()?;
         let relationships = self.get_all_edges()?;
@@ -84,8 +84,10 @@ impl CrustDatabase {
         }
 
         // Build reverse adjacency list, filtering excluded relationship types
-        let exclude_set: std::collections::HashSet<&str> =
-            exclude_edge_types.iter().map(|s| s.as_str()).collect();
+        let exclude_set: std::collections::HashSet<&str> = exclude_relationship_types
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
 
         let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
         for rel in &relationships {

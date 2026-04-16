@@ -251,7 +251,7 @@ impl CrustDatabase {
     ///
     /// Uses direct SQL query on the normalized rel_types table for O(distinct_types)
     /// performance instead of O(edges) full scan via Cypher.
-    pub fn get_edge_types(&self) -> Result<Vec<String>> {
+    pub fn get_relationship_types(&self) -> Result<Vec<String>> {
         // Use the optimized storage method that queries rel_types table directly
         // This is O(distinct_types) instead of O(edges)
         self.db

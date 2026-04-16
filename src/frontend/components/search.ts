@@ -9,7 +9,7 @@ import { getRenderer, loadGraphData } from "./graph-view";
 import { updateDetailPanel } from "./sidebars";
 import { NODE_COLORS } from "../graph/theme";
 import { getNodeIconPath } from "../graph/icons";
-import type { ADNodeType, ADEdgeType, RawADGraph } from "../graph/types";
+import type { ADNodeType, ADRelationshipType, RawADGraph } from "../graph/types";
 import { escapeHtml } from "../utils/html";
 import { api, ApiClientError } from "../api/client";
 import type { SearchResult, PathResponse } from "../api/types";
@@ -432,7 +432,7 @@ async function findPath(): Promise<void> {
         relationships: data.graph.relationships.map((e) => ({
           source: e.source,
           target: e.target,
-          type: e.type as ADEdgeType,
+          type: e.type as ADRelationshipType,
           ...(e.exploit_likelihood !== undefined ? { exploit_likelihood: e.exploit_likelihood } : {}),
         })),
       };

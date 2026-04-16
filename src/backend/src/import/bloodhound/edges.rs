@@ -156,7 +156,9 @@ impl BloodHoundImporter {
         };
         for group in local_groups {
             let group_name = group.get("Name").and_then(|v| v.as_str()).unwrap_or("");
-            let Some(rel_type) = Self::local_group_to_edge_type(group_name) else {
+            let group_sid = group.get("ObjectIdentifier").and_then(|v| v.as_str());
+            let Some(rel_type) = Self::local_group_to_relationship_type(group_sid, group_name)
+            else {
                 continue;
             };
 
@@ -204,7 +206,7 @@ impl BloodHoundImporter {
             }
 
             // Only recognized ACE rights produce edges; unknown rights are dropped
-            let Some(rel_type) = Self::ace_to_edge_type(right_name) else {
+            let Some(rel_type) = Self::ace_to_relationship_type(right_name) else {
                 trace!(right_name, "Skipping unrecognized ACE right");
                 continue;
             };

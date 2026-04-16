@@ -175,7 +175,7 @@ pub fn run_desktop(database_url: Option<&str>) {
             tauri_commands::paths_to_domain_admins,
             // Insights
             tauri_commands::graph_insights,
-            tauri_commands::graph_edge_types,
+            tauri_commands::graph_relationship_types,
             tauri_commands::graph_node_types,
             // Mutations
             tauri_commands::add_node,
@@ -295,7 +295,7 @@ pub fn create_api_router(state: AppState) -> Router {
         )
         .route(
             "/api/graph/relationship-types",
-            get(handlers::graph_edge_types),
+            get(handlers::graph_relationship_types),
         )
         .route("/api/graph/node-types", get(handlers::graph_node_types))
         .route("/api/graph/node", post(handlers::add_node))

@@ -1,9 +1,11 @@
 /**
  * Visual theme configuration for AD graph rendering.
  *
- * Colors are chosen to match common BloodHound conventions while
- * being accessible and distinguishable.
+ * Relationship type colors are loaded from the shared definitions
+ * (src/shared/relationship_types.json) to maintain a single source of truth.
  */
+
+import sharedDefs from "../../shared/relationship_types.json";
 
 /** Color palette for node types - vibrant, modern colors for visual appeal */
 export const NODE_COLORS: Record<string, string> = {
@@ -22,80 +24,17 @@ export const NODE_COLORS: Record<string, string> = {
   Unknown: "#adb5bd", // Light gray - unknown types
 };
 
-/** Color palette for relationship types (grouped by category) */
-export const EDGE_COLORS: Record<string, string> = {
-  // Membership/structure (neutral)
-  MemberOf: "#6c757d",
-  Contains: "#6c757d",
-  GPLink: "#6c757d",
-
-  // Session/access (blue)
-  HasSession: "#0d6efd",
-  CanRDP: "#0d6efd",
-  CanPSRemote: "#0d6efd",
-  ExecuteDCOM: "#0d6efd",
-  RemoteInteractiveLogonRight: "#0d6efd",
-
-  // Dangerous permissions (red/orange)
-  AdminTo: "#dc3545",
-  GenericAll: "#dc3545",
-  GenericWrite: "#fd7e14",
-  WriteOwner: "#fd7e14",
-  WriteDacl: "#fd7e14",
-  Owns: "#dc3545",
-  ForceChangePassword: "#fd7e14",
-  AddMember: "#fd7e14",
-  AddSelf: "#fd7e14",
-  AllExtendedRights: "#fd7e14",
-  AddKeyCredentialLink: "#fd7e14",
-  WriteSPN: "#fd7e14",
-  WriteAccountRestrictions: "#fd7e14",
-
-  // Delegation (purple)
-  AllowedToDelegate: "#6f42c1",
-  AllowedToAct: "#6f42c1",
-  AddAllowedToAct: "#6f42c1",
-  CoerceToTGT: "#6f42c1",
-
-  // Trust (purple)
-  SameForestTrust: "#6f42c1",
-  CrossForestTrust: "#6f42c1",
-
-  // DCSync / replication (critical - bright red)
-  DCSync: "#ff0040",
-  GetChanges: "#ff0040",
-  GetChangesAll: "#ff0040",
-  GetChangesInFilteredSet: "#ff0040",
-
-  // Credential access (pink)
-  ReadLAPSPassword: "#e83e8c",
-  ReadGMSAPassword: "#e83e8c",
-  SyncLAPSPassword: "#e83e8c",
-  DumpSMSAPassword: "#e83e8c",
-
-  // PKI / ADCS (rose)
-  Enroll: "#f06595",
-  ManageCA: "#f06595",
-  ManageCertificates: "#f06595",
-  WritePKINameFlag: "#f06595",
-  WritePKIEnrollmentFlag: "#f06595",
-  HostsCAService: "#f06595",
-  DelegatedEnrollmentAgent: "#f06595",
-  PublishedTo: "#f06595",
-  IssuedSignedBy: "#f06595",
-  EnterpriseCAFor: "#f06595",
-  RootCAFor: "#f06595",
-  NTAuthStoreFor: "#f06595",
-  TrustedForNTAuth: "#f06595",
-
-  Unknown: "#adb5bd",
-};
+/** Color palette for relationship types, derived from shared definitions */
+export const RELATIONSHIP_COLORS: Record<string, string> = Object.fromEntries([
+  ...sharedDefs.relationship_types.map((t) => [t.name, t.color]),
+  ["Unknown", "#adb5bd"],
+]);
 
 /** Default relationship size (controls arrow head size) */
 export const DEFAULT_EDGE_SIZE = 5;
 
 /** Default relationship color (uniform for all relationship types) */
-export const DEFAULT_EDGE_COLOR = "#6c757d";
+export const DEFAULT_RELATIONSHIP_COLOR = "#6c757d";
 
 /** Highlighted relationship size multiplier */
 export const HIGHLIGHT_SIZE_MULTIPLIER = 2;

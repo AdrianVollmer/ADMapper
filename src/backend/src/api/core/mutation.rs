@@ -193,7 +193,7 @@ pub fn update_edge(
 
     let escaped_source = source.replace('\'', "\\'");
     let escaped_target = target.replace('\'', "\\'");
-    let safe_edge_type: String = rel_type
+    let safe_rel_type: String = rel_type
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '_')
         .collect();
@@ -237,7 +237,7 @@ pub fn update_edge(
 
     let query = format!(
         "MATCH (a)-[r:{}]->(b) WHERE (a.objectid = '{}' OR a.name = '{}') AND (b.objectid = '{}' OR b.name = '{}') SET {}",
-        safe_edge_type, escaped_source, escaped_source, escaped_target, escaped_target,
+        safe_rel_type, escaped_source, escaped_source, escaped_target, escaped_target,
         set_parts.join(", ")
     );
     db.run_custom_query(&query).map_err(|e| e.to_string())?;
@@ -268,13 +268,13 @@ pub fn delete_edge(
     let escaped_source = source.replace('\'', "\\'");
     let escaped_target = target.replace('\'', "\\'");
     // Relationship type should be alphanumeric (relationship name)
-    let safe_edge_type: String = rel_type
+    let safe_rel_type: String = rel_type
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '_')
         .collect();
     let query = format!(
         "MATCH (a)-[r:{}]->(b) WHERE (a.objectid = '{}' OR a.name = '{}') AND (b.objectid = '{}' OR b.name = '{}') DELETE r",
-        safe_edge_type, escaped_source, escaped_source, escaped_target, escaped_target
+        safe_rel_type, escaped_source, escaped_source, escaped_target, escaped_target
     );
     db.run_custom_query(&query).map_err(|e| e.to_string())?;
     Ok(())

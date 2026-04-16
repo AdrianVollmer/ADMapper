@@ -70,8 +70,9 @@ pub use database::{
 
 #[allow(unused_imports)]
 pub use nodes::{
-    graph_all, graph_edge_types, graph_edges, graph_insights, graph_node_types, graph_nodes,
-    graph_search, node_connections, node_counts, node_get, node_set_owned, node_status_full,
+    graph_all, graph_edges, graph_insights, graph_node_types, graph_nodes,
+    graph_relationship_types, graph_search, node_connections, node_counts, node_get,
+    node_set_owned, node_status_full,
 };
 
 #[allow(unused_imports)]
