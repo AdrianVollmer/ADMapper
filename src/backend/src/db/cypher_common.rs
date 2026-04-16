@@ -595,3 +595,155 @@ pub fn insert_nodes(exec: &impl CypherExecutor, nodes: &[DbNode]) -> Result<usiz
 
     Ok(nodes.len())
 }
+
+/// Insert edges with flattened properties (individual top-level properties).
+///
+/// Uses UNWIND with inline Cypher map literals. Each edge's properties are
+/// stored as individual relationship properties (not a JSON blob), matching
+/// the OpenCypher property graph model.
+///
+/// This works for Neo4j. FalkorDB needs a two-step approach (ensure nodes
+/// first, then CREATE edges) due to UNWIND+MERGE row collapsing.
+pub fn insert_edges(exec: &impl CypherExecutor, relationships: &[DbEdge]) -> Result<usize> {
+    if relationships.is_empty() {
+        return Ok(0);
+    }
+
+    let mut edges_by_type: std::collections::HashMap<String, Vec<&DbEdge>> =
+        std::collections::HashMap::new();
+    for relationship in relationships {
+        edges_by_type
+            .entry(relationship.rel_type.clone())
+            .or_default()
+            .push(relationship);
+    }
+
+    let mut inserted = 0;
+    for (rel_type, type_edges) in edges_by_type {
+        for chunk in type_edges.chunks(BATCH_SIZE) {
+            let items: Vec<String> = chunk
+                .iter()
+                .map(|e| {
+                    let src = e.source.replace('\\', "\\\\").replace('\'', "\\'");
+                    let tgt = e.target.replace('\\', "\\\\").replace('\'', "\\'");
+                    let src_type = e
+                        .source_type
+                        .as_deref()
+                        .unwrap_or("Base")
+                        .replace('\\', "\\\\")
+                        .replace('\'', "\\'");
+                    let tgt_type = e
+                        .target_type
+                        .as_deref()
+                        .unwrap_or("Base")
+                        .replace('\\', "\\\\")
+                        .replace('\'', "\\'");
+                    let props_map =
+                        json_to_cypher_props(&e.properties, CypherEscapeStyle::Backslash);
+                    format!(
+                        "{{src: '{}', tgt: '{}', src_type: '{}', tgt_type: '{}', props: {}}}",
+                        src, tgt, src_type, tgt_type, props_map
+                    )
+                })
+                .collect();
+
+            let cypher = format!(
+                "UNWIND [{}] AS row \
+                 MERGE (a:Base {{objectid: row.src}}) \
+                 ON CREATE SET a.placeholder = true, a.node_type = row.src_type \
+                 MERGE (b:Base {{objectid: row.tgt}}) \
+                 ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type \
+                 MERGE (a)-[r:{}]->(b) \
+                 SET r += row.props",
+                items.join(", "),
+                rel_type
+            );
+
+            exec.exec_write(&cypher)?;
+            inserted += chunk.len();
+        }
+    }
+
+    Ok(inserted)
+}
+
+/// Insert edges with a two-step approach for FalkorDB.
+///
+/// FalkorDB's UNWIND+MERGE collapses rows when multiple edges reference the
+/// same source/target node, losing edges. Step 1 ensures placeholder nodes
+/// exist, step 2 creates edges with MATCH+CREATE.
+pub fn insert_edges_two_step(
+    exec: &impl CypherExecutor,
+    relationships: &[DbEdge],
+) -> Result<usize> {
+    if relationships.is_empty() {
+        return Ok(0);
+    }
+
+    let mut edges_by_type: std::collections::HashMap<String, Vec<&DbEdge>> =
+        std::collections::HashMap::new();
+    for relationship in relationships {
+        edges_by_type
+            .entry(relationship.rel_type.clone())
+            .or_default()
+            .push(relationship);
+    }
+
+    let mut inserted = 0;
+    for (rel_type, type_edges) in edges_by_type {
+        for chunk in type_edges.chunks(BATCH_SIZE) {
+            let items: Vec<String> = chunk
+                .iter()
+                .map(|e| {
+                    let src = e.source.replace('\\', "\\\\").replace('\'', "\\'");
+                    let tgt = e.target.replace('\\', "\\\\").replace('\'', "\\'");
+                    let src_type = e
+                        .source_type
+                        .as_deref()
+                        .unwrap_or("Base")
+                        .replace('\\', "\\\\")
+                        .replace('\'', "\\'");
+                    let tgt_type = e
+                        .target_type
+                        .as_deref()
+                        .unwrap_or("Base")
+                        .replace('\\', "\\\\")
+                        .replace('\'', "\\'");
+                    let props_map =
+                        json_to_cypher_props(&e.properties, CypherEscapeStyle::Backslash);
+                    format!(
+                        "{{src: '{}', tgt: '{}', src_type: '{}', tgt_type: '{}', props: {}}}",
+                        src, tgt, src_type, tgt_type, props_map
+                    )
+                })
+                .collect();
+
+            let items_str = items.join(", ");
+
+            // Step 1: Ensure all referenced nodes exist.
+            let ensure_nodes = format!(
+                "UNWIND [{}] AS row \
+                 MERGE (a:Base {{objectid: row.src}}) \
+                 ON CREATE SET a.placeholder = true, a.node_type = row.src_type \
+                 MERGE (b:Base {{objectid: row.tgt}}) \
+                 ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type",
+                items_str
+            );
+            exec.exec_write(&ensure_nodes)?;
+
+            // Step 2: Create edges with flattened properties.
+            let create_edges = format!(
+                "UNWIND [{}] AS row \
+                 MATCH (a:Base {{objectid: row.src}}) \
+                 MATCH (b:Base {{objectid: row.tgt}}) \
+                 CREATE (a)-[r:{}]->(b) \
+                 SET r += row.props",
+                items_str, rel_type
+            );
+            exec.exec_write(&create_edges)?;
+            inserted += chunk.len();
+        }
+    }
+
+    Ok(inserted)
+}

@@ -372,73 +372,7 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
-        if relationships.is_empty() {
-            return Ok(0);
-        }
-
-        // Group relationships by type for efficient batching
-        let mut edges_by_type: std::collections::HashMap<String, Vec<&DbEdge>> =
-            std::collections::HashMap::new();
-        for relationship in relationships {
-            edges_by_type
-                .entry(relationship.rel_type.clone())
-                .or_default()
-                .push(relationship);
-        }
-
-        // Neo4j supports parameterized UNWIND with a single MERGE for both
-        // placeholder nodes and edge creation.
-        let mut inserted = 0;
-        for (rel_type, type_edges) in edges_by_type {
-            for chunk in type_edges.chunks(cypher_common::BATCH_SIZE) {
-                let srcs: Vec<String> = chunk.iter().map(|e| e.source.clone()).collect();
-                let tgts: Vec<String> = chunk.iter().map(|e| e.target.clone()).collect();
-                let src_types: Vec<String> = chunk
-                    .iter()
-                    .map(|e| e.source_type.clone().unwrap_or_else(|| "Base".to_string()))
-                    .collect();
-                let tgt_types: Vec<String> = chunk
-                    .iter()
-                    .map(|e| e.target_type.clone().unwrap_or_else(|| "Base".to_string()))
-                    .collect();
-                let props: Vec<String> = chunk
-                    .iter()
-                    .map(|e| serde_json::to_string(&e.properties).unwrap_or_default())
-                    .collect();
-
-                let q = query(&format!(
-                    "UNWIND range(0, size($srcs)-1) AS i \
-                     MERGE (a:Base {{objectid: $srcs[i]}}) \
-                     ON CREATE SET a.placeholder = true, a.node_type = $src_types[i] \
-                     MERGE (b:Base {{objectid: $tgts[i]}}) \
-                     ON CREATE SET b.placeholder = true, b.node_type = $tgt_types[i] \
-                     MERGE (a)-[r:{}]->(b) \
-                     SET r.properties = $props[i] \
-                     RETURN count(r) AS created",
-                    rel_type
-                ))
-                .param("srcs", srcs)
-                .param("tgts", tgts)
-                .param("src_types", src_types)
-                .param("tgt_types", tgt_types)
-                .param("props", props);
-
-                match self.execute_query(q) {
-                    Ok(rows) => {
-                        let created = rows
-                            .first()
-                            .and_then(|r| r.get::<i64>("created").ok())
-                            .unwrap_or(0) as usize;
-                        inserted += created;
-                    }
-                    Err(e) => {
-                        debug!("Failed to create {} relationships batch: {}", rel_type, e);
-                    }
-                }
-            }
-        }
-
-        Ok(inserted)
+        cypher_common::insert_edges(self, relationships)
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {
