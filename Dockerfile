@@ -21,6 +21,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # Build frontend (vite root is src/frontend, index.html is there)
+COPY src/shared src/shared
 COPY src/frontend src/frontend
 COPY vite.config.ts tsconfig.json tailwind.config.js postcss.config.js ./
 RUN npm run build
@@ -41,6 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=frontend-builder /app/build build
 
 # Copy workspace files
+COPY src/shared src/shared
 COPY src/backend src/backend
 COPY src/crustdb src/crustdb
 COPY src/crustdb-cli src/crustdb-cli
