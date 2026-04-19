@@ -26,7 +26,7 @@ paths, and identifying security weaknesses.
 
 ### Desktop Mode
 
-Download the latest release for your platform and run the application.
+[Download](https://github.com/AdrianVollmer/ADMapper/releases) the latest release for your platform and run the application.
 Import your BloodHound ZIP file using the import dialog.
 
 ### Headless Mode
