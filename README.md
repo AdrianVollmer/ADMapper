@@ -9,6 +9,8 @@ ADMapper can be run as standalone Tauri-based Desktop app or inside a Docker con
 The data lives in a single file in form of a SQLite database. Neo4j is also
 supported, but not needed.
 
+Get started here: [Quickstart](https://adrianvollmer.github.io/ADMapper/#quick-start)
+
 Backends
 --------
 
@@ -27,7 +29,7 @@ installation are also provided for Windows, MacOS, AppImage and Debian.
 Documentation
 -------------
 
-For deails, read the [docs](https://adrianvollmer.github.io/ADMapper).
+For details, read the [docs](https://adrianvollmer.github.io/ADMapper).
 
 License
 -------
