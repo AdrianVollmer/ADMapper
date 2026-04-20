@@ -42,7 +42,7 @@
     { "name": "SameForestTrust",            "color": "#6f42c1", "exploit_likelihood": 1.0,  "category": "trust" },
     { "name": "CrossForestTrust",           "color": "#6f42c1", "exploit_likelihood": 1.0,  "category": "trust" },
 
-    { "name": "Enroll",                     "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },
+    { "name": "Enroll",                     "color": "#f06595", "exploit_likelihood": 0.3,  "category": "pki", "ace_right": true },
     { "name": "ManageCA",                   "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },
     { "name": "ManageCertificates",         "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },
     { "name": "WritePKINameFlag",           "color": "#f06595", "exploit_likelihood": 1.0,  "category": "pki", "ace_right": true },

@@ -233,6 +233,20 @@ function extractArgs(url: string, body?: unknown, command?: string): Record<stri
 }
 
 /**
+ * Convert snake_case keys to camelCase (Tauri v2 expects camelCase from JS).
+ * Only converts top-level keys; nested objects are passed through as-is since
+ * they represent serialized payloads, not command arguments.
+ */
+function toCamelCaseKeys(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    result[camelKey] = value;
+  }
+  return result;
+}
+
+/**
  * Invoke a Tauri command based on HTTP method and URL.
  */
 async function invokeFromUrl<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -248,8 +262,11 @@ async function invokeFromUrl<T>(method: string, url: string, body?: unknown): Pr
 
   const args = extractArgs(url, body, command);
 
+  // Tauri v2 expects camelCase keys from JS (e.g. rel_type -> relType)
+  const camelArgs = toCamelCaseKeys(args);
+
   try {
-    return await invoke<T>(command, args);
+    return await invoke<T>(command, camelArgs);
   } catch (e) {
     // Tauri commands return error strings
     throw new ApiClientError(500, String(e));

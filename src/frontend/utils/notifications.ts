@@ -21,13 +21,17 @@ function getToastContainer(): HTMLElement {
   return toastContainer;
 }
 
+/** Maximum length for toast messages before truncation */
+const MAX_TOAST_LENGTH = 200;
+
 /** Show a toast notification */
 function showToast(message: string, type: "success" | "error" | "info", duration: number = 4000): void {
   const container = getToastContainer();
 
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
-  toast.textContent = message;
+  const truncated = message.length > MAX_TOAST_LENGTH ? message.slice(0, MAX_TOAST_LENGTH) + "…" : message;
+  toast.textContent = truncated;
 
   // Click to dismiss
   toast.addEventListener("click", () => {

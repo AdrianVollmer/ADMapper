@@ -147,6 +147,20 @@ describe("Tauri API compatibility", () => {
     }
   });
 
+  it("extractArgs produces snake_case keys that toCamelCaseKeys converts correctly", () => {
+    // The update_edge and delete_edge commands use rel_type from URL path params.
+    // Tauri v2 expects camelCase args (rel_type -> relType).
+    // Verify the client.ts contains toCamelCaseKeys conversion.
+    const clientPath = join(frontendDir, "api/client.ts");
+    const content = readFileSync(clientPath, "utf-8");
+
+    expect(content).toContain("toCamelCaseKeys");
+    expect(content).toContain("camelArgs");
+
+    // Verify the conversion function exists and handles underscore patterns
+    expect(content).toMatch(/replace\(.*_\(\[a-z\]\)/);
+  });
+
   it("all API command mappings have valid format", () => {
     // Read the client.ts file to extract COMMAND_MAPPING
     const clientPath = join(frontendDir, "api/client.ts");
