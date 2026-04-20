@@ -1923,9 +1923,10 @@ fn test_resolve_orphan_names_batched() {
         .unwrap();
 
     // Insert orphan nodes whose name == objectid (raw SID)
-    let orphan_rids = ["-512", "-519", "-1001"];
-    for rid in &orphan_rids {
-        let sid = format!("{}{}", domain_sid, rid);
+    // Include both simple RIDs and compound well-known SID suffixes
+    let orphan_suffixes = ["-512", "-519", "-1001", "-S-1-5-11", "-S-1-1-0"];
+    for suffix in &orphan_suffixes {
+        let sid = format!("{}{}", domain_sid, suffix);
         importer
             .db
             .insert_node(DbNode {
@@ -1938,16 +1939,16 @@ fn test_resolve_orphan_names_batched() {
     }
 
     let updated = importer.resolve_orphan_names().unwrap();
-    assert_eq!(updated, 3);
+    assert_eq!(updated, 5);
 
     // Verify names were actually updated in the database
     let all_nodes = importer.db.get_all_nodes().unwrap();
-    for rid in &orphan_rids {
-        let sid = format!("{}{}", domain_sid, rid);
+    for suffix in &orphan_suffixes {
+        let sid = format!("{}{}", domain_sid, suffix);
         let node = all_nodes.iter().find(|n| n.id == sid).unwrap();
         assert_eq!(
             node.name,
-            format!("CONTOSO.LOCAL{}", rid),
+            format!("CONTOSO.LOCAL{}", suffix),
             "Orphan {} should have resolved name",
             sid
         );

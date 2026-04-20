@@ -193,17 +193,20 @@ impl BloodHoundImporter {
             "Built domain SID-to-name map for orphan resolution"
         );
 
-        // Step 2: Collect all (objectid, friendly_name) pairs for orphan nodes
+        // Step 2: Collect all (objectid, friendly_name) pairs for orphan nodes.
+        // We match by checking if the objectid starts with a known domain SID
+        // followed by a dash. This handles both simple RIDs (e.g. "-512") and
+        // compound well-known SID suffixes (e.g. "-S-1-5-11").
         let mut renames: Vec<(String, String)> = Vec::new();
         for node in &all_nodes {
             if node.name != node.id {
                 continue;
             }
-            if let Some(last_dash) = node.id.rfind('-') {
-                let domain_sid = &node.id[..last_dash];
-                let rid = &node.id[last_dash..]; // e.g. "-512"
-                if let Some(domain_name) = domain_map.get(domain_sid) {
-                    renames.push((node.id.clone(), format!("{}{}", domain_name, rid)));
+            for (sid, name) in &domain_map {
+                let prefix = format!("{}-", sid);
+                if let Some(suffix) = node.id.strip_prefix(&prefix) {
+                    renames.push((node.id.clone(), format!("{}-{}", name, suffix)));
+                    break;
                 }
             }
         }
