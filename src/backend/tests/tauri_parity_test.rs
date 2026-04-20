@@ -101,6 +101,26 @@ fn extract_registered_tauri_commands() -> BTreeSet<String> {
 }
 
 #[test]
+fn test_query_commands_broadcast_activity() {
+    // Tauri query commands must call start_sync_query/end_sync_query to drive
+    // the frontend query indicator animation. Without this, the indicator works
+    // in HTTP mode (via the SSE stream) but stays static in Tauri desktop mode.
+    let path = workspace_path("src/backend/src/tauri_commands.rs");
+    let content = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("Cannot read {}: {e}", path.display()));
+
+    // The graph_query command must bracket execution with activity broadcasts
+    assert!(
+        content.contains("start_sync_query()"),
+        "graph_query Tauri command must call start_sync_query() to animate the query indicator"
+    );
+    assert!(
+        content.contains("end_sync_query()"),
+        "graph_query Tauri command must call end_sync_query() to stop the query indicator"
+    );
+}
+
+#[test]
 fn test_every_frontend_command_has_tauri_handler() {
     let frontend_commands = extract_frontend_command_names();
     let registered_commands = extract_registered_tauri_commands();

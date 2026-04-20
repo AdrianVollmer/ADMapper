@@ -219,9 +219,14 @@ pub async fn paths_to_domain_admins(
         .unwrap_or_default();
 
     debug!(exclude = ?exclude_types, "Finding paths to DA (IPC)");
-    tokio::task::spawn_blocking(move || core::paths_to_domain_admins(db.as_ref(), &exclude_types))
-        .await
-        .map_err(|e| format!("Task join error: {e}"))?
+    state.start_sync_query();
+    let result = tokio::task::spawn_blocking(move || {
+        core::paths_to_domain_admins(db.as_ref(), &exclude_types)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?;
+    state.end_sync_query();
+    result
 }
 
 // ============================================================================
@@ -460,6 +465,9 @@ pub async fn graph_query(
         }
     }
 
+    // Broadcast query activity (query started)
+    state.start_sync_query();
+
     // Execute query on a blocking thread so it doesn't freeze the UI
     let query_clone = query.clone();
     let query_id_clone = query_id.clone();
@@ -512,6 +520,9 @@ pub async fn graph_query(
     })
     .await
     .map_err(|e| format!("Task join error: {e}"))?;
+
+    // Broadcast query activity (query finished)
+    state.end_sync_query();
 
     result
 }
