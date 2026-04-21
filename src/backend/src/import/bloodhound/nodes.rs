@@ -1,6 +1,6 @@
 //! Node extraction, UAC flag expansion, tier assignment, and type normalization.
 
-use super::{tier_zero_rids, uac_flags, BloodHoundImporter};
+use super::{uac_flags, BloodHoundImporter};
 use crate::db::types::normalize_node_type;
 use crate::db::DbNode;
 use serde_json::Value as JsonValue;
@@ -158,36 +158,37 @@ impl BloodHoundImporter {
         }
     }
 
-    /// Well-known RIDs that should receive tier 2.
-    const TIER_TWO_RIDS: &'static [&'static str] = &[
-        "-515", // Domain Computers
+    /// The four well-known group objects that are automatically tier 0.
+    /// Direct members are handled by `assign_member_tiers` after all edges are imported.
+    const TIER_ZERO_GROUP_SIDS: &'static [&'static str] = &[
+        "-512",     // Domain Admins         (S-1-5-21-<domain>-512)
+        "-516",     // Domain Controllers    (S-1-5-21-<domain>-516)
+        "-544",     // Administrators        (S-1-5-32-544)
+        "-S-1-5-9", // Enterprise Domain Controllers (domain-qualified form)
     ];
 
-    /// Assign tier based on the object's SID.
-    /// Sets tier=0 for privileged RIDs, tier=2 for well-known non-privileged groups.
+    /// Direct members of Domain Computers are automatically tier 3.
+    const DOMAIN_COMPUTERS_SID: &'static str = "-515";
+
+    /// Assign tier to the group object itself based on its SID.
+    /// Direct members are assigned in the post-import `assign_member_tiers` step.
     pub(super) fn assign_tier(props: &mut serde_json::Map<String, JsonValue>, objectid: &str) {
-        // Skip if already assigned
         if props.contains_key("tier") {
             return;
         }
 
-        // Check if the object's SID ends with a tier-0 RID
-        let is_tier_zero = tier_zero_rids::ALL
+        let is_tier_zero = Self::TIER_ZERO_GROUP_SIDS
             .iter()
-            .any(|rid| objectid.ends_with(rid));
+            .any(|s| objectid.ends_with(s))
+            || objectid == "S-1-5-9"; // bare well-known SID for Enterprise Domain Controllers
 
         if is_tier_zero {
             props.insert("tier".to_string(), JsonValue::Number(0.into()));
             return;
         }
 
-        // Check if the object's SID ends with a tier-2 RID
-        let is_tier_two = Self::TIER_TWO_RIDS
-            .iter()
-            .any(|rid| objectid.ends_with(rid));
-
-        if is_tier_two {
-            props.insert("tier".to_string(), JsonValue::Number(2.into()));
+        if objectid.ends_with(Self::DOMAIN_COMPUTERS_SID) {
+            props.insert("tier".to_string(), JsonValue::Number(3.into()));
         }
     }
 }

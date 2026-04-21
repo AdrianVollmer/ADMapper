@@ -141,14 +141,12 @@ pub fn tier_violations(db: &dyn DatabaseBackend) -> Result<TierViolationsRespons
     let total_nodes = nodes.len();
     let total_edges = edges.len();
 
-    let tier_map: HashMap<&str, i64> = nodes
+    // Violations are only meaningful between nodes with explicit tier assignments.
+    // Nodes without a tier property are skipped entirely.
+    let tier_map: HashMap<&str, Option<i64>> = nodes
         .iter()
         .map(|n| {
-            let tier = n
-                .properties
-                .get("tier")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(3);
+            let tier = n.properties.get("tier").and_then(|v| v.as_i64());
             (n.id.as_str(), tier)
         })
         .collect();
@@ -161,8 +159,14 @@ pub fn tier_violations(db: &dyn DatabaseBackend) -> Result<TierViolationsRespons
         let mut sample_edges = Vec::new();
 
         for edge in &edges {
-            let src_tier = *tier_map.get(edge.source.as_str()).unwrap_or(&3);
-            let tgt_tier = *tier_map.get(edge.target.as_str()).unwrap_or(&3);
+            let src_tier = match tier_map.get(edge.source.as_str()).copied().flatten() {
+                Some(t) => t,
+                None => continue,
+            };
+            let tgt_tier = match tier_map.get(edge.target.as_str()).copied().flatten() {
+                Some(t) => t,
+                None => continue,
+            };
             if src_tier >= src_label && tgt_tier == tgt_label {
                 count += 1;
                 if sample_edges.len() < max_edges {
@@ -279,9 +283,14 @@ pub fn compute_effective_tiers(
     let violations = nodes
         .iter()
         .filter(|n| {
-            let assigned = *tier_map.get(n.id.as_str()).unwrap_or(&3);
-            let effective = *effective_tier.get(n.id.as_str()).unwrap_or(&3);
-            effective < assigned
+            let assigned = n.properties.get("tier").and_then(|v| v.as_i64());
+            match assigned {
+                Some(a) => {
+                    let effective = *effective_tier.get(n.id.as_str()).unwrap_or(&3);
+                    effective < a
+                }
+                None => false,
+            }
         })
         .count();
 

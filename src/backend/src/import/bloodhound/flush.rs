@@ -123,6 +123,7 @@ impl BloodHoundImporter {
         self.send_progress(progress);
 
         self.flush_deferred_dcsync(progress)?;
+        self.assign_member_tiers();
 
         match self.resolve_orphan_names() {
             Ok(count) if count > 0 => {
@@ -157,6 +158,38 @@ impl BloodHoundImporter {
             }
         }
         self.flush_edge_buffer(progress)
+    }
+
+    /// Assign tier 0 to direct members of Domain Admins, Domain Controllers,
+    /// Enterprise Domain Controllers, and Administrators; tier 3 to direct members
+    /// of Domain Computers. Only sets tier where not already explicitly defined.
+    fn assign_member_tiers(&self) {
+        // Well-known SIDs: see https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
+        let tier_zero_query = "\
+            MATCH (n)-[:MemberOf]->(g) \
+            WHERE (g.objectid ENDS WITH '-512' \
+                OR g.objectid ENDS WITH '-516' \
+                OR g.objectid ENDS WITH '-S-1-5-9' \
+                OR g.objectid = 'S-1-5-9' \
+                OR g.objectid ENDS WITH '-544') \
+              AND n.tier IS NULL \
+            SET n.tier = 0";
+
+        let tier_three_query = "\
+            MATCH (n)-[:MemberOf]->(g) \
+            WHERE g.objectid ENDS WITH '-515' \
+              AND n.tier IS NULL \
+            SET n.tier = 3";
+
+        for (label, query) in [
+            ("tier-0 group members", tier_zero_query),
+            ("Domain Computers members", tier_three_query),
+        ] {
+            match self.db.run_custom_query(query) {
+                Ok(_) => info!("Assigned tiers to {}", label),
+                Err(e) => warn!(error = %e, "Failed to assign tiers to {}", label),
+            }
+        }
     }
 
     /// Resolve placeholder node names using domain SID-to-name mappings.

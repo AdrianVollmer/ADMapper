@@ -192,16 +192,12 @@ fn test_extract_node_uac_preserves_existing_enabled() {
 // ========================================================================
 
 #[rstest]
+// Tier-0 group objects
+#[case("S-1-5-21-1234567890-512", "groups", "DOMAIN ADMINS@CORP.LOCAL", Some(0))]
 #[case(
-    "S-1-5-21-1234567890-512",
+    "S-1-5-21-1234567890-516",
     "groups",
-    "DOMAIN ADMINS@CORP.LOCAL",
-    Some(0)
-)]
-#[case(
-    "S-1-5-21-1234567890-519",
-    "groups",
-    "ENTERPRISE ADMINS@CORP.LOCAL",
+    "DOMAIN CONTROLLERS@CORP.LOCAL",
     Some(0)
 )]
 #[case("S-1-5-32-544", "groups", "ADMINISTRATORS@CORP.LOCAL", Some(0))]
@@ -211,13 +207,30 @@ fn test_extract_node_uac_preserves_existing_enabled() {
     "ENTERPRISE DOMAIN CONTROLLERS@CORP.LOCAL",
     Some(0)
 )]
+#[case("S-1-5-9", "groups", "ENTERPRISE DOMAIN CONTROLLERS", Some(0))]
+// Domains are always tier 0
 #[case("S-1-5-21-1234567890", "domains", "CORP.LOCAL", Some(0))]
+// Domain Computers group object is tier 3
 #[case(
     "S-1-5-21-1234567890-515",
     "groups",
     "DOMAIN COMPUTERS@CORP.LOCAL",
-    Some(2)
+    Some(3)
 )]
+// Other privileged groups are no longer auto-assigned; user defines them
+#[case(
+    "S-1-5-21-1234567890-519",
+    "groups",
+    "ENTERPRISE ADMINS@CORP.LOCAL",
+    None
+)]
+#[case(
+    "S-1-5-21-1234567890-518",
+    "groups",
+    "SCHEMA ADMINS@CORP.LOCAL",
+    None
+)]
+// Regular objects: no auto-tier
 #[case("S-1-5-21-1234567890-1001", "users", "regularuser@corp.local", None)]
 fn test_tier_assignment(
     #[case] sid: &str,

@@ -21,6 +21,7 @@ use tokio::sync::broadcast;
 const BATCH_SIZE: usize = 2000;
 
 /// Well-known tier-0 RIDs in Active Directory.
+#[allow(dead_code)]
 /// These are built-in privileged groups that attackers typically target.
 /// See: https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
 mod tier_zero_rids {
