@@ -47,6 +47,9 @@ let isLoading = false;
  */
 let historyCursor = 0;
 
+/** Prevents concurrent back-navigation calls from corrupting the cursor. */
+let isNavigatingBack = false;
+
 /** Live duration update interval */
 let durationInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -699,6 +702,9 @@ export function resetHistoryCursor(): void {
 
 /** Go back to the previous query in history (re-run the one before the current) */
 export async function goBackInHistory(): Promise<boolean> {
+  if (isNavigatingBack) return false;
+  isNavigatingBack = true;
+  const savedCursor = historyCursor;
   try {
     // Fetch enough entries to find non-background queries
     const data = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=50");
@@ -714,7 +720,6 @@ export async function goBackInHistory(): Promise<boolean> {
       return false;
     }
 
-    // Increment cursor before executing
     historyCursor = targetIndex;
 
     // Execute as background query so it doesn't pollute history
@@ -733,11 +738,14 @@ export async function goBackInHistory(): Promise<boolean> {
 
     return true;
   } catch (err) {
+    historyCursor = savedCursor;
     // Silently ignore aborted queries
     if (err instanceof QueryAbortedError) {
       return false;
     }
     console.error("Failed to go back in history:", err);
     return false;
+  } finally {
+    isNavigatingBack = false;
   }
 }
