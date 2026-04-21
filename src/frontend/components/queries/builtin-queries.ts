@@ -222,9 +222,9 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
     queries: [
       {
         id: "paths-to-da",
-        name: "Shortest Paths to Domain Admins",
-        description: "Find shortest path from each user to Domain Admins (SID -512)",
-        query: `MATCH (u:User), (da:Group), p = shortestPath((u)-[*1..50]->(da)) WHERE da.objectid ENDS WITH '-512' AND ALL(r IN relationships(p) WHERE r.exploit_likelihood > 0) RETURN p`,
+        name: "Reachable Domain Admins (EL ≥ 0.5)",
+        description: "Shortest path from each user to Domain Admins where every hop has exploit likelihood ≥ 0.5",
+        query: `MATCH (u:User), (da:Group), p = shortestPath((u)-[*1..50]->(da)) WHERE da.objectid ENDS WITH '-512' AND ALL(r IN relationships(p) WHERE r.exploit_likelihood >= 0.5) RETURN p`,
       },
     ],
   },

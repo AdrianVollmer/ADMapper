@@ -319,12 +319,12 @@ function renderDAAnalysisTab(): string {
     <div class="insights-container">
       <div class="insight-section">
         <h3 class="insight-section-title">Domain Admin Analysis</h3>
-        <p class="insight-desc">Compare users with any path to Domain Admins vs direct/transitive group members.</p>
+        <p class="insight-desc">Compare users with a path to Domain Admins (EL ≥ 0.5) vs direct/transitive group members.</p>
         <div class="insight-cards">
           <div class="insight-card insight-card-primary">
             <div class="insight-card-value clickable" data-query="effective-das" title="Click to view graph">${effectiveCount.toLocaleString()}</div>
-            <div class="insight-card-label">Effective Domain Admins</div>
-            <div class="insight-card-desc">Users with any path to DA</div>
+            <div class="insight-card-label">Reachable Domain Admins</div>
+            <div class="insight-card-desc">Users with path to DA (EL ≥ 0.5)</div>
           </div>
           <div class="insight-card insight-card-secondary">
             <div class="insight-card-value clickable" data-query="real-das" title="Click to view graph">${realCount.toLocaleString()}</div>
@@ -758,7 +758,7 @@ async function loadDAAnalysis(): Promise<void> {
     // Run both queries in parallel using shortestPath to avoid combinatorial explosion
     const [effectiveResult, realResult] = await Promise.all([
       executeQuery(
-        `MATCH (u:User), (g:Group), p = shortestPath((u)-[*1..10]->(g)) WHERE g.objectid ENDS WITH '-512' RETURN DISTINCT u`,
+        `MATCH (u:User), (g:Group), p = shortestPath((u)-[*1..10]->(g)) WHERE g.objectid ENDS WITH '-512' AND ALL(r IN relationships(p) WHERE r.exploit_likelihood >= 0.5) RETURN DISTINCT u`,
         { extractGraph: false, background: true }
       ),
       executeQuery(
@@ -1019,7 +1019,7 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
 
   switch (queryType) {
     case "effective-das":
-      query = `MATCH (u:User), (g:Group), p = shortestPath((u)-[*1..10]->(g)) WHERE g.objectid ENDS WITH '-512' RETURN p LIMIT 500`;
+      query = `MATCH (u:User), (g:Group), p = shortestPath((u)-[*1..10]->(g)) WHERE g.objectid ENDS WITH '-512' AND ALL(r IN relationships(p) WHERE r.exploit_likelihood >= 0.5) RETURN p LIMIT 500`;
       break;
     case "real-das":
       query = `MATCH (u:User), (g:Group), p = shortestPath((u)-[:MemberOf*1..10]->(g)) WHERE g.objectid ENDS WITH '-512' RETURN p LIMIT 500`;
