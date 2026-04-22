@@ -193,7 +193,12 @@ fn test_extract_node_uac_preserves_existing_enabled() {
 
 #[rstest]
 // Tier-0 group objects
-#[case("S-1-5-21-1234567890-512", "groups", "DOMAIN ADMINS@CORP.LOCAL", Some(0))]
+#[case(
+    "S-1-5-21-1234567890-512",
+    "groups",
+    "DOMAIN ADMINS@CORP.LOCAL",
+    Some(0)
+)]
 #[case(
     "S-1-5-21-1234567890-516",
     "groups",
@@ -224,12 +229,7 @@ fn test_extract_node_uac_preserves_existing_enabled() {
     "ENTERPRISE ADMINS@CORP.LOCAL",
     None
 )]
-#[case(
-    "S-1-5-21-1234567890-518",
-    "groups",
-    "SCHEMA ADMINS@CORP.LOCAL",
-    None
-)]
+#[case("S-1-5-21-1234567890-518", "groups", "SCHEMA ADMINS@CORP.LOCAL", None)]
 // Regular objects: no auto-tier
 #[case("S-1-5-21-1234567890-1001", "users", "regularuser@corp.local", None)]
 fn test_tier_assignment(
