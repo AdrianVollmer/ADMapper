@@ -69,4 +69,23 @@ impl super::Database {
         let storage = self.get_read_storage();
         storage.get_all_labels()
     }
+
+    /// Set a numeric property on all relationships for each given type, in one transaction.
+    ///
+    /// This is significantly faster than running one Cypher SET query per type because
+    /// it avoids parse/plan overhead and batches all writes into a single SQLite transaction.
+    pub fn update_relationship_property_by_types(
+        &self,
+        property: &str,
+        values: &std::collections::HashMap<String, f64>,
+    ) -> Result<usize> {
+        self.require_writable()?;
+        let mut storage = self
+            .write_conn
+            .lock()
+            .map_err(|e| Error::Internal(e.to_string()))?;
+        let result = storage.update_relationship_property_by_types(property, values);
+        self.invalidate_adjacency_cache();
+        result
+    }
 }

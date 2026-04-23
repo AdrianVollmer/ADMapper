@@ -190,6 +190,15 @@ impl DatabaseBackend for CrustDatabase {
         CrustDatabase::find_paths_to_domain_admins(self, exclude_relationship_types)
     }
 
+    fn update_exploit_likelihoods(
+        &self,
+        likelihoods: &std::collections::HashMap<String, f64>,
+    ) -> Result<usize> {
+        self.db
+            .update_relationship_property_by_types("exploit_likelihood", likelihoods)
+            .map_err(|e| super::super::types::DbError::Database(e.to_string()))
+    }
+
     fn run_custom_query(&self, query: &str) -> Result<JsonValue> {
         CrustDatabase::run_custom_query(self, query)
     }

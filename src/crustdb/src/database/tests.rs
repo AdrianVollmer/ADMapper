@@ -1012,4 +1012,76 @@ mod tests {
         let cache = db.ensure_adjacency_cache().unwrap();
         assert_eq!(cache.outgoing(1).len(), 0);
     }
+
+    #[test]
+    fn test_update_relationship_property_by_types_single_transaction() {
+        let db = Database::in_memory().unwrap();
+
+        db.execute("CREATE (:User {objectid: 'U1'})-[:MemberOf {}]->(:Group {objectid: 'G1'})")
+            .unwrap();
+        db.execute("CREATE (:User {objectid: 'U2'})-[:AdminTo {}]->(:Computer {objectid: 'C1'})")
+            .unwrap();
+
+        let likelihoods: std::collections::HashMap<String, f64> =
+            [("MemberOf".to_string(), 0.5), ("AdminTo".to_string(), 0.9)].into();
+
+        let updated = db
+            .update_relationship_property_by_types("exploit_likelihood", &likelihoods)
+            .unwrap();
+        assert_eq!(updated, 2);
+
+        // Verify MemberOf was updated
+        let result = db
+            .execute("MATCH ()-[r:MemberOf]->() RETURN r.exploit_likelihood")
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        let val = &result.rows[0].values["r.exploit_likelihood"];
+        assert!(
+            matches!(val, crate::query::ResultValue::Property(crate::graph::PropertyValue::Float(v)) if (*v - 0.5).abs() < 1e-9),
+            "expected 0.5, got {val:?}"
+        );
+
+        // Verify AdminTo was updated
+        let result = db
+            .execute("MATCH ()-[r:AdminTo]->() RETURN r.exploit_likelihood")
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        let val = &result.rows[0].values["r.exploit_likelihood"];
+        assert!(
+            matches!(val, crate::query::ResultValue::Property(crate::graph::PropertyValue::Float(v)) if (*v - 0.9).abs() < 1e-9),
+            "expected 0.9, got {val:?}"
+        );
+    }
+
+    #[test]
+    fn test_update_relationship_property_by_types_unknown_type_skipped() {
+        let db = Database::in_memory().unwrap();
+
+        db.execute("CREATE (:User {objectid: 'U1'})-[:MemberOf {}]->(:Group {objectid: 'G1'})")
+            .unwrap();
+
+        let likelihoods: std::collections::HashMap<String, f64> =
+            [("UnknownType".to_string(), 0.7)].into();
+
+        // No rows match — updated should be 0
+        let updated = db
+            .update_relationship_property_by_types("exploit_likelihood", &likelihoods)
+            .unwrap();
+        assert_eq!(updated, 0);
+
+        // Existing edge should be unmodified (no exploit_likelihood set)
+        let result = db
+            .execute("MATCH ()-[r:MemberOf]->() RETURN r.exploit_likelihood")
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        // Property not set means it should be null/absent
+        let val = &result.rows[0].values["r.exploit_likelihood"];
+        assert!(
+            matches!(
+                val,
+                crate::query::ResultValue::Property(crate::graph::PropertyValue::Null)
+            ),
+            "expected null for unmodified edge, got {val:?}"
+        );
+    }
 }

@@ -554,6 +554,39 @@ impl SqliteStorage {
         Ok(affected > 0)
     }
 
+    /// Set a numeric property on all relationships grouped by type, in one transaction.
+    ///
+    /// For each `(rel_type, value)` pair, updates every relationship of that type so
+    /// that `properties[property] = value`. Unknown types are silently skipped.
+    /// Returns the number of distinct types that had at least one row updated.
+    pub fn update_relationship_property_by_types(
+        &mut self,
+        property: &str,
+        values: &std::collections::HashMap<String, f64>,
+    ) -> Result<usize> {
+        if values.is_empty() {
+            return Ok(0);
+        }
+        let json_key = format!("$.{property}");
+        let tx = self.conn.transaction()?;
+        let mut updated = 0;
+        {
+            let mut stmt = tx.prepare(
+                "UPDATE relationships \
+                 SET properties = jsonb(json_set(json(properties), ?1, ?2)) \
+                 WHERE type_id = (SELECT id FROM rel_types WHERE name = ?3)",
+            )?;
+            for (rel_type, value) in values {
+                let rows = stmt.execute(rusqlite::params![json_key, value, rel_type])?;
+                if rows > 0 {
+                    updated += 1;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(updated)
+    }
+
     /// Add a label to a node.
     pub fn add_node_label(&self, node_id: i64, label: &str) -> Result<bool> {
         // Check if node exists

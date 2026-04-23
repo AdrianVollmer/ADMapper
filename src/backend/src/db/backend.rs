@@ -190,6 +190,34 @@ pub trait DatabaseBackend: Send + Sync {
     // Custom Query
     // ========================================================================
 
+    /// Set exploit_likelihood on all edges for each given relationship type.
+    ///
+    /// The default implementation issues one Cypher SET query per type (safe for all
+    /// backends). CrustDB overrides this with a single SQL transaction for much better
+    /// performance — avoiding per-query parse/plan overhead and WAL round-trips.
+    fn update_exploit_likelihoods(
+        &self,
+        likelihoods: &std::collections::HashMap<String, f64>,
+    ) -> Result<usize> {
+        let mut updated = 0;
+        for (rel_type, likelihood) in likelihoods {
+            let safe_type: String = rel_type
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if safe_type.is_empty() {
+                continue;
+            }
+            let query = format!(
+                "MATCH ()-[r:{}]->() SET r.exploit_likelihood = {}",
+                safe_type, likelihood
+            );
+            self.run_custom_query(&query)?;
+            updated += 1;
+        }
+        Ok(updated)
+    }
+
     /// Run a custom query in the backend's native language.
     fn run_custom_query(&self, query: &str) -> Result<JsonValue>;
 
