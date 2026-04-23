@@ -184,15 +184,34 @@ enum ListItemRef<'a> {
 }
 
 /// Resolve a PlanExpr to a list of items for list predicate evaluation.
+///
+/// Handles two forms:
+/// - `r` where `r` is a variable-length relationship list (e.g., from `[r*1..5]`)
+/// - `relationships(p)` where `p` is a path variable (e.g., from `shortestPath(...)`)
 fn resolve_list_items<'a>(
     list_expr: &crate::query::planner::PlanExpr,
     binding: &'a Binding,
 ) -> Result<Vec<ListItemRef<'a>>> {
-    if let crate::query::planner::PlanExpr::Variable(var_name) = list_expr {
-        if let Some(rel_list) = binding.get_relationship_list(var_name) {
-            return Ok(rel_list.iter().map(ListItemRef::Relationship).collect());
+    match list_expr {
+        crate::query::planner::PlanExpr::Variable(var_name) => {
+            if let Some(rel_list) = binding.get_relationship_list(var_name) {
+                return Ok(rel_list.iter().map(ListItemRef::Relationship).collect());
+            }
         }
+        crate::query::planner::PlanExpr::Function { name, args }
+            if name.eq_ignore_ascii_case("relationships") && args.len() == 1 =>
+        {
+            if let crate::query::planner::PlanExpr::Variable(path_var) = &args[0] {
+                if let Some(path) = binding.get_path(path_var) {
+                    return Ok(path
+                        .relationships
+                        .iter()
+                        .map(ListItemRef::Relationship)
+                        .collect());
+                }
+            }
+        }
+        _ => {}
     }
-    // If not a relationship list variable, return empty
     Ok(Vec::new())
 }

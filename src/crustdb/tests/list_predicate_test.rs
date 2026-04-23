@@ -263,3 +263,207 @@ fn test_ends_with_sid_and_none_memberof() {
         names
     );
 }
+
+// ─── relationships(p) inside ALL/ANY/NONE ────────────────────────────────────
+
+/// Set up a graph where exploit_likelihood values differ per edge.
+///
+/// User U1 → Group G1 (DA, SID ends with -512).
+///   U1 --[MemberOf, exploit_likelihood=0.9]--> G1          (high likelihood)
+///
+/// User U2 → Group G1 via two hops:
+///   U2 --[MemberOf, exploit_likelihood=0.0]--> G2
+///   G2 --[MemberOf, exploit_likelihood=0.9]--> G1          (one hop is 0.0)
+///
+/// User U3 → Group G1 via two hops, both high:
+///   U3 --[MemberOf, exploit_likelihood=0.9]--> G3
+///   G3 --[MemberOf, exploit_likelihood=0.8]--> G1
+fn setup_exploit_likelihood_db() -> Database {
+    let db = Database::in_memory().expect("db");
+
+    // Domain Admins group
+    db.execute("CREATE (:Group {objectid: 'S-1-5-21-512', name: 'DA'})")
+        .unwrap();
+
+    // U1: single high-likelihood hop
+    db.execute("CREATE (:User {objectid: 'U1', name: 'U1'})")
+        .unwrap();
+    db.execute(
+        "MATCH (u:User {objectid: 'U1'}), (g:Group {objectid: 'S-1-5-21-512'}) \
+         CREATE (u)-[:MemberOf {exploit_likelihood: 0.9}]->(g)",
+    )
+    .unwrap();
+
+    // U2: two-hop path where first hop has likelihood=0.0
+    db.execute("CREATE (:User {objectid: 'U2', name: 'U2'})")
+        .unwrap();
+    db.execute("CREATE (:Group {objectid: 'G2', name: 'G2'})")
+        .unwrap();
+    db.execute(
+        "MATCH (u:User {objectid: 'U2'}), (g:Group {objectid: 'G2'}) \
+         CREATE (u)-[:MemberOf {exploit_likelihood: 0.0}]->(g)",
+    )
+    .unwrap();
+    db.execute(
+        "MATCH (g2:Group {objectid: 'G2'}), (da:Group {objectid: 'S-1-5-21-512'}) \
+         CREATE (g2)-[:MemberOf {exploit_likelihood: 0.9}]->(da)",
+    )
+    .unwrap();
+
+    // U3: two-hop path where both hops have high likelihood
+    db.execute("CREATE (:User {objectid: 'U3', name: 'U3'})")
+        .unwrap();
+    db.execute("CREATE (:Group {objectid: 'G3', name: 'G3'})")
+        .unwrap();
+    db.execute(
+        "MATCH (u:User {objectid: 'U3'}), (g:Group {objectid: 'G3'}) \
+         CREATE (u)-[:MemberOf {exploit_likelihood: 0.9}]->(g)",
+    )
+    .unwrap();
+    db.execute(
+        "MATCH (g3:Group {objectid: 'G3'}), (da:Group {objectid: 'S-1-5-21-512'}) \
+         CREATE (g3)-[:MemberOf {exploit_likelihood: 0.8}]->(da)",
+    )
+    .unwrap();
+
+    db
+}
+
+#[test]
+fn test_all_relationships_p_exploit_likelihood_filters_zero_edges() {
+    let db = setup_exploit_likelihood_db();
+
+    // Exact pattern from the built-in path-to-DA query.
+    // U2's path includes an edge with exploit_likelihood=0.0 → should be excluded.
+    // U1 and U3 have all edges > 0 → should be included.
+    let result = db
+        .execute(
+            "MATCH (u:User), (da:Group), p = shortestPath((u)-[*1..10]->(da)) \
+             WHERE da.objectid ENDS WITH '-512' \
+             AND ALL(r IN relationships(p) WHERE r.exploit_likelihood > 0) \
+             RETURN u.name AS name",
+        )
+        .unwrap();
+
+    let names = get_string_values(&result, "name");
+
+    assert!(
+        names.contains(&"U1".to_string()),
+        "U1 has exploit_likelihood=0.9 → should be included, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"U3".to_string()),
+        "U3's hops are 0.9 and 0.8 → should be included, got: {:?}",
+        names
+    );
+    assert!(
+        !names.contains(&"U2".to_string()),
+        "U2 has a hop with exploit_likelihood=0.0 → must be excluded, got: {:?}",
+        names
+    );
+}
+
+#[test]
+fn test_all_relationships_p_with_threshold() {
+    let db = setup_exploit_likelihood_db();
+
+    // Threshold of 0.85: U3's second hop (0.8) is below threshold → U3 excluded too.
+    let result = db
+        .execute(
+            "MATCH (u:User), (da:Group), p = shortestPath((u)-[*1..10]->(da)) \
+             WHERE da.objectid ENDS WITH '-512' \
+             AND ALL(r IN relationships(p) WHERE r.exploit_likelihood > 0.85) \
+             RETURN u.name AS name",
+        )
+        .unwrap();
+
+    let names = get_string_values(&result, "name");
+
+    assert!(
+        names.contains(&"U1".to_string()),
+        "U1 has exploit_likelihood=0.9 > 0.85 → included, got: {:?}",
+        names
+    );
+    assert!(
+        !names.contains(&"U2".to_string()),
+        "U2 has 0.0 < 0.85 → excluded, got: {:?}",
+        names
+    );
+    assert!(
+        !names.contains(&"U3".to_string()),
+        "U3 has a hop at 0.8 < 0.85 → excluded, got: {:?}",
+        names
+    );
+}
+
+#[test]
+fn test_any_relationships_p_exploit_likelihood() {
+    let db = setup_exploit_likelihood_db();
+
+    // ANY: path has at least one edge with exploit_likelihood > 0.85.
+    // U1: single hop at 0.9 → matches.
+    // U2: hops at 0.0 and 0.9 → matches (0.9 > 0.85).
+    // U3: hops at 0.9 and 0.8 → matches (0.9 > 0.85).
+    let result = db
+        .execute(
+            "MATCH (u:User), (da:Group), p = shortestPath((u)-[*1..10]->(da)) \
+             WHERE da.objectid ENDS WITH '-512' \
+             AND ANY(r IN relationships(p) WHERE r.exploit_likelihood > 0.85) \
+             RETURN u.name AS name",
+        )
+        .unwrap();
+
+    let names = get_string_values(&result, "name");
+
+    assert!(
+        names.contains(&"U1".to_string()),
+        "U1's hop is 0.9 > 0.85 → included, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"U2".to_string()),
+        "U2 has a hop at 0.9 > 0.85 → included, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"U3".to_string()),
+        "U3 has a hop at 0.9 > 0.85 → included, got: {:?}",
+        names
+    );
+}
+
+#[test]
+fn test_none_relationships_p_exploit_likelihood() {
+    let db = setup_exploit_likelihood_db();
+
+    // NONE: path has no edge with exploit_likelihood below 0.5.
+    // U2 has a hop at 0.0 < 0.5 → NONE fails → excluded.
+    // U1 and U3 have all hops >= 0.5 → NONE passes → included.
+    let result = db
+        .execute(
+            "MATCH (u:User), (da:Group), p = shortestPath((u)-[*1..10]->(da)) \
+             WHERE da.objectid ENDS WITH '-512' \
+             AND NONE(r IN relationships(p) WHERE r.exploit_likelihood < 0.5) \
+             RETURN u.name AS name",
+        )
+        .unwrap();
+
+    let names = get_string_values(&result, "name");
+
+    assert!(
+        names.contains(&"U1".to_string()),
+        "U1's single hop is 0.9 ≥ 0.5 → included, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"U3".to_string()),
+        "U3's hops are 0.9 and 0.8 ≥ 0.5 → included, got: {:?}",
+        names
+    );
+    assert!(
+        !names.contains(&"U2".to_string()),
+        "U2 has a hop at 0.0 < 0.5 → excluded, got: {:?}",
+        names
+    );
+}
