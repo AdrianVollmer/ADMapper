@@ -1,12 +1,13 @@
 /**
  * Export Component
  *
- * Export the currently visible graph as PNG, SVG, or JSON.
+ * Export the currently visible graph as PNG, SVG, JSON, or interactive HTML.
  */
 
 import { getRenderer } from "./graph-view";
 import { showError, showInfo, showSuccess } from "../utils/notifications";
 import { isRunningInTauri } from "../api/client";
+import htmlTemplate from "../export-graph-template.html?raw";
 
 /** Export the graph as PNG */
 export async function exportPNG(): Promise<void> {
@@ -208,6 +209,73 @@ export async function exportJSON(): Promise<void> {
   }
 }
 
+/** Export the graph as an interactive HTML file. */
+export async function exportHTML(): Promise<void> {
+  const renderer = getRenderer();
+  if (!renderer) {
+    showInfo("No graph to export. Please load a graph first.");
+    return;
+  }
+
+  try {
+    const graph = renderer.sigma.getGraph();
+
+    const nodes: Array<{
+      id: string;
+      label: string;
+      type: string;
+      x: number;
+      y: number;
+      properties: Record<string, unknown>;
+    }> = [];
+
+    const edges: Array<{
+      id: string;
+      source: string;
+      target: string;
+      type: string;
+    }> = [];
+
+    graph.forEachNode(
+      (
+        node: string,
+        attrs: { label?: string; nodeType?: string; x?: number; y?: number; properties?: Record<string, unknown> }
+      ) => {
+        nodes.push({
+          id: node,
+          label: attrs.label ?? node,
+          type: attrs.nodeType ?? "Unknown",
+          x: attrs.x ?? 0,
+          y: attrs.y ?? 0,
+          properties: attrs.properties ?? {},
+        });
+      }
+    );
+
+    graph.forEachEdge((_edge: string, attrs: { relationshipType?: string }, source: string, target: string) => {
+      edges.push({
+        id: `${source}->${target}:${attrs.relationshipType ?? ""}`,
+        source,
+        target,
+        type: attrs.relationshipType ?? "Unknown",
+      });
+    });
+
+    const data = {
+      exportedAt: new Date().toISOString(),
+      nodes,
+      edges,
+    };
+
+    const html = htmlTemplate.replace("__GRAPH_DATA_PLACEHOLDER__", JSON.stringify(data));
+    const blob = new Blob([html], { type: "text/html" });
+    downloadBlob(blob, "admapper-graph.html");
+  } catch (err) {
+    console.error("HTML export failed:", err);
+    showError("Failed to export HTML: " + (err instanceof Error ? err.message : String(err)));
+  }
+}
+
 /** Download a blob as a file */
 async function downloadBlob(blob: Blob, filename: string): Promise<void> {
   // In Tauri mode, use native save dialog
@@ -216,7 +284,15 @@ async function downloadBlob(blob: Blob, filename: string): Promise<void> {
       // Determine file extension and filter
       const ext = filename.split(".").pop() || "";
       const filterName =
-        ext === "png" ? "PNG Image" : ext === "svg" ? "SVG Image" : ext === "json" ? "JSON File" : "File";
+        ext === "png"
+          ? "PNG Image"
+          : ext === "svg"
+            ? "SVG Image"
+            : ext === "json"
+              ? "JSON File"
+              : ext === "html"
+                ? "HTML File"
+                : "File";
 
       const savePath = await window.__TAURI_PLUGIN_DIALOG__.save({
         defaultPath: filename,

@@ -12,7 +12,7 @@ import { triggerBloodHoundImport } from "./import";
 import { openQueryHistory, goBackInHistory } from "./query-history";
 import { showKeyboardShortcuts } from "./keyboard";
 import { openDbManager, clearDatabase, clearDisabledObjects, clearCache } from "./db-manager";
-import { exportPNG, exportSVG, exportJSON } from "./export";
+import { exportPNG, exportSVG, exportJSON, exportHTML } from "./export";
 import { openInsights } from "./insights";
 import { openAddNode, openAddEdge } from "./add-node-edge";
 import { openDbConnect, disconnectDb, connectToUrl } from "./db-connect";
@@ -36,6 +36,7 @@ export const Actions = {
   EXPORT_PNG: "export-png",
   EXPORT_SVG: "export-svg",
   EXPORT_JSON: "export-json",
+  EXPORT_HTML: "export-html",
   SETTINGS: "settings",
   QUIT: "quit",
   // Edit menu
@@ -103,6 +104,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "export-png": () => exportPNG(),
   "export-svg": () => exportSVG(),
   "export-json": () => exportJSON(),
+  "export-html": () => exportHTML(),
   settings: () => openSettings(),
   quit: () => {
     if ("__TAURI__" in window) {
