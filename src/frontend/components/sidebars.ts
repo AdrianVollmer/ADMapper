@@ -179,6 +179,13 @@ function renderIndicator(type: keyof typeof USER_INDICATORS): string {
   return `<span class="user-indicator" title="${indicator.tooltip}">${indicator.icon}</span>`;
 }
 
+const DISABLED_ICON = `<span class="disabled-badge" title="Disabled">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4 text-red-500">
+    <circle cx="12" cy="12" r="10"/>
+    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+  </svg>
+</span>`;
+
 /** Initialize sidebars */
 export function initSidebars(): void {
   // Sidebars are now initialized without document-level click handlers.
@@ -705,12 +712,15 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   // Build placeholder warning banner if applicable
   const placeholderBanner = isPlaceholder ? renderPlaceholderBanner() : "";
 
+  const isDisabled = attrs.properties?.enabled === false;
+
   content.innerHTML = `
     <div class="detail-header">
       <div class="detail-header-top">
         <span class="detail-node-type node-badge" style="background-color: ${typeColor}">
           ${escapeHtml(attrs.nodeType)}
         </span>
+        <span id="disabled-badge-container">${isDisabled ? DISABLED_ICON : ""}</span>
         ${indicatorsHtml}
       </div>
       <h2 class="detail-node-name">${escapeHtml(attrs.label)}</h2>
@@ -1067,6 +1077,12 @@ async function fetchNodeProperties(nodeId: string): Promise<void> {
     const bannerContainer = document.getElementById("placeholder-banner-container");
     if (bannerContainer && node.properties.placeholder === true) {
       bannerContainer.innerHTML = renderPlaceholderBanner();
+    }
+
+    // Update disabled badge now that properties are available
+    const disabledContainer = document.getElementById("disabled-badge-container");
+    if (disabledContainer) {
+      disabledContainer.innerHTML = node.properties.enabled === false ? DISABLED_ICON : "";
     }
 
     // Build properties HTML
