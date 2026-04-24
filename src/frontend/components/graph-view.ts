@@ -8,7 +8,7 @@ import { loadGraph, createRenderer, applyLayoutAsync as applyLayoutFromModule, g
 import type { ADGraphRenderer, LayoutType } from "../graph";
 import type { RawADGraph } from "../graph/types";
 import { updateDetailPanel, updateDetailPanelForEdge } from "./sidebars";
-import { clearCollapseState, autoCollapseGraph } from "../graph/collapse";
+import { clearCollapseState, autoCollapseGraph, getHiddenNodeIds } from "../graph/collapse";
 import { destroyMagnifier } from "../graph/magnifier";
 import { dispatchAction, Actions, type Action } from "./actions";
 import { api } from "../api/client";
@@ -38,7 +38,11 @@ function hideLayoutSpinner(): void {
 }
 
 /** Apply layout asynchronously with spinner */
-async function applyLayoutAsync(graph: ReturnType<typeof loadGraph>, layout: LayoutType): Promise<void> {
+async function applyLayoutAsync(
+  graph: ReturnType<typeof loadGraph>,
+  layout: LayoutType,
+  hiddenNodeIds?: ReadonlySet<string>
+): Promise<void> {
   const nodeCount = graph.order;
   // Show spinner for larger graphs or heavy layouts
   const showSpinner = nodeCount > 50 || layout === "hierarchical";
@@ -51,7 +55,7 @@ async function applyLayoutAsync(graph: ReturnType<typeof loadGraph>, layout: Lay
 
   try {
     // Use the async layout that yields to UI during computation
-    await applyLayoutFromModule(graph, { type: layout });
+    await applyLayoutFromModule(graph, { type: layout }, undefined, hiddenNodeIds);
   } finally {
     if (showSpinner) {
       hideLayoutSpinner();
@@ -259,17 +263,19 @@ export async function loadGraphData(data: RawADGraph): Promise<void> {
   // Clear previous collapse state
   clearCollapseState();
 
-  // Load and layout the graph
-  // Use lattice layout for graphs with no relationships (e.g., stale objects)
+  // Load graph, then auto-collapse heavy nodes BEFORE computing layout so the
+  // layout algorithm only positions the nodes that will actually be visible.
+  // This prevents collapsed leaf nodes from forcing the algorithm to widen
+  // spacing around their parent and creating extremely tight clusters.
   const graph = loadGraph(data);
-  const layoutToUse = edgeCount === 0 ? "lattice" : currentLayout;
-  await applyLayoutAsync(graph, layoutToUse);
 
-  // Auto-collapse high-connectivity nodes before rendering
   const threshold = getAutoCollapseThreshold();
   if (threshold > 0) {
     autoCollapseGraph(graph, threshold);
   }
+
+  const layoutToUse = edgeCount === 0 ? "lattice" : currentLayout;
+  await applyLayoutAsync(graph, layoutToUse, getHiddenNodeIds());
 
   // Create renderer
   renderer = createRenderer({
@@ -341,7 +347,7 @@ export async function relayoutGraph(): Promise<void> {
   if (!renderer) return;
 
   const graph = renderer.sigma.getGraph();
-  await applyLayoutAsync(graph, currentLayout);
+  await applyLayoutAsync(graph, currentLayout, getHiddenNodeIds());
   renderer.refresh();
   renderer.resetCamera();
 }

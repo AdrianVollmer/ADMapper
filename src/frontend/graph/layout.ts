@@ -39,11 +39,17 @@ const ALGORITHM_MAP: Record<LayoutType, ServerLayoutAlgorithm> = {
  * Sends the graph structure to the backend, which uses visgraph (Rust) to
  * compute positions. Reads iterations, temperature, and direction from the
  * persisted layout settings.
+ *
+ * Pass `hiddenNodeIds` to exclude collapsed/hidden nodes from layout
+ * computation. This prevents heavy nodes (e.g. a Group with 200 incoming
+ * MemberOf leaves that will be hidden) from forcing the algorithm to
+ * accommodate them and creating extremely tight clusters.
  */
 export async function applyLayoutAsync(
   graph: ADGraphType,
   options: LayoutOptions = {},
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  hiddenNodeIds?: ReadonlySet<string>
 ): Promise<void> {
   const nodeCount = graph.order;
   if (nodeCount === 0) return;
@@ -52,17 +58,20 @@ export async function applyLayoutAsync(
   const algorithm = ALGORITHM_MAP[layoutType];
   const settings = getServerLayoutSettings();
 
-  // Build node list, labels, and index map
+  // Build node list, labels, and index map — skip hidden (collapsed) nodes
   const nodes: string[] = [];
   const nodeLabels: string[] = [];
   const nodeIndexMap = new Map<string, number>();
   graph.forEachNode((nodeId, attrs) => {
+    if (hiddenNodeIds?.has(nodeId)) return;
     nodeIndexMap.set(nodeId, nodes.length);
     nodes.push(nodeId);
     nodeLabels.push(attrs.nodeType ?? "");
   });
 
-  // Build edge list as index pairs
+  if (nodes.length === 0) return;
+
+  // Build edge list as index pairs — skip edges touching hidden nodes
   const edges: [number, number][] = [];
   graph.forEachEdge((_, _attrs, source, target) => {
     const si = nodeIndexMap.get(source);
@@ -82,15 +91,15 @@ export async function applyLayoutAsync(
     node_labels: nodeLabels,
   });
 
-  // Apply positions from server response
+  // Apply positions from server response (hidden nodes keep whatever position they had)
   for (const pos of response.positions) {
-    if (graph.hasNode(pos.id)) {
+    if (graph.hasNode(pos.id) && !hiddenNodeIds?.has(pos.id)) {
       graph.setNodeAttribute(pos.id, "x", pos.x);
       graph.setNodeAttribute(pos.id, "y", pos.y);
     }
   }
 
-  validateAndFixPositions(graph);
+  validateAndFixPositions(graph, hiddenNodeIds);
   if (onProgress) onProgress(1);
 }
 
@@ -103,9 +112,11 @@ export async function applyLayoutAsync(
  * 3. Degenerate layouts where all nodes are at the same point
  * 4. Very small position ranges that make the graph invisible
  *
+ * Hidden nodes are skipped — their positions don't affect rendering.
+ *
  * @returns Number of nodes that had positions fixed
  */
-export function validateAndFixPositions(graph: ADGraphType): number {
+export function validateAndFixPositions(graph: ADGraphType, hiddenNodeIds?: ReadonlySet<string>): number {
   if (graph.order === 0) return 0;
 
   // Thresholds for detecting problematic positions
@@ -123,6 +134,7 @@ export function validateAndFixPositions(graph: ADGraphType): number {
   const allNodes: string[] = [];
 
   graph.forEachNode((nodeId, attrs) => {
+    if (hiddenNodeIds?.has(nodeId)) return; // hidden nodes don't need valid positions
     allNodes.push(nodeId);
     const x = attrs.x;
     const y = attrs.y;
