@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ADMapper Graph Export</title>
+    <link id="favicon" rel="icon" type="image/svg+xml" />
     <style>
       *,
       *::before,
@@ -345,6 +346,15 @@
 
     <script>
       "use strict";
+
+      // ── Favicon from inline logo SVG ─────────────────────────────
+      (() => {
+        const svg = document.querySelector(".logo-svg");
+        const clone = svg.cloneNode(true);
+        clone.removeAttribute("class");
+        document.getElementById("favicon").href =
+          "data:image/svg+xml," + encodeURIComponent(new XMLSerializer().serializeToString(clone));
+      })();
 
       // ── Data ────────────────────────────────────────────────────
       const DATA = JSON.parse(document.getElementById("graph-data").textContent);
