@@ -1652,6 +1652,20 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2360a5fa' stroke-width='2'%3E%3Cpath d='M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6'/%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M10 14L21 3'/%3E%3C/svg%3E");
   }
 
+  .insights-section-selector {
+    @apply flex items-center gap-3 pb-4 border-b border-gray-700;
+  }
+
+  .insights-section-label {
+    @apply text-sm font-medium text-gray-400 whitespace-nowrap;
+  }
+
+  .insights-section-select {
+    @apply px-3 py-1.5 text-sm bg-gray-700 border border-gray-600 rounded
+           text-gray-200 focus:outline-none focus:border-blue-500 cursor-pointer;
+    color-scheme: dark;
+  }
+
   .insight-tab-content {
     @apply min-h-[200px];
   }
@@ -2507,6 +2521,19 @@ body[data-theme="light"] {
 }
 
 [data-theme="light"] .stale-threshold-select {
+  @apply bg-gray-100 border-gray-300 text-gray-900;
+  color-scheme: light;
+}
+
+[data-theme="light"] .insights-section-selector {
+  @apply border-gray-200;
+}
+
+[data-theme="light"] .insights-section-label {
+  @apply text-gray-500;
+}
+
+[data-theme="light"] .insights-section-select {
   @apply bg-gray-100 border-gray-300 text-gray-900;
   color-scheme: light;
 }

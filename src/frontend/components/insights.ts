@@ -216,7 +216,7 @@ function createModal(): void {
   modalEl.id = "insights-modal";
   modalEl.className = "modal-overlay";
   modalEl.innerHTML = `
-    <div class="modal-content modal-lg">
+    <div class="modal-content modal-xl">
       <div class="modal-header">
         <h2 class="modal-title">Security Insights</h2>
         <div class="modal-header-actions">
@@ -254,28 +254,17 @@ function renderModal(): void {
   if (!body) return;
 
   body.innerHTML = `
-    <div class="db-type-tabs">
-      <button class="db-type-tab ${state.activeTab === "da-analysis" ? "active" : ""}" data-tab="da-analysis">
-        Domain Admin Analysis
-      </button>
-      <button class="db-type-tab ${state.activeTab === "reachability" ? "active" : ""}" data-tab="reachability">
-        Reachability
-      </button>
-      <button class="db-type-tab ${state.activeTab === "stale-objects" ? "active" : ""}" data-tab="stale-objects">
-        Stale Objects
-      </button>
-      <button class="db-type-tab ${state.activeTab === "account-exposure" ? "active" : ""}" data-tab="account-exposure">
-        Account Exposure
-      </button>
-      <button class="db-type-tab ${state.activeTab === "choke-points" ? "active" : ""}" data-tab="choke-points">
-        Choke Points
-      </button>
-      <button class="db-type-tab ${state.activeTab === "unexpected-choke-points" ? "active" : ""}" data-tab="unexpected-choke-points">
-        Unexpected Choke Points
-      </button>
-      <button class="db-type-tab ${state.activeTab === "tier-violations" ? "active" : ""}" data-tab="tier-violations">
-        Tier Violations
-      </button>
+    <div class="insights-section-selector">
+      <label class="insights-section-label" for="insights-section-select">Section</label>
+      <select id="insights-section-select" class="insights-section-select" data-action="change-tab">
+        <option value="da-analysis" ${state.activeTab === "da-analysis" ? "selected" : ""}>Domain Admin Analysis</option>
+        <option value="reachability" ${state.activeTab === "reachability" ? "selected" : ""}>Reachability</option>
+        <option value="stale-objects" ${state.activeTab === "stale-objects" ? "selected" : ""}>Stale Objects</option>
+        <option value="account-exposure" ${state.activeTab === "account-exposure" ? "selected" : ""}>Account Exposure</option>
+        <option value="choke-points" ${state.activeTab === "choke-points" ? "selected" : ""}>Choke Points</option>
+        <option value="unexpected-choke-points" ${state.activeTab === "unexpected-choke-points" ? "selected" : ""}>Unexpected Choke Points</option>
+        <option value="tier-violations" ${state.activeTab === "tier-violations" ? "selected" : ""}>Tier Violations</option>
+      </select>
     </div>
     <div class="insight-tab-content" ${state.activeTab !== "da-analysis" ? "hidden" : ""} id="tab-da-analysis">
       ${renderDAAnalysisTab()}
@@ -1210,6 +1199,17 @@ function handleClick(e: Event): void {
 /** Handle change events (for select elements) */
 function handleChange(e: Event): void {
   const target = e.target as HTMLElement;
+
+  // Section dropdown change
+  const tabSelect = target.closest("[data-action='change-tab']") as HTMLSelectElement;
+  if (tabSelect) {
+    const tabId = tabSelect.value as TabId;
+    if (tabId && tabId !== state.activeTab) {
+      state.activeTab = tabId;
+      renderModal();
+    }
+    return;
+  }
 
   // Stale threshold change
   const thresholdSelect = target.closest("[data-action='change-threshold']") as HTMLSelectElement;
