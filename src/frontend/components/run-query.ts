@@ -3,29 +3,27 @@
  *
  * Provides a modal for entering and executing database queries.
  * Supports Cypher queries (CrustDB, Neo4j, FalkorDB).
- * Queries run asynchronously with progress tracking and abort support.
+ *
+ * Uses the shared executeQuery utility so sync (Tauri IPC) and async
+ * (HTTP SSE) modes are handled transparently — no mode-specific logic here.
  */
 
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
-import type { QueryHistoryResponse, QueryStartResponse, QueryProgressEvent } from "../api/types";
+import type { QueryHistoryResponse } from "../api/types";
 import { loadGraphData } from "./graph-view";
 import type { RawADGraph } from "../graph/types";
-import { subscribe, QUERY_PROGRESS_CHANNEL, type Unsubscribe } from "../api/transport";
 import {
-  registerForegroundQuery,
-  unregisterForegroundQuery,
+  executeQuery as sharedExecuteQuery,
+  abortCurrentForegroundQuery,
+  QueryAbortedError,
   getQueryErrorMessage,
   formatDuration,
 } from "../utils/query";
 
-/** Encapsulated mutable state for the run-query modal */
 interface RunQueryState {
   queryText: string;
   isExecuting: boolean;
-  currentQueryId: string | null;
-  unsubscribeProgress: Unsubscribe | null;
-  currentAbortController: AbortController | null;
   errorMessage: string;
   infoMessage: string;
   currentDurationMs: number;
@@ -37,9 +35,6 @@ function createInitialRunQueryState(): RunQueryState {
   return {
     queryText: "",
     isExecuting: false,
-    currentQueryId: null,
-    unsubscribeProgress: null,
-    currentAbortController: null,
     errorMessage: "",
     infoMessage: "",
     currentDurationMs: 0,
@@ -50,7 +45,6 @@ function createInitialRunQueryState(): RunQueryState {
 
 let state = createInitialRunQueryState();
 
-/** Reset all mutable state (called on modal close) */
 function resetState(): void {
   state = createInitialRunQueryState();
 }
@@ -63,7 +57,6 @@ export function initRunQuery(): void {
   createModalElement();
 }
 
-/** Create the modal element */
 function createModalElement(): void {
   const modal = document.createElement("div");
   modal.id = "run-query-modal";
@@ -101,11 +94,9 @@ export async function openRunQuery(): Promise<void> {
   state.isExecuting = false;
   state.errorMessage = "";
   state.infoMessage = "";
-  state.currentQueryId = null;
   state.currentDurationMs = 0;
   state.queryStartTime = null;
 
-  // Try to load the last query from history
   try {
     const data = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=1");
     if (data.entries.length > 0) {
@@ -116,50 +107,36 @@ export async function openRunQuery(): Promise<void> {
   }
 
   modalEl.removeAttribute("hidden");
-  // Add keyboard listener when modal opens (removed on close to prevent leaks)
   document.addEventListener("keydown", handleKeydown);
   renderModal();
 
-  // Focus the textarea after render
   setTimeout(() => {
     const textarea = document.getElementById("query-input") as HTMLTextAreaElement;
     if (textarea) {
       textarea.focus();
-      // Move cursor to end
       textarea.setSelectionRange(textarea.value.length, textarea.value.length);
     }
   }, 50);
 }
 
-/** Close the modal */
+/** Close the modal, aborting any in-flight query */
 export function closeRunQuery(): void {
   if (!modalEl) return;
 
-  // Clean up event subscription
-  if (state.unsubscribeProgress) {
-    state.unsubscribeProgress();
-    state.unsubscribeProgress = null;
+  if (state.isExecuting) {
+    abortCurrentForegroundQuery();
   }
 
-  // Clear duration interval
-  if (state.durationInterval) {
-    clearInterval(state.durationInterval);
-    state.durationInterval = null;
-  }
-
-  // Remove keyboard listener when modal closes to prevent leaks
+  cleanup();
   document.removeEventListener("keydown", handleKeydown);
-
   modalEl.setAttribute("hidden", "");
   resetState();
 }
 
-/** Get the documentation URL for Cypher */
 function getDocsUrl(): string {
   return "https://neo4j.com/docs/cypher-manual/current/";
 }
 
-/** Render the modal content */
 function renderModal(): void {
   const body = document.getElementById("run-query-body");
   const footer = document.getElementById("run-query-footer");
@@ -198,7 +175,7 @@ function renderModal(): void {
           <div class="flex items-center gap-3">
             <div class="spinner"></div>
             <span class="text-gray-300">Executing query...</span>
-            <span class="text-gray-500">${formatDuration(state.currentDurationMs)}</span>
+            <span id="query-timer" class="text-gray-500">${formatDuration(state.currentDurationMs)}</span>
           </div>
         </div>
       `
@@ -258,7 +235,7 @@ function renderModal(): void {
   }
 }
 
-/** Execute the query */
+/** Execute the query using the shared utility (handles Tauri sync + HTTP async transparently) */
 async function executeQuery(): Promise<void> {
   const textarea = document.getElementById("query-input") as HTMLTextAreaElement;
   if (!textarea) return;
@@ -278,146 +255,52 @@ async function executeQuery(): Promise<void> {
   state.currentDurationMs = 0;
   renderModal();
 
-  // Start duration update interval
+  // Update only the timer text every 100ms — no full re-render needed
   state.durationInterval = setInterval(() => {
-    if (state.queryStartTime) {
+    if (state.queryStartTime !== null) {
       state.currentDurationMs = Date.now() - state.queryStartTime;
-      renderModal();
+      const timerEl = document.getElementById("query-timer");
+      if (timerEl) {
+        timerEl.textContent = formatDuration(state.currentDurationMs);
+      }
     }
   }, 100);
 
   try {
-    // Start the async query
-    const startResponse = await api.post<QueryStartResponse>("/api/graph/query", {
-      query,
-      extract_graph: true,
-    });
-
-    state.currentQueryId = startResponse.query_id;
-
-    // Register as the current foreground query (aborts any previous foreground query)
-    state.currentAbortController = registerForegroundQuery(state.currentQueryId, () => {
-      // This cleanup is called if another query aborts us
-      if (state.unsubscribeProgress) {
-        state.unsubscribeProgress();
-        state.unsubscribeProgress = null;
-      }
-    });
-
-    // Listen for abort from the foreground query system
-    state.currentAbortController.signal.addEventListener("abort", () => {
-      if (state.isExecuting) {
-        cleanup();
-        state.infoMessage = "Query was superseded by a new query";
-        renderModal();
-      }
-    });
-
-    // Subscribe to progress events
-    state.unsubscribeProgress = subscribe(
-      QUERY_PROGRESS_CHANNEL,
-      { queryId: state.currentQueryId, query_id: state.currentQueryId },
-      (progress) => {
-        // Ignore events if we've been aborted
-        if (state.currentAbortController?.signal.aborted) {
-          return;
-        }
-        handleQueryProgress(progress as QueryProgressEvent);
-      },
-      () => {
-        // Connection closed, check if we're still executing and not aborted
-        if (state.isExecuting && !state.currentAbortController?.signal.aborted) {
-          cleanup();
-          state.errorMessage = "Lost connection to server";
-          renderModal();
-        }
-      }
-    );
+    const result = await sharedExecuteQuery(query, { extractGraph: true });
+    cleanup();
+    if (result.graph && result.graph.nodes.length > 0) {
+      closeRunQuery();
+      loadGraphData(result.graph as unknown as RawADGraph);
+    } else {
+      state.infoMessage = `Query returned ${result.resultCount ?? 0} row${result.resultCount === 1 ? "" : "s"}`;
+      renderModal();
+    }
   } catch (err) {
     cleanup();
-    state.errorMessage = getQueryErrorMessage(err);
-    renderModal();
-  }
-}
-
-/** Handle query progress event */
-function handleQueryProgress(progress: QueryProgressEvent): void {
-  state.currentDurationMs = progress.duration_ms ?? (state.queryStartTime ? Date.now() - state.queryStartTime : 0);
-
-  switch (progress.status) {
-    case "running":
-      // Still running, just update duration
-      renderModal();
-      break;
-
-    case "completed":
-      cleanup();
-      // Load the graph if we got one with nodes
-      if (progress.graph && progress.graph.nodes.length > 0) {
-        closeRunQuery();
-        loadGraphData(progress.graph as unknown as RawADGraph);
+    // Only update UI if modal is still open (abort-on-close should be silent)
+    if (modalEl && !modalEl.hasAttribute("hidden")) {
+      if (err instanceof QueryAbortedError) {
+        state.infoMessage = "Query was aborted";
       } else {
-        state.infoMessage = `Query returned ${progress.result_count ?? 0} row${progress.result_count === 1 ? "" : "s"}`;
-        renderModal();
+        state.errorMessage = getQueryErrorMessage(err);
       }
-      break;
-
-    case "failed":
-      cleanup();
-      state.errorMessage = progress.error ?? "Query failed";
       renderModal();
-      break;
-
-    case "aborted":
-      cleanup();
-      state.infoMessage = "Query was aborted";
-      renderModal();
-      break;
+    }
   }
 }
 
-/** Abort the running query */
-async function abortQuery(): Promise<void> {
-  if (!state.currentQueryId) return;
-
-  try {
-    await api.postNoContent(`/api/query/abort/${state.currentQueryId}`);
-    // The SSE will receive the aborted status
-  } catch (err) {
-    console.error("Failed to abort query:", err);
-    cleanup();
-    state.errorMessage = "Failed to abort query";
-    renderModal();
-  }
-}
-
-/** Clean up after query completes */
 function cleanup(): void {
   state.isExecuting = false;
-
-  // Unregister from foreground query tracking
-  if (state.currentQueryId) {
-    unregisterForegroundQuery(state.currentQueryId);
-  }
-  state.currentQueryId = null;
-  state.currentAbortController = null;
-
-  if (state.unsubscribeProgress) {
-    state.unsubscribeProgress();
-    state.unsubscribeProgress = null;
-  }
-
   if (state.durationInterval) {
     clearInterval(state.durationInterval);
     state.durationInterval = null;
   }
 }
 
-/** Handle clicks in the modal */
 function handleModalClick(e: Event): void {
   const target = e.target as HTMLElement;
 
-  // Close on backdrop click
   if (target.classList.contains("modal-overlay")) {
     closeRunQuery();
     return;
@@ -432,22 +315,18 @@ function handleModalClick(e: Event): void {
     case "close":
       closeRunQuery();
       break;
-
     case "execute":
       executeQuery();
       break;
-
     case "abort":
-      abortQuery();
+      abortCurrentForegroundQuery();
       break;
   }
 }
 
-/** Handle non-Escape keyboard shortcuts (Escape is handled globally in main.ts) */
 function handleKeydown(e: KeyboardEvent): void {
   if (!modalEl || modalEl.hasAttribute("hidden")) return;
 
-  // Ctrl+Enter or Cmd+Enter to execute
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
     if (!state.isExecuting) {

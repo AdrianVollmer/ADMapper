@@ -563,7 +563,12 @@ function renderChokePointsTab(): string {
     return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing choke points...</span></div>`;
   }
   if (state.chokePointsState.error) {
-    return `<div class="insight-error">${escapeHtml(state.chokePointsState.error)}</div>`;
+    return `
+      <div class="insight-error">${escapeHtml(state.chokePointsState.error)}</div>
+      <div class="mt-3">
+        <button class="btn btn-sm btn-secondary" data-action="reload-choke-points">Retry</button>
+      </div>
+    `;
   }
   if (!state.chokePointsState.data) {
     return `<div class="insight-error">No data available</div>`;
@@ -576,7 +581,10 @@ function renderChokePointsTab(): string {
       <div class="insights-container">
         <div class="insight-section">
           <h3 class="insight-section-title">Choke Points</h3>
-          <p class="text-gray-500">No choke points found. The graph may be too small or disconnected.</p>
+          <p class="text-gray-500">No choke points found (${total_nodes.toLocaleString()} nodes, ${total_edges.toLocaleString()} relationships analyzed). The graph may be too small or fully disconnected.</p>
+          <div class="mt-3">
+            <button class="btn btn-sm btn-secondary" data-action="reload-choke-points">Retry</button>
+          </div>
         </div>
       </div>
     `;
@@ -607,7 +615,12 @@ function renderUnexpectedChokePointsTab(): string {
     return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing choke points...</span></div>`;
   }
   if (state.chokePointsState.error) {
-    return `<div class="insight-error">${escapeHtml(state.chokePointsState.error)}</div>`;
+    return `
+      <div class="insight-error">${escapeHtml(state.chokePointsState.error)}</div>
+      <div class="mt-3">
+        <button class="btn btn-sm btn-secondary" data-action="reload-choke-points">Retry</button>
+      </div>
+    `;
   }
   if (!state.chokePointsState.data) {
     return `<div class="insight-error">No data available</div>`;
@@ -1183,6 +1196,11 @@ function handleClick(e: Event): void {
       }
       break;
     }
+    case "reload-choke-points":
+      state.chokePointsPage = 0;
+      state.unexpectedChokePointsPage = 0;
+      loadChokePoints();
+      break;
     case "compute-effective-tiers":
       computeEffectiveTiers();
       break;
