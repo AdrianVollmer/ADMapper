@@ -40,6 +40,7 @@ interface ReachabilityData {
   principalName: string;
   principalSid: string;
   count: number;
+  isAggregate?: boolean;
 }
 
 /** Account Exposure data */
@@ -48,6 +49,7 @@ interface AccountExposureData {
   asrepRoastable: number;
   unconstrainedDelegation: number;
   protectedUsers: number;
+  computerAdmins: number;
 }
 
 /** Stale Objects data */
@@ -355,11 +357,13 @@ function renderReachabilityTab(): string {
   let rowsHtml = "";
   for (const p of principals) {
     const hasData = p.count >= 0;
+    const queryType = p.isAggregate ? "reachability-all" : "reachability";
+    const dataSid = p.isAggregate ? "" : `data-sid="${escapeHtml(p.principalSid)}"`;
     rowsHtml += `
-      <div class="insight-row">
+      <div class="insight-row${p.isAggregate ? " insight-row-aggregate" : ""}">
         <span class="insight-label">${escapeHtml(p.principalName)}</span>
         <span class="insight-value ${hasData && p.count > 0 ? "clickable" : ""} ${!hasData ? "text-gray-500" : ""}"
-              ${hasData && p.count > 0 ? `data-query="reachability" data-sid="${escapeHtml(p.principalSid)}" title="Click to view graph"` : ""}>
+              ${hasData && p.count > 0 ? `data-query="${queryType}" ${dataSid} title="Click to view graph"` : ""}>
           ${hasData ? p.count.toLocaleString() : "Not found"}
         </span>
       </div>
@@ -441,7 +445,8 @@ function renderAccountExposureTab(): string {
     return `<div class="insight-error">No data available</div>`;
   }
 
-  const { kerberoastable, asrepRoastable, unconstrainedDelegation, protectedUsers } = state.accountExposureState.data;
+  const { kerberoastable, asrepRoastable, unconstrainedDelegation, protectedUsers, computerAdmins } =
+    state.accountExposureState.data;
 
   function row(label: string, count: number, queryType: string): string {
     return `
@@ -465,6 +470,7 @@ function renderAccountExposureTab(): string {
           ${row("AS-REP Roastable Users", asrepRoastable, "asrep-roastable")}
           ${row("Unconstrained Delegation", unconstrainedDelegation, "unconstrained-delegation")}
           ${row("Protected Users Members", protectedUsers, "protected-users")}
+          ${row("Computers with Local Admin on Others", computerAdmins, "computer-admins")}
         </div>
         <p class="text-xs text-gray-500 mt-3">Click on a count to view the objects in the graph</p>
       </div>
@@ -825,6 +831,26 @@ async function loadReachability(): Promise<void> {
     const allResults = await Promise.all(queries);
     results.push(...allResults);
 
+    // Combined count — distinct objects reachable from any of the above groups
+    try {
+      const combinedResult = await executeQuery(
+        `MATCH (g:Group)-[r]->(target)
+         WHERE (g.objectid ENDS WITH '-513' OR g.objectid ENDS WITH '-515'
+             OR g.objectid ENDS WITH '-S-1-5-11' OR g.objectid ENDS WITH '-S-1-1-0')
+         AND type(r) <> 'MemberOf'
+         RETURN DISTINCT target`,
+        { extractGraph: false, background: true }
+      );
+      results.push({
+        principalName: "All Low Privilege Groups",
+        principalSid: "",
+        count: combinedResult.resultCount,
+        isAggregate: true,
+      });
+    } catch {
+      results.push({ principalName: "All Low Privilege Groups", principalSid: "", count: -1, isAggregate: true });
+    }
+
     state.reachabilityState = { loading: false, error: null, data: results };
   } catch (err) {
     if (err instanceof QueryAbortedError) {
@@ -892,7 +918,7 @@ async function loadAccountExposure(): Promise<void> {
   renderModal();
 
   try {
-    const [kerbResult, asrepResult, delegationResult, protectedResult] = await Promise.all([
+    const [kerbResult, asrepResult, delegationResult, protectedResult, computerAdminsResult] = await Promise.all([
       executeQuery(`MATCH (u:User) WHERE u.hasspn = true AND u.enabled = true RETURN u`, {
         extractGraph: false,
         background: true,
@@ -909,6 +935,10 @@ async function loadAccountExposure(): Promise<void> {
         `MATCH (u:User), (g:Group), p = shortestPath((u)-[:MemberOf*1..]->(g)) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u`,
         { extractGraph: false, background: true }
       ),
+      executeQuery(`MATCH (c:Computer)-[:AdminTo]->(target:Computer) RETURN DISTINCT c`, {
+        extractGraph: false,
+        background: true,
+      }),
     ]);
 
     state.accountExposureState = {
@@ -919,6 +949,7 @@ async function loadAccountExposure(): Promise<void> {
         asrepRoastable: asrepResult.resultCount,
         unconstrainedDelegation: delegationResult.resultCount,
         protectedUsers: protectedResult.resultCount,
+        computerAdmins: computerAdminsResult.resultCount,
       },
     };
   } catch (err) {
@@ -1034,6 +1065,15 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
         RETURN p LIMIT 500
       `;
       break;
+    case "reachability-all":
+      query = `
+        MATCH p=(g:Group)-[r]->(target)
+        WHERE (g.objectid ENDS WITH '-513' OR g.objectid ENDS WITH '-515'
+            OR g.objectid ENDS WITH '-S-1-5-11' OR g.objectid ENDS WITH '-S-1-1-0')
+        AND type(r) <> 'MemberOf'
+        RETURN p LIMIT 500
+      `;
+      break;
     case "kerberoastable":
       query = `MATCH (u:User) WHERE u.hasspn = true AND u.enabled = true RETURN u LIMIT 500`;
       break;
@@ -1045,6 +1085,9 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
       break;
     case "protected-users":
       query = `MATCH (u:User), (g:Group), p = shortestPath((u)-[:MemberOf*1..]->(g)) WHERE g.objectid ENDS WITH '-525' RETURN DISTINCT u LIMIT 500`;
+      break;
+    case "computer-admins":
+      query = `MATCH p=(c:Computer)-[:AdminTo]->(target:Computer) RETURN p LIMIT 500`;
       break;
     case "stale-users": {
       const threshold = daysToWindowsFileTime(state.staleThresholdDays);
