@@ -6,7 +6,7 @@
 
 import { getRenderer } from "./graph-view";
 import { showError, showInfo, showSuccess } from "../utils/notifications";
-import { isRunningInTauri } from "../api/client";
+import { api, isRunningInTauri } from "../api/client";
 import htmlTemplate from "../export-graph-template.html?raw";
 
 /** Export the graph as PNG */
@@ -209,6 +209,10 @@ export async function exportJSON(): Promise<void> {
   }
 }
 
+interface NodeWithProperties {
+  properties: Record<string, unknown>;
+}
+
 /** Export the graph as an interactive HTML file. */
 export async function exportHTML(): Promise<void> {
   const renderer = getRenderer();
@@ -220,38 +224,52 @@ export async function exportHTML(): Promise<void> {
   try {
     const graph = renderer.sigma.getGraph();
 
-    const nodes: Array<{
-      id: string;
-      label: string;
-      type: string;
-      x: number;
-      y: number;
-      properties: Record<string, unknown>;
-    }> = [];
+    // Collect basic node info from graphology (positions, labels, types)
+    const nodeIds: string[] = [];
+    const nodeBasics = new Map<string, { label: string; type: string; x: number; y: number }>();
 
-    const edges: Array<{
-      id: string;
-      source: string;
-      target: string;
-      type: string;
-    }> = [];
+    graph.forEachNode((node: string, attrs: { label?: string; nodeType?: string; x?: number; y?: number }) => {
+      nodeIds.push(node);
+      nodeBasics.set(node, {
+        label: attrs.label ?? node,
+        type: attrs.nodeType ?? "Unknown",
+        x: attrs.x ?? 0,
+        y: attrs.y ?? 0,
+      });
+    });
 
-    graph.forEachNode(
-      (
-        node: string,
-        attrs: { label?: string; nodeType?: string; x?: number; y?: number; properties?: Record<string, unknown> }
-      ) => {
-        nodes.push({
-          id: node,
-          label: attrs.label ?? node,
-          type: attrs.nodeType ?? "Unknown",
-          x: attrs.x ?? 0,
-          y: attrs.y ?? 0,
-          properties: attrs.properties ?? {},
-        });
-      }
+    if (nodeIds.length === 0) {
+      showInfo("No nodes to export.");
+      return;
+    }
+
+    // Fetch full properties for all visible nodes in parallel.
+    // The graph is loaded with minimal GraphNode data (no properties); they
+    // are only retrieved on demand. We fetch them all here so the exported
+    // HTML has a populated detail panel.
+    const propertyResults = await Promise.all(
+      nodeIds.map((id) =>
+        api
+          .get<NodeWithProperties>(`/api/graph/node/${encodeURIComponent(id)}`)
+          .then((n) => ({ id, properties: n.properties }))
+          .catch(() => ({ id, properties: {} as Record<string, unknown> }))
+      )
     );
+    const propertiesMap = new Map(propertyResults.map((r) => [r.id, r.properties]));
 
+    const nodes = nodeIds.map((id) => {
+      const basic = nodeBasics.get(id)!;
+      return {
+        id,
+        label: basic.label,
+        type: basic.type,
+        x: basic.x,
+        y: basic.y,
+        properties: propertiesMap.get(id) ?? {},
+      };
+    });
+
+    const edges: Array<{ id: string; source: string; target: string; type: string }> = [];
     graph.forEachEdge((_edge: string, attrs: { relationshipType?: string }, source: string, target: string) => {
       edges.push({
         id: `${source}->${target}:${attrs.relationshipType ?? ""}`,
