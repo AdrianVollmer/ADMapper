@@ -179,6 +179,25 @@ Then you can easily get going by running
 
 Replace `docker` with `podman` if you prefer a rootless setup.
 
+### Bundled Image
+
+The `admapper-neo4j` image bundles both admapper and Neo4j into a single
+container. This is the simplest way to get started with Neo4j -- no separate
+database container or compose file required.
+
+``` bash
+docker run --rm -it --init -p 9191:9191 -v ./data:/data \
+    ghcr.io/adrianvollmer/admapper-neo4j
+```
+
+Mount a local directory to `/data` (Neo4j's data directory) so your graph
+persists across container restarts. The admapper web interface is available
+at `http://localhost:9191`.
+
+Neo4j runs as root inside the container. When using rootless Docker or
+Podman, UID 0 inside the container maps to your host user, so files in the
+mounted volume will be owned by you.
+
 ## Important: Neo4j Compatibility
 
 Do not use ADMapper with a Neo4j database that was populated by the original

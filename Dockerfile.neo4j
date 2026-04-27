@@ -1,0 +1,80 @@
+# ADMapper + Neo4j Combined Image
+#
+# Bundles the admapper binary with a Neo4j database so you only need one
+# container. Neo4j runs as root, which means file ownership in mounted volumes
+# will match the host user when using rootless Docker or Podman.
+#
+# Usage:
+#   docker run --rm -it --init -p 9191:9191 -v ./data:/data \
+#       ghcr.io/adrianvollmer/admapper-neo4j
+#
+# Access the web interface at http://localhost:9191
+
+# ==============================================================================
+# Stage 1: Build frontend
+# ==============================================================================
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY src/shared src/shared
+COPY src/frontend src/frontend
+COPY vite.config.ts tsconfig.json tailwind.config.js postcss.config.js ./
+RUN npm run build
+
+# ==============================================================================
+# Stage 2: Build backend
+# ==============================================================================
+FROM rust:1-bookworm AS backend-builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=frontend-builder /app/build build
+
+COPY src/shared src/shared
+COPY src/backend src/backend
+COPY src/crustdb src/crustdb
+COPY src/crustdb-cli src/crustdb-cli
+
+ARG CARGO_BUILD_JOBS
+RUN cargo build --manifest-path src/backend/Cargo.toml \
+    --no-default-features \
+    --features crustdb,neo4j,falkordb \
+    --release \
+    ${CARGO_BUILD_JOBS:+--jobs $CARGO_BUILD_JOBS}
+
+# ==============================================================================
+# Stage 3: Combined admapper + neo4j runtime
+# ==============================================================================
+FROM neo4j:5
+
+USER root
+
+# Patch neo4j's Docker entrypoint to not drop root privileges via gosu.
+# Without this, neo4j would switch to the neo4j user (UID 7474), causing
+# mounted volume files to be owned by that UID on the host. By staying root,
+# rootless Docker/Podman maps UID 0 to the host user automatically.
+RUN find /startup -name "*.sh" -exec \
+        sed -i 's/exec gosu neo4j /: # gosu disabled: /g' {} \; 2>/dev/null || true
+
+COPY --from=backend-builder /app/src/backend/target/release/admapper /usr/local/bin/
+
+ENV NEO4J_AUTH=none
+ENV RUST_LOG=info
+ENV ADMAPPER_HOST=0.0.0.0
+ENV ADMAPPER_PORT=9191
+
+VOLUME ["/data"]
+EXPOSE 9191
+
+COPY docker/admapper-neo4j-entrypoint.sh /admapper-entrypoint.sh
+RUN chmod +x /admapper-entrypoint.sh
+
+ENTRYPOINT ["/admapper-entrypoint.sh"]

@@ -92,6 +92,13 @@ Environment variables:
 - `RUST_LOG`: Log level (default: `info`)
 
 
+For a self-contained Neo4j setup with no compose file, use the bundled image:
+
+``` bash
+docker run --rm -it --init -p 9191:9191 -v ./data:/data \
+    ghcr.io/adrianvollmer/admapper-neo4j
+```
+
 ### Alternative Databases
 
 See [Database Backends](backends.md#running-with-docker) for how to run ADMapper

@@ -1,4 +1,4 @@
-name: Test
+name: CI
 
 on:
   pull_request:
@@ -10,6 +10,126 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  build-backend:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src/backend
+            src/crustdb
+            src/crustdb-cli
+          cache-on-failure: true
+
+      - name: Create empty build dir for rust-embed
+        run: mkdir -p build
+
+      - name: Build backend (headless)
+        run: cargo build --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb --release
+
+      - name: Build crustdb
+        run: cargo build --manifest-path src/crustdb/Cargo.toml --release
+
+      - name: Build crustdb-cli
+        run: cargo build --manifest-path src/crustdb-cli/Cargo.toml --release
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-linux
+          path: src/backend/target/release/admapper
+          retention-days: 1
+
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: build/
+          retention-days: 1
+
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src/backend
+            src/crustdb
+            src/crustdb-cli
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Prettier format check
+        run: npm run format:check
+
+      - name: Rust format check
+        run: |
+          cargo fmt --manifest-path src/backend/Cargo.toml --check
+          cargo fmt --manifest-path src/crustdb/Cargo.toml --check
+          cargo fmt --manifest-path src/crustdb-cli/Cargo.toml --check
+
+      - name: Create empty build dir for rust-embed
+        run: mkdir -p build
+
+      - name: Clippy (backend)
+        run: cargo clippy --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb -- -D warnings
+
+      - name: Clippy (crustdb)
+        run: cargo clippy --manifest-path src/crustdb/Cargo.toml -- -D warnings
+
+      - name: Clippy (crustdb-cli)
+        run: cargo clippy --manifest-path src/crustdb-cli/Cargo.toml -- -D warnings
+
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -52,7 +172,7 @@ jobs:
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
-    needs: [unit-tests]
+    needs: [build-backend, unit-tests]
     services:
       neo4j:
         image: neo4j:5.18.1-community
@@ -84,21 +204,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
         with:
-          workspaces: |
-            src/backend
-            src/crustdb
+          name: backend-linux
+          path: src/backend/target/release/
 
-      - name: Create empty build dir for rust-embed
-        run: mkdir -p build
-
-      - name: Build backend
-        run: cargo build --manifest-path src/backend/Cargo.toml --no-default-features --features crustdb,neo4j,falkordb --release
+      - name: Make binary executable
+        run: chmod +x src/backend/target/release/admapper
 
       - name: Install test dependencies
         run: |
@@ -107,12 +220,10 @@ jobs:
 
       - name: Generate test data
         run: |
-          # Generate sample data using the built binary
           ./src/backend/target/release/admapper --headless --port 9191 &
           ADMAPPER_PID=$!
           sleep 2
 
-          # Wait for server to be ready
           for i in {1..30}; do
             if curl -s http://localhost:9191/api/health > /dev/null; then
               break
@@ -120,7 +231,6 @@ jobs:
             sleep 1
           done
 
-          # Connect to CrustDB and generate data
           curl -X POST http://localhost:9191/api/database/connect \
             -H "Content-Type: application/json" \
             -d '{"url": "crustdb:///tmp/test.db"}'
@@ -129,7 +239,6 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"size": "small"}'
 
-          # Export for testing
           mkdir -p /tmp/e2e-data
           curl http://localhost:9191/api/graph/all > /tmp/e2e-data/graph.json
 
