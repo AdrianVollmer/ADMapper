@@ -1524,3 +1524,41 @@ async fn test_graph_all_relationships_preserve_stored_exploit_likelihood() {
         "stored exploit_likelihood 0.42 must be preserved, got: {el}"
     );
 }
+
+/// Verify that GET /api/exploit-likelihood returns a full defaults map,
+/// not an empty values object.
+#[tokio::test]
+async fn test_get_exploit_likelihood_returns_full_defaults() {
+    let app = create_test_app();
+    let (status, body) = get_json(&app, "/api/exploit-likelihood").await;
+
+    assert_eq!(status, StatusCode::OK);
+
+    let values = body["values"]
+        .as_object()
+        .expect("values must be an object");
+
+    // Must contain known types with non-1.0 defaults to prove it's not falling back
+    let can_rdp = values["CanRDP"]
+        .as_f64()
+        .expect("CanRDP must be present");
+    assert!(
+        (can_rdp - 0.1).abs() < f64::EPSILON,
+        "CanRDP default must be 0.1, got {can_rdp}"
+    );
+
+    let has_session = values["HasSession"]
+        .as_f64()
+        .expect("HasSession must be present");
+    assert!(
+        (has_session - 0.6).abs() < f64::EPSILON,
+        "HasSession default must be 0.6, got {has_session}"
+    );
+
+    // Must contain many types, not just a few
+    assert!(
+        values.len() >= 20,
+        "Expected at least 20 relationship types, got {}",
+        values.len()
+    );
+}
