@@ -35,6 +35,7 @@ export default [
         Blob: "readonly",
         File: "readonly",
         FileList: "readonly",
+        FileReader: "readonly",
         Promise: "readonly",
         Map: "readonly",
         Set: "readonly",
