@@ -119,7 +119,7 @@ impl BloodHoundImporter {
     /// resolve orphan names, and mark completion.
     pub(super) fn finalize(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
         progress.current_file = None;
-        progress.set_stage("Finalizing");
+        progress.set_stage("Applying post-processing rules");
         self.send_progress(progress);
 
         self.flush_deferred_dcsync(progress)?;

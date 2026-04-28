@@ -214,12 +214,15 @@ function subscribeToProgressUpdates(jobId: string): void {
 /** Update the progress UI */
 function updateProgressUI(progress: ImportProgressEvent): void {
   // Use byte-weighted progress when available, fall back to file count
-  const percent =
+  const rawPercent =
     progress.bytes_total > 0
       ? Math.round((progress.bytes_processed / progress.bytes_total) * 100)
       : progress.total_files > 0
         ? Math.round((progress.files_processed / progress.total_files) * 100)
         : 0;
+
+  // Cap at 95% while still running — post-processing can hold at 100% for a while
+  const percent = progress.status === "running" ? Math.min(rawPercent, 95) : rawPercent;
 
   if (progressFill) {
     progressFill.style.width = `${percent}%`;
@@ -234,11 +237,13 @@ function updateProgressUI(progress: ImportProgressEvent): void {
   }
 
   if (currentFileEl) {
-    currentFileEl.textContent = progress.current_file || "-";
+    // Fall back to stage when no file is being processed (e.g. post-processing)
+    currentFileEl.textContent = progress.current_file || progress.stage || "-";
   }
 
   if (stageEl) {
-    stageEl.innerHTML = progress.stage || "&nbsp;";
+    // Only show stage separately when a file is also shown; avoid duplicating post-processing text
+    stageEl.innerHTML = progress.current_file && progress.stage ? progress.stage : "&nbsp;";
   }
 
   if (nodesCountEl) {
@@ -252,7 +257,10 @@ function updateProgressUI(progress: ImportProgressEvent): void {
 
 /** Reset progress display */
 function resetProgress(): void {
-  if (progressFill) progressFill.style.width = "0%";
+  if (progressFill) {
+    progressFill.style.width = "0%";
+    progressFill.classList.remove("progress-fill--done");
+  }
   if (progressPercent) progressPercent.textContent = "0%";
   if (progressFiles) progressFiles.textContent = "0 / 0 files";
   if (currentFileEl) currentFileEl.textContent = "-";
@@ -285,7 +293,10 @@ function hideModal(): void {
 
 /** Show completed state */
 function showCompleted(): void {
-  if (progressFill) progressFill.style.width = "100%";
+  if (progressFill) {
+    progressFill.style.width = "100%";
+    progressFill.classList.add("progress-fill--done");
+  }
   if (progressPercent) progressPercent.textContent = "100%";
   if (doneBtn) doneBtn.hidden = false;
   if (cancelBtn) cancelBtn.hidden = true;
