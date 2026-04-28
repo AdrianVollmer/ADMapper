@@ -13,7 +13,7 @@
 # ==============================================================================
 # Stage 1: Build frontend
 # ==============================================================================
-FROM node:20-slim AS frontend-builder
+FROM docker.io/node:20-slim AS frontend-builder
 
 WORKDIR /app
 
@@ -28,7 +28,7 @@ RUN npm run build
 # ==============================================================================
 # Stage 2: Build backend
 # ==============================================================================
-FROM rust:1-bookworm AS backend-builder
+FROM docker.io/rust:1-bookworm AS backend-builder
 
 WORKDIR /app
 
@@ -53,7 +53,7 @@ RUN cargo build --manifest-path src/backend/Cargo.toml \
 # ==============================================================================
 # Stage 3: Combined admapper + neo4j runtime
 # ==============================================================================
-FROM neo4j:5
+FROM docker.io/neo4j:5
 
 USER root
 

@@ -33,4 +33,7 @@ until wget -qO- http://localhost:7474 >/dev/null 2>&1; do
 done
 
 echo "Neo4j is ready, starting admapper..."
-exec admapper --headless neo4j://localhost
+exec admapper --headless \
+    --bind "${ADMAPPER_HOST:-0.0.0.0}" \
+    --port "${ADMAPPER_PORT:-9191}" \
+    neo4j://localhost
