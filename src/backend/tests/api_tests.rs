@@ -1539,9 +1539,7 @@ async fn test_get_exploit_likelihood_returns_full_defaults() {
         .expect("values must be an object");
 
     // Must contain known types with non-1.0 defaults to prove it's not falling back
-    let can_rdp = values["CanRDP"]
-        .as_f64()
-        .expect("CanRDP must be present");
+    let can_rdp = values["CanRDP"].as_f64().expect("CanRDP must be present");
     assert!(
         (can_rdp - 0.1).abs() < f64::EPSILON,
         "CanRDP default must be 0.1, got {can_rdp}"
