@@ -2,7 +2,7 @@
 
 use super::{types::BloodHoundFile, BloodHoundImporter, BATCH_SIZE};
 use crate::db::DbNode;
-use crate::import::types::ImportProgress;
+use crate::import::types::{FailedFile, ImportProgress};
 use serde_json::Value as JsonValue;
 use std::io::{Read, Seek};
 use std::path::Path;
@@ -88,6 +88,10 @@ impl BloodHoundImporter {
                 }
                 Err(e) => {
                     warn!(file = %file_name, error = %e, "Error importing file, continuing");
+                    progress.failed_files.push(FailedFile {
+                        filename: file_name.clone(),
+                        error: e,
+                    });
                     progress.files_processed += 1;
                     progress.bytes_processed += file_size;
                 }
@@ -177,6 +181,10 @@ impl BloodHoundImporter {
                 }
                 Err(e) => {
                     warn!(file = %filename, error = %e, "Error importing file, continuing");
+                    progress.failed_files.push(FailedFile {
+                        filename: filename.clone(),
+                        error: e,
+                    });
                     progress.files_processed += 1;
                     progress.bytes_processed += file_size;
                 }
@@ -194,6 +202,9 @@ impl BloodHoundImporter {
         contents: &str,
         progress: &mut ImportProgress,
     ) -> Result<(), String> {
+        // Strip UTF-8 BOM (U+FEFF) if present — some tools write it but JSON doesn't allow it
+        let contents = contents.strip_prefix('\u{FEFF}').unwrap_or(contents);
+
         // Parse with RawValue to defer entity parsing - reduces peak memory
         let file: BloodHoundFile = serde_json::from_str(contents).map_err(|e| {
             error!(error = %e, "Failed to parse JSON");

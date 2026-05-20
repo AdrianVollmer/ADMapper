@@ -14,6 +14,13 @@ pub enum ImportStatus {
     Failed,
 }
 
+/// A file that could not be imported, with a reason.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailedFile {
+    pub filename: String,
+    pub error: String,
+}
+
 /// Progress information for an import job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportProgress {
@@ -40,6 +47,9 @@ pub struct ImportProgress {
     pub bytes_total: u64,
     /// Error message if status is Failed
     pub error: Option<String>,
+    /// Per-file failures (files that could not be parsed/imported)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub failed_files: Vec<FailedFile>,
 }
 
 impl ImportProgress {
@@ -56,6 +66,7 @@ impl ImportProgress {
             bytes_processed: 0,
             bytes_total: 0,
             error: None,
+            failed_files: Vec::new(),
         }
     }
 

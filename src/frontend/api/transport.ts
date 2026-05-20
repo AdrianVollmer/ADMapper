@@ -87,6 +87,8 @@ export interface ImportProgressEvent {
   bytes_processed: number;
   bytes_total: number;
   error?: string;
+  /** Files that could not be imported, with per-file error reasons */
+  failed_files?: Array<{ filename: string; error: string }>;
 }
 
 export const IMPORT_PROGRESS_CHANNEL: ChannelDefinition<ImportProgressEvent> = {

@@ -1,7 +1,7 @@
 //! BloodHound data import endpoints.
 
 use crate::api::types::ApiError;
-use crate::import::{BloodHoundImporter, ImportProgress};
+use crate::import::{BloodHoundImporter, ImportProgress, ImportStatus};
 use crate::state::{AppState, ImportJob};
 use axum::{
     extract::{Multipart, Path, State},
@@ -146,6 +146,23 @@ pub async fn import_bloodhound(
                 }
                 Err(e) => {
                     error!(filename = %filename, error = %e, "ZIP import failed");
+                    let error_progress = ImportProgress {
+                        job_id: job_id_clone.clone(),
+                        status: ImportStatus::Failed,
+                        current_file: Some(filename.clone()),
+                        stage: None,
+                        files_processed: 0,
+                        total_files: 1,
+                        nodes_imported: 0,
+                        edges_imported: 0,
+                        bytes_processed: 0,
+                        bytes_total: 0,
+                        error: Some(e.clone()),
+                        failed_files: Vec::new(),
+                    };
+                    *job_for_task.final_state.write() = Some(error_progress.clone());
+                    let _ = job_for_task.channel.send(error_progress.clone());
+                    state_for_task.emit_import_progress(&job_id_for_events, &error_progress);
                 }
             }
         }
@@ -177,6 +194,23 @@ pub async fn import_bloodhound(
                     }
                     Err(e) => {
                         error!(error = %e, "JSON import failed");
+                        let error_progress = ImportProgress {
+                            job_id: job_id_clone.clone(),
+                            status: ImportStatus::Failed,
+                            current_file: None,
+                            stage: None,
+                            files_processed: 0,
+                            total_files: valid_json_files.len(),
+                            nodes_imported: 0,
+                            edges_imported: 0,
+                            bytes_processed: 0,
+                            bytes_total: 0,
+                            error: Some(e.clone()),
+                            failed_files: Vec::new(),
+                        };
+                        *job_for_task.final_state.write() = Some(error_progress.clone());
+                        let _ = job_for_task.channel.send(error_progress.clone());
+                        state_for_task.emit_import_progress(&job_id_for_events, &error_progress);
                     }
                 }
             }

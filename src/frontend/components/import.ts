@@ -105,34 +105,41 @@ async function triggerTauriImport(): Promise<void> {
     showModal();
     resetProgress();
 
-    // Call Tauri command to import files - get job ID first
+    // Register the Tauri event listener BEFORE starting the import.
+    // Fast failures (e.g. parse errors) can complete before a post-invoke
+    // subscribe() registers the listener, leaving the dialog stuck.
+    // Awaiting event.listen() guarantees we catch every event.
+    let currentJobId: string | null = null;
+    const unlistenFn = await window.__TAURI__!.event.listen<ImportProgressEvent>(
+      IMPORT_PROGRESS_CHANNEL.name,
+      (e) => {
+        const progress = e.payload;
+        // Once job_id is known, filter out events from unrelated imports
+        if (currentJobId !== null && progress.job_id !== currentJobId) return;
+
+        updateProgressUI(progress);
+        if (progress.status === "completed") {
+          unlistenFn();
+          unsubscribe = null;
+          showCompleted(progress.failed_files);
+          loadDomainAdmins();
+        } else if (progress.status === "failed") {
+          unlistenFn();
+          unsubscribe = null;
+          showError(progress.error || "Import failed", progress.failed_files);
+        }
+      }
+    );
+    unsubscribe = () => unlistenFn();
+
+    // Now start the import — listener is already in place
     const response = await window.__TAURI__!.core.invoke<{ job_id: string; status: string }>("import_from_paths", {
       paths,
     });
-
-    // Subscribe to progress events using the real job ID
-    unsubscribe = subscribe(
-      IMPORT_PROGRESS_CHANNEL,
-      { jobId: response.job_id, job_id: response.job_id },
-      (progress: ImportProgressEvent) => {
-        updateProgressUI(progress);
-        if (progress.status === "completed") {
-          unsubscribe?.();
-          unsubscribe = null;
-          showCompleted();
-          loadDomainAdmins();
-        } else if (progress.status === "failed") {
-          unsubscribe?.();
-          unsubscribe = null;
-          showError(progress.error || "Import failed");
-        }
-      },
-      () => {
-        unsubscribe?.();
-        unsubscribe = null;
-      }
-    );
+    currentJobId = response.job_id;
   } catch (err) {
+    unsubscribe?.();
+    unsubscribe = null;
     showError(err instanceof Error ? err.message : String(err));
   }
 }
@@ -195,12 +202,12 @@ function subscribeToProgressUpdates(jobId: string): void {
       if (progress.status === "completed") {
         unsubscribe?.();
         unsubscribe = null;
-        showCompleted();
+        showCompleted(progress.failed_files);
         loadDomainAdmins();
       } else if (progress.status === "failed") {
         unsubscribe?.();
         unsubscribe = null;
-        showError(progress.error || "Import failed");
+        showError(progress.error || "Import failed", progress.failed_files);
       }
     },
     () => {
@@ -291,8 +298,8 @@ function hideModal(): void {
   }
 }
 
-/** Show completed state */
-function showCompleted(): void {
+/** Show completed state, optionally with a list of files that failed */
+function showCompleted(failedFiles?: Array<{ filename: string; error: string }>): void {
   if (progressFill) {
     progressFill.style.width = "100%";
     progressFill.classList.add("progress-fill--done");
@@ -302,16 +309,50 @@ function showCompleted(): void {
   if (cancelBtn) cancelBtn.hidden = true;
   // New types may have been introduced by the import
   invalidateTypeCache();
+
+  if (failedFiles && failedFiles.length > 0) {
+    renderFailedFiles(failedFiles);
+  }
 }
 
-/** Show error */
-function showError(message: string): void {
+/** Show a fatal import error, optionally listing per-file failures */
+function showError(message: string, failedFiles?: Array<{ filename: string; error: string }>): void {
   if (errorEl) {
-    errorEl.textContent = message;
-    errorEl.hidden = false;
+    if (failedFiles && failedFiles.length > 0) {
+      renderFailedFiles(failedFiles);
+    } else {
+      errorEl.textContent = message;
+      errorEl.hidden = false;
+    }
   }
   if (doneBtn) doneBtn.hidden = false;
   if (cancelBtn) cancelBtn.hidden = true;
+}
+
+/** Render per-file failures into the error element */
+function renderFailedFiles(failedFiles: Array<{ filename: string; error: string }>): void {
+  if (!errorEl) return;
+  errorEl.innerHTML = "";
+
+  const header = document.createElement("div");
+  header.textContent = `${failedFiles.length} file${failedFiles.length === 1 ? "" : "s"} could not be imported:`;
+  errorEl.appendChild(header);
+
+  const list = document.createElement("ul");
+  list.style.marginTop = "0.4em";
+  list.style.paddingLeft = "1.2em";
+  for (const { filename, error } of failedFiles) {
+    const item = document.createElement("li");
+    const name = document.createElement("strong");
+    name.textContent = filename;
+    const reason = document.createElement("span");
+    reason.textContent = ` — ${error}`;
+    item.appendChild(name);
+    item.appendChild(reason);
+    list.appendChild(item);
+  }
+  errorEl.appendChild(list);
+  errorEl.hidden = false;
 }
 
 /** Handle done button click */
