@@ -163,8 +163,28 @@ impl BloodHoundImporter {
     /// Assign tier 0 to direct members of Domain Admins, Domain Controllers,
     /// Enterprise Domain Controllers, and Administrators; tier 3 to direct members
     /// of Domain Computers. Only sets tier where not already explicitly defined.
+    ///
+    /// Also sets tier 0 on the well-known group objects themselves, so that
+    /// placeholder nodes (created before groups.json is imported) are correctly
+    /// assigned and participate in effective-tier propagation.
     fn assign_member_tiers(&self) {
         // Well-known SIDs: see https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
+        //
+        // Set tier 0 on the group objects themselves first. When users.json is
+        // imported before groups.json, CrustDB creates placeholder group nodes
+        // that never go through extract_node/assign_tier, leaving them without a
+        // tier property. Without this query those placeholders have no tier and
+        // compute_effective_tiers can't propagate tier 0 from them.
+        let tier_zero_groups_query = "\
+            MATCH (g) \
+            WHERE (g.objectid ENDS WITH '-512' \
+                OR g.objectid ENDS WITH '-516' \
+                OR g.objectid ENDS WITH '-S-1-5-9' \
+                OR g.objectid = 'S-1-5-9' \
+                OR g.objectid ENDS WITH '-544') \
+              AND g.tier IS NULL \
+            SET g.tier = 0";
+
         let tier_zero_query = "\
             MATCH (n)-[:MemberOf]->(g) \
             WHERE (g.objectid ENDS WITH '-512' \
@@ -182,6 +202,7 @@ impl BloodHoundImporter {
             SET n.tier = 3";
 
         for (label, query) in [
+            ("tier-0 group objects", tier_zero_groups_query),
             ("tier-0 group members", tier_zero_query),
             ("Domain Computers members", tier_three_query),
         ] {

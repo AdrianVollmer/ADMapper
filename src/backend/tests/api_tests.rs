@@ -1062,6 +1062,282 @@ async fn test_debug_actual_db() {
     }
 }
 
+// ============================================================================
+// Tier Assignment and Effective Tier Tests
+// ============================================================================
+
+/// assign_member_tiers (new group-object query) must set tier 0 on the DA group
+/// placeholder node itself, not only on its members. This is the fix for the bug
+/// where importing users.json before groups.json leaves the DA group without a tier
+/// property, causing compute_effective_tiers to miss it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_assign_member_tiers_sets_tier_on_da_group_itself() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // Placeholder DA group — SID ending -512, no tier (as if created by edge insertion)
+    db.run_custom_query("CREATE (:Group {name: 'S-1-5-21-123-512', objectid: 'S-1-5-21-123-512'})")
+        .unwrap();
+
+    // Run the group-object query (mirrors the new tier_zero_groups_query in assign_member_tiers)
+    db.run_custom_query(
+        "MATCH (g) \
+         WHERE (g.objectid ENDS WITH '-512' \
+             OR g.objectid ENDS WITH '-516' \
+             OR g.objectid ENDS WITH '-S-1-5-9' \
+             OR g.objectid = 'S-1-5-9' \
+             OR g.objectid ENDS WITH '-544') \
+           AND g.tier IS NULL \
+         SET g.tier = 0",
+    )
+    .unwrap();
+
+    let nodes = db.get_all_nodes().unwrap();
+    let da_group = nodes.iter().find(|n| n.id == "S-1-5-21-123-512").unwrap();
+    assert_eq!(
+        da_group.properties.get("tier").and_then(|v| v.as_i64()),
+        Some(0),
+        "DA group placeholder should receive tier 0 from group-object assignment"
+    );
+}
+
+/// assign_member_tiers should not overwrite an explicitly set tier on a DA group object.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_assign_member_tiers_does_not_overwrite_existing_tier() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // DA group with an explicit non-zero tier (unusual but should be preserved)
+    db.run_custom_query(
+        "CREATE (:Group {name: 'Domain Admins', objectid: 'S-1-5-21-123-512', tier: 1})",
+    )
+    .unwrap();
+
+    db.run_custom_query(
+        "MATCH (g) \
+         WHERE g.objectid ENDS WITH '-512' AND g.tier IS NULL \
+         SET g.tier = 0",
+    )
+    .unwrap();
+
+    let nodes = db.get_all_nodes().unwrap();
+    let da_group = nodes.iter().find(|n| n.id == "S-1-5-21-123-512").unwrap();
+    assert_eq!(
+        da_group.properties.get("tier").and_then(|v| v.as_i64()),
+        Some(1),
+        "Explicitly set tier should not be overwritten by assign_member_tiers"
+    );
+}
+
+/// compute_effective_tiers propagates tier 0 from a DA group to its direct members.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_compute_effective_tiers_propagates_to_da_member() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // DA group with tier 0
+    db.run_custom_query(
+        "CREATE (:Group {name: 'Domain Admins', objectid: 'S-1-5-21-123-512', tier: 0})",
+    )
+    .unwrap();
+
+    // Direct DA member — no explicit tier assigned yet
+    db.run_custom_query("CREATE (:User {name: 'AdminUser', objectid: 'U-ADMIN', enabled: true})")
+        .unwrap();
+    db.run_custom_query(
+        "MATCH (u {objectid: 'U-ADMIN'}), (g {objectid: 'S-1-5-21-123-512'}) \
+         CREATE (u)-[:MemberOf]->(g)",
+    )
+    .unwrap();
+
+    // Unrelated user
+    db.run_custom_query("CREATE (:User {name: 'Regular', objectid: 'U-REGULAR', enabled: true})")
+        .unwrap();
+
+    let (status, body) = post_json(
+        app.router(),
+        "/api/graph/compute-effective-tiers",
+        json!({}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "compute-effective-tiers: {:?}",
+        body
+    );
+
+    let nodes = db.get_all_nodes().unwrap();
+
+    let da_group = nodes.iter().find(|n| n.id == "S-1-5-21-123-512").unwrap();
+    assert_eq!(
+        da_group
+            .properties
+            .get("effective_tier")
+            .and_then(|v| v.as_i64()),
+        Some(0),
+        "DA group itself should have effective_tier = 0"
+    );
+
+    let admin = nodes.iter().find(|n| n.id == "U-ADMIN").unwrap();
+    assert_eq!(
+        admin
+            .properties
+            .get("effective_tier")
+            .and_then(|v| v.as_i64()),
+        Some(0),
+        "Direct DA member should have effective_tier = 0"
+    );
+
+    let regular = nodes.iter().find(|n| n.id == "U-REGULAR").unwrap();
+    assert_eq!(
+        regular
+            .properties
+            .get("effective_tier")
+            .and_then(|v| v.as_i64()),
+        Some(3),
+        "Unrelated user should have effective_tier = 3"
+    );
+}
+
+/// compute_effective_tiers propagates tier 0 via any edge type (not just MemberOf).
+/// A user with AdminTo on a tier-0 node should receive effective_tier = 0.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_compute_effective_tiers_propagates_via_non_memberof_edges() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // Tier-0 DC
+    db.run_custom_query(
+        "CREATE (:Computer {name: 'DC01', objectid: 'C-DC01', tier: 0, enabled: true})",
+    )
+    .unwrap();
+
+    // User with AdminTo on the DC (non-MemberOf path to tier-0)
+    db.run_custom_query("CREATE (:User {name: 'Eve', objectid: 'U-EVE', enabled: true})")
+        .unwrap();
+    db.run_custom_query(
+        "MATCH (u {objectid: 'U-EVE'}), (c {objectid: 'C-DC01'}) CREATE (u)-[:AdminTo]->(c)",
+    )
+    .unwrap();
+
+    let (status, body) = post_json(
+        app.router(),
+        "/api/graph/compute-effective-tiers",
+        json!({}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "compute-effective-tiers: {:?}",
+        body
+    );
+
+    let nodes = db.get_all_nodes().unwrap();
+    let eve = nodes.iter().find(|n| n.id == "U-EVE").unwrap();
+    assert_eq!(
+        eve.properties
+            .get("effective_tier")
+            .and_then(|v| v.as_i64()),
+        Some(0),
+        "User with AdminTo path to tier-0 DC should have effective_tier = 0"
+    );
+}
+
+/// End-to-end: DA group placeholder gets tier 0 from assign_member_tiers, then
+/// compute_effective_tiers correctly propagates it to the DA member.
+/// This covers the original bug: importing users.json before groups.json left the
+/// DA group as a placeholder with no tier, so effective tier was never 0 for
+/// users who were members.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_effective_tier_end_to_end_with_placeholder_da_group() {
+    let app = TestApp::new();
+    let db = app.db();
+
+    // Placeholder DA group — created by edge insertion, no tier property
+    db.run_custom_query("CREATE (:Group {name: 'S-1-5-21-123-512', objectid: 'S-1-5-21-123-512'})")
+        .unwrap();
+
+    // User who is a member
+    db.run_custom_query("CREATE (:User {name: 'Admin', objectid: 'U-ADMIN', enabled: true})")
+        .unwrap();
+    db.run_custom_query(
+        "MATCH (u {objectid: 'U-ADMIN'}), (g {objectid: 'S-1-5-21-123-512'}) \
+         CREATE (u)-[:MemberOf]->(g)",
+    )
+    .unwrap();
+
+    // Simulate assign_member_tiers (both queries, in order)
+    db.run_custom_query(
+        "MATCH (g) \
+         WHERE (g.objectid ENDS WITH '-512' \
+             OR g.objectid ENDS WITH '-516' \
+             OR g.objectid ENDS WITH '-S-1-5-9' \
+             OR g.objectid = 'S-1-5-9' \
+             OR g.objectid ENDS WITH '-544') \
+           AND g.tier IS NULL \
+         SET g.tier = 0",
+    )
+    .unwrap();
+    db.run_custom_query(
+        "MATCH (n)-[:MemberOf]->(g) \
+         WHERE (g.objectid ENDS WITH '-512' \
+             OR g.objectid ENDS WITH '-516' \
+             OR g.objectid ENDS WITH '-S-1-5-9' \
+             OR g.objectid = 'S-1-5-9' \
+             OR g.objectid ENDS WITH '-544') \
+           AND n.tier IS NULL \
+         SET n.tier = 0",
+    )
+    .unwrap();
+
+    // Now compute effective tiers
+    let (status, body) = post_json(
+        app.router(),
+        "/api/graph/compute-effective-tiers",
+        json!({}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "compute-effective-tiers: {:?}",
+        body
+    );
+
+    let nodes = db.get_all_nodes().unwrap();
+
+    let da_group = nodes.iter().find(|n| n.id == "S-1-5-21-123-512").unwrap();
+    assert_eq!(
+        da_group.properties.get("tier").and_then(|v| v.as_i64()),
+        Some(0),
+        "Placeholder DA group should have tier = 0 after assign_member_tiers"
+    );
+    assert_eq!(
+        da_group
+            .properties
+            .get("effective_tier")
+            .and_then(|v| v.as_i64()),
+        Some(0),
+        "Placeholder DA group should have effective_tier = 0"
+    );
+
+    let user = nodes.iter().find(|n| n.id == "U-ADMIN").unwrap();
+    assert_eq!(
+        user.properties.get("tier").and_then(|v| v.as_i64()),
+        Some(0),
+        "DA member should have tier = 0 after assign_member_tiers"
+    );
+    assert_eq!(
+        user.properties
+            .get("effective_tier")
+            .and_then(|v| v.as_i64()),
+        Some(0),
+        "DA member should have effective_tier = 0 after compute"
+    );
+}
+
 /// Test path finding with realistic BloodHound-style data
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_graph_path_bloodhound_style() {

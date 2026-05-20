@@ -180,11 +180,14 @@ export function formatValue(key: string, value: unknown): string {
       return formatTimestamp(value);
     }
 
-    // Delegate heuristic timestamp detection to formatTimestamp as well,
-    // which has the most complete range checks for FILETIME / Unix / JS ms.
-    const tsResult = formatTimestamp(value);
-    if (tsResult !== String(value)) {
-      return tsResult;
+    // Heuristic timestamp detection: only try for values that could plausibly
+    // be a Unix/JS/FILETIME epoch. Skip small values (0–1e9) like tier numbers
+    // to avoid formatTimestamp(0) returning "Never" for effective_tier = 0.
+    if (value > 1e9) {
+      const tsResult = formatTimestamp(value);
+      if (tsResult !== String(value)) {
+        return tsResult;
+      }
     }
 
     // Regular number - use locale formatting for thousands separators
