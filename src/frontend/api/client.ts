@@ -163,6 +163,8 @@ function normalizeUrl(url: string): string {
 const BODY_WRAPPER_MAP: Record<string, string> = {
   update_settings: "settings",
   update_exploit_likelihood: "config",
+  batch_set_tier: "request",
+  add_query_history: "request",
 };
 
 /**
