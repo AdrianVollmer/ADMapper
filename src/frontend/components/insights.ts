@@ -292,6 +292,53 @@ function renderModal(): void {
   `;
 }
 
+/**
+ * Update the content of a single tab div without touching the rest of the modal.
+ *
+ * Calling renderModal() on every data update destroys and recreates ALL tab
+ * spinner elements, which resets their CSS animations. Using targeted updates
+ * means a spinner in the active tab is only interrupted when THAT tab's own
+ * data arrives, not when any other tab completes.
+ *
+ * Both "choke-points" and "unexpected-choke-points" share the same state, so
+ * both are refreshed together.
+ */
+function updateTabContent(tabId: TabId): void {
+  const targets: TabId[] =
+    tabId === "choke-points" || tabId === "unexpected-choke-points"
+      ? ["choke-points", "unexpected-choke-points"]
+      : [tabId];
+
+  for (const id of targets) {
+    const el = document.getElementById(`tab-${id}`);
+    if (!el) continue;
+
+    switch (id) {
+      case "da-analysis":
+        el.innerHTML = renderDAAnalysisTab();
+        break;
+      case "reachability":
+        el.innerHTML = renderReachabilityTab();
+        break;
+      case "stale-objects":
+        el.innerHTML = renderStaleObjectsTab();
+        break;
+      case "account-exposure":
+        el.innerHTML = renderAccountExposureTab();
+        break;
+      case "choke-points":
+        el.innerHTML = renderChokePointsTab();
+        break;
+      case "unexpected-choke-points":
+        el.innerHTML = renderUnexpectedChokePointsTab();
+        break;
+      case "tier-violations":
+        el.innerHTML = renderTierViolationsTab();
+        break;
+    }
+  }
+}
+
 /** Render Domain Admin Analysis tab */
 function renderDAAnalysisTab(): string {
   if (state.daState.loading) {
@@ -738,13 +785,13 @@ function renderTierViolationsTab(): string {
 async function computeEffectiveTiers(): Promise<void> {
   state.computingEffectiveTiers = true;
   state.effectiveTiersResult = null;
-  renderModal();
+  updateTabContent("tier-violations");
 
   try {
     const result = await api.post<{ computed: number; violations: number }>("/api/graph/compute-effective-tiers", {});
     state.effectiveTiersResult = result;
     state.computingEffectiveTiers = false;
-    renderModal();
+    updateTabContent("tier-violations");
 
     // Reload tier violations to reflect updated effective tiers
     await loadTierViolations();
@@ -753,14 +800,14 @@ async function computeEffectiveTiers(): Promise<void> {
     const message = err instanceof Error ? err.message : "Failed to compute effective tiers";
     state.effectiveTiersResult = null;
     state.tierViolationsState = { loading: false, error: message, data: state.tierViolationsState.data };
-    renderModal();
+    updateTabContent("tier-violations");
   }
 }
 
 /** Load Domain Admin Analysis data */
 async function loadDAAnalysis(): Promise<void> {
   state.daState = { loading: true, error: null, data: null };
-  renderModal();
+  updateTabContent("da-analysis");
 
   try {
     // Run both queries in parallel using shortestPath to avoid combinatorial explosion
@@ -792,13 +839,13 @@ async function loadDAAnalysis(): Promise<void> {
     state.daState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
-  renderModal();
+  updateTabContent("da-analysis");
 }
 
 /** Load Reachability data */
 async function loadReachability(): Promise<void> {
   state.reachabilityState = { loading: true, error: null, data: null };
-  renderModal();
+  updateTabContent("reachability");
 
   // Well-known principal SIDs (relative IDs)
   const principals = [
@@ -859,7 +906,7 @@ async function loadReachability(): Promise<void> {
     state.reachabilityState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
-  renderModal();
+  updateTabContent("reachability");
 }
 
 /** Convert days to Windows FileTime threshold */
@@ -876,7 +923,7 @@ function daysToWindowsFileTime(days: number): number {
 /** Load Stale Objects data */
 async function loadStaleObjects(): Promise<void> {
   state.staleState = { loading: true, error: null, data: null };
-  renderModal();
+  updateTabContent("stale-objects");
 
   try {
     const threshold = daysToWindowsFileTime(state.staleThresholdDays);
@@ -909,13 +956,13 @@ async function loadStaleObjects(): Promise<void> {
     state.staleState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
-  renderModal();
+  updateTabContent("stale-objects");
 }
 
 /** Load Account Exposure data */
 async function loadAccountExposure(): Promise<void> {
   state.accountExposureState = { loading: true, error: null, data: null };
-  renderModal();
+  updateTabContent("account-exposure");
 
   try {
     const [kerbResult, asrepResult, delegationResult, protectedResult, computerAdminsResult] = await Promise.all([
@@ -959,13 +1006,13 @@ async function loadAccountExposure(): Promise<void> {
     state.accountExposureState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
-  renderModal();
+  updateTabContent("account-exposure");
 }
 
 /** Load Choke Points data */
 async function loadChokePoints(): Promise<void> {
   state.chokePointsState = { loading: true, error: null, data: null };
-  renderModal();
+  updateTabContent("choke-points");
 
   try {
     const data = await api.get<ChokePointsData>("/api/graph/choke-points");
@@ -975,13 +1022,13 @@ async function loadChokePoints(): Promise<void> {
     state.chokePointsState = { loading: false, error: message, data: null };
   }
 
-  renderModal();
+  updateTabContent("choke-points");
 }
 
 /** Load Tier Violations data */
 async function loadTierViolations(): Promise<void> {
   state.tierViolationsState = { loading: true, error: null, data: null };
-  renderModal();
+  updateTabContent("tier-violations");
 
   try {
     const data = await api.get<TierViolationsData>("/api/graph/tier-violations");
@@ -991,7 +1038,7 @@ async function loadTierViolations(): Promise<void> {
     state.tierViolationsState = { loading: false, error: message, data: null };
   }
 
-  renderModal();
+  updateTabContent("tier-violations");
 }
 
 /** Execute a choke point graph query using direct IDs */
@@ -1139,8 +1186,11 @@ function handleClick(e: Event): void {
   if (tabBtn) {
     const tabId = tabBtn.getAttribute("data-tab") as TabId;
     if (tabId && tabId !== state.activeTab) {
+      document.getElementById(`tab-${state.activeTab}`)?.setAttribute("hidden", "");
       state.activeTab = tabId;
-      renderModal();
+      document.getElementById(`tab-${tabId}`)?.removeAttribute("hidden");
+      const select = document.getElementById("insights-section-select") as HTMLSelectElement;
+      if (select) select.value = tabId;
     }
     return;
   }
@@ -1201,7 +1251,7 @@ function handleClick(e: Event): void {
     case "choke-page-prev":
       if (state.chokePointsPage > 0) {
         state.chokePointsPage--;
-        renderModal();
+        updateTabContent("choke-points");
       }
       break;
     case "choke-page-next": {
@@ -1209,14 +1259,14 @@ function handleClick(e: Event): void {
       const maxPage = Math.ceil(total / CHOKE_POINTS_PAGE_SIZE) - 1;
       if (state.chokePointsPage < maxPage) {
         state.chokePointsPage++;
-        renderModal();
+        updateTabContent("choke-points");
       }
       break;
     }
     case "unexpected-choke-page-prev":
       if (state.unexpectedChokePointsPage > 0) {
         state.unexpectedChokePointsPage--;
-        renderModal();
+        updateTabContent("unexpected-choke-points");
       }
       break;
     case "unexpected-choke-page-next": {
@@ -1224,7 +1274,7 @@ function handleClick(e: Event): void {
       const maxUnexpectedPage = Math.ceil(unexpectedCount / CHOKE_POINTS_PAGE_SIZE) - 1;
       if (state.unexpectedChokePointsPage < maxUnexpectedPage) {
         state.unexpectedChokePointsPage++;
-        renderModal();
+        updateTabContent("unexpected-choke-points");
       }
       break;
     }
@@ -1248,8 +1298,10 @@ function handleChange(e: Event): void {
   if (tabSelect) {
     const tabId = tabSelect.value as TabId;
     if (tabId && tabId !== state.activeTab) {
+      // Toggle visibility without re-rendering the whole modal
+      document.getElementById(`tab-${state.activeTab}`)?.setAttribute("hidden", "");
       state.activeTab = tabId;
-      renderModal();
+      document.getElementById(`tab-${tabId}`)?.removeAttribute("hidden");
     }
     return;
   }
