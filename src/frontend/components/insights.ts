@@ -149,6 +149,15 @@ function createInitialInsightsState(): InsightsState {
 
 let state = createInitialInsightsState();
 
+/**
+ * Monotonically increasing counter. Incremented each time openInsights() or
+ * the Refresh button starts a new round of loads. Every load function captures
+ * this value at invocation time and skips state writes + DOM updates when a
+ * newer round has started (stale requests from a previous modal session or
+ * previous refresh can otherwise overwrite fresh results).
+ */
+let loadGeneration = 0;
+
 /** Reset all mutable state (called on modal close) */
 function resetState(): void {
   state = createInitialInsightsState();
@@ -179,13 +188,16 @@ export async function openInsights(): Promise<void> {
   updateModalExpanded();
   renderModal();
 
+  // Bump generation so any in-flight loads from a previous session are abandoned
+  const gen = ++loadGeneration;
+
   // Load all tabs in parallel
-  loadDAAnalysis();
-  loadReachability();
-  loadStaleObjects();
-  loadAccountExposure();
-  loadChokePoints();
-  loadTierViolations();
+  loadDAAnalysis(gen);
+  loadReachability(gen);
+  loadStaleObjects(gen);
+  loadAccountExposure(gen);
+  loadChokePoints(gen);
+  loadTierViolations(gen);
 }
 
 /** Close the modal */
@@ -794,7 +806,7 @@ async function computeEffectiveTiers(): Promise<void> {
     updateTabContent("tier-violations");
 
     // Reload tier violations to reflect updated effective tiers
-    await loadTierViolations();
+    await loadTierViolations(loadGeneration);
   } catch (err) {
     state.computingEffectiveTiers = false;
     const message = err instanceof Error ? err.message : "Failed to compute effective tiers";
@@ -805,7 +817,7 @@ async function computeEffectiveTiers(): Promise<void> {
 }
 
 /** Load Domain Admin Analysis data */
-async function loadDAAnalysis(): Promise<void> {
+async function loadDAAnalysis(generation: number): Promise<void> {
   state.daState = { loading: true, error: null, data: null };
   updateTabContent("da-analysis");
 
@@ -822,6 +834,8 @@ async function loadDAAnalysis(): Promise<void> {
       ),
     ]);
 
+    if (generation !== loadGeneration) return;
+
     const effectiveCount = effectiveResult.resultCount;
     const realCount = realResult.resultCount;
     const ratio = realCount > 0 ? effectiveCount / realCount : effectiveCount > 0 ? Infinity : 1;
@@ -836,14 +850,16 @@ async function loadDAAnalysis(): Promise<void> {
     if (err instanceof QueryAbortedError) {
       return;
     }
+    if (generation !== loadGeneration) return;
     state.daState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
+  if (generation !== loadGeneration) return;
   updateTabContent("da-analysis");
 }
 
 /** Load Reachability data */
-async function loadReachability(): Promise<void> {
+async function loadReachability(generation: number): Promise<void> {
   state.reachabilityState = { loading: true, error: null, data: null };
   updateTabContent("reachability");
 
@@ -876,6 +892,7 @@ async function loadReachability(): Promise<void> {
     });
 
     const allResults = await Promise.all(queries);
+    if (generation !== loadGeneration) return;
     results.push(...allResults);
 
     // Combined count — distinct objects reachable from any of the above groups
@@ -903,9 +920,11 @@ async function loadReachability(): Promise<void> {
     if (err instanceof QueryAbortedError) {
       return;
     }
+    if (generation !== loadGeneration) return;
     state.reachabilityState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
+  if (generation !== loadGeneration) return;
   updateTabContent("reachability");
 }
 
@@ -921,7 +940,7 @@ function daysToWindowsFileTime(days: number): number {
 }
 
 /** Load Stale Objects data */
-async function loadStaleObjects(): Promise<void> {
+async function loadStaleObjects(generation: number): Promise<void> {
   state.staleState = { loading: true, error: null, data: null };
   updateTabContent("stale-objects");
 
@@ -953,14 +972,16 @@ async function loadStaleObjects(): Promise<void> {
     if (err instanceof QueryAbortedError) {
       return;
     }
+    if (generation !== loadGeneration) return;
     state.staleState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
+  if (generation !== loadGeneration) return;
   updateTabContent("stale-objects");
 }
 
 /** Load Account Exposure data */
-async function loadAccountExposure(): Promise<void> {
+async function loadAccountExposure(generation: number): Promise<void> {
   state.accountExposureState = { loading: true, error: null, data: null };
   updateTabContent("account-exposure");
 
@@ -1003,14 +1024,16 @@ async function loadAccountExposure(): Promise<void> {
     if (err instanceof QueryAbortedError) {
       return;
     }
+    if (generation !== loadGeneration) return;
     state.accountExposureState = { loading: false, error: getQueryErrorMessage(err), data: null };
   }
 
+  if (generation !== loadGeneration) return;
   updateTabContent("account-exposure");
 }
 
 /** Load Choke Points data */
-async function loadChokePoints(): Promise<void> {
+async function loadChokePoints(generation: number): Promise<void> {
   state.chokePointsState = { loading: true, error: null, data: null };
   updateTabContent("choke-points");
 
@@ -1019,25 +1042,30 @@ async function loadChokePoints(): Promise<void> {
     state.chokePointsState = { loading: false, error: null, data };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load choke points";
+    if (generation !== loadGeneration) return;
     state.chokePointsState = { loading: false, error: message, data: null };
   }
 
+  if (generation !== loadGeneration) return;
   updateTabContent("choke-points");
 }
 
 /** Load Tier Violations data */
-async function loadTierViolations(): Promise<void> {
+async function loadTierViolations(generation: number): Promise<void> {
   state.tierViolationsState = { loading: true, error: null, data: null };
   updateTabContent("tier-violations");
 
   try {
     const data = await api.get<TierViolationsData>("/api/graph/tier-violations");
+    if (generation !== loadGeneration) return;
     state.tierViolationsState = { loading: false, error: null, data };
   } catch (err) {
+    if (generation !== loadGeneration) return;
     const message = err instanceof Error ? err.message : "Failed to load tier violations";
     state.tierViolationsState = { loading: false, error: message, data: null };
   }
 
+  if (generation !== loadGeneration) return;
   updateTabContent("tier-violations");
 }
 
@@ -1237,17 +1265,19 @@ function handleClick(e: Event): void {
       state.modalExpanded = !state.modalExpanded;
       updateModalExpanded();
       break;
-    case "refresh":
-      // Reload all tabs
+    case "refresh": {
+      // Reload all tabs — bump generation to abandon any still-running loads
       state.chokePointsPage = 0;
       state.unexpectedChokePointsPage = 0;
-      loadDAAnalysis();
-      loadReachability();
-      loadStaleObjects();
-      loadAccountExposure();
-      loadChokePoints();
-      loadTierViolations();
+      const refreshGen = ++loadGeneration;
+      loadDAAnalysis(refreshGen);
+      loadReachability(refreshGen);
+      loadStaleObjects(refreshGen);
+      loadAccountExposure(refreshGen);
+      loadChokePoints(refreshGen);
+      loadTierViolations(refreshGen);
       break;
+    }
     case "choke-page-prev":
       if (state.chokePointsPage > 0) {
         state.chokePointsPage--;
@@ -1281,7 +1311,7 @@ function handleClick(e: Event): void {
     case "reload-choke-points":
       state.chokePointsPage = 0;
       state.unexpectedChokePointsPage = 0;
-      loadChokePoints();
+      loadChokePoints(loadGeneration);
       break;
     case "compute-effective-tiers":
       computeEffectiveTiers();
@@ -1312,7 +1342,7 @@ function handleChange(e: Event): void {
     const newThreshold = parseInt(thresholdSelect.value, 10);
     if (newThreshold !== state.staleThresholdDays) {
       state.staleThresholdDays = newThreshold;
-      loadStaleObjects();
+      loadStaleObjects(loadGeneration);
     }
   }
 }
