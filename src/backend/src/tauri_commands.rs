@@ -744,6 +744,7 @@ pub fn import_from_paths(
         bytes_processed: 0,
         bytes_total: 0,
         error: None,
+        failed_files: Vec::new(),
     };
     state_clone.emit_import_progress(&job_id, &initial_progress);
 
@@ -794,6 +795,7 @@ pub fn import_from_paths(
                 bytes_processed: 0,
                 bytes_total: 0,
                 error: None,
+                failed_files: Vec::new(),
             };
             state_clone.emit_import_progress(&job_id_clone, &progress);
 
@@ -822,6 +824,7 @@ pub fn import_from_paths(
                         bytes_processed: 0,
                         bytes_total: 0,
                         error: Some(e),
+                        failed_files: Vec::new(),
                     };
                     state_clone.emit_import_progress(&job_id_clone, &error_progress);
                     return;
@@ -868,6 +871,7 @@ pub fn import_from_paths(
                             bytes_processed: 0,
                             bytes_total: 0,
                             error: Some(e),
+                            failed_files: Vec::new(),
                         };
                         state_clone.emit_import_progress(&job_id_clone, &error_progress);
                         return;
@@ -889,6 +893,7 @@ pub fn import_from_paths(
             bytes_processed: 0,
             bytes_total: 0,
             error: None,
+            failed_files: Vec::new(),
         };
         state_clone.emit_import_progress(&job_id_clone, &final_progress);
     });
