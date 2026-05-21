@@ -110,26 +110,23 @@ async function triggerTauriImport(): Promise<void> {
     // subscribe() registers the listener, leaving the dialog stuck.
     // Awaiting event.listen() guarantees we catch every event.
     let currentJobId: string | null = null;
-    const unlistenFn = await window.__TAURI__!.event.listen<ImportProgressEvent>(
-      IMPORT_PROGRESS_CHANNEL.name,
-      (e) => {
-        const progress = e.payload;
-        // Once job_id is known, filter out events from unrelated imports
-        if (currentJobId !== null && progress.job_id !== currentJobId) return;
+    const unlistenFn = await window.__TAURI__!.event.listen<ImportProgressEvent>(IMPORT_PROGRESS_CHANNEL.name, (e) => {
+      const progress = e.payload;
+      // Once job_id is known, filter out events from unrelated imports
+      if (currentJobId !== null && progress.job_id !== currentJobId) return;
 
-        updateProgressUI(progress);
-        if (progress.status === "completed") {
-          unlistenFn();
-          unsubscribe = null;
-          showCompleted(progress.failed_files);
-          loadDomainAdmins();
-        } else if (progress.status === "failed") {
-          unlistenFn();
-          unsubscribe = null;
-          showError(progress.error || "Import failed", progress.failed_files);
-        }
+      updateProgressUI(progress);
+      if (progress.status === "completed") {
+        unlistenFn();
+        unsubscribe = null;
+        showCompleted(progress.failed_files);
+        loadDomainAdmins();
+      } else if (progress.status === "failed") {
+        unlistenFn();
+        unsubscribe = null;
+        showError(progress.error || "Import failed", progress.failed_files);
       }
-    );
+    });
     unsubscribe = () => unlistenFn();
 
     // Now start the import — listener is already in place
