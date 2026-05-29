@@ -116,7 +116,7 @@ export function showConfirm(message: string, options: ConfirmOptions = {}): Prom
 
     // Populate the body
     modal.body.className = "modal-body px-6 py-4";
-    modal.body.innerHTML = `<p class="text-gray-300">${escapeHtml(message)}</p>`;
+    modal.body.innerHTML = `<p>${escapeHtml(message)}</p>`;
 
     // Handle escape/enter key
     const handleKeydown = (e: KeyboardEvent) => {

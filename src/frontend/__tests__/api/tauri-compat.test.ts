@@ -182,4 +182,118 @@ describe("Tauri API compatibility", () => {
       expect(match, `Invalid mapping format: ${entry}`).toBeTruthy();
     }
   });
+
+  it("all api client calls have a Tauri command mapping", () => {
+    // This test catches the class of bug where a frontend API call has no entry
+    // in COMMAND_MAPPING, causing "No Tauri command mapping" errors at runtime
+    // in the desktop app. Adding any new api.* call requires a corresponding
+    // COMMAND_MAPPING entry.
+
+    const clientPath = join(frontendDir, "api/client.ts");
+    const clientContent = readFileSync(clientPath, "utf-8");
+
+    // Parse COMMAND_MAPPING keys from client.ts
+    const mappingMatch = clientContent.match(/COMMAND_MAPPING[^{]*\{([^}]+)\}/s);
+    expect(mappingMatch).toBeTruthy();
+    const mappingContent = mappingMatch![1]!;
+    const mappingKeys = new Set<string>();
+    for (const entry of mappingContent.matchAll(/"((?:GET|POST|PUT|DELETE) \/api\/[^"]+)"/g)) {
+      mappingKeys.add(entry[1]!);
+    }
+
+    // Endpoints that are intentionally not in COMMAND_MAPPING because they have
+    // no Tauri equivalent (SSE streams, or Tauri mode handles them differently).
+    const KNOWN_GAPS: Record<string, string> = {
+      "POST /api/query/abort/:id": "Query abort is a no-op in Tauri mode (graph_query is synchronous)",
+      "GET /api/query/progress/:id": "SSE progress stream — not used via api client in Tauri mode",
+      "POST /api/graph/import": "Multipart upload — Tauri uses native file dialog instead",
+      "GET /api/import/progress/:id": "SSE import progress — not used via api client in Tauri mode",
+    };
+
+    // Normalize a URL extracted from source code to a COMMAND_MAPPING key pattern.
+    // Replaces ${...} template expressions and known path-param patterns with placeholders.
+    function normalizeExtracted(method: string, rawUrl: string): string {
+      // Strip query string
+      const base = rawUrl.split("?")[0] ?? rawUrl;
+      // Replace template literal interpolations ${...} with a placeholder
+      const noInterp = base.replace(/\$\{[^}]*\}/g, ":param");
+      // Apply the same normalization rules as client.ts normalizeUrl()
+      const normalized = noInterp
+        .replace(/\/api\/graph\/node\/:param\/connections\/:param/, "/api/graph/node/:id/connections/:direction")
+        .replace(/\/api\/graph\/node\/:param\/counts/, "/api/graph/node/:id/counts")
+        .replace(/\/api\/graph\/node\/:param\/status/, "/api/graph/node/:id/status")
+        .replace(/\/api\/graph\/node\/:param\/owned/, "/api/graph/node/:id/owned")
+        .replace(/\/api\/graph\/node\/:param$/, "/api/graph/node/:id")
+        .replace(/\/api\/graph\/nodes\/:param$/, "/api/graph/nodes/:id")
+        .replace(/\/api\/graph\/relationships\/:param\/:param\/:param$/, "/api/graph/relationships/:source/:target/:rel_type")
+        .replace(/\/api\/query-history\/:param$/, "/api/query-history/:id")
+        .replace(/\/api\/query\/abort\/:param$/, "/api/query/abort/:id")
+        .replace(/\/api\/query\/progress\/:param$/, "/api/query/progress/:id")
+        .replace(/\/api\/graph\/import\/:param$/, "/api/graph/import/:id");
+      return `${method} ${normalized}`;
+    }
+
+    // Scan frontend files for api.get/post/put/delete/postNoContent calls
+    const tsFiles = findTsFiles(frontendDir);
+    const violations: string[] = [];
+
+    // HTTP method mapping
+    const METHOD_MAP: Record<string, string> = {
+      get: "GET",
+      post: "POST",
+      postNoContent: "POST",
+      put: "PUT",
+      delete: "DELETE",
+    };
+
+    for (const file of tsFiles) {
+      const relPath = relative(frontendDir, file);
+      // Skip the API client itself (defines the mapping) and transport (SSE/WebSocket)
+      if (relPath === "api/client.ts" || relPath === "api/transport.ts") continue;
+
+      const content = readFileSync(file, "utf-8");
+      const lines = content.split("\n");
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        // Match: api.METHOD(`/api/...`) or api.METHOD("/api/...")
+        const callMatch = line.match(/\bapi\.(get|post|postNoContent|put|delete)\s*[<(]/);
+        if (!callMatch) continue;
+
+        const method = METHOD_MAP[callMatch[1]!]!;
+
+        // Extract the URL argument (first string/template literal after the call)
+        const afterCall = line.slice(line.indexOf(callMatch[0]!) + callMatch[0]!.length);
+        const urlMatch =
+          afterCall.match(/[<(][^"'`]*["'`](\/api\/[^"'`]*)["'`]/) ??
+          afterCall.match(/["'`](\/api\/[^"'`]*)["'`]/);
+        if (!urlMatch) continue;
+
+        const rawUrl = urlMatch[1]!;
+        const key = normalizeExtracted(method, rawUrl);
+
+        if (!mappingKeys.has(key) && !Object.prototype.hasOwnProperty.call(KNOWN_GAPS, key)) {
+          violations.push(`${relPath}:${i + 1}: ${method} ${rawUrl}  →  key "${key}" missing from COMMAND_MAPPING`);
+        }
+      }
+    }
+
+    if (violations.length > 0) {
+      const message = [
+        "API calls found with no entry in COMMAND_MAPPING (client.ts).",
+        "These will throw 'No Tauri command mapping' errors in desktop (Tauri) mode.",
+        "",
+        "Add the missing entry to COMMAND_MAPPING and implement a corresponding",
+        "#[tauri::command] fn in src/backend/src/tauri_commands.rs.",
+        "",
+        "If the endpoint intentionally has no Tauri equivalent, add it to KNOWN_GAPS",
+        "in tauri-compat.test.ts with an explanation.",
+        "",
+        "Violations:",
+        ...violations.map((v) => `  ${v}`),
+      ].join("\n");
+
+      expect.fail(message);
+    }
+  });
 });

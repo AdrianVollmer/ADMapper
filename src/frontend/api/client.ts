@@ -114,6 +114,9 @@ const COMMAND_MAPPING: Record<string, string> = {
   "POST /api/query-history": "add_query_history",
   "DELETE /api/query-history/:id": "delete_query_history",
   "POST /api/query-history/clear": "clear_query_history",
+  // Cache
+  "GET /api/cache/stats": "get_cache_stats",
+  "POST /api/cache/clear": "clear_cache",
   // Settings
   "GET /api/settings": "get_settings",
   "PUT /api/settings": "update_settings",
