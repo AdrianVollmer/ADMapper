@@ -60,7 +60,7 @@ pub fn batch_set_tier(
         .name_regex
         .as_deref()
         .filter(|r| !r.is_empty())
-        .map(regex::Regex::new)
+        .map(|r| regex::RegexBuilder::new(r).case_insensitive(true).build())
         .transpose()
         .map_err(|e| format!("Invalid regex: {e}"))?;
 
