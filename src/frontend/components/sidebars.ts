@@ -29,8 +29,8 @@ const MAIN_ACTIONS = [
     id: "show-incoming",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <circle cx="12" cy="12" r="4"/>
+      <path d="M12 2l-2 2m2-2l2 2M12 22l-2-2m2 2l2-2M2 12l2-2m-2 2l2 2M22 12l-2-2m2 2l-2 2"/>
       <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
-      <path d="M12 6l-2-2m2 2l2-2M12 18l-2 2m2-2l2 2M6 12l-2-2m2 2l-2 2M18 12l2-2m-2 2l2 2"/>
     </svg>`,
     tooltip: "Incoming",
     countKey: "incoming",
@@ -41,7 +41,7 @@ const MAIN_ACTIONS = [
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <circle cx="12" cy="12" r="4"/>
       <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
-      <path d="M12 2l-2 2m2-2l2 2M12 22l-2-2m2 2l2-2M2 12l2-2m-2 2l2 2M22 12l-2-2m2 2l-2 2"/>
+      <path d="M12 6l-2-2m2 2l2-2M12 18l-2 2m2-2l2 2M6 12l-2-2m2 2l-2 2M18 12l2-2m-2 2l2 2"/>
     </svg>`,
     tooltip: "Outgoing",
     countKey: "outgoing",
