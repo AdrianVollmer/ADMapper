@@ -2,12 +2,14 @@
  * Export Component
  *
  * Export the currently visible graph as PNG, SVG, JSON, or interactive HTML.
+ * Also handles importing a previously-exported JSON view (client-side only).
  */
 
-import { getRenderer } from "./graph-view";
+import { getRenderer, loadGraphData } from "./graph-view";
 import { showError, showInfo, showSuccess } from "../utils/notifications";
 import { api, isRunningInTauri } from "../api/client";
 import htmlTemplate from "../export-graph-template.html?raw";
+import { parseExportJSON } from "../utils/graph-export";
 
 /** Export the graph as PNG */
 export async function exportPNG(): Promise<void> {
@@ -361,6 +363,73 @@ async function downloadBlob(blob: Blob, filename: string): Promise<void> {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, 100);
+}
+
+/**
+ * Import a JSON file previously created by "Export JSON Data" and render it
+ * in the graph view without touching the backend database.
+ *
+ * Works in both headless (web browser file picker) and Tauri (native dialog)
+ * modes. The loaded graph replaces whatever is currently displayed.
+ */
+export async function importJSONView(): Promise<void> {
+  try {
+    const json = await pickAndReadJsonFile();
+    if (json === null) return; // User cancelled
+
+    const rawGraph = parseExportJSON(json);
+    await loadGraphData(rawGraph);
+    showSuccess(`Loaded ${rawGraph.nodes.length} nodes, ${rawGraph.relationships.length} relationships`);
+  } catch (err) {
+    showError("Failed to import JSON: " + (err instanceof Error ? err.message : String(err)));
+  }
+}
+
+/** Open a file picker and return the contents of the chosen JSON file as a string.
+ *  Returns null if the user cancels. */
+async function pickAndReadJsonFile(): Promise<string | null> {
+  if (isRunningInTauri() && window.__TAURI_PLUGIN_DIALOG__?.open && window.__TAURI__?.core.invoke) {
+    return pickAndReadJsonFileTauri();
+  }
+  return pickAndReadJsonFileWeb();
+}
+
+async function pickAndReadJsonFileTauri(): Promise<string | null> {
+  const path = await window.__TAURI_PLUGIN_DIALOG__!.open({
+    multiple: false,
+    filters: [{ name: "JSON File", extensions: ["json"] }],
+    title: "Import JSON View",
+  });
+
+  if (!path || Array.isArray(path)) return null;
+
+  const bytes = await window.__TAURI__!.core.invoke<number[]>("read_file", { path });
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+function pickAndReadJsonFileWeb(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (!file) {
+        resolve(null);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsText(file);
+    });
+
+    // Cancelled: no change event fires, resolve after a short delay
+    input.addEventListener("cancel", () => resolve(null));
+
+    input.click();
+  });
 }
 
 /** Escape XML special characters */

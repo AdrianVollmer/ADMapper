@@ -36,6 +36,7 @@ export default [
         File: "readonly",
         FileList: "readonly",
         FileReader: "readonly",
+        TextDecoder: "readonly",
         Promise: "readonly",
         Map: "readonly",
         Set: "readonly",

@@ -218,6 +218,7 @@ pub fn run_desktop(database_url: Option<&str>) {
             // Layout
             tauri_commands::graph_layout,
             // File operations
+            tauri_commands::read_file,
             tauri_commands::write_file,
         ])
         .build(tauri::generate_context!())

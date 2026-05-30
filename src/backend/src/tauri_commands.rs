@@ -909,6 +909,14 @@ pub fn import_from_paths(
 // File Operations
 // ============================================================================
 
+/// Read bytes from a file.
+/// Used for importing graph JSON exports via the native file dialog.
+#[tauri::command]
+pub fn read_file(path: String) -> Result<Vec<u8>, String> {
+    info!(path = %path, "Reading file (IPC)");
+    std::fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))
+}
+
 /// Write bytes to a file.
 /// Used for exporting graphs to user-selected paths.
 #[tauri::command]
