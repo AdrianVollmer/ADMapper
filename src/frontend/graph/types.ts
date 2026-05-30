@@ -70,6 +70,12 @@ export interface RawADNode {
   properties?: Record<string, unknown> | undefined;
   x?: number;
   y?: number;
+  /** Whether this node has been marked owned (from backend GraphNode) */
+  owned?: boolean;
+  /** Whether the AD account is enabled; absent means unknown */
+  enabled?: boolean | null;
+  /** Tier assignment (0 = most critical); absent means unassigned */
+  tier?: number | null;
 }
 
 /** Raw relationship data as received from server */

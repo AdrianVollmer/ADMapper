@@ -8,7 +8,6 @@
 import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import type { QueryHistoryEntry, QueryHistoryResponse, QueryStatus } from "../api/types";
-import type { RawADGraph } from "../graph";
 import {
   executeQueryWithHistory,
   getQueryErrorMessage,
@@ -302,7 +301,7 @@ async function runQuery(query: string, name: string): Promise<void> {
 
     // Show results
     if (result.graph && result.graph.nodes.length > 0) {
-      loadGraphData(result.graph as unknown as RawADGraph);
+      loadGraphData(result.graph);
       showSuccess(
         `Query returned ${result.graph.nodes.length} nodes and ${result.graph.relationships.length} relationships`
       );
@@ -730,7 +729,7 @@ export async function goBackInHistory(): Promise<boolean> {
 
     // Show results and render graph
     if (result.graph && result.graph.nodes.length > 0) {
-      loadGraphData(result.graph as unknown as RawADGraph);
+      loadGraphData(result.graph);
       showSuccess(`Back to: ${previousEntry.name}`);
     } else {
       showInfo(`Query returned ${result.resultCount} rows`);

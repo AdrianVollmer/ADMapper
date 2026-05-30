@@ -8,7 +8,6 @@ import { loadGraphData } from "../graph-view";
 import { escapeHtml } from "../../utils/html";
 import { executeQueryWithHistory, getQueryErrorMessage, QueryAbortedError } from "../../utils/query";
 import { showSuccess, showError, showInfo } from "../../utils/notifications";
-import type { RawADGraph } from "../../graph/types";
 import type { Query, QueryCategory } from "./types";
 import { BUILTIN_QUERIES } from "./builtin-queries";
 
@@ -304,22 +303,7 @@ async function runQuery(queryId: string): Promise<void> {
 
     // Show results
     if (result.graph && result.graph.nodes.length > 0) {
-      // Convert GraphData to RawADGraph format and load into renderer
-      const rawGraph: RawADGraph = {
-        nodes: result.graph.nodes.map((n) => ({
-          id: n.id,
-          name: n.name,
-          type: n.type as RawADGraph["nodes"][0]["type"],
-          properties: n.properties,
-        })),
-        relationships: result.graph.relationships.map((e) => ({
-          source: e.source,
-          target: e.target,
-          type: e.type as RawADGraph["relationships"][0]["type"],
-          ...(e.exploit_likelihood !== undefined ? { exploit_likelihood: e.exploit_likelihood } : {}),
-        })),
-      };
-      loadGraphData(rawGraph);
+      loadGraphData(result.graph);
       showSuccess(
         `"${query.name}" returned ${result.graph.nodes.length} nodes and ${result.graph.relationships.length} relationships`
       );

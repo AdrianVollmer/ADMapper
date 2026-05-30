@@ -42,9 +42,15 @@ function rawNodeToAttributes(node: RawADNode): ADNodeAttributes {
     color: getNodeTypeColor(nodeType),
     image: getNodeIcon(nodeType),
   };
-  if (node.properties) {
-    attrs.properties = node.properties;
-  }
+
+  // Merge node.properties with the three status fields so both sources
+  // end up in attrs.properties for the renderer to read.
+  const props: Record<string, unknown> = { ...(node.properties ?? {}) };
+  if (node.owned !== undefined && node.owned !== null) props.owned = node.owned;
+  if (node.enabled !== undefined && node.enabled !== null) props.enabled = node.enabled;
+  if (node.tier !== undefined && node.tier !== null) props.tier = node.tier;
+  if (Object.keys(props).length > 0) attrs.properties = props;
+
   return attrs;
 }
 

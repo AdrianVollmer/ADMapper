@@ -10,25 +10,50 @@ use std::sync::Arc;
 // Graph Types
 // ============================================================================
 
-/// Graph node response format for visualization.
+/// Minimal node representation for graph rendering responses.
 ///
 /// This is a minimal subset of `DbNode` used for graph rendering, excluding
 /// the heavy `properties` field which can contain large BloodHound data.
 /// Properties can be fetched on-demand when a user clicks on a node.
+/// The three status fields (owned, enabled, tier) are included because the
+/// renderer needs them at load time to draw status rings without per-node requests.
 #[derive(Debug, Clone, Serialize)]
 pub struct GraphNode {
     pub id: String,
     pub name: String,
     #[serde(rename = "type")]
     pub node_type: String,
+    /// Whether the node has been marked owned by the attacker.
+    pub owned: bool,
+    /// Whether the AD account is enabled. None if the property is absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Tier level (0 = most critical). None if no tier has been assigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<i64>,
 }
 
 impl From<DbNode> for GraphNode {
     fn from(node: DbNode) -> Self {
+        let owned = node
+            .properties
+            .get("owned")
+            .or_else(|| node.properties.get("Owned"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let enabled = node
+            .properties
+            .get("enabled")
+            .or_else(|| node.properties.get("Enabled"))
+            .and_then(|v| v.as_bool());
+        let tier = node.properties.get("tier").and_then(|v| v.as_i64());
         GraphNode {
             id: node.id,
             name: node.name,
             node_type: node.label,
+            owned,
+            enabled,
+            tier,
         }
     }
 }
@@ -251,8 +276,10 @@ pub fn extract_graph_from_results(
 
 /// Extract a GraphNode from a JSON node object.
 ///
-/// Only extracts the minimal fields needed for graph visualization (id, name, type).
-/// Full properties are not included to keep response sizes small.
+/// Extracts the minimal fields needed for graph visualization: id, name, type,
+/// along with status fields (owned, enabled, tier). Full properties are not included
+/// to keep response sizes small. The status fields are included because the renderer
+/// needs them at load time to draw status indicators without per-node requests.
 fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
     let objectid = value
         .get("objectid")
@@ -306,10 +333,23 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
         .map(String::from)
         .unwrap_or_else(|| objectid.clone());
 
+    let props = value.get("properties");
+    let owned = props
+        .and_then(|p| p.get("owned").or_else(|| p.get("Owned")))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let enabled = props
+        .and_then(|p| p.get("enabled").or_else(|| p.get("Enabled")))
+        .and_then(|v| v.as_bool());
+    let tier = props.and_then(|p| p.get("tier")).and_then(|v| v.as_i64());
+
     Some(GraphNode {
         id: objectid,
         name,
         node_type,
+        owned,
+        enabled,
+        tier,
     })
 }
 

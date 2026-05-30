@@ -44,6 +44,9 @@ let currentSettings: Settings = {
   autoCollapseThreshold: DEFAULT_AUTO_COLLAPSE_THRESHOLD,
 };
 
+/** In-memory badge toggle — not persisted, resets on reload like label visibility. */
+let showNodeBadges = false;
+
 /** Callback for when fixedNodeSizes changes */
 let onFixedNodeSizesChange: ((fixed: boolean) => void) | null = null;
 
@@ -55,6 +58,22 @@ export function setFixedNodeSizesCallback(callback: (fixed: boolean) => void): v
 /** Get current fixedNodeSizes setting */
 export function getFixedNodeSizes(): boolean {
   return currentSettings.fixedNodeSizes ?? true;
+}
+
+/** Get current showNodeBadges state. */
+export function getShowNodeBadges(): boolean {
+  return showNodeBadges;
+}
+
+/** Set showNodeBadges state (for testing). */
+export function setShowNodeBadges(value: boolean): void {
+  showNodeBadges = value;
+}
+
+/** Toggle node badge visibility. Returns the new state. */
+export function toggleShowNodeBadges(): boolean {
+  showNodeBadges = !showNodeBadges;
+  return showNodeBadges;
 }
 
 /**
@@ -502,6 +521,7 @@ async function saveSettings(): Promise<void> {
     : DEFAULT_AUTO_COLLAPSE_THRESHOLD;
 
   const newSettings: Settings = {
+    ...currentSettings,
     theme: (themeRadio?.value as Theme) || currentSettings.theme,
     defaultGraphLayout: (layoutRadio?.value as GraphLayout) || currentSettings.defaultGraphLayout,
     layout,

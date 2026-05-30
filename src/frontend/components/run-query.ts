@@ -12,7 +12,6 @@ import { escapeHtml } from "../utils/html";
 import { api } from "../api/client";
 import type { QueryHistoryResponse } from "../api/types";
 import { loadGraphData } from "./graph-view";
-import type { RawADGraph } from "../graph/types";
 import {
   executeQuery as sharedExecuteQuery,
   abortCurrentForegroundQuery,
@@ -334,7 +333,7 @@ async function executeQuery(): Promise<void> {
     cleanup();
     if (result.graph && result.graph.nodes.length > 0) {
       closeRunQuery();
-      loadGraphData(result.graph as unknown as RawADGraph);
+      loadGraphData(result.graph);
     } else {
       state.infoMessage = `Query returned ${result.resultCount ?? 0} row${result.resultCount === 1 ? "" : "s"}`;
       renderModal();

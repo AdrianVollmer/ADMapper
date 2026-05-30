@@ -9,30 +9,8 @@
 // Graph Data Types
 // ============================================================================
 
-/** Node in the graph from API */
-export interface GraphNode {
-  id: string;
-  /** Display name (from BloodHound's name property) */
-  name: string;
-  /** Cypher label (User, Computer, Group, etc.) */
-  type: string;
-  properties?: Record<string, unknown>;
-}
-
-/** Relationship in the graph from API */
-export interface GraphEdge {
-  source: string;
-  target: string;
-  type: string;
-  properties?: Record<string, unknown>;
-  exploit_likelihood?: number;
-}
-
-/** Full graph data from /api/graph/all */
-export interface GraphData {
-  nodes: GraphNode[];
-  relationships: GraphEdge[];
-}
+import type { RawADNode, RawADGraph } from "../graph/types";
+export type { RawADNode as GraphNode, RawADEdge as GraphEdge, RawADGraph as GraphData } from "../graph/types";
 
 // ============================================================================
 // Search Types
@@ -55,7 +33,7 @@ export interface SearchResult {
 
 /** Step in a path from /api/graph/path */
 export interface PathStep {
-  node: GraphNode;
+  node: RawADNode;
   rel_type?: string;
 }
 
@@ -63,7 +41,7 @@ export interface PathStep {
 export interface PathResponse {
   found: boolean;
   path: PathStep[];
-  graph: GraphData;
+  graph: RawADGraph;
 }
 
 // ============================================================================
@@ -89,7 +67,7 @@ export interface QueryStartResponseSync {
   duration_ms: number;
   result_count: number | null;
   results?: QueryResult;
-  graph?: GraphData;
+  graph?: RawADGraph;
 }
 
 /** Async response - query is running, subscribe to progress events */
@@ -107,7 +85,7 @@ export interface QueryProgressEvent {
   result_count: number | null;
   error: string | null;
   results?: QueryResult;
-  graph?: GraphData;
+  graph?: RawADGraph;
 }
 
 // ============================================================================

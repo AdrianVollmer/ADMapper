@@ -8,6 +8,7 @@
 import { toggleNavSidebar, toggleDetailSidebar, toggleSidebars } from "./sidebars";
 import { getRenderer, setLayout, relayoutGraph, toggleLabelVisibility, cycleLayout } from "./graph-view";
 import { toggleMagnifier, isMagnifierActive } from "../graph/magnifier";
+import { toggleShowNodeBadges } from "./settings";
 import { triggerBloodHoundImport } from "./import";
 import { openQueryHistory, goBackInHistory } from "./query-history";
 import { showKeyboardShortcuts } from "./keyboard";
@@ -60,6 +61,7 @@ export const Actions = {
   FULLSCREEN: "fullscreen",
   TOGGLE_LABEL_VISIBILITY: "toggle-label-visibility",
   TOGGLE_MAGNIFIER: "toggle-magnifier",
+  TOGGLE_NODE_BADGES: "toggle-node-badges",
   // Tools menu
   IMPORT_BLOODHOUND: "import-bloodhound",
   GENERATE_DATA: "generate-data",
@@ -151,6 +153,13 @@ const actionHandlers: Record<StaticAction, () => void> = {
     toggleMagnifier(r.sigma);
     import("../utils/notifications").then(({ showInfo }) => {
       showInfo(isMagnifierActive() ? "Magnifier On" : "Magnifier Off");
+    });
+  },
+  "toggle-node-badges": () => {
+    const newValue = toggleShowNodeBadges();
+    getRenderer()?.refresh();
+    import("../utils/notifications").then(({ showInfo }) => {
+      showInfo(newValue ? "Node Badges: On" : "Node Badges: Off");
     });
   },
   // Tools menu

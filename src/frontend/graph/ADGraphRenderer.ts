@@ -23,7 +23,8 @@ import {
   getCollapsedChildren,
 } from "./collapse";
 import { createSharedNodeImageProgram, createSharedCurvedArrowProgram, drawNodeLabel } from "./programs";
-import { getFixedNodeSizes, setFixedNodeSizesCallback } from "../components/settings";
+import { getFixedNodeSizes, setFixedNodeSizesCallback, getShowNodeBadges } from "../components/settings";
+import { drawStatusRing, drawTierBadge, type NodeStatusData } from "./status-ring";
 
 export interface RendererOptions {
   /** Container element or selector */
@@ -451,6 +452,42 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   // Schedule texture filtering after first render
   requestAnimationFrame(applyTextureFiltering);
 
+  // Draw status rings and tier badges on every render when badges are enabled.
+  // Uses the labels 2D canvas (below node WebGL) — rings extend beyond node
+  // bounds so the outer stroke is always visible above the node icon layer.
+  function handleAfterRender() {
+    if (!getShowNodeBadges()) return;
+
+    const labelsCanvas = sigma.getCanvases().labels;
+    if (!labelsCanvas) return;
+    const ctx = labelsCanvas.getContext("2d");
+    if (!ctx) return;
+
+    graph.forEachNode((nodeId, attrs) => {
+      const displayData = sigma.getNodeDisplayData(nodeId);
+      if (!displayData || displayData.hidden) return;
+
+      // getNodeDisplayData returns already-normalized coordinates; use raw
+      // graph attributes with graphToViewport to avoid double-normalization.
+      const graphX = graph.getNodeAttribute(nodeId, "x") as number;
+      const graphY = graph.getNodeAttribute(nodeId, "y") as number;
+      const { x, y } = sigma.graphToViewport({ x: graphX, y: graphY });
+      const size = sigma.scaleSize(displayData.size);
+
+      const nodeAttrs = attrs as ADNodeAttributes;
+      const props = nodeAttrs.properties;
+      const status: NodeStatusData = {};
+      if (props?.owned !== undefined) status.owned = props.owned as boolean;
+      if (props?.enabled !== undefined) status.enabled = props.enabled as boolean | null;
+      if (props?.tier !== undefined) status.tier = props.tier as number | null;
+
+      drawStatusRing(ctx, x, y, size, status, currentTheme);
+      drawTierBadge(ctx, x, y, size, status);
+    });
+  }
+
+  sigma.on("afterRender", handleAfterRender);
+
   // Register callback for fixed node sizes setting changes
   setFixedNodeSizesCallback((fixed: boolean) => {
     sigma.setSetting("itemSizesReference", fixed ? "screen" : "positions");
@@ -627,6 +664,7 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
 
     destroy() {
       window.removeEventListener("themechange", handleThemeChange);
+      sigma.off("afterRender", handleAfterRender);
       for (const canvas of webglCanvases) {
         canvas.removeEventListener("webglcontextlost", handleContextLost);
         canvas.removeEventListener("webglcontextrestored", handleContextRestored);

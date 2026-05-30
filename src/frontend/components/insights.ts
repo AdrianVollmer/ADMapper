@@ -916,7 +916,7 @@ async function executeChokePointQuery(sourceId: string, targetId: string, relTyp
   try {
     const result = await executeQuery(query, { extractGraph: true });
     if (result.graph && result.graph.nodes.length > 0) {
-      loadGraphData(result.graph as unknown as RawADGraph);
+      loadGraphData(result.graph);
     }
   } catch (err) {
     if (!(err instanceof QueryAbortedError)) {
@@ -987,7 +987,7 @@ async function executeGraphQuery(queryType: string, extraData?: string): Promise
   try {
     const result = await executeQuery(query, { extractGraph: true });
     if (result.graph && result.graph.nodes.length > 0) {
-      loadGraphData(result.graph as unknown as RawADGraph);
+      loadGraphData(result.graph);
     } else {
       // For single-node queries like stale objects, build a simple graph
       // The backend should have extracted the nodes from the query result
