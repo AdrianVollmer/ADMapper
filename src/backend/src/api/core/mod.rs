@@ -86,7 +86,7 @@ pub use mutation::{
 };
 
 #[allow(unused_imports)]
-pub use tiers::{batch_set_tier, compute_effective_tiers, tier_violations};
+pub use tiers::batch_set_tier;
 
 #[allow(unused_imports)]
 pub use query::{

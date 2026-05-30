@@ -2,7 +2,7 @@
 
 use super::run_db;
 use crate::api::core;
-use crate::api::types::{ApiError, ComputeEffectiveTiersResponse, TierViolationsResponse};
+use crate::api::types::ApiError;
 use crate::db::DbError;
 use crate::state::AppState;
 use axum::{extract::State, response::Json};
@@ -68,57 +68,5 @@ pub async fn graph_choke_points(
         total_edges = result.total_edges,
         "Choke points retrieved"
     );
-    Ok(Json(result))
-}
-
-/// Compute tier violations: direct relationships crossing tier zone boundaries.
-///
-/// Analyze tier violations.
-///
-/// Uses stored `effective_tier` property if available (set by compute-effective-tiers).
-/// Falls back to on-the-fly reverse BFS computation if effective_tier is not yet computed.
-///
-/// A violation is an edge from a node in zone N to a node in zone M where N > M
-/// (lower-privilege zone reaching higher-privilege zone).
-#[instrument(skip(state))]
-pub async fn tier_violations(
-    State(state): State<AppState>,
-) -> Result<Json<TierViolationsResponse>, ApiError> {
-    let db = state.require_db()?;
-
-    let result = run_db(db, |db| {
-        core::tier_violations(db).map_err(crate::db::DbError::Database)
-    })
-    .await?;
-
-    info!(
-        violations = result.violations.iter().map(|v| v.count).sum::<usize>(),
-        "Tier violations computed"
-    );
-
-    Ok(Json(result))
-}
-
-/// Compute effective tiers for all nodes using multi-source reverse BFS.
-///
-/// For each tier level (0, 1, 2), finds all nodes that can transitively reach
-/// a node of that tier. Each node's effective tier is the minimum tier it can reach.
-/// Results are stored as the `effective_tier` property on each node.
-pub async fn compute_effective_tiers(
-    State(state): State<AppState>,
-) -> Result<Json<ComputeEffectiveTiersResponse>, ApiError> {
-    let db = state.require_db()?;
-
-    let result = run_db(db, |db| {
-        core::compute_effective_tiers(db).map_err(crate::db::DbError::Database)
-    })
-    .await?;
-
-    info!(
-        computed = result.computed,
-        violations = result.violations,
-        "Effective tiers computed"
-    );
-
     Ok(Json(result))
 }

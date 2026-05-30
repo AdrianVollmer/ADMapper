@@ -174,26 +174,116 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
     ],
   },
   {
-    id: "tier-zero",
-    name: "Tier 0 Targets",
-    queries: [
+    id: "tier-analysis",
+    name: "Tier Analysis",
+    subcategories: [
       {
-        id: "tier-zero-groups",
-        name: "Tier 0 Groups",
-        description: "Privileged groups by well-known SID",
-        query: `MATCH (g:Group) WHERE ${ridWhereClause("g", [...HIGH_VALUE_RIDS, "-S-1-5-9"])} RETURN g`,
+        id: "tier-zero-assets",
+        name: "Tier 0 Assets",
+        queries: [
+          {
+            id: "tier-zero-groups",
+            name: "Tier 0 Groups",
+            description: "Privileged groups by well-known SID",
+            query: `MATCH (g:Group) WHERE ${ridWhereClause("g", [...HIGH_VALUE_RIDS, "-S-1-5-9"])} RETURN g`,
+          },
+          {
+            id: "tier-zero-users",
+            name: "Tier 0 Users",
+            description: "Users who are members of tier-0 groups",
+            query: `MATCH p = (u:User)-[:MemberOf]->(g:Group) WHERE ${ridWhereClause("g", [...HIGH_VALUE_RIDS, "-S-1-5-9"])} RETURN p`,
+          },
+          {
+            id: "tier-zero-computers",
+            name: "Tier 0 Computers",
+            description: "Computers that are domain controllers",
+            query: `MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE ${ridWhereClause("g", ["-516", "-498", "-521", "-S-1-5-9"])} RETURN p`,
+          },
+        ],
       },
       {
-        id: "tier-zero-users",
-        name: "Tier 0 Users",
-        description: "Users who are members of tier-0 groups",
-        query: `MATCH p = (u:User)-[:MemberOf]->(g:Group) WHERE ${ridWhereClause("g", [...HIGH_VALUE_RIDS, "-S-1-5-9"])} RETURN p`,
+        id: "targeting-tier-0",
+        name: "Targeting Tier 0",
+        queries: [
+          {
+            id: "tier1-to-tier0",
+            name: "Tier 1 → Tier 0",
+            description: "Single-hop relationships from tier 1 nodes to tier 0 nodes",
+            query: `MATCH p = (a)-[r]->(b) WHERE a.tier = 1 AND b.tier = 0 RETURN p`,
+          },
+          {
+            id: "tier2-to-tier0",
+            name: "Tier 2 → Tier 0",
+            description: "Single-hop relationships from tier 2 nodes to tier 0 nodes",
+            query: `MATCH p = (a)-[r]->(b) WHERE a.tier = 2 AND b.tier = 0 RETURN p`,
+          },
+          {
+            id: "tier3-to-tier0",
+            name: "Tier 3 → Tier 0",
+            description: "Single-hop relationships from tier 3 nodes to tier 0 nodes",
+            query: `MATCH p = (a)-[r]->(b) WHERE a.tier = 3 AND b.tier = 0 RETURN p`,
+          },
+          {
+            id: "any-to-tier0",
+            name: "Any → Tier 0",
+            description: "All single-hop relationships reaching tier 0 from higher-numbered tiers",
+            query: `MATCH p = (a)-[r]->(b) WHERE b.tier = 0 AND a.tier > 0 RETURN p`,
+          },
+        ],
       },
       {
-        id: "tier-zero-computers",
-        name: "Tier 0 Computers",
-        description: "Computers who are members of tier-0 groups (e.g., Domain Controllers)",
-        query: `MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE ${ridWhereClause("g", ["-516", "-498", "-521", "-S-1-5-9"])} RETURN p`,
+        id: "targeting-tier-1",
+        name: "Targeting Tier 1",
+        queries: [
+          {
+            id: "tier2-to-tier1",
+            name: "Tier 2 → Tier 1",
+            description: "Single-hop relationships from tier 2 nodes to tier 1 nodes",
+            query: `MATCH p = (a)-[r]->(b) WHERE a.tier = 2 AND b.tier = 1 RETURN p`,
+          },
+          {
+            id: "tier3-to-tier1",
+            name: "Tier 3 → Tier 1",
+            description: "Single-hop relationships from tier 3 nodes to tier 1 nodes",
+            query: `MATCH p = (a)-[r]->(b) WHERE a.tier = 3 AND b.tier = 1 RETURN p`,
+          },
+          {
+            id: "any-to-tier1",
+            name: "Any → Tier 1",
+            description: "All single-hop relationships reaching tier 1 from higher-numbered tiers",
+            query: `MATCH p = (a)-[r]->(b) WHERE b.tier = 1 AND a.tier > 1 RETURN p`,
+          },
+        ],
+      },
+      {
+        id: "targeting-tier-2",
+        name: "Targeting Tier 2",
+        queries: [
+          {
+            id: "tier3-to-tier2",
+            name: "Tier 3 → Tier 2",
+            description: "Single-hop relationships from tier 3 nodes to tier 2 nodes",
+            query: `MATCH p = (a)-[r]->(b) WHERE a.tier = 3 AND b.tier = 2 RETURN p`,
+          },
+          {
+            id: "any-to-tier2",
+            name: "Any → Tier 2",
+            description: "All single-hop relationships reaching tier 2 from higher-numbered tiers",
+            query: `MATCH p = (a)-[r]->(b) WHERE b.tier = 2 AND a.tier > 2 RETURN p`,
+          },
+        ],
+      },
+      {
+        id: "all-tier-violations",
+        name: "All Tier Violations",
+        queries: [
+          {
+            id: "all-cross-tier",
+            name: "All Cross-Tier Relationships",
+            description: "All single-hop relationships where source tier > target tier (any privilege escalation path)",
+            query: `MATCH p = (a)-[r]->(b) WHERE a.tier IS NOT NULL AND b.tier IS NOT NULL AND a.tier > b.tier RETURN p`,
+          },
+        ],
       },
     ],
   },

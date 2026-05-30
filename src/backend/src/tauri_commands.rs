@@ -375,18 +375,6 @@ pub async fn graph_choke_points(
         .map_err(|e| format!("Task join error: {e}"))?
 }
 
-/// Get tier violations in the graph.
-#[tauri::command]
-pub async fn tier_violations(
-    state: State<'_, AppState>,
-) -> Result<crate::api::types::TierViolationsResponse, String> {
-    let db = state.db().ok_or("Not connected to database")?;
-    debug!("Getting tier violations (IPC)");
-    tokio::task::spawn_blocking(move || core::tier_violations(db.as_ref()))
-        .await
-        .map_err(|e| format!("Task join error: {e}"))?
-}
-
 /// Batch-set tiers on filtered nodes.
 #[tauri::command]
 pub async fn batch_set_tier(
@@ -396,18 +384,6 @@ pub async fn batch_set_tier(
     let db = state.db().ok_or("Not connected to database")?;
     debug!("Batch setting tier (IPC)");
     tokio::task::spawn_blocking(move || core::batch_set_tier(db.as_ref(), request))
-        .await
-        .map_err(|e| format!("Task join error: {e}"))?
-}
-
-/// Compute effective tiers for all nodes.
-#[tauri::command]
-pub async fn compute_effective_tiers(
-    state: State<'_, AppState>,
-) -> Result<crate::api::types::ComputeEffectiveTiersResponse, String> {
-    let db = state.db().ok_or("Not connected to database")?;
-    debug!("Computing effective tiers (IPC)");
-    tokio::task::spawn_blocking(move || core::compute_effective_tiers(db.as_ref()))
         .await
         .map_err(|e| format!("Task join error: {e}"))?
 }

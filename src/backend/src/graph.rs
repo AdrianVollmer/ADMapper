@@ -288,13 +288,14 @@ fn extract_node_from_json(value: &JsonValue) -> Option<GraphNode> {
         .find(|l| l.as_str() != "Base")
         .cloned()
         .or_else(|| labels.first().cloned());
-    let node_type_from_props = value
-        .get("properties")
-        .and_then(|p| p.get("node_type"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let node_type = node_type_from_props
-        .or(node_type_from_labels)
+    let node_type = node_type_from_labels
+        .or_else(|| {
+            value
+                .get("properties")
+                .and_then(|p| p.get("label"))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
         .unwrap_or_else(|| "Unknown".to_string());
 
     // Try "name" first (standard property), fall back to "label" (BloodHound style)

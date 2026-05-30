@@ -127,14 +127,14 @@ impl CrustDatabase {
                     .unwrap_or_else(|| objectid.clone());
 
                 // Get node type: prefer Cypher labels (excluding "Base" which is a
-                // generic super-label), then node_type property
+                // generic super-label), then the stored label property
                 let label = labels
                     .iter()
                     .find(|l| *l != "Base")
                     .cloned()
                     .or_else(|| labels.first().cloned())
                     .or_else(|| {
-                        properties.get("node_type").and_then(|v| {
+                        properties.get("label").and_then(|v| {
                             if let crustdb::PropertyValue::String(s) = v {
                                 Some(s.clone())
                             } else {

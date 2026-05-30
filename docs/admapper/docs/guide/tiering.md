@@ -1,46 +1,90 @@
 # Tiering Model
 
 ADMapper implements an enterprise tiering model to classify Active Directory
-objects by privilege level. This helps identify tier violations: relationships
-that cross tier boundaries and could allow privilege escalation.
+objects by privilege level. The goal is to identify relationships that cross
+tier boundaries and could allow privilege escalation.
 
 ## Overview
 
-The Enterprise Access Model (formerly Administrative Tier Model) divides AD
-objects into tiers based on their criticality:
+The Enterprise Access Model divides AD objects into tiers based on their
+criticality:
 
 | Tier | Name | Examples |
 |------|------|----------|
-| **0** | Identity infrastructure | Domain Controllers, Domain Admins, Enterprise Admins, KRBTGT, PKI servers, AdminSDHolder |
+| **0** | Identity infrastructure | Domain Controllers, Domain Admins, Enterprise Admins, Schema Admins, PKI servers |
 | **1** | Servers and enterprise apps | Member servers, application servers, service accounts |
-| **2** | Workstations and standard users | End-user workstations, standard user accounts |
-| **3** | Unclassified (default) | All objects that have not been explicitly classified |
+| **2** | Workstations | End-user workstations, Domain Computers members |
+| **3** | Standard users | Domain Users members and other unclassified objects |
 
-Lower tier numbers represent higher privilege. All objects start at tier 3
-(unclassified) until explicitly assigned.
+Lower tier numbers represent higher privilege.
 
-## Assigning Tiers
+## Automatic Tier Assignment
+
+After importing BloodHound data, ADMapper automatically assigns tiers to nodes
+based on their well-known group membership. All assignments use the RID suffix
+of the group's SID for reliable identification.
+
+The following are applied in priority order. Once a tier is assigned, it is
+never overwritten by a lower-priority rule.
+
+### Tier 0 — Privileged groups and their members
+
+The group object itself and all direct members of each well-known privileged
+group receive tier 0:
+
+| Group | RID |
+|-------|-----|
+| Domain Admins | -512 |
+| Domain Controllers | -516 |
+| Cert Publishers | -517 |
+| Schema Admins | -518 |
+| Enterprise Admins | -519 |
+| Group Policy Creator Owners | -520 |
+| Read-Only Domain Controllers | -521 |
+| Protected Users | -525 |
+| Key Admins | -526 |
+| Enterprise Key Admins | -527 |
+| Administrators (Builtin) | -544 |
+| Account Operators | -548 |
+| Server Operators | -549 |
+| Print Operators | -550 |
+| Backup Operators | -551 |
+| Enterprise Read-Only DCs | -498 |
+| Enterprise Domain Controllers | S-1-5-9 |
+
+### Tier 2 — Domain Computers and their members
+
+The Domain Computers group object itself (RID `-515`) and all its direct
+members receive tier 2.
+
+### Tier 3 — Domain Users members
+
+Direct members of Domain Users (RID `-513`) receive tier 3.
+
+### Ungrouped objects
+
+Objects that do not match any of the above rules receive no automatic tier
+assignment. Tier 1 assets (member servers, application servers, etc.) must be
+classified manually using the **Edit Tiers** modal.
+
+!!! note
+    Exchange groups such as "Exchange Windows Permissions" and "Exchange Trusted
+    Subsystem" do not have fixed well-known RIDs and therefore cannot be
+    automatically classified. Assign them manually.
+
+## Assigning Tiers Manually
 
 Open the **Edit Tiers** modal from the toolbar to assign tiers to nodes.
 
-### Recommended Workflow
-
-1. All nodes start at tier 3 (default)
-2. Assign tier 0 to your most critical objects first
-3. Work upward through tier 1 and tier 2
-4. Leave unclassified objects at tier 3
-
 ### Filter Modes
-
-The Edit Tiers modal supports several ways to select nodes for tier assignment:
 
 #### Name Regex
 
-Use a regular expression to match node names. For example:
+Use a regular expression to match node names:
 
-- `ADMIN`: matches all nodes with "ADMIN" in the name
-- `^DC\d+`: matches nodes starting with "DC" followed by digits
-- `SERVER|SRV`: matches nodes containing "SERVER" or "SRV"
+- `ADMIN` — matches all nodes with "ADMIN" in the name
+- `^DC\d+` — matches nodes starting with "DC" followed by digits
+- `SERVER|SRV` — matches nodes containing "SERVER" or "SRV"
 
 #### Node Type
 
@@ -48,76 +92,38 @@ Filter by AD object type (User, Group, Computer, OU, Domain, GPO, etc.).
 
 #### Group Membership
 
-Search for a group by name and assign a tier to all its transitive members.
-This follows `MemberOf` relationships recursively.
-
-Example: Select "Domain Admins" to assign tier 0 to all direct and indirect
-members of the Domain Admins group.
+Search for a group and assign a tier to all its transitive members via
+`MemberOf` relationships.
 
 #### OU Containment
 
 Search for an Organizational Unit and assign a tier to all objects it
-recursively contains. This follows `Contains` relationships.
-
-Example: Select "Tier 0 Servers" OU to assign tier 0 to all objects within
-that OU and its sub-OUs.
+recursively contains via `Contains` relationships.
 
 #### Tag Visible Nodes
 
-If you have a graph currently displayed, click **Tag Visible Nodes** to assign
-a tier to all nodes currently visible in the graph view. This is useful after
+Assign a tier to all nodes currently visible in the graph. Useful after
 running a query that surfaces a specific set of objects.
-
-### Typical Tier 0 Objects
-
-- Domain Admins, Enterprise Admins, Schema Admins
-- Domain Controllers
-- KRBTGT account
-- AdminSDHolder
-- PKI / AD CS servers and templates
-- Account Operators, Server Operators, Backup Operators
 
 ## Analyzing Tier Violations
 
-### Assigned vs. Effective Tier
+Use the **Tier Analysis** built-in queries (in the sidebar query panel) to
+find single-hop relationships that cross tier boundaries:
 
-ADMapper distinguishes between two tier concepts:
+| Query | Description |
+|-------|-------------|
+| Tier 1 → Tier 0 | Tier 1 nodes with a direct relationship to tier 0 |
+| Tier 2 → Tier 0 | Tier 2 nodes with a direct relationship to tier 0 |
+| Tier 3 → Tier 0 | Tier 3 nodes with a direct relationship to tier 0 |
+| Any → Tier 0 | All nodes reaching tier 0 in one hop |
+| Tier 2 → Tier 1 | Tier 2 nodes with a direct relationship to tier 1 |
+| Tier 3 → Tier 1 | Tier 3 nodes with a direct relationship to tier 1 |
+| Any → Tier 1 | All nodes reaching tier 1 in one hop |
+| Tier 3 → Tier 2 | Tier 3 nodes with a direct relationship to tier 2 |
+| All Cross-Tier | All single-hop relationships where source tier > target tier |
 
-- **Assigned tier**: the tier you explicitly set on a node (stored as the
-  `tier` property)
-- **Effective tier**: the lowest (most privileged) tier the node can
-  transitively reach via any relationship path
-
-A **tier violation** occurs when a node's effective tier is lower than its
-assigned tier. This means the node can reach a higher-privilege tier than
-intended.
-
-### Computing Effective Tiers
-
-Open the **Security Insights** modal and navigate to the **Tier Violations**
-tab. Click **Analyze Tier Violations** to compute effective tiers.
-
-The algorithm uses multi-source reverse BFS:
-
-1. For each tier level (0, 1, 2), collect all nodes assigned to that tier
-2. Perform a reverse BFS from those seed nodes, following all relationships
-   backwards
-3. Each reached node's effective tier becomes the minimum of its current
-   effective tier and the seed tier
-
-This runs in O(V + E) time per tier level, making it efficient even for
-large graphs.
-
-### Reading the Results
-
-The Tier Violations tab shows cross-zone boundary violations:
-
-- **Zone 1 to Zone 0** — Server admin zone reaching domain admin zone
-- **Zone 2 to Zone 1** — Workstation zone reaching server admin zone
-- **Zone 3 to Zone 2** — Default zone reaching workstation zone
-
-Click on a violation count to visualize the violating relationships in the
-graph.
+The fine-grained queries (e.g. Tier 3 → Tier 0) are useful in large
+environments where the broad "Any" queries return too many results.
 
 ### Remediation
 
@@ -128,6 +134,3 @@ Common remediation steps for tier violations:
 - Separate service accounts by tier
 - Review and remove stale ACL entries
 - Implement proper tiered administration (separate admin accounts per tier)
-
-After making changes in your AD environment, re-import the data and
-recompute effective tiers to verify the violations are resolved.

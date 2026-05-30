@@ -123,7 +123,7 @@ impl CrustDatabase {
                     .cloned()
                     .or_else(|| n.labels.first().cloned())
                     .or_else(|| {
-                        n.properties.get("node_type").and_then(|v| {
+                        n.properties.get("label").and_then(|v| {
                             if let crustdb::PropertyValue::String(s) = v {
                                 Some(s.clone())
                             } else {

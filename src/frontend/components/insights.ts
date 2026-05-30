@@ -25,8 +25,7 @@ type TabId =
   | "stale-objects"
   | "account-exposure"
   | "choke-points"
-  | "unexpected-choke-points"
-  | "tier-violations";
+  | "unexpected-choke-points";
 
 /** Domain Admin Analysis data */
 interface DAAnalysisData {
@@ -57,28 +56,6 @@ interface StaleObjectsData {
   users: number;
   computers: number;
   thresholdDays: number;
-}
-
-/** A single tier violation edge */
-interface TierViolationEdge {
-  source_id: string;
-  target_id: string;
-  rel_type: string;
-}
-
-/** A single tier violation category */
-interface TierViolationCategory {
-  source_zone: number;
-  target_zone: number;
-  count: number;
-  edges: TierViolationEdge[];
-}
-
-/** Tier Violations response from API */
-interface TierViolationsData {
-  violations: TierViolationCategory[];
-  total_nodes: number;
-  total_edges: number;
 }
 
 /** Choke Point data */
@@ -123,10 +100,7 @@ interface InsightsState {
   staleState: TabState<StaleObjectsData>;
   accountExposureState: TabState<AccountExposureData>;
   chokePointsState: TabState<ChokePointsData>;
-  tierViolationsState: TabState<TierViolationsData>;
   staleThresholdDays: number;
-  computingEffectiveTiers: boolean;
-  effectiveTiersResult: { computed: number; violations: number } | null;
 }
 
 function createInitialInsightsState(): InsightsState {
@@ -140,10 +114,7 @@ function createInitialInsightsState(): InsightsState {
     staleState: { loading: false, error: null, data: null },
     accountExposureState: { loading: false, error: null, data: null },
     chokePointsState: { loading: false, error: null, data: null },
-    tierViolationsState: { loading: false, error: null, data: null },
     staleThresholdDays: 90,
-    computingEffectiveTiers: false,
-    effectiveTiersResult: null,
   };
 }
 
@@ -178,7 +149,6 @@ export async function openInsights(): Promise<void> {
   state.staleState = { loading: true, error: null, data: null };
   state.accountExposureState = { loading: true, error: null, data: null };
   state.chokePointsState = { loading: true, error: null, data: null };
-  state.tierViolationsState = { loading: true, error: null, data: null };
   state.chokePointsPage = 0;
   state.unexpectedChokePointsPage = 0;
   state.modalExpanded = false;
@@ -197,7 +167,6 @@ export async function openInsights(): Promise<void> {
   loadStaleObjects(gen);
   loadAccountExposure(gen);
   loadChokePoints(gen);
-  loadTierViolations(gen);
 }
 
 /** Close the modal */
@@ -277,7 +246,6 @@ function renderModal(): void {
         <option value="account-exposure" ${state.activeTab === "account-exposure" ? "selected" : ""}>Account Exposure</option>
         <option value="choke-points" ${state.activeTab === "choke-points" ? "selected" : ""}>Choke Points</option>
         <option value="unexpected-choke-points" ${state.activeTab === "unexpected-choke-points" ? "selected" : ""}>Unexpected Choke Points</option>
-        <option value="tier-violations" ${state.activeTab === "tier-violations" ? "selected" : ""}>Tier Violations</option>
       </select>
     </div>
     <div class="insight-tab-content" ${state.activeTab !== "da-analysis" ? "hidden" : ""} id="tab-da-analysis">
@@ -297,9 +265,6 @@ function renderModal(): void {
     </div>
     <div class="insight-tab-content" ${state.activeTab !== "unexpected-choke-points" ? "hidden" : ""} id="tab-unexpected-choke-points">
       ${renderUnexpectedChokePointsTab()}
-    </div>
-    <div class="insight-tab-content" ${state.activeTab !== "tier-violations" ? "hidden" : ""} id="tab-tier-violations">
-      ${renderTierViolationsTab()}
     </div>
   `;
 }
@@ -343,9 +308,6 @@ function updateTabContent(tabId: TabId): void {
         break;
       case "unexpected-choke-points":
         el.innerHTML = renderUnexpectedChokePointsTab();
-        break;
-      case "tier-violations":
-        el.innerHTML = renderTierViolationsTab();
         break;
     }
   }
@@ -714,108 +676,6 @@ function renderUnexpectedChokePointsTab(): string {
   `;
 }
 
-/** Render Tier Violations tab */
-function renderTierViolationsTab(): string {
-  if (state.tierViolationsState.loading) {
-    return `<div class="insight-loading"><div class="spinner"></div><span>Analyzing tier violations...</span></div>`;
-  }
-  if (state.tierViolationsState.error) {
-    return `<div class="insight-error">${escapeHtml(state.tierViolationsState.error)}</div>`;
-  }
-  if (!state.tierViolationsState.data) {
-    return `<div class="insight-error">No data available</div>`;
-  }
-
-  const { violations, total_nodes, total_edges } = state.tierViolationsState.data;
-
-  // Find each violation category (may be absent if backend returns fewer)
-  const v1to0 = violations.find((v) => v.source_zone === 1 && v.target_zone === 0);
-  const v2to1 = violations.find((v) => v.source_zone === 2 && v.target_zone === 1);
-  const v3to2 = violations.find((v) => v.source_zone === 3 && v.target_zone === 2);
-
-  const total = violations.reduce((sum, v) => sum + v.count, 0);
-
-  const descriptions: Record<string, string> = {
-    "1-0": "Server admin zone reaching domain admin zone",
-    "2-1": "Workstation zone reaching server admin zone",
-    "3-2": "Default zone reaching workstation zone",
-  };
-
-  const renderCard = (
-    v: TierViolationCategory | undefined,
-    srcZone: number,
-    tgtZone: number,
-    cardClass: string
-  ): string => {
-    const count = v?.count ?? 0;
-    const key = `${srcZone}-${tgtZone}`;
-    return `
-      <div class="insight-card ${cardClass}">
-        <div class="insight-card-value ${count > 0 ? "clickable" : ""}" ${count > 0 ? `data-query="tier-violation" data-sid="${key}" title="Click to view graph"` : ""}>${count.toLocaleString()}</div>
-        <div class="insight-card-label">Zone ${srcZone} &rarr; Zone ${tgtZone}</div>
-        <div class="insight-card-desc">${descriptions[key]}</div>
-      </div>
-    `;
-  };
-
-  const computeButton = state.computingEffectiveTiers
-    ? `<button class="btn btn-sm btn-secondary" disabled><span class="spinner spinner-sm"></span> Computing...</button>`
-    : `<button class="btn btn-sm btn-primary" data-action="compute-effective-tiers">Analyze Tier Violations</button>`;
-
-  const computeResult = state.effectiveTiersResult
-    ? `<div class="text-sm text-green-400 mt-2">Computed effective tiers for ${state.effectiveTiersResult.computed.toLocaleString()} nodes. Found ${state.effectiveTiersResult.violations.toLocaleString()} violation${state.effectiveTiersResult.violations === 1 ? "" : "s"}.</div>`
-    : "";
-
-  return `
-    <div class="insights-container">
-      <div class="insight-section">
-        <h3 class="insight-section-title">Tier Violations</h3>
-        <p class="insight-desc">
-          Relationships crossing tier zone boundaries. Nodes are assigned to the
-          most privileged zone they can reach (zone 0 = can reach tier-0 nodes, etc.).
-          Edges from a lower-privilege zone to a higher-privilege zone are violations.
-          ${total.toLocaleString()} total violation${total === 1 ? "" : "s"}
-          (${total_nodes.toLocaleString()} nodes, ${total_edges.toLocaleString()} relationships analyzed).
-        </p>
-        <div class="insight-cards">
-          ${renderCard(v1to0, 1, 0, "insight-card-primary")}
-          ${renderCard(v2to1, 2, 1, "insight-card-secondary")}
-          ${renderCard(v3to2, 3, 2, "")}
-        </div>
-        <div class="flex items-center gap-3 mt-3">
-          ${computeButton}
-          <span class="text-xs text-gray-500">Compute effective tiers via reverse BFS to update violation analysis</span>
-        </div>
-        ${computeResult}
-        <p class="text-xs text-gray-500 mt-2">Click on a number to visualize the graph</p>
-      </div>
-    </div>
-  `;
-}
-
-/** Compute effective tiers and reload violations */
-async function computeEffectiveTiers(): Promise<void> {
-  state.computingEffectiveTiers = true;
-  state.effectiveTiersResult = null;
-  updateTabContent("tier-violations");
-
-  try {
-    const result = await api.post<{ computed: number; violations: number }>("/api/graph/compute-effective-tiers", {});
-    state.effectiveTiersResult = result;
-    state.computingEffectiveTiers = false;
-    updateTabContent("tier-violations");
-
-    // Reload tier violations to reflect updated effective tiers
-    await loadTierViolations(loadGeneration);
-  } catch (err) {
-    state.computingEffectiveTiers = false;
-    const message = err instanceof Error ? err.message : "Failed to compute effective tiers";
-    state.effectiveTiersResult = null;
-    state.tierViolationsState = { loading: false, error: message, data: state.tierViolationsState.data };
-    updateTabContent("tier-violations");
-  }
-}
-
 /** Load Domain Admin Analysis data */
 async function loadDAAnalysis(generation: number): Promise<void> {
   state.daState = { loading: true, error: null, data: null };
@@ -1050,25 +910,6 @@ async function loadChokePoints(generation: number): Promise<void> {
   updateTabContent("choke-points");
 }
 
-/** Load Tier Violations data */
-async function loadTierViolations(generation: number): Promise<void> {
-  state.tierViolationsState = { loading: true, error: null, data: null };
-  updateTabContent("tier-violations");
-
-  try {
-    const data = await api.get<TierViolationsData>("/api/graph/tier-violations");
-    if (generation !== loadGeneration) return;
-    state.tierViolationsState = { loading: false, error: null, data };
-  } catch (err) {
-    if (generation !== loadGeneration) return;
-    const message = err instanceof Error ? err.message : "Failed to load tier violations";
-    state.tierViolationsState = { loading: false, error: message, data: null };
-  }
-
-  if (generation !== loadGeneration) return;
-  updateTabContent("tier-violations");
-}
-
 /** Execute a choke point graph query using direct IDs */
 async function executeChokePointQuery(sourceId: string, targetId: string, relType: string): Promise<void> {
   const query = `MATCH p=(a)-[r]->(b) WHERE a.objectid = '${sourceId}' AND b.objectid = '${targetId}' AND type(r) = '${relType}' RETURN p`;
@@ -1080,43 +921,6 @@ async function executeChokePointQuery(sourceId: string, targetId: string, relTyp
   } catch (err) {
     if (!(err instanceof QueryAbortedError)) {
       console.error("Failed to execute choke point query:", err);
-    }
-  }
-}
-
-/** Show tier violation edges as a graph using pre-fetched edge data */
-async function executeTierViolationGraph(sid: string): Promise<void> {
-  const data = state.tierViolationsState.data;
-  if (!data) return;
-
-  const parts = sid.split("-");
-  const srcZone = parseInt(parts[0] ?? "0", 10);
-  const tgtZone = parseInt(parts[1] ?? "0", 10);
-
-  const violation = data.violations.find((v) => v.source_zone === srcZone && v.target_zone === tgtZone);
-  if (!violation || violation.edges.length === 0) return;
-
-  // Build a query using the actual violating edge IDs
-  const pairs = violation.edges.slice(0, 500);
-  const conditions = pairs
-    .map(
-      (e) =>
-        `(a.objectid = '${e.source_id.replace(/'/g, "\\'")}' AND b.objectid = '${e.target_id.replace(/'/g, "\\'")}' AND type(r) = '${e.rel_type}')`
-    )
-    .join(" OR ");
-
-  const query = `MATCH p=(a)-[r]->(b) WHERE ${conditions} RETURN p`;
-
-  closeModal();
-
-  try {
-    const result = await executeQuery(query, { extractGraph: true });
-    if (result.graph && result.graph.nodes.length > 0) {
-      loadGraphData(result.graph as unknown as RawADGraph);
-    }
-  } catch (err) {
-    if (!(err instanceof QueryAbortedError)) {
-      console.error("Failed to load tier violation graph:", err);
     }
   }
 }
@@ -1227,13 +1031,6 @@ function handleClick(e: Event): void {
   const clickableValue = target.closest("[data-query]") as HTMLElement;
   if (clickableValue) {
     const queryType = clickableValue.getAttribute("data-query");
-    if (queryType === "tier-violation") {
-      const sid = clickableValue.getAttribute("data-sid");
-      if (sid) {
-        executeTierViolationGraph(sid);
-      }
-      return;
-    }
     if (queryType === "choke-point") {
       const sourceId = clickableValue.getAttribute("data-source-id");
       const targetId = clickableValue.getAttribute("data-target-id");
@@ -1275,7 +1072,6 @@ function handleClick(e: Event): void {
       loadStaleObjects(refreshGen);
       loadAccountExposure(refreshGen);
       loadChokePoints(refreshGen);
-      loadTierViolations(refreshGen);
       break;
     }
     case "choke-page-prev":
@@ -1312,9 +1108,6 @@ function handleClick(e: Event): void {
       state.chokePointsPage = 0;
       state.unexpectedChokePointsPage = 0;
       loadChokePoints(loadGeneration);
-      break;
-    case "compute-effective-tiers":
-      computeEffectiveTiers();
       break;
   }
 }

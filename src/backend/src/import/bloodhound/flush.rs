@@ -160,51 +160,59 @@ impl BloodHoundImporter {
         self.flush_edge_buffer(progress)
     }
 
-    /// Assign tier 0 to direct members of Domain Admins, Domain Controllers,
-    /// Enterprise Domain Controllers, and Administrators; tier 3 to direct members
-    /// of Domain Computers. Only sets tier where not already explicitly defined.
+    /// Assign automatic tiers based on well-known group membership.
     ///
-    /// Also sets tier 0 on the well-known group objects themselves, so that
-    /// placeholder nodes (created before groups.json is imported) are correctly
-    /// assigned and participate in effective-tier propagation.
+    /// Applied in priority order (highest first), each query only sets tier
+    /// where it is not already assigned (`tier IS NULL`), so a higher-priority
+    /// tier that is set first cannot be overwritten by a lower-priority one.
+    ///
+    /// Priority order:
+    ///   tier 0  — well-known privileged group objects and their members
+    ///   tier 2  — Domain Computers group object and its members
+    ///   tier 3  — Domain Users members
+    ///
+    /// The group-object queries also cover placeholder nodes created by edge
+    /// insertion before their JSON file is imported.
     fn assign_member_tiers(&self) {
-        // Well-known SIDs: see https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
-        //
-        // Set tier 0 on the group objects themselves first. When users.json is
-        // imported before groups.json, CrustDB creates placeholder group nodes
-        // that never go through extract_node/assign_tier, leaving them without a
-        // tier property. Without this query those placeholders have no tier and
-        // compute_effective_tiers can't propagate tier 0 from them.
-        let tier_zero_groups_query = "\
-            MATCH (g) \
-            WHERE (g.objectid ENDS WITH '-512' \
-                OR g.objectid ENDS WITH '-516' \
-                OR g.objectid ENDS WITH '-S-1-5-9' \
-                OR g.objectid = 'S-1-5-9' \
-                OR g.objectid ENDS WITH '-544') \
+        // Build WHERE clauses for all well-known tier-0 RIDs.
+        // See: https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
+        let rid_clauses = super::tier_zero_rids::ALL
+            .iter()
+            .map(|rid| format!("g.objectid ENDS WITH '{rid}'"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+
+        let tier_zero_groups_query = format!(
+            "MATCH (g) WHERE ({rid_clauses} OR g.objectid = 'S-1-5-9') \
+             AND g.tier IS NULL SET g.tier = 0"
+        );
+        let tier_zero_members_query = format!(
+            "MATCH (n)-[:MemberOf]->(g) WHERE ({rid_clauses} OR g.objectid = 'S-1-5-9') \
+             AND n.tier IS NULL SET n.tier = 0"
+        );
+
+        let tier_two_groups_query = "\
+            MATCH (g) WHERE g.objectid ENDS WITH '-515' \
               AND g.tier IS NULL \
-            SET g.tier = 0";
-
-        let tier_zero_query = "\
-            MATCH (n)-[:MemberOf]->(g) \
-            WHERE (g.objectid ENDS WITH '-512' \
-                OR g.objectid ENDS WITH '-516' \
-                OR g.objectid ENDS WITH '-S-1-5-9' \
-                OR g.objectid = 'S-1-5-9' \
-                OR g.objectid ENDS WITH '-544') \
-              AND n.tier IS NULL \
-            SET n.tier = 0";
-
-        let tier_three_query = "\
+            SET g.tier = 2";
+        let tier_two_members_query = "\
             MATCH (n)-[:MemberOf]->(g) \
             WHERE g.objectid ENDS WITH '-515' \
+              AND n.tier IS NULL \
+            SET n.tier = 2";
+
+        let tier_three_members_query = "\
+            MATCH (n)-[:MemberOf]->(g) \
+            WHERE g.objectid ENDS WITH '-513' \
               AND n.tier IS NULL \
             SET n.tier = 3";
 
         for (label, query) in [
-            ("tier-0 group objects", tier_zero_groups_query),
-            ("tier-0 group members", tier_zero_query),
-            ("Domain Computers members", tier_three_query),
+            ("tier-0 group objects", tier_zero_groups_query.as_str()),
+            ("tier-0 group members", tier_zero_members_query.as_str()),
+            ("Domain Computers group object", tier_two_groups_query),
+            ("Domain Computers members", tier_two_members_query),
+            ("Domain Users members", tier_three_members_query),
         ] {
             match self.db.run_custom_query(query) {
                 Ok(_) => info!("Assigned tiers to {}", label),

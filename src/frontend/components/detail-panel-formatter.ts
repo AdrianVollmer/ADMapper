@@ -40,8 +40,7 @@ export const PROPERTY_PRIORITY: Record<string, number> = {
   enabled: 50,
   admincount: 51,
   tier: 52,
-  effective_tier: 53,
-  sensitive: 54,
+  sensitive: 53,
 
   // Computer info
   operatingsystem: 60,
@@ -85,8 +84,7 @@ export const PROPERTY_LABELS: Record<string, string> = {
   whencreated: "Created",
   whenchanged: "Changed",
   admincount: "Admin Count",
-  tier: "Tier (Assigned)",
-  effective_tier: "Tier (Effective)",
+  tier: "Tier",
   sensitive: "Sensitive",
 
   // Computer
@@ -182,7 +180,7 @@ export function formatValue(key: string, value: unknown): string {
 
     // Heuristic timestamp detection: only try for values that could plausibly
     // be a Unix/JS/FILETIME epoch. Skip small values (0–1e9) like tier numbers
-    // to avoid formatTimestamp(0) returning "Never" for effective_tier = 0.
+    // to avoid formatTimestamp(0) returning "Never" for tier = 0.
     if (value > 1e9) {
       const tsResult = formatTimestamp(value);
       if (tsResult !== String(value)) {

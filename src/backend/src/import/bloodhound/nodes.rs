@@ -158,16 +158,7 @@ impl BloodHoundImporter {
         }
     }
 
-    /// The four well-known group objects that are automatically tier 0.
-    /// Direct members are handled by `assign_member_tiers` after all edges are imported.
-    const TIER_ZERO_GROUP_SIDS: &'static [&'static str] = &[
-        "-512",     // Domain Admins         (S-1-5-21-<domain>-512)
-        "-516",     // Domain Controllers    (S-1-5-21-<domain>-516)
-        "-544",     // Administrators        (S-1-5-32-544)
-        "-S-1-5-9", // Enterprise Domain Controllers (domain-qualified form)
-    ];
-
-    /// Direct members of Domain Computers are automatically tier 3.
+    /// Direct members of Domain Computers are automatically tier 2.
     const DOMAIN_COMPUTERS_SID: &'static str = "-515";
 
     /// Assign tier to the group object itself based on its SID.
@@ -177,7 +168,7 @@ impl BloodHoundImporter {
             return;
         }
 
-        let is_tier_zero = Self::TIER_ZERO_GROUP_SIDS
+        let is_tier_zero = super::tier_zero_rids::ALL
             .iter()
             .any(|s| objectid.ends_with(s))
             || objectid == "S-1-5-9"; // bare well-known SID for Enterprise Domain Controllers
@@ -188,7 +179,7 @@ impl BloodHoundImporter {
         }
 
         if objectid.ends_with(Self::DOMAIN_COMPUTERS_SID) {
-            props.insert("tier".to_string(), JsonValue::Number(3.into()));
+            props.insert("tier".to_string(), JsonValue::Number(2.into()));
         }
     }
 }

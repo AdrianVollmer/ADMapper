@@ -186,9 +186,7 @@ pub fn run_desktop(database_url: Option<&str>) {
             tauri_commands::delete_edge,
             // Insights (additional)
             tauri_commands::graph_choke_points,
-            tauri_commands::tier_violations,
             tauri_commands::batch_set_tier,
-            tauri_commands::compute_effective_tiers,
             // Query
             tauri_commands::graph_query,
             // Query history
@@ -311,11 +309,6 @@ pub fn create_api_router(state: AppState) -> Router {
         )
         .route("/api/graph/insights", get(handlers::graph_insights))
         .route("/api/graph/choke-points", get(handlers::graph_choke_points))
-        .route("/api/graph/tier-violations", get(handlers::tier_violations))
-        .route(
-            "/api/graph/compute-effective-tiers",
-            post(handlers::compute_effective_tiers),
-        )
         .route("/api/graph/generate", post(handlers::generate_data))
         .route("/api/graph/query", post(handlers::graph_query))
         // Query progress and abort

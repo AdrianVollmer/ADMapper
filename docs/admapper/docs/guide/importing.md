@@ -68,6 +68,23 @@ rusthound-ce -d DOMAIN.LOCAL -u USERNAME@DOMAIN.LOCAL -z
 - Missing target nodes create placeholder entries
 - Placeholders are updated when the full node data is imported
 
+### Automatic Tier Assignment
+
+After import completes, ADMapper automatically assigns tiers to nodes based on
+well-known group membership (using RID suffix matching):
+
+- **Tier 0** — the group objects themselves and direct members of all well-known
+  privileged groups (Domain Admins, Domain Controllers, Enterprise Admins,
+  Schema Admins, Administrators, Account Operators, Backup Operators, etc.)
+- **Tier 2** — the Domain Computers group object and its direct members
+- **Tier 3** — direct members of Domain Users
+
+These assignments are applied in priority order: tier 0 is set first, so a
+Domain Admin who is also a member of Domain Users receives tier 0, not tier 3.
+
+Tier 1 (member servers, application servers) has no automatic assignment and
+must be classified manually using the **Edit Tiers** modal.
+
 ## Clearing Data
 
 To start fresh, use the clear button in the database menu.
