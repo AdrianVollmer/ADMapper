@@ -19,6 +19,8 @@ import {
   QueryAbortedError,
   getQueryErrorMessage,
   formatDuration,
+  filterForegroundQueryTexts,
+  navigateHistoryIndex,
 } from "../utils/query";
 
 interface RunQueryState {
@@ -29,6 +31,8 @@ interface RunQueryState {
   currentDurationMs: number;
   durationInterval: ReturnType<typeof setInterval> | null;
   queryStartTime: number | null;
+  historyEntries: string[];
+  historyIndex: number;
 }
 
 function createInitialRunQueryState(): RunQueryState {
@@ -40,6 +44,8 @@ function createInitialRunQueryState(): RunQueryState {
     currentDurationMs: 0,
     durationInterval: null,
     queryStartTime: null,
+    historyEntries: [],
+    historyIndex: 0,
   };
 }
 
@@ -98,10 +104,10 @@ export async function openRunQuery(): Promise<void> {
   state.queryStartTime = null;
 
   try {
-    const data = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=1");
-    if (data.entries.length > 0) {
-      state.queryText = data.entries[0]?.query ?? "";
-    }
+    const data = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=100");
+    state.historyEntries = filterForegroundQueryTexts(data.entries);
+    state.historyIndex = 0;
+    state.queryText = state.historyEntries[0] ?? "";
   } catch {
     // Ignore errors, just start with empty query
   }
@@ -137,6 +143,60 @@ function getDocsUrl(): string {
   return "https://neo4j.com/docs/cypher-manual/current/";
 }
 
+function renderHistoryNav(): string {
+  const { historyEntries, historyIndex } = state;
+  if (historyEntries.length === 0) return "";
+
+  const canGoOlder = historyIndex < historyEntries.length - 1;
+  const canGoNewer = historyIndex > 0;
+  const position = historyIndex + 1;
+  const total = historyEntries.length;
+
+  return `
+    <div class="history-nav">
+      <button
+        class="history-nav-btn"
+        data-action="history-older"
+        title="Older query"
+        ${canGoOlder ? "" : "disabled"}
+        aria-label="Go to older query"
+      >&#8592;</button>
+      <span class="history-nav-counter">${position} / ${total}</span>
+      <button
+        class="history-nav-btn"
+        data-action="history-newer"
+        title="Newer query"
+        ${canGoNewer ? "" : "disabled"}
+        aria-label="Go to newer query"
+      >&#8594;</button>
+    </div>
+  `;
+}
+
+function navigateHistory(direction: "older" | "newer"): void {
+  const { historyEntries, historyIndex } = state;
+  if (historyEntries.length === 0) return;
+
+  const newIndex = navigateHistoryIndex(historyIndex, direction, historyEntries.length);
+  if (newIndex === historyIndex) return;
+
+  state.historyIndex = newIndex;
+
+  // Update only the textarea and nav controls — no full re-render
+  const textarea = document.getElementById("query-input") as HTMLTextAreaElement | null;
+  if (textarea) {
+    textarea.value = historyEntries[newIndex] ?? "";
+  }
+
+  const navContainer = document.querySelector(".query-label-row");
+  if (navContainer) {
+    const oldNav = navContainer.querySelector(".history-nav");
+    if (oldNav) {
+      oldNav.outerHTML = renderHistoryNav();
+    }
+  }
+}
+
 function renderModal(): void {
   const body = document.getElementById("run-query-body");
   const footer = document.getElementById("run-query-footer");
@@ -157,7 +217,10 @@ function renderModal(): void {
       </div>
 
       <div class="form-group">
-        <label class="form-label" for="query-input">Query</label>
+        <div class="query-label-row">
+          <label class="form-label" for="query-input">Query</label>
+          ${renderHistoryNav()}
+        </div>
         <textarea
           id="query-input"
           class="form-textarea query-textarea"
@@ -320,6 +383,12 @@ function handleModalClick(e: Event): void {
       break;
     case "abort":
       abortCurrentForegroundQuery();
+      break;
+    case "history-older":
+      navigateHistory("older");
+      break;
+    case "history-newer":
+      navigateHistory("newer");
       break;
   }
 }

@@ -10,7 +10,7 @@
  */
 
 import { api, ApiClientError } from "../api/client";
-import type { QueryStartResponse, QueryProgressEvent, GraphData, QueryResult } from "../api/types";
+import type { QueryStartResponse, QueryProgressEvent, GraphData, QueryResult, QueryHistoryEntry } from "../api/types";
 import { subscribe, QUERY_PROGRESS_CHANNEL } from "../api/transport";
 
 /** Callback for when a foreground query starts */
@@ -308,6 +308,19 @@ export async function executeQueryWithHistory(
   // Support legacy boolean argument for extractGraph
   const opts: QueryExecutionOptions = typeof options === "boolean" ? { extractGraph: options } : options;
   return executeQuery(query, opts);
+}
+
+/** Extract query strings from foreground (non-background) history entries, preserving order. */
+export function filterForegroundQueryTexts(entries: QueryHistoryEntry[]): string[] {
+  return entries.filter((e) => !e.background).map((e) => e.query);
+}
+
+/** Compute new history index after a navigation step, clamped to valid range.
+ *  "older" moves toward higher indices (earlier entries), "newer" toward 0.
+ */
+export function navigateHistoryIndex(current: number, direction: "older" | "newer", count: number): number {
+  if (direction === "older") return Math.min(current + 1, count - 1);
+  return Math.max(current - 1, 0);
 }
 
 /** Format duration in human readable format */

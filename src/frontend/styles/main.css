@@ -1091,6 +1091,24 @@
     @apply min-h-[250px] font-mono text-sm leading-relaxed;
   }
 
+  .query-label-row {
+    @apply flex items-center justify-between;
+  }
+
+  .history-nav {
+    @apply flex items-center gap-1;
+  }
+
+  .history-nav-btn {
+    @apply px-1.5 py-0.5 text-sm text-gray-400 rounded
+           hover:text-gray-200 hover:bg-gray-700 transition-colors
+           disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400;
+  }
+
+  .history-nav-counter {
+    @apply text-xs text-gray-500 tabular-nums min-w-[3rem] text-center;
+  }
+
   .query-error {
     @apply flex items-start gap-3 p-3 rounded-lg bg-red-900/30 border border-red-700/50 text-red-200
            max-h-40 overflow-y-auto;
