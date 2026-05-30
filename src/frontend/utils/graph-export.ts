@@ -2,18 +2,24 @@
  * Utilities for parsing ADMapper's JSON export format back into graph data.
  */
 
-import type { RawADGraph } from "../graph/types";
+import type { RawADGraph, RawADNode } from "../graph/types";
+
+export interface ParsedExport {
+  graph: RawADGraph;
+  /** The Cypher query that produced the graph, if the export included one. */
+  query?: string;
+}
 
 /**
- * Parse a JSON string produced by "Export JSON Data" and return a RawADGraph
- * suitable for passing to loadGraphData().
+ * Parse a JSON string produced by "Export JSON Data" and return the graph and
+ * the optional embedded query.
  *
  * The export format stores the display name in a field called "label"; RawADNode
  * calls the same field "name". Everything else maps 1-to-1.
  *
  * @throws Error with a descriptive message on malformed or structurally invalid input.
  */
-export function parseExportJSON(json: string): RawADGraph {
+export function parseExportJSON(json: string): ParsedExport {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -35,7 +41,7 @@ export function parseExportJSON(json: string): RawADGraph {
   }
 
   const nodes = (obj["nodes"] as Record<string, unknown>[]).map((n) => {
-    const node: import("../graph/types").RawADNode = {
+    const node: RawADNode = {
       id: String(n["id"] ?? ""),
       name: String(n["label"] ?? n["id"] ?? ""),
       type: String(n["type"] ?? "Unknown"),
@@ -54,5 +60,8 @@ export function parseExportJSON(json: string): RawADGraph {
     type: String(r["type"] ?? "Unknown"),
   }));
 
-  return { nodes, relationships };
+  const queryValue = typeof obj["query"] === "string" ? obj["query"] : undefined;
+  const result: ParsedExport = { graph: { nodes, relationships } };
+  if (queryValue !== undefined) result.query = queryValue;
+  return result;
 }

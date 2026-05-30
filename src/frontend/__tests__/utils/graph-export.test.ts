@@ -22,33 +22,33 @@ const VALID_EXPORT = {
 
 describe("parseExportJSON", () => {
   it("returns a RawADGraph with correctly mapped nodes", () => {
-    const result = parseExportJSON(JSON.stringify(VALID_EXPORT));
-    expect(result.nodes).toHaveLength(2);
-    expect(result.nodes[0]).toMatchObject({ id: "n1", name: "Alice", type: "User", x: 10, y: 20 });
-    expect(result.nodes[1]).toMatchObject({ id: "n2", name: "Admins", type: "Group" });
+    const { graph } = parseExportJSON(JSON.stringify(VALID_EXPORT));
+    expect(graph.nodes).toHaveLength(2);
+    expect(graph.nodes[0]).toMatchObject({ id: "n1", name: "Alice", type: "User", x: 10, y: 20 });
+    expect(graph.nodes[1]).toMatchObject({ id: "n2", name: "Admins", type: "Group" });
   });
 
   it("maps export 'label' field to RawADNode 'name'", () => {
-    const result = parseExportJSON(JSON.stringify(VALID_EXPORT));
-    expect(result.nodes[0]!.name).toBe("Alice");
+    const { graph } = parseExportJSON(JSON.stringify(VALID_EXPORT));
+    expect(graph.nodes[0]!.name).toBe("Alice");
   });
 
   it("preserves node properties", () => {
-    const result = parseExportJSON(JSON.stringify(VALID_EXPORT));
-    expect(result.nodes[0]!.properties).toEqual({ objectid: "S-1" });
+    const { graph } = parseExportJSON(JSON.stringify(VALID_EXPORT));
+    expect(graph.nodes[0]!.properties).toEqual({ objectid: "S-1" });
   });
 
   it("returns correctly mapped relationships", () => {
-    const result = parseExportJSON(JSON.stringify(VALID_EXPORT));
-    expect(result.relationships).toHaveLength(1);
-    expect(result.relationships[0]).toMatchObject({ source: "n1", target: "n2", type: "MemberOf" });
+    const { graph } = parseExportJSON(JSON.stringify(VALID_EXPORT));
+    expect(graph.relationships).toHaveLength(1);
+    expect(graph.relationships[0]).toMatchObject({ source: "n1", target: "n2", type: "MemberOf" });
   });
 
   it("handles empty nodes and relationships arrays", () => {
     const empty = { ...VALID_EXPORT, nodes: [], relationships: [], nodeCount: 0, edgeCount: 0 };
-    const result = parseExportJSON(JSON.stringify(empty));
-    expect(result.nodes).toEqual([]);
-    expect(result.relationships).toEqual([]);
+    const { graph } = parseExportJSON(JSON.stringify(empty));
+    expect(graph.nodes).toEqual([]);
+    expect(graph.relationships).toEqual([]);
   });
 
   it("falls back to id when label is missing from a node", () => {
@@ -56,8 +56,25 @@ describe("parseExportJSON", () => {
       ...VALID_EXPORT,
       nodes: [{ id: "n1", type: "User", x: 0, y: 0, properties: {} }],
     };
-    const result = parseExportJSON(JSON.stringify(noLabel));
-    expect(result.nodes[0]!.name).toBe("n1");
+    const { graph } = parseExportJSON(JSON.stringify(noLabel));
+    expect(graph.nodes[0]!.name).toBe("n1");
+  });
+
+  it("returns the query field when present", () => {
+    const withQuery = { ...VALID_EXPORT, query: "MATCH (n:User) RETURN n" };
+    const { query } = parseExportJSON(JSON.stringify(withQuery));
+    expect(query).toBe("MATCH (n:User) RETURN n");
+  });
+
+  it("returns undefined query when field is absent", () => {
+    const { query } = parseExportJSON(JSON.stringify(VALID_EXPORT));
+    expect(query).toBeUndefined();
+  });
+
+  it("ignores non-string query field", () => {
+    const badQuery = { ...VALID_EXPORT, query: 42 };
+    const { query } = parseExportJSON(JSON.stringify(badQuery));
+    expect(query).toBeUndefined();
   });
 });
 

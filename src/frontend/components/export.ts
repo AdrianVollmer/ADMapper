@@ -8,6 +8,7 @@
 import { getRenderer, loadGraphData } from "./graph-view";
 import { showError, showInfo, showSuccess } from "../utils/notifications";
 import { api, isRunningInTauri } from "../api/client";
+import type { QueryHistoryResponse } from "../api/types";
 import htmlTemplate from "../export-graph-template.html?raw";
 import { parseExportJSON } from "../utils/graph-export";
 
@@ -194,13 +195,24 @@ export async function exportJSON(): Promise<void> {
       });
     });
 
-    const data = {
+    // Embed the most recent foreground query so it can be recovered on import
+    let exportedQuery: string | undefined;
+    try {
+      const history = await api.get<QueryHistoryResponse>("/api/query-history?page=1&per_page=10");
+      const latest = history.entries.find((e) => !e.background && e.query);
+      exportedQuery = latest?.query;
+    } catch {
+      // Non-fatal: export proceeds without the query field
+    }
+
+    const data: Record<string, unknown> = {
       exportedAt: new Date().toISOString(),
       nodeCount: nodes.length,
       edgeCount: relationships.length,
       nodes,
       relationships,
     };
+    if (exportedQuery) data["query"] = exportedQuery;
 
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -377,9 +389,18 @@ export async function importJSONView(): Promise<void> {
     const json = await pickAndReadJsonFile();
     if (json === null) return; // User cancelled
 
-    const rawGraph = parseExportJSON(json);
-    await loadGraphData(rawGraph);
-    showSuccess(`Loaded ${rawGraph.nodes.length} nodes, ${rawGraph.relationships.length} relationships`);
+    const { graph, query } = parseExportJSON(json);
+    await loadGraphData(graph);
+
+    if (query) {
+      try {
+        await api.post("/api/query-history", { name: "Imported view", query, result_count: null });
+      } catch {
+        // Non-fatal: graph is loaded, history entry is best-effort
+      }
+    }
+
+    showSuccess(`Loaded ${graph.nodes.length} nodes, ${graph.relationships.length} relationships`);
   } catch (err) {
     showError("Failed to import JSON: " + (err instanceof Error ? err.message : String(err)));
   }
