@@ -15,7 +15,13 @@ import {
   LABEL_COLOR,
   DEFAULT_RELATIONSHIP_COLOR,
 } from "./theme";
-import { isNodeCollapsed, getHiddenChildCount, getHiddenNodeIds, toggleNodeCollapse } from "./collapse";
+import {
+  isNodeCollapsed,
+  getHiddenChildCount,
+  getHiddenNodeIds,
+  toggleNodeCollapse,
+  getCollapsedChildren,
+} from "./collapse";
 import { createSharedNodeImageProgram, createSharedCurvedArrowProgram, drawNodeLabel } from "./programs";
 import { getFixedNodeSizes, setFixedNodeSizesCallback } from "../components/settings";
 
@@ -514,6 +520,22 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   sigma.on("doubleClickNode", (event) => {
     // Prevent Sigma's default double-click zoom
     event.preventSigmaDefault();
+
+    // Before expanding, position children to the left of the parent so they
+    // appear near their parent rather than at their stale initial positions.
+    // Hidden nodes are excluded from layout computation and keep random coords.
+    if (isNodeCollapsed(event.node)) {
+      const children = getCollapsedChildren(event.node);
+      const parentX: number = graph.getNodeAttribute(event.node, "x") ?? 0;
+      const parentY: number = graph.getNodeAttribute(event.node, "y") ?? 0;
+      const horizontalOffset = 150;
+      const verticalSpacing = 100;
+      const startY = parentY - ((children.length - 1) * verticalSpacing) / 2;
+      for (let i = 0; i < children.length; i++) {
+        graph.setNodeAttribute(children[i]!, "x", parentX - horizontalOffset);
+        graph.setNodeAttribute(children[i]!, "y", startY + i * verticalSpacing);
+      }
+    }
 
     // Toggle collapse state
     toggleNodeCollapse(graph, event.node);

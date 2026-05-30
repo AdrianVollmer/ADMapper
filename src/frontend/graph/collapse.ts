@@ -52,6 +52,11 @@ export function expandNode(nodeId: string): void {
   collapsedNodes.delete(nodeId);
 }
 
+/** Get the node IDs currently hidden under a collapsed node */
+export function getCollapsedChildren(nodeId: string): string[] {
+  return Array.from(collapsedNodes.get(nodeId) ?? []);
+}
+
 /** Toggle collapse state of a node */
 export function toggleNodeCollapse(graph: ADGraphType, nodeId: string): boolean {
   if (isNodeCollapsed(nodeId)) {

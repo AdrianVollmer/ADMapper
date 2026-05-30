@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   isNodeCollapsed,
   getHiddenChildCount,
+  getCollapsedChildren,
   collapseNode,
   expandNode,
   toggleNodeCollapse,
@@ -155,6 +156,40 @@ describe("expandNode", () => {
     expandNode("hub");
     expect(isNodeCollapsed("hub")).toBe(false);
     expect(getHiddenChildCount("hub")).toBe(0);
+  });
+});
+
+// ============================================================================
+// getCollapsedChildren
+// ============================================================================
+
+describe("getCollapsedChildren", () => {
+  it("returns hidden child IDs for a collapsed node", () => {
+    const graph = buildTestGraph();
+    collapseNode(graph, "hub");
+
+    const children = getCollapsedChildren("hub");
+    expect(children).toHaveLength(5);
+    for (let i = 1; i <= 5; i++) {
+      expect(children).toContain(`member-${i}`);
+    }
+  });
+
+  it("returns empty array for an uncollapsed node", () => {
+    buildTestGraph();
+    // hub is not collapsed
+    expect(getCollapsedChildren("hub")).toEqual([]);
+  });
+
+  it("returns empty array for a non-existent node", () => {
+    expect(getCollapsedChildren("does-not-exist")).toEqual([]);
+  });
+
+  it("returns empty array after expanding", () => {
+    const graph = buildTestGraph();
+    collapseNode(graph, "hub");
+    expandNode("hub");
+    expect(getCollapsedChildren("hub")).toEqual([]);
   });
 });
 

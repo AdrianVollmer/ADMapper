@@ -68,7 +68,13 @@ export {
 } from "./theme";
 
 // Collapse functionality
-export { isNodeCollapsed, getHiddenChildCount, toggleNodeCollapse, clearCollapseState } from "./collapse";
+export {
+  isNodeCollapsed,
+  getHiddenChildCount,
+  getCollapsedChildren,
+  toggleNodeCollapse,
+  clearCollapseState,
+} from "./collapse";
 
 // Label visibility
 export {

@@ -225,7 +225,10 @@ describe("Tauri API compatibility", () => {
         .replace(/\/api\/graph\/node\/:param\/owned/, "/api/graph/node/:id/owned")
         .replace(/\/api\/graph\/node\/:param$/, "/api/graph/node/:id")
         .replace(/\/api\/graph\/nodes\/:param$/, "/api/graph/nodes/:id")
-        .replace(/\/api\/graph\/relationships\/:param\/:param\/:param$/, "/api/graph/relationships/:source/:target/:rel_type")
+        .replace(
+          /\/api\/graph\/relationships\/:param\/:param\/:param$/,
+          "/api/graph/relationships/:source/:target/:rel_type"
+        )
         .replace(/\/api\/query-history\/:param$/, "/api/query-history/:id")
         .replace(/\/api\/query\/abort\/:param$/, "/api/query/abort/:id")
         .replace(/\/api\/query\/progress\/:param$/, "/api/query/progress/:id")
@@ -265,8 +268,7 @@ describe("Tauri API compatibility", () => {
         // Extract the URL argument (first string/template literal after the call)
         const afterCall = line.slice(line.indexOf(callMatch[0]!) + callMatch[0]!.length);
         const urlMatch =
-          afterCall.match(/[<(][^"'`]*["'`](\/api\/[^"'`]*)["'`]/) ??
-          afterCall.match(/["'`](\/api\/[^"'`]*)["'`]/);
+          afterCall.match(/[<(][^"'`]*["'`](\/api\/[^"'`]*)["'`]/) ?? afterCall.match(/["'`](\/api\/[^"'`]*)["'`]/);
         if (!urlMatch) continue;
 
         const rawUrl = urlMatch[1]!;
