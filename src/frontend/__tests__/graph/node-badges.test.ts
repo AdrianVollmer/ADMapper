@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import {
-  getShowNodeBadges,
-  setShowNodeBadges,
-  toggleShowNodeBadges,
-} from "../../components/settings";
+import { getShowNodeBadges, setShowNodeBadges, toggleShowNodeBadges } from "../../components/settings";
 
 describe("node badges toggle", () => {
   beforeEach(() => {

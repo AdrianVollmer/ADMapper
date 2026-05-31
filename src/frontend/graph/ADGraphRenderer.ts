@@ -219,7 +219,8 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
   }
 
   // Custom hover renderer: draws a glow effect behind the hovered node,
-  // then redraws the collapse badge on top so it is never occluded.
+  // then redraws all badges on top so they are never occluded by the
+  // hoverNodes WebGL canvas (which re-renders the node icon on top of labels).
   function drawNodeHover(
     context: CanvasRenderingContext2D,
     data: { key?: string; x: number; y: number; size: number; color: string },
@@ -228,12 +229,12 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
     const isSelected = data.key ? selectedNodes.has(data.key) : false;
 
     if (isSelected) {
-      // Selected: red, tight, intense glow
-      const glowRadius = data.size * 1.8;
-      const gradient = context.createRadialGradient(data.x, data.y, data.size * 0.8, data.x, data.y, glowRadius);
-      gradient.addColorStop(0, "rgba(255, 50, 50, 1)");
-      gradient.addColorStop(0.6, "rgba(255, 50, 50, 0.6)");
-      gradient.addColorStop(1, "rgba(255, 50, 50, 0)");
+      // Selected: red, soft glow matching hover intensity
+      const glowRadius = data.size * 2;
+      const gradient = context.createRadialGradient(data.x, data.y, data.size * 0.5, data.x, data.y, glowRadius);
+      gradient.addColorStop(0, "rgba(255, 60, 60, 0.6)");
+      gradient.addColorStop(0.5, "rgba(255, 60, 60, 0.2)");
+      gradient.addColorStop(1, "rgba(255, 60, 60, 0)");
 
       context.beginPath();
       context.arc(data.x, data.y, glowRadius, 0, Math.PI * 2);
@@ -253,8 +254,19 @@ export function createRenderer(options: RendererOptions): ADGraphRenderer {
       context.fill();
     }
 
-    // Redraw badge on top of glow so it's never hidden
+    // Redraw all badges on top of glow so they're never hidden by the node icon
     drawCollapseBadge(context, data);
+
+    if (data.key && getShowNodeBadges()) {
+      const attrs = graph.getNodeAttributes(data.key) as ADNodeAttributes;
+      const props = attrs.properties;
+      const status: NodeStatusData = {};
+      if (props?.owned !== undefined) status.owned = props.owned as boolean;
+      if (props?.enabled !== undefined) status.enabled = props.enabled as boolean | null;
+      if (props?.tier !== undefined) status.tier = props.tier as number | null;
+      drawStatusRing(context, data.x, data.y, data.size, status, currentTheme);
+      drawTierBadge(context, data.x, data.y, data.size, status);
+    }
   }
 
   // Create shared node image and curved arrow programs

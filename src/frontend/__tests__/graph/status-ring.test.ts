@@ -9,24 +9,50 @@ function makeMockCtx() {
     stroke: vi.fn(),
     fill: vi.fn(),
     fillText: vi.fn(),
-    get strokeStyle() { return state.strokeStyle; },
-    set strokeStyle(v: string) { state.strokeStyle = v; },
-    get fillStyle() { return state.fillStyle; },
-    set fillStyle(v: string) { state.fillStyle = v; },
-    get lineWidth() { return state.lineWidth; },
-    set lineWidth(v: number) { state.lineWidth = v; },
-    get font() { return state.font; },
-    set font(v: string) { state.font = v; },
-    get textAlign() { return state.textAlign; },
-    set textAlign(v: string) { state.textAlign = v; },
-    get textBaseline() { return state.textBaseline; },
-    set textBaseline(v: string) { state.textBaseline = v; },
+    get strokeStyle() {
+      return state.strokeStyle;
+    },
+    set strokeStyle(v: string) {
+      state.strokeStyle = v;
+    },
+    get fillStyle() {
+      return state.fillStyle;
+    },
+    set fillStyle(v: string) {
+      state.fillStyle = v;
+    },
+    get lineWidth() {
+      return state.lineWidth;
+    },
+    set lineWidth(v: number) {
+      state.lineWidth = v;
+    },
+    get font() {
+      return state.font;
+    },
+    set font(v: string) {
+      state.font = v;
+    },
+    get textAlign() {
+      return state.textAlign;
+    },
+    set textAlign(v: string) {
+      state.textAlign = v;
+    },
+    get textBaseline() {
+      return state.textBaseline;
+    },
+    set textBaseline(v: string) {
+      state.textBaseline = v;
+    },
   } as unknown as CanvasRenderingContext2D;
 }
 
 describe("drawStatusRing", () => {
   let ctx: CanvasRenderingContext2D;
-  beforeEach(() => { ctx = makeMockCtx(); });
+  beforeEach(() => {
+    ctx = makeMockCtx();
+  });
 
   it("draws nothing when no status applies", () => {
     drawStatusRing(ctx, 100, 100, 20, {}, "dark");
@@ -47,8 +73,12 @@ describe("drawStatusRing", () => {
   it("uses red for owned nodes", () => {
     const calls: string[] = [];
     Object.defineProperty(ctx, "strokeStyle", {
-      set(v: string) { calls.push(v); },
-      get() { return ""; },
+      set(v: string) {
+        calls.push(v);
+      },
+      get() {
+        return "";
+      },
     });
     drawStatusRing(ctx, 100, 100, 20, { owned: true }, "dark");
     expect(calls).toContain("#ef4444");
@@ -57,8 +87,12 @@ describe("drawStatusRing", () => {
   it("uses grey for disabled nodes", () => {
     const calls: string[] = [];
     Object.defineProperty(ctx, "strokeStyle", {
-      set(v: string) { calls.push(v); },
-      get() { return ""; },
+      set(v: string) {
+        calls.push(v);
+      },
+      get() {
+        return "";
+      },
     });
     drawStatusRing(ctx, 100, 100, 20, { enabled: false }, "dark");
     expect(calls).toContain("#6b7280");
@@ -67,8 +101,12 @@ describe("drawStatusRing", () => {
   it("owned takes priority over disabled", () => {
     const calls: string[] = [];
     Object.defineProperty(ctx, "strokeStyle", {
-      set(v: string) { calls.push(v); },
-      get() { return ""; },
+      set(v: string) {
+        calls.push(v);
+      },
+      get() {
+        return "";
+      },
     });
     drawStatusRing(ctx, 100, 100, 20, { owned: true, enabled: false }, "dark");
     expect(calls).toContain("#ef4444");
@@ -84,7 +122,9 @@ describe("drawStatusRing", () => {
 
 describe("drawTierBadge", () => {
   let ctx: CanvasRenderingContext2D;
-  beforeEach(() => { ctx = makeMockCtx(); });
+  beforeEach(() => {
+    ctx = makeMockCtx();
+  });
 
   it("draws nothing when tier is not set", () => {
     drawTierBadge(ctx, 100, 100, 20, {});
