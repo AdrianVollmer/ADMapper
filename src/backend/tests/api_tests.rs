@@ -1512,7 +1512,10 @@ async fn test_graph_all_nodes_include_status_fields() {
 
     let owned_node = nodes.iter().find(|n| n["id"] == "user-owned").unwrap();
     assert_eq!(owned_node["owned"], true, "owned flag should be true");
-    assert_eq!(owned_node["enabled"], true, "enabled should be true for user-owned");
+    assert_eq!(
+        owned_node["enabled"], true,
+        "enabled should be true for user-owned"
+    );
     assert_eq!(owned_node["tier"], 1, "tier should be 1");
 
     let tier0_node = nodes.iter().find(|n| n["id"] == "dc-tier0").unwrap();
@@ -1520,11 +1523,20 @@ async fn test_graph_all_nodes_include_status_fields() {
     assert_eq!(tier0_node["tier"], 0);
 
     let disabled_node = nodes.iter().find(|n| n["id"] == "disabled-user").unwrap();
-    assert_eq!(disabled_node["enabled"], false, "disabled flag should be false");
-    assert!(disabled_node["tier"].is_null(), "tier should be null when not set");
+    assert_eq!(
+        disabled_node["enabled"], false,
+        "disabled flag should be false"
+    );
+    assert!(
+        disabled_node["tier"].is_null(),
+        "tier should be null when not set"
+    );
 
     let default_node = nodes.iter().find(|n| n["id"] == "unowned-default").unwrap();
-    assert_eq!(default_node["owned"], false, "owned should default to false when property absent");
+    assert_eq!(
+        default_node["owned"], false,
+        "owned should default to false when property absent"
+    );
 }
 
 /// Verify that GET /api/exploit-likelihood returns a full defaults map,

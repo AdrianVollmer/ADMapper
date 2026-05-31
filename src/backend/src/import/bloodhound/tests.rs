@@ -215,21 +215,26 @@ fn test_extract_node_uac_preserves_existing_enabled() {
 #[case("S-1-5-9", "groups", "ENTERPRISE DOMAIN CONTROLLERS", Some(0))]
 // Domains are always tier 0
 #[case("S-1-5-21-1234567890", "domains", "CORP.LOCAL", Some(0))]
-// Domain Computers group object is tier 3
+// Domain Computers group object is tier 2
 #[case(
     "S-1-5-21-1234567890-515",
     "groups",
     "DOMAIN COMPUTERS@CORP.LOCAL",
-    Some(3)
+    Some(2)
 )]
-// Other privileged groups are no longer auto-assigned; user defines them
+// Other privileged groups are tier 0
 #[case(
     "S-1-5-21-1234567890-519",
     "groups",
     "ENTERPRISE ADMINS@CORP.LOCAL",
-    None
+    Some(0)
 )]
-#[case("S-1-5-21-1234567890-518", "groups", "SCHEMA ADMINS@CORP.LOCAL", None)]
+#[case(
+    "S-1-5-21-1234567890-518",
+    "groups",
+    "SCHEMA ADMINS@CORP.LOCAL",
+    Some(0)
+)]
 // Regular objects: no auto-tier
 #[case("S-1-5-21-1234567890-1001", "users", "regularuser@corp.local", None)]
 fn test_tier_assignment(
