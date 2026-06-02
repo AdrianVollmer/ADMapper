@@ -687,24 +687,18 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
 
   const actionsHtml = mainActionsHtml + overflowMenuHtml;
 
-  // Build properties list - show ALL properties
-  let propsHtml = "";
-  let needsFetch = false;
-  if (attrs.properties) {
-    propsHtml = renderPropertyList(Object.entries(attrs.properties));
-  } else {
-    // Properties not available - need to fetch them
-    needsFetch = true;
-    propsHtml = `
-      <div class="flex items-center gap-2 text-sm text-gray-500">
-        <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
-          <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/>
-        </svg>
-        <span>Loading properties...</span>
-      </div>
-    `;
-  }
+  // Properties are always fetched from the backend to ensure the full set is shown.
+  // attrs.properties only contains summary status fields (owned/enabled/tier) from
+  // the graph API and must not be used as a substitute for the full property list.
+  const propsHtml = `
+    <div class="flex items-center gap-2 text-sm text-gray-500">
+      <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+        <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/>
+      </svg>
+      <span>Loading properties...</span>
+    </div>
+  `;
 
   // Check if this is a placeholder node
   const isPlaceholder = attrs.properties?.placeholder === true;
@@ -745,10 +739,7 @@ export function updateDetailPanel(nodeId: string | null, attrs: ADNodeAttributes
   // Fetch and display connection counts
   fetchNodeCounts(nodeId);
 
-  // Fetch properties if not already available
-  if (needsFetch) {
-    fetchNodeProperties(nodeId);
-  }
+  fetchNodeProperties(nodeId);
 }
 
 /** Update the detail sidebar with relationship information */
