@@ -85,7 +85,13 @@ function mockApiResponses(fullProperties: Record<string, unknown>) {
       return Promise.resolve({ id: "user1", name: "jsmith", type: "User", properties: fullProperties });
     }
     if (url.includes("/status")) {
-      return Promise.resolve({ owned: false, isEnterpriseAdmin: false, isDomainAdmin: false, tier: -1, hasPathToHighTier: false });
+      return Promise.resolve({
+        owned: false,
+        isEnterpriseAdmin: false,
+        isDomainAdmin: false,
+        tier: -1,
+        hasPathToHighTier: false,
+      });
     }
     if (url.includes("/counts")) {
       return Promise.resolve({ incoming: 0, outgoing: 0, adminTo: 0, memberOf: 0, members: 0 });
