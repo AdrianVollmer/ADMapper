@@ -57,12 +57,11 @@ FROM docker.io/neo4j:5
 
 USER root
 
-# Patch neo4j's Docker entrypoint to not drop root privileges via gosu.
-# Without this, neo4j would switch to the neo4j user (UID 7474), causing
-# mounted volume files to be owned by that UID on the host. By staying root,
-# rootless Docker/Podman maps UID 0 to the host user automatically.
-RUN find /startup -name "*.sh" -exec \
-        sed -i 's/exec gosu neo4j /: # gosu disabled: /g' {} \; 2>/dev/null || true
+# Remap the neo4j user/group to UID/GID 0 so that neo4j's entrypoint
+# (which does `gosu neo4j`) effectively stays root. This way, files in
+# mounted volumes are owned by UID 0, and rootless Docker/Podman maps
+# that to the host user automatically.
+RUN usermod -o -u 0 neo4j && groupmod -o -g 0 neo4j
 
 COPY --from=backend-builder /app/src/backend/target/release/admapper /usr/local/bin/
 
