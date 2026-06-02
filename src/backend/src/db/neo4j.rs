@@ -276,6 +276,32 @@ impl Neo4jDatabase {
         })
     }
 
+    /// Convert a neo4rs Row to a DbEdge using named column access.
+    ///
+    /// neo4rs stores row attributes in a HashMap whose iteration order is
+    /// non-deterministic.  Using named access (row.get::<T>("col")) is the
+    /// only safe way to extract multi-column results; positional indexing
+    /// via exec_rows() silently drops all edges when the HashMap happens to
+    /// iterate columns in the wrong order.
+    fn row_to_db_edge(row: &Row) -> Option<DbEdge> {
+        let src = row.get::<String>("src").ok()?;
+        let tgt = row.get::<String>("tgt").ok()?;
+        let typ = row.get::<String>("typ").ok()?;
+        let props = row
+            .get::<Relation>("rel")
+            .ok()
+            .map(|rel| Self::relation_to_json(&rel))
+            .and_then(|v| v.get("properties").cloned())
+            .unwrap_or(JsonValue::Object(Map::new()));
+        Some(DbEdge {
+            source: src,
+            target: tgt,
+            rel_type: typ,
+            properties: props,
+            ..Default::default()
+        })
+    }
+
     /// Execute a typed write-only query.
     /// Used by backend-specific methods that need parameterized queries.
     fn run_query(&self, q: Query) -> Result<()> {
@@ -426,7 +452,14 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn get_all_edges(&self) -> Result<Vec<DbEdge>> {
-        cypher_common::get_all_edges(self)
+        // Cannot use cypher_common::get_all_edges here: that function parses by
+        // position, but neo4rs stores row attributes in a HashMap whose iteration
+        // order is non-deterministic.  Named access via execute_query is required.
+        let rows = self.execute_query(query(
+            "MATCH (a)-[r]->(b) \
+             RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel",
+        ))?;
+        Ok(rows.iter().filter_map(Self::row_to_db_edge).collect())
     }
 
     fn get_nodes_by_ids(&self, ids: &[String]) -> Result<Vec<DbNode>> {
@@ -434,7 +467,21 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn get_edges_between(&self, node_ids: &[String]) -> Result<Vec<DbEdge>> {
-        cypher_common::get_edges_between(self, node_ids)
+        if node_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let id_list: Vec<String> = node_ids
+            .iter()
+            .map(|id| format!("'{}'", id.replace('\'', "\\'")))
+            .collect();
+        let id_set = id_list.join(", ");
+        let cypher = format!(
+            "MATCH (a)-[r]->(b) \
+             WHERE a.objectid IN [{id_set}] AND b.objectid IN [{id_set}] \
+             RETURN a.objectid AS src, b.objectid AS tgt, type(r) AS typ, r AS rel"
+        );
+        let rows = self.execute_query(query(&cypher))?;
+        Ok(rows.iter().filter_map(Self::row_to_db_edge).collect())
     }
 
     fn get_relationship_types(&self) -> Result<Vec<String>> {

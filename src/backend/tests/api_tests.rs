@@ -1574,3 +1574,75 @@ async fn test_get_exploit_likelihood_returns_full_defaults() {
         values.len()
     );
 }
+
+/// Choke-points endpoint returns non-empty results when the graph has connected nodes.
+///
+/// Regression test: the betweenness-centrality algorithm requires edges from
+/// get_all_edges(). Any backend bug that silently drops edges (e.g. positional
+/// column parsing from a non-deterministic HashMap) would cause every attack path
+/// to appear disconnected and this endpoint to return an empty choke_points list.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_choke_points_returns_results_for_connected_graph() {
+    let app = TestApp::new();
+
+    // Build a small connected graph: user → group → computer (via two hops).
+    // Any connected graph with ≥ 2 nodes and ≥ 1 edge produces at least one
+    // choke point with positive betweenness.
+    let nodes = vec![
+        DbNode {
+            id: "user-1".to_string(),
+            name: "Alice".to_string(),
+            label: "User".to_string(),
+            properties: json!({"enabled": true}),
+        },
+        DbNode {
+            id: "group-1".to_string(),
+            name: "Domain Admins".to_string(),
+            label: "Group".to_string(),
+            properties: json!({}),
+        },
+        DbNode {
+            id: "computer-1".to_string(),
+            name: "DC01".to_string(),
+            label: "Computer".to_string(),
+            properties: json!({}),
+        },
+    ];
+    let edges = vec![
+        DbEdge {
+            source: "user-1".to_string(),
+            target: "group-1".to_string(),
+            rel_type: "MemberOf".to_string(),
+            properties: json!({}),
+            source_type: None,
+            target_type: None,
+        },
+        DbEdge {
+            source: "group-1".to_string(),
+            target: "computer-1".to_string(),
+            rel_type: "AdminTo".to_string(),
+            properties: json!({}),
+            source_type: None,
+            target_type: None,
+        },
+    ];
+
+    app.db().insert_nodes(&nodes).unwrap();
+    app.db().insert_edges(&edges).unwrap();
+
+    let (status, json) = get_json(app.router(), "/api/graph/choke-points").await;
+
+    assert_eq!(status, StatusCode::OK);
+
+    let total_nodes = json["total_nodes"].as_u64().unwrap_or(0);
+    let total_edges = json["total_edges"].as_u64().unwrap_or(0);
+    assert_eq!(total_nodes, 3, "backend must see all 3 nodes");
+    assert_eq!(total_edges, 2, "backend must see all 2 edges");
+
+    let choke_points = json["choke_points"].as_array().unwrap();
+    assert!(
+        !choke_points.is_empty(),
+        "a connected graph must have at least one choke point; \
+         got 0 — likely caused by get_all_edges() returning no edges"
+    );
+}
