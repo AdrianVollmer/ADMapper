@@ -72,6 +72,22 @@ classified manually using the **Edit Tiers** modal.
     Subsystem" do not have fixed well-known RIDs and therefore cannot be
     automatically classified. Assign them manually.
 
+### Hypervisors and physical infrastructure
+
+ESXi hosts, Hyper-V servers, and similar hypervisor platforms are not part of
+Active Directory's object model and therefore never receive an automatic tier.
+You are responsible for assigning the correct tier manually.
+
+The critical rule: **a hypervisor inherits the tier of its most sensitive
+guest.** If a host runs a domain controller or any other tier 0 system, the
+hypervisor itself must be tier 0 — an attacker with hypervisor-level access can
+trivially compromise every VM running on it.
+
+To make these relationships visible in the graph, add manual **"Hosts"** edges
+from each hypervisor node to the VMs it runs. Once those edges exist, tier
+violations (e.g. a tier 1 hypervisor with a tier 0 guest) surface automatically
+in the tier-violation view.
+
 ## Assigning Tiers Manually
 
 Open the **Edit Tiers** modal from the toolbar to assign tiers to nodes.
