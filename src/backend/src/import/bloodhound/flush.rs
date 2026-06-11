@@ -93,8 +93,12 @@ impl BloodHoundImporter {
         let total_edges = self.edge_buffer.len();
         info!(total_edges, "Flushing relationship buffer");
 
-        // Process in batches
-        for chunk in self.edge_buffer.chunks(BATCH_SIZE) {
+        // Process in batches; throttle progress notifications to avoid
+        // saturating subscribers with hundreds of rapid-fire messages.
+        let batch_count = total_edges.div_ceil(BATCH_SIZE);
+        let notify_every = batch_count.div_ceil(20).max(1);
+
+        for (i, chunk) in self.edge_buffer.chunks(BATCH_SIZE).enumerate() {
             let batch_size = chunk.len();
             let count = self.db.insert_edges(chunk).map_err(|e| {
                 error!(error = %e, batch_size, "Failed to insert relationships");
@@ -102,7 +106,9 @@ impl BloodHoundImporter {
             })?;
 
             progress.edges_imported += count;
-            self.send_progress(progress);
+            if (i + 1) % notify_every == 0 {
+                self.send_progress(progress);
+            }
         }
 
         debug!(
@@ -110,6 +116,7 @@ impl BloodHoundImporter {
             "All relationships inserted"
         );
         self.edge_buffer.clear();
+        self.send_progress(progress);
         Ok(())
     }
 
