@@ -391,22 +391,34 @@ impl DatabaseBackend for Neo4jDatabase {
         info!("Clearing all data from Neo4j");
         self.run_query(query("MATCH (n) DETACH DELETE n"))?;
 
+        // Fire all index-creation queries concurrently to avoid 13 sequential
+        // round-trips.  IF NOT EXISTS makes them idempotent on Neo4j 4.0+.
+        // Legacy syntax (Neo4j 3.x) is tried per-label only if modern fails.
         debug!("Creating objectid indexes for faster imports");
-        for label in cypher_common::NODE_LABELS {
-            // Try modern syntax first (Neo4j 4.0+)
-            let modern_query = format!(
-                "CREATE INDEX idx_{}_objectid IF NOT EXISTS FOR (n:{}) ON (n.objectid)",
-                label.to_lowercase(),
-                label
-            );
-            if self.run_query(query(&modern_query)).is_err() {
-                // Fall back to legacy syntax
-                let legacy_query = format!("CREATE INDEX ON :{}(objectid)", label);
-                if let Err(e) = self.run_query(query(&legacy_query)) {
-                    debug!("Index creation skipped for {}: {}", label, e);
-                }
-            }
-        }
+        let graph = self.graph.clone();
+        self.runtime.block_on(async {
+            let futures: Vec<_> = cypher_common::NODE_LABELS
+                .iter()
+                .map(|label| {
+                    let g = graph.clone();
+                    let modern = format!(
+                        "CREATE INDEX idx_{}_objectid IF NOT EXISTS FOR (n:{}) ON (n.objectid)",
+                        label.to_lowercase(),
+                        label
+                    );
+                    let legacy = format!("CREATE INDEX ON :{}(objectid)", label);
+                    let label = *label;
+                    async move {
+                        if g.run(query(&modern)).await.is_err() {
+                            if let Err(e) = g.run(query(&legacy)).await {
+                                debug!("Index creation skipped for {label}: {e}");
+                            }
+                        }
+                    }
+                })
+                .collect();
+            futures::future::join_all(futures).await;
+        });
 
         debug!("Database cleared and indexes created");
         Ok(())
