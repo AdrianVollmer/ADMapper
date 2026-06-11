@@ -7,7 +7,8 @@
 //! Neo4j-specific query syntax.
 
 use neo4rs::{
-    query, ConfigBuilder, Graph, Node as Neo4jNode, Path, Query, Relation, Row, UnboundedRelation,
+    query, BoltBoolean, BoltFloat, BoltInteger, BoltList, BoltMap, BoltNull, BoltString, BoltType,
+    ConfigBuilder, Graph, Node as Neo4jNode, Path, Query, Relation, Row, UnboundedRelation,
 };
 use serde_json::{json, Map, Value as JsonValue};
 use std::collections::HashSet;
@@ -311,6 +312,34 @@ impl Neo4jDatabase {
             Ok(())
         })
     }
+
+    /// Convert a serde_json::Value to a neo4rs BoltType for parameterized queries.
+    fn json_to_bolt(value: &JsonValue) -> BoltType {
+        match value {
+            JsonValue::Null => BoltType::Null(BoltNull::default()),
+            JsonValue::Bool(b) => BoltType::Boolean(BoltBoolean::new(*b)),
+            JsonValue::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    BoltType::Integer(BoltInteger::new(i))
+                } else if let Some(f) = n.as_f64() {
+                    BoltType::Float(BoltFloat::new(f))
+                } else {
+                    BoltType::Null(BoltNull::default())
+                }
+            }
+            JsonValue::String(s) => BoltType::String(BoltString::new(s)),
+            JsonValue::Array(arr) => BoltType::List(BoltList {
+                value: arr.iter().map(Self::json_to_bolt).collect(),
+            }),
+            JsonValue::Object(obj) => {
+                let mut map = BoltMap::new();
+                for (k, v) in obj {
+                    map.put(BoltString::new(k), Self::json_to_bolt(v));
+                }
+                BoltType::Map(map)
+            }
+        }
+    }
 }
 
 // ========================================================================
@@ -394,11 +423,100 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn insert_nodes(&self, nodes: &[DbNode]) -> Result<usize> {
-        cypher_common::insert_nodes(self, nodes)
+        if nodes.is_empty() {
+            return Ok(0);
+        }
+
+        let mut nodes_by_label: std::collections::HashMap<String, Vec<BoltType>> =
+            std::collections::HashMap::new();
+        for node in nodes {
+            let flat_props = node.flatten_properties(true);
+            nodes_by_label
+                .entry(node.label.clone())
+                .or_default()
+                .push(Self::json_to_bolt(&flat_props));
+        }
+
+        for (label, bolt_nodes) in &nodes_by_label {
+            for chunk in bolt_nodes.chunks(cypher_common::BATCH_SIZE) {
+                let params = BoltType::List(BoltList {
+                    value: chunk.to_vec(),
+                });
+                let q = query(&format!(
+                    "UNWIND $nodes AS props \
+                     MERGE (n:Base {{objectid: props.objectid}}) \
+                     SET n:{label}, n += props \
+                     REMOVE n.placeholder"
+                ))
+                .param("nodes", params);
+                self.run_query(q)?;
+            }
+        }
+
+        Ok(nodes.len())
     }
 
     fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
-        cypher_common::insert_edges(self, relationships)
+        if relationships.is_empty() {
+            return Ok(0);
+        }
+
+        let mut edges_by_type: std::collections::HashMap<String, Vec<BoltType>> =
+            std::collections::HashMap::new();
+        for edge in relationships {
+            let mut map = BoltMap::new();
+            map.put(
+                BoltString::new("src"),
+                BoltType::String(BoltString::new(&edge.source)),
+            );
+            map.put(
+                BoltString::new("tgt"),
+                BoltType::String(BoltString::new(&edge.target)),
+            );
+            map.put(
+                BoltString::new("src_type"),
+                BoltType::String(BoltString::new(
+                    edge.source_type.as_deref().unwrap_or("Base"),
+                )),
+            );
+            map.put(
+                BoltString::new("tgt_type"),
+                BoltType::String(BoltString::new(
+                    edge.target_type.as_deref().unwrap_or("Base"),
+                )),
+            );
+            map.put(
+                BoltString::new("props"),
+                Self::json_to_bolt(&edge.properties),
+            );
+            edges_by_type
+                .entry(edge.rel_type.clone())
+                .or_default()
+                .push(BoltType::Map(map));
+        }
+
+        let mut inserted = 0;
+        for (rel_type, bolt_edges) in &edges_by_type {
+            for chunk in bolt_edges.chunks(cypher_common::BATCH_SIZE) {
+                let params = BoltType::List(BoltList {
+                    value: chunk.to_vec(),
+                });
+                let q = query(&format!(
+                    "UNWIND $edges AS row \
+                     MERGE (a:Base {{objectid: row.src}}) \
+                     ON CREATE SET a.placeholder = true, a.node_type = row.src_type \
+                     MERGE (b:Base {{objectid: row.tgt}}) \
+                     ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type \
+                     MERGE (a)-[r:{rel_type}]->(b) \
+                     SET r += row.props"
+                ))
+                .param("edges", params);
+                self.run_query(q)?;
+                inserted += chunk.len();
+            }
+        }
+
+        Ok(inserted)
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {
