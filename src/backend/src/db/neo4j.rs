@@ -78,7 +78,7 @@ impl Neo4jDatabase {
             .uri(&uri)
             .user(&user)
             .password(&pass)
-            .max_connections(3)
+            .max_connections(16)
             .build()?;
         let graph = Graph::connect(config)?;
 
