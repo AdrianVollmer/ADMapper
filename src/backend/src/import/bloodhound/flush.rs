@@ -228,20 +228,30 @@ impl BloodHoundImporter {
     /// nodes, then updates matching placeholders to `{DOMAIN}-{RID}` format
     /// (e.g. `CONTOSO.LOCAL-512`).
     pub(super) fn resolve_orphan_names(&self) -> Result<usize, String> {
-        // Step 1: Build domain SID -> name map from Domain nodes
-        let all_nodes = self
+        // Step 1: Fetch only Domain nodes with resolved names (server-side filter).
+        // This avoids transferring all graph nodes across the DB connection.
+        let domain_result = self
             .db
-            .get_all_nodes()
-            .map_err(|e| format!("Failed to get nodes for orphan name resolution: {e}"))?;
+            .run_custom_query(
+                "MATCH (n:Domain) \
+                 WHERE n.name IS NOT NULL AND n.name <> n.objectid \
+                 RETURN n.objectid AS id, n.name AS name",
+            )
+            .map_err(|e| format!("Failed to query domain nodes: {e}"))?;
 
         let mut domain_map: HashMap<String, String> = HashMap::new();
-        for node in &all_nodes {
-            if node.label == "Domain"
-                && !node.name.is_empty()
-                && node.name != node.id
-                && !node.name.starts_with("S-1-")
-            {
-                domain_map.insert(node.id.clone(), node.name.clone());
+        if let Some(rows) = domain_result.get("rows").and_then(|v| v.as_array()) {
+            for row in rows {
+                if let Some(cols) = row.as_array() {
+                    if let (Some(id), Some(name)) = (
+                        cols.first().and_then(|v| v.as_str()),
+                        cols.get(1).and_then(|v| v.as_str()),
+                    ) {
+                        if !name.starts_with("S-1-") {
+                            domain_map.insert(id.to_string(), name.to_string());
+                        }
+                    }
+                }
             }
         }
 
@@ -255,20 +265,31 @@ impl BloodHoundImporter {
             "Built domain SID-to-name map for orphan resolution"
         );
 
-        // Step 2: Collect all (objectid, friendly_name) pairs for orphan nodes.
+        // Step 2: Fetch only orphan nodes (name == objectid) server-side, then
+        // compute friendly names in memory against the domain map.
         // We match by checking if the objectid starts with a known domain SID
         // followed by a dash. This handles both simple RIDs (e.g. "-512") and
         // compound well-known SID suffixes (e.g. "-S-1-5-11").
+        let orphan_result = self
+            .db
+            .run_custom_query("MATCH (n) WHERE n.name = n.objectid RETURN n.objectid AS id")
+            .map_err(|e| format!("Failed to query orphan nodes: {e}"))?;
+
         let mut renames: Vec<(String, String)> = Vec::new();
-        for node in &all_nodes {
-            if node.name != node.id {
-                continue;
-            }
-            for (sid, name) in &domain_map {
-                let prefix = format!("{}-", sid);
-                if let Some(suffix) = node.id.strip_prefix(&prefix) {
-                    renames.push((node.id.clone(), format!("{}-{}", name, suffix)));
-                    break;
+        if let Some(rows) = orphan_result.get("rows").and_then(|v| v.as_array()) {
+            for row in rows {
+                let node_id = row
+                    .as_array()
+                    .and_then(|cols| cols.first())
+                    .and_then(|v| v.as_str());
+                if let Some(node_id) = node_id {
+                    for (sid, name) in &domain_map {
+                        let prefix = format!("{}-", sid);
+                        if let Some(suffix) = node_id.strip_prefix(&prefix) {
+                            renames.push((node_id.to_string(), format!("{}-{}", name, suffix)));
+                            break;
+                        }
+                    }
                 }
             }
         }
