@@ -119,6 +119,14 @@ impl BloodHoundImporter {
     /// resolve orphan names, and mark completion.
     pub(super) fn finalize(&mut self, progress: &mut ImportProgress) -> Result<(), String> {
         progress.current_file = None;
+
+        // Flush all edges accumulated across every file in one pass.  All
+        // node types have been imported by now, so most target nodes already
+        // exist and placeholder creation is minimised.
+        progress.set_stage("Writing relationships");
+        self.send_progress(progress);
+        self.flush_edge_buffer(progress)?;
+
         progress.set_stage("Applying post-processing rules");
         self.send_progress(progress);
 

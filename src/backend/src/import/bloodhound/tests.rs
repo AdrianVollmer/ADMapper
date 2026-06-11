@@ -599,9 +599,11 @@ fn test_import_json_str_groups_with_members() {
 
     let mut progress = ImportProgress::new("test".to_string());
     let result = importer.import_json_str(&json_content.to_string(), &mut progress);
-
     assert!(result.is_ok());
     assert_eq!(progress.nodes_imported, 1);
+
+    // Edges are buffered until finalize (all files processed first).
+    importer.finalize(&mut progress).unwrap();
     assert_eq!(progress.edges_imported, 2); // 2 MemberOf relationships
 
     // Verify relationships are in database
@@ -691,6 +693,9 @@ fn test_import_deduplicates_edges() {
     importer
         .import_json_str(&json_content.to_string(), &mut progress)
         .unwrap();
+
+    // Edges are buffered until finalize; flush now.
+    importer.finalize(&mut progress).unwrap();
 
     // Should only have 1 edge due to deduplication
     let (_, edge_count) = importer.db.get_stats().unwrap();

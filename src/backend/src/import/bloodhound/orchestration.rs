@@ -287,12 +287,9 @@ impl BloodHoundImporter {
         // Flush remaining nodes
         self.flush_nodes(&mut node_batch, progress)?;
 
-        // Flush edges for this file - placeholder nodes handle missing targets
-        if !self.edge_buffer.is_empty() {
-            progress.set_stage("Writing relationships");
-            self.send_progress(progress);
-        }
-        self.flush_edge_buffer(progress)?;
+        // Edges remain in edge_buffer; all edges are flushed together after
+        // all files are processed so that target nodes already exist,
+        // minimising placeholder creation and MERGE overhead.
 
         Ok(())
     }
