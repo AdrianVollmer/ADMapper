@@ -93,6 +93,10 @@ impl BloodHoundImporter {
         let total_edges = self.edge_buffer.len();
         info!(total_edges, "Flushing relationship buffer");
 
+        // Announce the total so the frontend can render a meaningful progress bar.
+        progress.edges_total = total_edges;
+        self.send_progress(progress);
+
         // Process in batches; throttle progress notifications to avoid
         // saturating subscribers with hundreds of rapid-fire messages.
         let batch_count = total_edges.div_ceil(BATCH_SIZE);

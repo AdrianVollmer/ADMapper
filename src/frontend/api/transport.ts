@@ -84,6 +84,8 @@ export interface ImportProgressEvent {
   stage?: string;
   nodes_imported: number;
   edges_imported: number;
+  /** Total relationships to insert — set once edge flush begins */
+  edges_total?: number;
   bytes_processed: number;
   bytes_total: number;
   error?: string;

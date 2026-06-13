@@ -225,8 +225,17 @@ function updateProgressUI(progress: ImportProgressEvent): void {
         ? Math.round((progress.files_processed / progress.total_files) * 100)
         : 0;
 
-  // Cap at 95% while still running — post-processing can hold at 100% for a while
-  const percent = progress.status === "running" ? Math.min(rawPercent, 95) : rawPercent;
+  let percent: number;
+  if (progress.status === "completed") {
+    percent = 100;
+  } else if (progress.edges_total && progress.edges_total > 0 && rawPercent >= 100) {
+    // Files done; edge flush in progress — animate from 95% → 99%
+    const edgeFraction = progress.edges_imported / progress.edges_total;
+    percent = Math.round(95 + edgeFraction * 4);
+  } else {
+    // Cap at 95% while still running — post-processing can hold at 100% for a while
+    percent = Math.min(rawPercent, 95);
+  }
 
   if (progressFill) {
     progressFill.style.width = `${percent}%`;
@@ -255,17 +264,20 @@ function updateProgressUI(progress: ImportProgressEvent): void {
   }
 
   if (edgesCountEl) {
-    edgesCountEl.textContent = progress.edges_imported.toLocaleString();
+    edgesCountEl.textContent =
+      progress.edges_total && progress.edges_total > 0
+        ? `${progress.edges_imported.toLocaleString()} / ${progress.edges_total.toLocaleString()}`
+        : progress.edges_imported.toLocaleString();
   }
 }
 
 /** Reset progress display */
 function resetProgress(): void {
   if (progressFill) {
-    progressFill.style.width = "0%";
+    progressFill.style.width = "3%";
     progressFill.classList.remove("progress-fill--done");
   }
-  if (progressPercent) progressPercent.textContent = "0%";
+  if (progressPercent) progressPercent.textContent = "3%";
   if (progressFiles) progressFiles.textContent = "0 / 0 files";
   if (currentFileEl) currentFileEl.textContent = "-";
   if (stageEl) {

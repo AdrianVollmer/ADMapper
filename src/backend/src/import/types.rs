@@ -2,6 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
+fn is_zero(v: &usize) -> bool {
+    *v == 0
+}
+
 /// Status of an import job.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -41,6 +45,9 @@ pub struct ImportProgress {
     pub nodes_imported: usize,
     /// Number of relationships imported
     pub edges_imported: usize,
+    /// Total number of relationships to be imported (known once edge flush begins)
+    #[serde(skip_serializing_if = "is_zero", default)]
+    pub edges_total: usize,
     /// Bytes processed so far (for weighted progress)
     pub bytes_processed: u64,
     /// Total bytes across all files (for weighted progress)
@@ -63,6 +70,7 @@ impl ImportProgress {
             total_files: 0,
             nodes_imported: 0,
             edges_imported: 0,
+            edges_total: 0,
             bytes_processed: 0,
             bytes_total: 0,
             error: None,
