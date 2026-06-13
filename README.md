@@ -11,6 +11,14 @@ supported, but not needed.
 
 Get started here: [Quickstart](https://adrianvollmer.github.io/ADMapper/#quick-start)
 
+For a double-quick Quickstart, run this:
+
+```console
+mkdir -p data && docker run --rm -it --init \
+    -p 9191:9191 -v ./data:/data \
+    ghcr.io/adrianvollmer/admapper-neo4j
+```
+
 Backends
 --------
 
@@ -30,6 +38,7 @@ Documentation
 -------------
 
 For details, read the [docs](https://adrianvollmer.github.io/ADMapper).
+
 
 License
 -------
