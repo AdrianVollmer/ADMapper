@@ -93,8 +93,9 @@ impl BloodHoundImporter {
         let total_edges = self.edge_buffer.len();
         info!(total_edges, "Flushing relationship buffer");
 
-        // Announce the total so the frontend can render a meaningful progress bar.
-        progress.edges_total = total_edges;
+        // Accumulate into edges_total (flush_edge_buffer may be called more than
+        // once, e.g. main buffer then deferred DCSync edges).
+        progress.edges_total += total_edges;
         self.send_progress(progress);
 
         // Process in batches; throttle progress notifications to avoid
