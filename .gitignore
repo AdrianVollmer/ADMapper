@@ -18,6 +18,7 @@ build/
 dist/
 target/
 docs/**/site/
+layout-test-output/
 
 # Cache
 .mypy_cache/
