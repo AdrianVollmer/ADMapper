@@ -21,6 +21,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # Build frontend (vite root is src/frontend, index.html is there)
+COPY public public
 COPY src/shared src/shared
 COPY src/frontend src/frontend
 COPY vite.config.ts tsconfig.json tailwind.config.js postcss.config.js ./

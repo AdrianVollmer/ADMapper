@@ -20,6 +20,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+COPY public public
 COPY src/shared src/shared
 COPY src/frontend src/frontend
 COPY vite.config.ts tsconfig.json tailwind.config.js postcss.config.js ./

@@ -70,14 +70,19 @@ async fn serve_embedded(uri: axum::http::Uri) -> Response {
             .into_response();
     }
 
-    // SPA fallback: serve root index.html for non-API routes
-    if let Some(content) = Assets::get("index.html") {
-        return (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/html")],
-            content.data.into_owned(),
-        )
-            .into_response();
+    // SPA fallback: serve root index.html only for paths that look like
+    // client-side routes (no file extension). Paths with extensions are static
+    // asset requests that should 404 when not found.
+    let has_extension = path.rsplit('/').next().is_some_and(|seg| seg.contains('.'));
+    if !has_extension {
+        if let Some(content) = Assets::get("index.html") {
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/html")],
+                content.data.into_owned(),
+            )
+                .into_response();
+        }
     }
 
     (StatusCode::NOT_FOUND, "Not found").into_response()
