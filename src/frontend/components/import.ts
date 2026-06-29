@@ -233,8 +233,10 @@ function updateProgressUI(progress: ImportProgressEvent): void {
     const edgeFraction = progress.edges_imported / progress.edges_total;
     percent = Math.round(95 + edgeFraction * 4);
   } else {
-    // Cap at 95% while still running — post-processing can hold at 100% for a while
-    percent = Math.min(rawPercent, 95);
+    // Floor at 3% (the initial visual hint) so the bar never jumps backward
+    // when the first progress event arrives with 0 bytes/files processed.
+    // Cap at 95% while still running — post-processing can hold at 100% for a while.
+    percent = Math.max(3, Math.min(rawPercent, 95));
   }
 
   if (progressFill) {
