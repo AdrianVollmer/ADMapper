@@ -518,9 +518,9 @@ impl DatabaseBackend for Neo4jDatabase {
                 let q = query(&format!(
                     "UNWIND $edges AS row \
                      MERGE (a:Base {{objectid: row.src}}) \
-                     ON CREATE SET a.placeholder = true, a.node_type = row.src_type \
+                     ON CREATE SET a.placeholder = true, a.node_type = row.src_type, a.name = row.src \
                      MERGE (b:Base {{objectid: row.tgt}}) \
-                     ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type \
+                     ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type, b.name = row.tgt \
                      MERGE (a)-[r:{rel_type}]->(b) \
                      SET r += row.props"
                 ))

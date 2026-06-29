@@ -1977,3 +1977,122 @@ fn test_resolve_orphan_names_batched() {
         );
     }
 }
+
+/// Orphan resolution must also catch placeholder nodes where name IS NULL.
+///
+/// Neo4j and FalkorDB create placeholder nodes during edge insertion with
+/// only `objectid`, `placeholder`, and `node_type` -- no `name` property.
+/// The orphan query must handle these in addition to name == objectid.
+#[test]
+fn test_resolve_orphan_names_null_name_placeholders() {
+    let importer = test_importer();
+    let domain_sid = "S-1-5-21-9999-8888-7777";
+
+    // Insert a Domain node with a proper name
+    importer
+        .db
+        .insert_node(DbNode {
+            id: domain_sid.to_string(),
+            name: "ACME.LOCAL".to_string(),
+            label: "Domain".to_string(),
+            properties: serde_json::json!({}),
+        })
+        .unwrap();
+
+    // Simulate Neo4j/FalkorDB-style placeholder creation: set objectid but
+    // NOT name. This is what `ON CREATE SET a.placeholder = true` produces.
+    let orphan_sids = [
+        format!("{}-512", domain_sid),
+        format!("{}-519", domain_sid),
+    ];
+    for sid in &orphan_sids {
+        importer
+            .db
+            .run_custom_query(&format!(
+                "CREATE (n:Base {{objectid: '{}', placeholder: true}})",
+                sid
+            ))
+            .unwrap();
+    }
+
+    let updated = importer.resolve_orphan_names().unwrap();
+    assert_eq!(
+        updated, 2,
+        "Should resolve orphans with NULL name (Neo4j-style placeholders)"
+    );
+
+    let all_nodes = importer.db.get_all_nodes().unwrap();
+    for sid in &orphan_sids {
+        let node = all_nodes.iter().find(|n| n.id == *sid).unwrap();
+        let suffix = sid.strip_prefix(&format!("{}-", domain_sid)).unwrap();
+        assert_eq!(
+            node.name,
+            format!("ACME.LOCAL-{}", suffix),
+            "Placeholder {} should have resolved name",
+            sid
+        );
+    }
+}
+
+/// Edge insertion creates placeholder nodes for unknown targets.
+/// After inserting a domain and flushing edges that reference SID-based
+/// targets, resolve_orphan_names should give those placeholders friendly names.
+#[test]
+fn test_resolve_orphan_names_after_edge_flush() {
+    use crate::db::backend::DatabaseBackend;
+    use crate::db::DbEdge;
+
+    let importer = test_importer();
+    let domain_sid = "S-1-5-21-4444-5555-6666";
+
+    // Insert a Domain node and a User node
+    importer
+        .db
+        .insert_node(DbNode {
+            id: domain_sid.to_string(),
+            name: "CORP.LOCAL".to_string(),
+            label: "Domain".to_string(),
+            properties: serde_json::json!({}),
+        })
+        .unwrap();
+
+    importer
+        .db
+        .insert_node(DbNode {
+            id: "user-1".to_string(),
+            name: "jdoe@corp.local".to_string(),
+            label: "User".to_string(),
+            properties: serde_json::json!({}),
+        })
+        .unwrap();
+
+    // Insert edges whose targets don't exist yet -- this creates placeholders.
+    let orphan_target = format!("{}-512", domain_sid);
+    importer
+        .db
+        .insert_edges(&[DbEdge {
+            source: "user-1".to_string(),
+            target: orphan_target.clone(),
+            rel_type: "MemberOf".to_string(),
+            properties: serde_json::json!({}),
+            source_type: Some("User".to_string()),
+            target_type: Some("Group".to_string()),
+        }])
+        .unwrap();
+
+    // Placeholder should exist now
+    let all_nodes = importer.db.get_all_nodes().unwrap();
+    let placeholder = all_nodes.iter().find(|n| n.id == orphan_target);
+    assert!(placeholder.is_some(), "Placeholder node should exist after edge insert");
+
+    // Resolve orphan names
+    let updated = importer.resolve_orphan_names().unwrap();
+    assert!(updated >= 1, "Should resolve at least the placeholder");
+
+    let all_nodes = importer.db.get_all_nodes().unwrap();
+    let node = all_nodes.iter().find(|n| n.id == orphan_target).unwrap();
+    assert_eq!(
+        node.name, "CORP.LOCAL-512",
+        "Placeholder created by edge flush should get a friendly name"
+    );
+}

@@ -292,7 +292,9 @@ impl BloodHoundImporter {
         // compound well-known SID suffixes (e.g. "-S-1-5-11").
         let orphan_result = self
             .db
-            .run_custom_query("MATCH (n) WHERE n.name = n.objectid RETURN n.objectid AS id")
+            .run_custom_query(
+                "MATCH (n) WHERE n.name = n.objectid OR n.name IS NULL RETURN n.objectid AS id",
+            )
             .map_err(|e| format!("Failed to query orphan nodes: {e}"))?;
 
         let mut renames: Vec<(String, String)> = Vec::new();

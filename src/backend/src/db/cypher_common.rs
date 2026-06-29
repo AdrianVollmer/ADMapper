@@ -764,9 +764,9 @@ pub fn insert_edges_two_step(
             let ensure_nodes = format!(
                 "UNWIND [{}] AS row \
                  MERGE (a:Base {{objectid: row.src}}) \
-                 ON CREATE SET a.placeholder = true, a.node_type = row.src_type \
+                 ON CREATE SET a.placeholder = true, a.node_type = row.src_type, a.name = row.src \
                  MERGE (b:Base {{objectid: row.tgt}}) \
-                 ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type",
+                 ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type, b.name = row.tgt",
                 items_str
             );
             exec.exec_write(&ensure_nodes)?;
