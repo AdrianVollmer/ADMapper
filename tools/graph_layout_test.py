@@ -128,7 +128,7 @@ def star(n_leaves, invert=False):
     return nodes, edges
 
 
-def binary_tree(depth):
+def binary_tree(depth, invert=False):
     types_by_depth = {0: "Domain", 1: "Group", 2: "Computer"}
     nodes = [N("root", "Root", "Domain")]
     edges = []
@@ -143,7 +143,10 @@ def binary_tree(depth):
             idx += 1
             ntype = types_by_depth.get(d + 1, "User")
             nodes.append(N(nid, nid, ntype))
-            edges.append(E(parent, nid, "Contains"))
+            if invert:
+                edges.append(E(nid, parent, "MemberOf"))
+            else:
+                edges.append(E(parent, nid, "Contains"))
             queue.append((nid, d + 1))
     return nodes, edges
 
@@ -304,6 +307,8 @@ def make_test_graphs():
             *star(8, invert=True)),
         ("binary_tree", "Binary Tree", "Full binary tree, depth 4 (15 nodes)",
             *binary_tree(4)),
+        ("binary_tree_inv", "Inverted Binary Tree", "Inverted binary tree, depth 4 (15 nodes)",
+            *binary_tree(4, invert=True)),
         ("ad_small", "AD Structure (small)", "Domain · groups · users · computers",
             *ad_structure_small()),
         ("clusters_isolated", "Three Isolated Clusters", "3 clusters of 8 nodes, no bridges",
