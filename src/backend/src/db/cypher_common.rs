@@ -12,9 +12,11 @@ use serde_json::{Map, Value as JsonValue};
 use std::collections::HashSet;
 use tracing::debug;
 
+#[cfg(feature = "falkordb")]
+use super::types::{json_to_cypher_props, CypherEscapeStyle};
 use super::types::{
-    json_to_cypher_props, CypherEscapeStyle, DbEdge, DbNode, DetailedStats, ReachabilityInsight,
-    Result, ADMIN_RELATIONSHIP_TYPES, WELL_KNOWN_PRINCIPALS,
+    DbEdge, DbNode, DetailedStats, ReachabilityInsight, Result, ADMIN_RELATIONSHIP_TYPES,
+    WELL_KNOWN_PRINCIPALS,
 };
 
 // ========================================================================
@@ -171,6 +173,7 @@ pub fn compute_reachability(exec: &impl CypherExecutor) -> Vec<ReachabilityInsig
 }
 
 /// Parse real DA rows (id, name) from positional query results.
+#[cfg(feature = "falkordb")]
 pub fn parse_real_das(rows: &[Vec<JsonValue>]) -> Vec<(String, String)> {
     rows.iter()
         .filter_map(|r| {
@@ -182,6 +185,7 @@ pub fn parse_real_das(rows: &[Vec<JsonValue>]) -> Vec<(String, String)> {
 }
 
 /// Parse paths-to-DA results (id, label, name, hops) with deduplication.
+#[cfg(feature = "falkordb")]
 pub fn parse_paths_to_da_results(rows: &[Vec<JsonValue>]) -> Vec<(String, String, String, usize)> {
     let mut results = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -220,6 +224,7 @@ pub(crate) trait CypherExecutor {
     fn exec_rows(&self, cypher: &str) -> Result<Vec<Vec<JsonValue>>>;
 
     /// Execute a write-only query.
+    #[allow(dead_code)] // Used by FalkorDB; Neo4j implements writes inline.
     fn exec_write(&self, cypher: &str) -> Result<()>;
 }
 
@@ -288,6 +293,7 @@ pub fn get_all_nodes(exec: &impl CypherExecutor) -> Result<Vec<DbNode>> {
     Ok(nodes)
 }
 
+#[cfg(feature = "falkordb")]
 pub fn get_all_edges(exec: &impl CypherExecutor) -> Result<Vec<DbEdge>> {
     let rows = exec.exec_rows(
         "MATCH (a)-[r]->(b) \
@@ -343,6 +349,7 @@ pub fn get_nodes_by_ids(exec: &impl CypherExecutor, ids: &[String]) -> Result<Ve
     Ok(nodes)
 }
 
+#[cfg(feature = "falkordb")]
 pub fn get_edges_between(exec: &impl CypherExecutor, node_ids: &[String]) -> Result<Vec<DbEdge>> {
     if node_ids.is_empty() {
         return Ok(Vec::new());
@@ -664,6 +671,7 @@ pub fn get_node_connections(
     Ok((nodes, relationships))
 }
 
+#[cfg(feature = "falkordb")]
 pub fn insert_nodes(exec: &impl CypherExecutor, nodes: &[DbNode]) -> Result<usize> {
     if nodes.is_empty() {
         return Ok(0);
@@ -712,6 +720,7 @@ pub fn insert_nodes(exec: &impl CypherExecutor, nodes: &[DbNode]) -> Result<usiz
 /// FalkorDB's UNWIND+MERGE collapses rows when multiple edges reference the
 /// same source/target node, losing edges. Step 1 ensures placeholder nodes
 /// exist, step 2 creates edges with MATCH+CREATE.
+#[cfg(feature = "falkordb")]
 pub fn insert_edges_two_step(
     exec: &impl CypherExecutor,
     relationships: &[DbEdge],

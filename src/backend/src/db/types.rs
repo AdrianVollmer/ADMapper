@@ -93,7 +93,8 @@ pub fn admin_types_set() -> std::collections::HashSet<&'static str> {
 
 /// Quote-escaping style for Cypher string literals.
 #[derive(Clone, Copy)]
-#[cfg(any(feature = "crustdb", feature = "neo4j", feature = "falkordb"))]
+#[cfg(any(feature = "crustdb", feature = "falkordb"))]
+#[allow(dead_code)] // Variants used by different feature flags.
 pub enum CypherEscapeStyle {
     /// Escape single quotes by doubling them: `'` -> `''` (CrustDB)
     DoubleQuote,
@@ -102,7 +103,7 @@ pub enum CypherEscapeStyle {
 }
 
 /// Convert a JSON object to Cypher property syntax (e.g., `{key: value, ...}`).
-#[cfg(any(feature = "crustdb", feature = "neo4j", feature = "falkordb"))]
+#[cfg(any(feature = "crustdb", feature = "falkordb"))]
 pub fn json_to_cypher_props(value: &JsonValue, style: CypherEscapeStyle) -> String {
     let obj = match value.as_object() {
         Some(o) => o,
@@ -121,7 +122,7 @@ pub fn json_to_cypher_props(value: &JsonValue, style: CypherEscapeStyle) -> Stri
 }
 
 /// Convert a JSON value to a Cypher literal string.
-#[cfg(any(feature = "crustdb", feature = "neo4j", feature = "falkordb"))]
+#[cfg(any(feature = "crustdb", feature = "falkordb"))]
 pub fn json_value_to_cypher(value: &JsonValue, style: CypherEscapeStyle) -> Option<String> {
     match value {
         JsonValue::Null => None,
