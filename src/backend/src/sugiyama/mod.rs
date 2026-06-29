@@ -516,6 +516,36 @@ mod tests {
         }
     }
 
+    /// Many children sharing the same parents: the parents must have
+    /// healthy spacing, not collapse to the same position.
+    #[test]
+    fn shared_parents_healthy_spacing() {
+        let n_children = 100;
+        let n_parents = 2;
+        let n = n_children + n_parents;
+        // children 0..99 each -> parent 100 and parent 101
+        let mut edges = Vec::new();
+        for c in 0..n_children {
+            edges.push([c, n_children]);     // -> parent 0
+            edges.push([c, n_children + 1]); // -> parent 1
+        }
+        let config = SugiyamaConfig::default();
+        let coords = layout(n, &edges, &config, None);
+
+        let p0_x = coords[n_children].0;
+        let p1_x = coords[n_children + 1].0;
+        let gap = (p0_x - p1_x).abs();
+
+        // With 100 incoming edges each, the parents should be spaced well
+        // beyond the base node_sep. log2(100) ~ 6.6, so effective sep
+        // should be roughly node_sep * (1 + 3.3) ~ 6.5.
+        assert!(
+            gap >= config.node_sep * 3.0,
+            "shared parents too close: gap={gap:.2}, need >= {:.2}",
+            config.node_sep * 3.0,
+        );
+    }
+
     /// Sort keys should order children by (label, name) when barycenters
     /// are equal (all share the same single parent).
     #[test]
@@ -584,4 +614,5 @@ mod tests {
             );
         }
     }
+
 }

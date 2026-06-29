@@ -149,14 +149,82 @@ fn compact_layers(coords: &mut [(f32, f32)], graph: &LayeredGraph, layer_sep: f3
 /// the crossing-minimized order and the centre of mass.
 fn enforce_layer_spacing(coords: &mut [(f32, f32)], graph: &LayeredGraph, node_sep: f32) {
     for layer in &graph.layers {
-        preserve_order_spacing(layer, coords, node_sep);
+        preserve_order_spacing(layer, coords, node_sep, graph);
+    }
+}
+
+/// Compute the span (max - min) of a node's neighbor x-coordinates.
+fn neighbor_span(node: usize, coords: &[(f32, f32)], graph: &LayeredGraph) -> f32 {
+    let neighbors = graph.in_adj[node]
+        .iter()
+        .chain(graph.out_adj[node].iter());
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut count = 0u32;
+    for &nb in neighbors {
+        let x = coords[nb].0;
+        if x < min_x {
+            min_x = x;
+        }
+        if x > max_x {
+            max_x = x;
+        }
+        count += 1;
+    }
+    if count < 2 {
+        0.0
+    } else {
+        max_x - min_x
+    }
+}
+
+/// Minimum degree (in + out) before span-based spacing kicks in.
+///
+/// Only high-fan-in/out "hub" nodes get spacing proportional to their
+/// neighbor span. Low-degree "leaf" nodes always use base `node_sep`.
+/// This prevents a feedback loop where two adjacent layers keep
+/// amplifying each other's spans during barycenter refinement.
+const SPAN_SPACING_DEGREE_THRESHOLD: usize = 8;
+
+/// Compute minimum spacing between two adjacent nodes in a layer.
+///
+/// When a high-degree node fans out to (or receives from) many neighbors
+/// spanning a wide coordinate range, it needs proportionally more room
+/// so its edge fan doesn't pile on top of its neighbor. The spacing is
+/// the maximum of the base `node_sep` and a fraction of the high-degree
+/// node's neighbor span.
+fn effective_sep(
+    a: usize,
+    b: usize,
+    node_sep: f32,
+    coords: &[(f32, f32)],
+    graph: &LayeredGraph,
+) -> f32 {
+    let deg_a = graph.in_adj[a].len() + graph.out_adj[a].len();
+    let deg_b = graph.in_adj[b].len() + graph.out_adj[b].len();
+
+    if deg_a >= SPAN_SPACING_DEGREE_THRESHOLD || deg_b >= SPAN_SPACING_DEGREE_THRESHOLD {
+        // Use the span of whichever node has higher degree.
+        let span = if deg_a >= deg_b {
+            neighbor_span(a, coords, graph)
+        } else {
+            neighbor_span(b, coords, graph)
+        };
+        node_sep.max(span / 3.0)
+    } else {
+        node_sep
     }
 }
 
 /// Enforce minimum spacing within a single layer, keeping the given
 /// left-to-right order (from crossing minimization) and re-centring
 /// around the original centre of mass.
-fn preserve_order_spacing(layer: &[usize], coords: &mut [(f32, f32)], node_sep: f32) {
+fn preserve_order_spacing(
+    layer: &[usize],
+    coords: &mut [(f32, f32)],
+    node_sep: f32,
+    graph: &LayeredGraph,
+) {
     if layer.len() <= 1 {
         return;
     }
@@ -165,7 +233,8 @@ fn preserve_order_spacing(layer: &[usize], coords: &mut [(f32, f32)], node_sep: 
 
     // Push apart left-to-right in the crossing-minimized order
     for i in 1..layer.len() {
-        let min_x = coords[layer[i - 1]].0 + node_sep;
+        let sep = effective_sep(layer[i - 1], layer[i], node_sep, coords, graph);
+        let min_x = coords[layer[i - 1]].0 + sep;
         if coords[layer[i]].0 < min_x {
             coords[layer[i]].0 = min_x;
         }
@@ -198,7 +267,7 @@ fn barycenter_refine(coords: &mut [(f32, f32)], graph: &LayeredGraph, node_sep: 
                         preds.iter().map(|&p| coords[p].0).sum::<f32>() / preds.len() as f32;
                 }
             }
-            preserve_order_spacing(&graph.layers[l], coords, node_sep);
+            preserve_order_spacing(&graph.layers[l], coords, node_sep, graph);
         }
 
         // Backward: place each node at the average x of its successors
@@ -210,7 +279,7 @@ fn barycenter_refine(coords: &mut [(f32, f32)], graph: &LayeredGraph, node_sep: 
                         succs.iter().map(|&c| coords[c].0).sum::<f32>() / succs.len() as f32;
                 }
             }
-            preserve_order_spacing(&graph.layers[l], coords, node_sep);
+            preserve_order_spacing(&graph.layers[l], coords, node_sep, graph);
         }
     }
 }

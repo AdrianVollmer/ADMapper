@@ -282,6 +282,30 @@ def uneven_stars(sizes, bridges=None):
     return nodes, edges
 
 
+def shared_parents(n_children, n_parents=2):
+    """Many child nodes each connected to the same set of parent nodes.
+
+    Creates n_children nodes that all point to the same n_parents parents.
+    In hierarchical L-R layout, parents end up on the right with identical
+    barycenters -- a stress test for overlap avoidance.
+    """
+    CHILD_TYPES = ["User", "Computer", "OU", "GPO"]
+    nodes = []
+    edges = []
+    parent_ids = []
+    for pi in range(n_parents):
+        pid = f"parent{pi}"
+        parent_ids.append(pid)
+        nodes.append(N(pid, f"Parent{pi}", "Group"))
+    for ci in range(n_children):
+        cid = f"child{ci}"
+        ctype = CHILD_TYPES[ci % len(CHILD_TYPES)]
+        nodes.append(N(cid, f"Child{ci}", ctype))
+        for pid in parent_ids:
+            edges.append(E(cid, pid, "MemberOf"))
+    return nodes, edges
+
+
 def dense_core_periphery(n_core, n_peri):
     nodes = [N(f"core{i}", f"Core{i}", "Group") for i in range(n_core)]
     nodes += [N(f"peri{i}", f"Peri{i}", "User") for i in range(n_peri)]
@@ -329,6 +353,8 @@ def make_test_graphs():
             *dense_core_periphery(10, 20)),
         ("uneven_stars", "Uneven Star Clusters", "3 stars: 200 + 3 + 5 satellites, bridged",
             *uneven_stars([200, 3, 5], bridges=[(0, 1), (1, 2)])),
+        ("shared_parents", "Shared Parents", "100 children all with same 2 parents (barycenter tie)",
+            *shared_parents(100, 2)),
     ]
 
     graphs = []
