@@ -306,7 +306,11 @@ fn get_node_connections_incoming_returns_all_sources() {
     let (nodes, edges) = db.get_node_connections("target-node", "incoming").unwrap();
 
     assert_eq!(edges.len(), 3, "Should return all 3 incoming edges");
-    assert_eq!(nodes.len(), 4, "Should return all 4 nodes (3 sources + target)");
+    assert_eq!(
+        nodes.len(),
+        4,
+        "Should return all 4 nodes (3 sources + target)"
+    );
 
     // Verify all source nodes are present.
     let node_ids: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();

@@ -2001,10 +2001,7 @@ fn test_resolve_orphan_names_null_name_placeholders() {
 
     // Simulate Neo4j/FalkorDB-style placeholder creation: set objectid but
     // NOT name. This is what `ON CREATE SET a.placeholder = true` produces.
-    let orphan_sids = [
-        format!("{}-512", domain_sid),
-        format!("{}-519", domain_sid),
-    ];
+    let orphan_sids = [format!("{}-512", domain_sid), format!("{}-519", domain_sid)];
     for sid in &orphan_sids {
         importer
             .db
@@ -2083,7 +2080,10 @@ fn test_resolve_orphan_names_after_edge_flush() {
     // Placeholder should exist now
     let all_nodes = importer.db.get_all_nodes().unwrap();
     let placeholder = all_nodes.iter().find(|n| n.id == orphan_target);
-    assert!(placeholder.is_some(), "Placeholder node should exist after edge insert");
+    assert!(
+        placeholder.is_some(),
+        "Placeholder node should exist after edge insert"
+    );
 
     // Resolve orphan names
     let updated = importer.resolve_orphan_names().unwrap();
