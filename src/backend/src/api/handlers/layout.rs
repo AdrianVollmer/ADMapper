@@ -78,28 +78,263 @@ pub fn compute_layout(req: &LayoutRequest) -> Vec<NodePosition> {
 
 /// Fruchterman-Reingold force-directed layout.
 ///
-/// Based on code from visgraph by Raoul Luque (MIT OR Apache-2.0).
-/// Adapted to work on raw index-based adjacency lists instead of petgraph.
-/// Source: <https://github.com/raoulluque/visgraph>
+/// Originally based on visgraph by Raoul Luque (MIT OR Apache-2.0),
+/// substantially reworked:
+///   - proper cooling schedule (exponential decay from a large initial temp)
+///   - weak gravity toward the centroid to prevent cluster drift
+///   - component-aware: disconnected components are laid out independently
+///     and then packed using skyline bin-packing
 fn force_directed(
     node_ids: &[String],
     edges: &[[usize; 2]],
     iterations: u32,
-    initial_temperature: f32,
+    _initial_temperature: f32,
 ) -> Vec<NodePosition> {
     let n = node_ids.len();
     if n == 0 {
         return Vec::new();
     }
 
+    // Find connected components via union-find.
+    let components = connected_components(n, edges);
+
+    // If there's only one component, lay it out directly.
+    if components.len() == 1 {
+        let positions = fr_single_component(n, edges, iterations);
+        return assemble_positions(node_ids, &[positions]);
+    }
+
+    // Lay out each component independently, then pack them.
+    let mut component_positions = Vec::with_capacity(components.len());
+    for comp in &components {
+        let cn = comp.len();
+        let global_to_local: std::collections::HashMap<usize, usize> =
+            comp.iter().enumerate().map(|(li, &gi)| (gi, li)).collect();
+        let local_edges: Vec<[usize; 2]> = edges
+            .iter()
+            .filter_map(|e| {
+                let a = global_to_local.get(&e[0])?;
+                let b = global_to_local.get(&e[1])?;
+                Some([*a, *b])
+            })
+            .collect();
+        component_positions.push(fr_single_component(cn, &local_edges, iterations));
+    }
+
+    // Compute bounding boxes for each component.
+    let bboxes: Vec<(f32, f32)> = component_positions
+        .iter()
+        .map(|cpos| {
+            let (mut min_x, mut max_x) = (f32::INFINITY, f32::NEG_INFINITY);
+            let (mut min_y, mut max_y) = (f32::INFINITY, f32::NEG_INFINITY);
+            for &(cx, cy) in cpos {
+                min_x = min_x.min(cx);
+                max_x = max_x.max(cx);
+                min_y = min_y.min(cy);
+                max_y = max_y.max(cy);
+            }
+            ((max_x - min_x).max(0.0), (max_y - min_y).max(0.0))
+        })
+        .collect();
+
+    // Skyline-pack the bounding boxes.
+    let padding = 0.3;
+    let origins = skyline_pack(&bboxes, padding);
+
+    // Place each component at its packed origin.
+    let mut all_pos = vec![(0.0_f32, 0.0_f32); n];
+    for (ci, comp) in components.iter().enumerate() {
+        let cpos = &component_positions[ci];
+        let (ox, oy) = origins[ci];
+        // Shift component so its local min is at the packed origin.
+        let (mut min_x, mut min_y) = (f32::INFINITY, f32::INFINITY);
+        for &(cx, cy) in cpos {
+            min_x = min_x.min(cx);
+            min_y = min_y.min(cy);
+        }
+        for (li, &gi) in comp.iter().enumerate() {
+            all_pos[gi].0 = cpos[li].0 - min_x + ox;
+            all_pos[gi].1 = cpos[li].1 - min_y + oy;
+        }
+    }
+
+    let positions = node_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| NodePosition {
+            id: id.clone(),
+            x: all_pos[i].0,
+            y: all_pos[i].1,
+        })
+        .collect();
+
+    normalize(positions)
+}
+
+/// Skyline bin-packing: place rectangles into a compact, roughly square area.
+///
+/// Takes a slice of (width, height) bounding boxes and padding between them.
+/// Returns the (x, y) origin for each rectangle's top-left corner.
+///
+/// Algorithm: maintain a "skyline" -- a sequence of (x, y) segments where y
+/// is the height of already-placed content at position x.  For each rectangle
+/// (largest-area first), find the skyline position where the top of the placed
+/// rectangle is lowest, place it, and raise the skyline.
+fn skyline_pack(bboxes: &[(f32, f32)], padding: f32) -> Vec<(f32, f32)> {
+    let n = bboxes.len();
+    if n == 0 {
+        return Vec::new();
+    }
+
+    // Padded sizes.
+    let padded: Vec<(f32, f32)> = bboxes
+        .iter()
+        .map(|&(w, h)| (w + padding, h + padding))
+        .collect();
+
+    // Sort by area descending; place large components first.
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| {
+        let area_a = padded[a].0 * padded[a].1;
+        let area_b = padded[b].0 * padded[b].1;
+        area_b.partial_cmp(&area_a).unwrap()
+    });
+
+    // Estimate bin width: aim for a roughly square total area.
+    let total_area: f32 = padded.iter().map(|(w, h)| w * h).sum();
+    let max_w = padded.iter().map(|(w, _)| *w).fold(0.0_f32, f32::max);
+    let bin_width = total_area.sqrt().max(max_w);
+
+    // Skyline segments: each (x_start, height).  The segment at index i
+    // covers [segments[i].x, segments[i+1].x) at the given height.
+    // The last segment implicitly extends to bin_width.
+    let mut sky: Vec<(f32, f32)> = vec![(0.0, 0.0)];
+
+    let mut origins = vec![(0.0_f32, 0.0_f32); n];
+
+    for &idx in &order {
+        let (rw, rh) = padded[idx];
+
+        // Find the skyline position that minimises the top of the placed rect.
+        let mut best_si = 0;
+        let mut best_y = f32::INFINITY;
+
+        'outer: for si in 0..sky.len() {
+            let x0 = sky[si].0;
+            if x0 + rw > bin_width + 0.001 {
+                break;
+            }
+            // Max height across all segments the rect would overlap.
+            let mut max_h = 0.0_f32;
+            for sj in si..sky.len() {
+                if sky[sj].0 >= x0 + rw - 0.001 {
+                    break;
+                }
+                max_h = max_h.max(sky[sj].1);
+                // If this is already worse than our best, skip.
+                if max_h >= best_y {
+                    continue 'outer;
+                }
+            }
+            if max_h < best_y {
+                best_y = max_h;
+                best_si = si;
+            }
+        }
+
+        let best_x = sky[best_si].0;
+        origins[idx] = (best_x, best_y);
+
+        // Update skyline: raise [best_x, best_x + rw) to best_y + rh.
+        let new_top = best_y + rh;
+        let rx_end = best_x + rw;
+
+        // Collect the height of the segment that covers rx_end (we'll need
+        // it if we're splitting a segment).
+        let mut tail_h = sky.last().unwrap().1;
+        for s in &sky {
+            if s.0 <= rx_end + 0.001 {
+                tail_h = s.1;
+            }
+        }
+
+        // Build a new skyline:
+        //   1. Keep segments entirely before best_x
+        //   2. Insert (best_x, new_top)
+        //   3. Insert (rx_end, tail_h) if rx_end < bin_width
+        //   4. Keep segments starting at or after rx_end
+        let mut new_sky: Vec<(f32, f32)> = Vec::with_capacity(sky.len() + 2);
+
+        // Segments before the rect.
+        for s in &sky {
+            if s.0 < best_x - 0.001 {
+                new_sky.push(*s);
+            }
+        }
+
+        // The rect's raised segment.
+        new_sky.push((best_x, new_top));
+
+        // Segment after the rect (restore previous height).
+        if rx_end < bin_width - 0.001 {
+            new_sky.push((rx_end, tail_h));
+        }
+
+        // Segments after the rect's range.
+        for s in &sky {
+            if s.0 >= rx_end + 0.001 {
+                new_sky.push(*s);
+            }
+        }
+
+        // Merge adjacent segments with the same height.
+        sky.clear();
+        for seg in &new_sky {
+            if let Some(last) = sky.last() {
+                if (last.1 - seg.1).abs() < 0.001 {
+                    continue;
+                }
+            }
+            sky.push(*seg);
+        }
+    }
+
+    origins
+}
+
+/// Lay out a single connected component using Fruchterman-Reingold.
+fn fr_single_component(
+    n: usize,
+    edges: &[[usize; 2]],
+    iterations: u32,
+) -> Vec<(f32, f32)> {
+    if n == 0 {
+        return Vec::new();
+    }
+    if n == 1 {
+        return vec![(0.0, 0.0)];
+    }
+
     let mut pos = vec![(0.0_f32, 0.0_f32); n];
     let mut rng = fastrand::Rng::new();
     for p in &mut pos {
-        *p = (rng.f32(), rng.f32());
+        *p = (rng.f32() - 0.5, rng.f32() - 0.5);
     }
 
-    let k = (1.0 / n as f32).sqrt();
-    let clip = 0.01_f32;
+    // Ideal spring length: area = n, side = sqrt(n), so k = sqrt(area/n) = 1.
+    // Using k proportional to 1/sqrt(n) keeps nodes from piling up in big graphs.
+    let k = (1.0_f32 / n as f32).sqrt();
+    let k2 = k * k;
+    let clip = k * 0.01;
+
+    // Cooling: start hot (large displacement allowed), decay exponentially.
+    // Initial temperature proportional to layout area so nodes can traverse it.
+    let t0 = k * (n as f32).sqrt(); // ~ side length of ideal layout
+    let t_min = k * 0.01;
+
+    // Gravity: weak pull toward centroid to prevent drift.
+    // Stronger for larger graphs where drift is more pronounced.
+    let gravity = 0.05 * k;
 
     for iteration in 0..iterations {
         let mut disp = vec![(0.0_f32, 0.0_f32); n];
@@ -110,7 +345,7 @@ fn force_directed(
                 let dx = pos[i].0 - pos[j].0;
                 let dy = pos[i].1 - pos[j].1;
                 let dist = (dx * dx + dy * dy).sqrt().max(clip);
-                let force = k * k / dist;
+                let force = k2 / dist;
                 let fx = (dx / dist) * force;
                 let fy = (dy / dist) * force;
                 disp[i].0 += fx;
@@ -135,8 +370,24 @@ fn force_directed(
             disp[t].1 += fy;
         }
 
-        // Apply with cooling
-        let temp = initial_temperature - (0.1 * iteration as f32) / ((iterations + 1) as f32);
+        // Gravity: pull toward centroid
+        let (mut cx, mut cy) = (0.0_f32, 0.0_f32);
+        for p in &pos {
+            cx += p.0;
+            cy += p.1;
+        }
+        cx /= n as f32;
+        cy /= n as f32;
+        for i in 0..n {
+            disp[i].0 -= (pos[i].0 - cx) * gravity;
+            disp[i].1 -= (pos[i].1 - cy) * gravity;
+        }
+
+        // Apply displacement with temperature-limited step size.
+        // Exponential cooling: t = t0 * decay^iteration
+        let progress = iteration as f32 / iterations as f32;
+        let temp = (t0 * (t_min / t0).powf(progress)).max(t_min);
+
         for i in 0..n {
             let len = (disp[i].0 * disp[i].0 + disp[i].1 * disp[i].1).sqrt();
             if len > 0.0 {
@@ -147,16 +398,56 @@ fn force_directed(
         }
     }
 
+    pos
+}
+
+/// Find connected components via union-find.  Returns a vec of components,
+/// each being a sorted vec of global node indices.
+fn connected_components(n: usize, edges: &[[usize; 2]]) -> Vec<Vec<usize>> {
+    let mut parent: Vec<usize> = (0..n).collect();
+
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]]; // path halving
+            x = parent[x];
+        }
+        x
+    }
+
+    for e in edges {
+        let a = find(&mut parent, e[0]);
+        let b = find(&mut parent, e[1]);
+        if a != b {
+            parent[a] = b;
+        }
+    }
+
+    let mut groups: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        groups.entry(root).or_default().push(i);
+    }
+
+    // Sort components by size descending (largest first).
+    let mut comps: Vec<Vec<usize>> = groups.into_values().collect();
+    comps.sort_by(|a, b| b.len().cmp(&a.len()));
+    comps
+}
+
+/// Build the final NodePosition vec from per-component position arrays,
+/// mapping local indices back to global ones.
+fn assemble_positions(node_ids: &[String], component_positions: &[Vec<(f32, f32)>]) -> Vec<NodePosition> {
+    // Single component: indices are 1:1.
     let positions = node_ids
         .iter()
         .enumerate()
         .map(|(i, id)| NodePosition {
             id: id.clone(),
-            x: pos[i].0,
-            y: pos[i].1,
+            x: component_positions[0][i].0,
+            y: component_positions[0][i].1,
         })
         .collect();
-
     normalize(positions)
 }
 
@@ -681,5 +972,159 @@ mod tests {
             - pos.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
         assert!(x_range > TARGET_SIZE, "squashed horizontally: {x_range:.0}");
         assert!(y_range > TARGET_SIZE, "squashed vertically: {y_range:.0}");
+    }
+
+    // ── Force-directed specific tests ────────────────────────────────────
+
+    fn make_fd_request(n: usize, edges: &[[usize; 2]]) -> LayoutRequest {
+        LayoutRequest {
+            nodes: (0..n).map(|i| format!("node_{i}")).collect(),
+            edges: edges.to_vec(),
+            algorithm: LayoutAlgorithm::ForceDirected,
+            direction: None,
+            iterations: None,
+            node_labels: None,
+            temperature: None,
+        }
+    }
+
+    /// Helper: assert all positions finite, in bounds, and no overlaps.
+    fn assert_valid_layout(positions: &[NodePosition], label: &str) {
+        for (i, p) in positions.iter().enumerate() {
+            assert!(
+                p.x.is_finite() && p.y.is_finite(),
+                "{label}: node {i} non-finite: ({}, {})",
+                p.x,
+                p.y,
+            );
+            assert!(
+                p.x.abs() <= TARGET_SIZE + 1.0 && p.y.abs() <= TARGET_SIZE + 1.0,
+                "{label}: node {i} out of bounds: ({}, {})",
+                p.x,
+                p.y,
+            );
+        }
+        for i in 0..positions.len() {
+            for j in (i + 1)..positions.len() {
+                let dist = ((positions[i].x - positions[j].x).powi(2)
+                    + (positions[i].y - positions[j].y).powi(2))
+                .sqrt();
+                assert!(
+                    dist > 1.0,
+                    "{label}: nodes {i} and {j} too close (dist={dist:.1})",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fd_star_graph() {
+        // Hub + 8 spokes
+        let edges: &[[usize; 2]] = &[
+            [0, 1], [0, 2], [0, 3], [0, 4],
+            [0, 5], [0, 6], [0, 7], [0, 8],
+        ];
+        let req = make_fd_request(9, edges);
+        let positions = compute_layout(&req);
+        assert_eq!(positions.len(), 9);
+        assert_valid_layout(&positions, "fd_star");
+    }
+
+    #[test]
+    fn fd_disconnected_components() {
+        // Two triangles with no connection between them
+        let edges: &[[usize; 2]] = &[
+            [0, 1], [1, 2], [2, 0], // component A
+            [3, 4], [4, 5], [5, 3], // component B
+        ];
+        let req = make_fd_request(6, edges);
+        let positions = compute_layout(&req);
+        assert_eq!(positions.len(), 6);
+        assert_valid_layout(&positions, "fd_disconnected");
+    }
+
+    #[test]
+    fn fd_no_edges() {
+        let req = make_fd_request(10, &[]);
+        let positions = compute_layout(&req);
+        assert_eq!(positions.len(), 10);
+        assert_valid_layout(&positions, "fd_no_edges");
+    }
+
+    #[test]
+    fn fd_single_node() {
+        let req = make_fd_request(1, &[]);
+        let positions = compute_layout(&req);
+        assert_eq!(positions.len(), 1);
+        assert!(positions[0].x.is_finite() && positions[0].y.is_finite());
+    }
+
+    #[test]
+    fn skyline_pack_basic() {
+        // Three rectangles: one big, two small.
+        let bboxes = vec![(4.0, 3.0), (1.0, 1.0), (1.0, 1.0)];
+        let origins = skyline_pack(&bboxes, 0.0);
+
+        // All origins should be finite and non-negative.
+        for (i, &(x, y)) in origins.iter().enumerate() {
+            assert!(x >= 0.0 && y >= 0.0, "rect {i} has negative origin: ({x}, {y})");
+            assert!(x.is_finite() && y.is_finite(), "rect {i} non-finite: ({x}, {y})");
+        }
+
+        // No two rectangles should overlap.
+        for i in 0..bboxes.len() {
+            for j in (i + 1)..bboxes.len() {
+                let (x1, y1) = origins[i];
+                let (w1, h1) = bboxes[i];
+                let (x2, y2) = origins[j];
+                let (w2, h2) = bboxes[j];
+                let overlap_x = x1 < x2 + w2 && x2 < x1 + w1;
+                let overlap_y = y1 < y2 + h2 && y2 < y1 + h1;
+                assert!(
+                    !(overlap_x && overlap_y),
+                    "rects {i} and {j} overlap: ({x1},{y1},{w1},{h1}) vs ({x2},{y2},{w2},{h2})",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn skyline_pack_many_equal() {
+        // 9 equal squares should pack into roughly a 3x3 grid.
+        let bboxes = vec![(1.0, 1.0); 9];
+        let origins = skyline_pack(&bboxes, 0.0);
+
+        let max_x = origins.iter().map(|o| o.0 + 1.0).fold(0.0_f32, f32::max);
+        let max_y = origins.iter().map(|o| o.1 + 1.0).fold(0.0_f32, f32::max);
+
+        // Should be roughly square, not a long strip.
+        let aspect = max_x.max(max_y) / max_x.min(max_y);
+        assert!(
+            aspect < 2.0,
+            "9 equal squares packed with bad aspect ratio: {max_x} x {max_y} (ratio {aspect:.1})"
+        );
+    }
+
+    #[test]
+    fn fd_spread() {
+        let edges: &[[usize; 2]] = &[[0, 5], [1, 5], [2, 6], [3, 6], [4, 7], [5, 7], [6, 7]];
+        let req = make_fd_request(8, edges);
+        let positions = compute_layout(&req);
+
+        let xs: Vec<f32> = positions.iter().map(|p| p.x).collect();
+        let ys: Vec<f32> = positions.iter().map(|p| p.y).collect();
+        let x_range = xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+            - xs.iter().cloned().fold(f32::INFINITY, f32::min);
+        let y_range = ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+            - ys.iter().cloned().fold(f32::INFINITY, f32::min);
+
+        assert!(
+            x_range > 100.0,
+            "fd x range too small: {x_range} (positions: {xs:?})"
+        );
+        assert!(
+            y_range > 100.0,
+            "fd y range too small: {y_range} (positions: {ys:?})"
+        );
     }
 }
