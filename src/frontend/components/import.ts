@@ -225,18 +225,17 @@ function updateProgressUI(progress: ImportProgressEvent): void {
         ? Math.round((progress.files_processed / progress.total_files) * 100)
         : 0;
 
+  // Progress is split 50/50 between file parsing (3%–50%) and edge flush (50%–99%).
   let percent: number;
   if (progress.status === "completed") {
     percent = 100;
   } else if (progress.edges_total && progress.edges_total > 0 && rawPercent >= 100) {
-    // Files done; edge flush in progress — animate from 95% → 99%
+    // Files done; edge flush in progress — animate from 50% → 99%
     const edgeFraction = progress.edges_imported / progress.edges_total;
-    percent = Math.round(95 + edgeFraction * 4);
+    percent = Math.round(50 + edgeFraction * 49);
   } else {
-    // Floor at 3% (the initial visual hint) so the bar never jumps backward
-    // when the first progress event arrives with 0 bytes/files processed.
-    // Cap at 95% while still running — post-processing can hold at 100% for a while.
-    percent = Math.max(3, Math.min(rawPercent, 95));
+    // File parsing phase: scale rawPercent (0–100) into 3%–50%.
+    percent = Math.max(3, Math.round(3 + (rawPercent / 100) * 47));
   }
 
   if (progressFill) {
