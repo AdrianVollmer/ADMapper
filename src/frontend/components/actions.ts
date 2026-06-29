@@ -77,6 +77,7 @@ export const Actions = {
   LAYOUT_CIRCULAR: "layout-circular",
   LAYOUT_GRID: "layout-grid",
   LAYOUT_LATTICE: "layout-lattice",
+  LAYOUT_RADIAL: "layout-radial",
   CYCLE_LAYOUT: "cycle-layout",
   LIST_VIEW: "list-view",
   // Help menu
@@ -177,6 +178,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "layout-circular": () => setLayout("circular"),
   "layout-grid": () => setLayout("grid"),
   "layout-lattice": () => setLayout("lattice"),
+  "layout-radial": () => setLayout("radial"),
   "cycle-layout": async () => {
     const layoutName = await cycleLayout();
     const { showInfo } = await import("../utils/notifications");

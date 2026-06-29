@@ -323,7 +323,7 @@ export async function setLayout(layout: LayoutType): Promise<void> {
 
 /** Cycle through available layouts and return the new layout name */
 export async function cycleLayout(): Promise<string> {
-  const layouts: LayoutType[] = ["force", "hierarchical", "circular", "grid", "lattice"];
+  const layouts: LayoutType[] = ["force", "hierarchical", "circular", "grid", "lattice", "radial"];
   const currentIndex = layouts.indexOf(currentLayout);
   const nextIndex = (currentIndex + 1) % layouts.length;
   currentLayout = layouts[nextIndex]!;

@@ -38,6 +38,48 @@ impl Default for SugiyamaConfig {
     }
 }
 
+/// Assign nodes to layers and minimize crossings within each layer.
+///
+/// Returns a vec of layers, where each layer is a vec of node indices in
+/// optimized left-to-right order. Only contains real node indices (0..n),
+/// virtual nodes are stripped.
+pub fn get_ordered_layers(
+    n: usize,
+    edges: &[[usize; 2]],
+    sort_keys: Option<&[String]>,
+) -> Vec<Vec<usize>> {
+    if n == 0 {
+        return Vec::new();
+    }
+    if n == 1 {
+        return vec![vec![0]];
+    }
+
+    let mut dag = DagGraph::new(n, edges);
+    dag.remove_cycles();
+    let layers = assign_layers(&dag);
+    let mut layered = build_layered_graph(&dag, &layers);
+    minimize_crossings(
+        &mut layered,
+        SugiyamaConfig::default().crossing_iterations,
+        sort_keys,
+    );
+
+    // Return only real nodes per layer, preserving the optimized order.
+    layered
+        .layers
+        .iter()
+        .map(|layer| {
+            layer
+                .iter()
+                .filter(|&&node| node < n)
+                .copied()
+                .collect()
+        })
+        .filter(|layer: &Vec<usize>| !layer.is_empty())
+        .collect()
+}
+
 /// Compute a top-to-bottom hierarchical layout.
 ///
 /// Returns `(x, y)` coordinates for each of the `n` input nodes (indices

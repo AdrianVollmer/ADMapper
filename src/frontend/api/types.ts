@@ -177,7 +177,7 @@ export interface ApiError {
 export type Theme = "dark" | "light";
 
 /** Graph layout options */
-export type GraphLayout = "force" | "hierarchical" | "circular" | "grid" | "lattice";
+export type GraphLayout = "force" | "hierarchical" | "circular" | "grid" | "lattice" | "radial";
 
 /** Layout settings (visgraph) */
 export interface LayoutSettings {
@@ -205,7 +205,7 @@ export interface Settings {
 // ============================================================================
 
 /** Available server-side layout algorithms */
-export type ServerLayoutAlgorithm = "force_directed" | "hierarchical" | "circular" | "grid" | "lattice";
+export type ServerLayoutAlgorithm = "force_directed" | "hierarchical" | "circular" | "grid" | "lattice" | "radial";
 
 /** Direction for hierarchical layout */
 export type LayoutDirection = "top_to_bottom" | "bottom_to_top" | "left_to_right" | "right_to_left";

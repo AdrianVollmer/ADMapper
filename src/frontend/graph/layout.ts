@@ -17,7 +17,7 @@ import type { LayoutResponse, ServerLayoutAlgorithm } from "../api/types";
 import { getServerLayoutSettings } from "../components/settings";
 
 /** Available layout algorithms */
-export type LayoutType = "force" | "hierarchical" | "circular" | "grid" | "lattice";
+export type LayoutType = "force" | "hierarchical" | "circular" | "grid" | "lattice" | "radial";
 
 export interface LayoutOptions {
   /** Layout algorithm to use */
@@ -31,6 +31,7 @@ const ALGORITHM_MAP: Record<LayoutType, ServerLayoutAlgorithm> = {
   circular: "circular",
   grid: "grid",
   lattice: "lattice",
+  radial: "radial",
 };
 
 /**

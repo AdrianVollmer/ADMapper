@@ -92,6 +92,11 @@ LAYOUTS = [
         "label": "Lattice",
         "request": {"algorithm": "lattice"},
     },
+    {
+        "id": "radial",
+        "label": "Radial",
+        "request": {"algorithm": "radial"},
+    },
 ]
 
 # ── Graph builders ─────────────────────────────────────────────────────────────
@@ -111,12 +116,15 @@ def chain(n, node_type="User"):
     return nodes, edges
 
 
-def star(n_leaves):
+def star(n_leaves, invert=False):
     nodes = [N("hub", "Hub", "Group")]
     edges = []
     for i in range(n_leaves):
         nodes.append(N(f"leaf{i}", f"L{i}", "User"))
-        edges.append(E("hub", f"leaf{i}", "Contains"))
+        if invert:
+            edges.append(E(f"leaf{i}", "hub", "MemberOf"))
+        else:
+            edges.append(E("hub", f"leaf{i}", "Contains"))
     return nodes, edges
 
 
@@ -290,8 +298,10 @@ def make_test_graphs():
     specs = [
         ("tiny_chain", "Tiny Chain", "5 nodes, linear A→B→C→D→E",
             *chain(5)),
-        ("star_small", "Small Star", "1 hub + 8 leaves",
+        ("star_small", "Small Star", "1 hub + 8 leaves (outward)",
             *star(8)),
+        ("star_inverted", "Inverted Star", "1 hub + 8 leaves (inward)",
+            *star(8, invert=True)),
         ("binary_tree", "Binary Tree", "Full binary tree, depth 4 (15 nodes)",
             *binary_tree(4)),
         ("ad_small", "AD Structure (small)", "Domain · groups · users · computers",

@@ -262,6 +262,27 @@ function renderGraphTab(): string {
             <span class="settings-option-label">Lattice</span>
           </span>
         </label>
+        <label class="settings-option">
+          <input type="radio" name="layout" value="radial">
+          <span class="settings-option-content">
+            <svg class="settings-option-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="2"/>
+              <circle cx="12" cy="4" r="1.5"/>
+              <circle cx="19" cy="8" r="1.5"/>
+              <circle cx="19" cy="16" r="1.5"/>
+              <circle cx="12" cy="20" r="1.5"/>
+              <circle cx="5" cy="16" r="1.5"/>
+              <circle cx="5" cy="8" r="1.5"/>
+              <line x1="12" y1="12" x2="12" y2="4"/>
+              <line x1="12" y1="12" x2="19" y2="8"/>
+              <line x1="12" y1="12" x2="19" y2="16"/>
+              <line x1="12" y1="12" x2="12" y2="20"/>
+              <line x1="12" y1="12" x2="5" y2="16"/>
+              <line x1="12" y1="12" x2="5" y2="8"/>
+            </svg>
+            <span class="settings-option-label">Radial</span>
+          </span>
+        </label>
       </div>
     </div>
 

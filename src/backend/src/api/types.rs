@@ -526,6 +526,8 @@ pub enum LayoutAlgorithm {
     Grid,
     /// Tilted grid for optimal label separation
     Lattice,
+    /// Hierarchical layers arranged as concentric circles
+    Radial,
 }
 
 /// Hierarchical layout direction.
