@@ -69,13 +69,7 @@ pub fn get_ordered_layers(
     layered
         .layers
         .iter()
-        .map(|layer| {
-            layer
-                .iter()
-                .filter(|&&node| node < n)
-                .copied()
-                .collect()
-        })
+        .map(|layer| layer.iter().filter(|&&node| node < n).copied().collect())
         .filter(|layer: &Vec<usize>| !layer.is_empty())
         .collect()
 }
@@ -526,7 +520,7 @@ mod tests {
         // children 0..99 each -> parent 100 and parent 101
         let mut edges = Vec::new();
         for c in 0..n_children {
-            edges.push([c, n_children]);     // -> parent 0
+            edges.push([c, n_children]); // -> parent 0
             edges.push([c, n_children + 1]); // -> parent 1
         }
         let config = SugiyamaConfig::default();
@@ -584,12 +578,25 @@ mod tests {
         // 17 sources (0-16) -> 3 targets (17, 18, 19)
         let edges: &[[usize; 2]] = &[
             // 12 sources -> target 17
-            [0, 17], [1, 17], [2, 17], [3, 17], [4, 17], [5, 17],
-            [6, 17], [7, 17], [8, 17], [9, 17], [10, 17], [16, 17],
+            [0, 17],
+            [1, 17],
+            [2, 17],
+            [3, 17],
+            [4, 17],
+            [5, 17],
+            [6, 17],
+            [7, 17],
+            [8, 17],
+            [9, 17],
+            [10, 17],
+            [16, 17],
             // 2 sources -> target 18
-            [11, 18], [12, 18],
+            [11, 18],
+            [12, 18],
             // 3 sources -> target 19
-            [13, 19], [14, 19], [15, 19],
+            [13, 19],
+            [14, 19],
+            [15, 19],
         ];
         let config = SugiyamaConfig::default();
         let coords = layout(20, edges, &config, None);
@@ -614,5 +621,4 @@ mod tests {
             );
         }
     }
-
 }

@@ -176,8 +176,12 @@ pub(crate) fn skyline_pack(bboxes: &[(f32, f32)], padding: f32) -> Vec<(f32, f32
         origins[idx] = (x, y);
 
         // Update skyline.
-        for col in best_col..(best_col + span).min(n_cols) {
-            skyline[col] = y + rh;
+        for h in skyline
+            .iter_mut()
+            .take((best_col + span).min(n_cols))
+            .skip(best_col)
+        {
+            *h = y + rh;
         }
     }
 
@@ -321,7 +325,7 @@ pub(crate) fn connected_components(n: usize, edges: &[[usize; 2]]) -> Vec<Vec<us
     }
 
     let mut components: Vec<Vec<usize>> = comp_map.into_values().collect();
-    components.sort_by(|a, b| b.len().cmp(&a.len()));
+    components.sort_by_key(|c| std::cmp::Reverse(c.len()));
     components
 }
 
@@ -391,8 +395,14 @@ mod tests {
     #[test]
     fn fd_star_graph() {
         let edges: &[[usize; 2]] = &[
-            [0, 1], [0, 2], [0, 3], [0, 4],
-            [0, 5], [0, 6], [0, 7], [0, 8],
+            [0, 1],
+            [0, 2],
+            [0, 3],
+            [0, 4],
+            [0, 5],
+            [0, 6],
+            [0, 7],
+            [0, 8],
         ];
         let req = make_fd_request(9, edges);
         let positions = compute_layout(&req);
@@ -403,8 +413,12 @@ mod tests {
     #[test]
     fn fd_disconnected_components() {
         let edges: &[[usize; 2]] = &[
-            [0, 1], [1, 2], [2, 0], // component A
-            [3, 4], [4, 5], [5, 3], // component B
+            [0, 1],
+            [1, 2],
+            [2, 0], // component A
+            [3, 4],
+            [4, 5],
+            [5, 3], // component B
         ];
         let req = make_fd_request(6, edges);
         let positions = compute_layout(&req);
@@ -434,8 +448,14 @@ mod tests {
         let origins = skyline_pack(&bboxes, 0.0);
 
         for (i, &(x, y)) in origins.iter().enumerate() {
-            assert!(x >= 0.0 && y >= 0.0, "rect {i} has negative origin: ({x}, {y})");
-            assert!(x.is_finite() && y.is_finite(), "rect {i} non-finite: ({x}, {y})");
+            assert!(
+                x >= 0.0 && y >= 0.0,
+                "rect {i} has negative origin: ({x}, {y})"
+            );
+            assert!(
+                x.is_finite() && y.is_finite(),
+                "rect {i} non-finite: ({x}, {y})"
+            );
         }
 
         for i in 0..bboxes.len() {

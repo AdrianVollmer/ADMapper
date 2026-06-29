@@ -53,8 +53,7 @@ pub(crate) fn hierarchical(
                 .collect()
         });
 
-        let coords =
-            crate::sugiyama::layout(cn, &local_edges, &config, local_sort_keys.as_deref());
+        let coords = crate::sugiyama::layout(cn, &local_edges, &config, local_sort_keys.as_deref());
         component_coords.push(coords);
     }
 
@@ -138,8 +137,17 @@ mod tests {
     #[test]
     fn full_pipeline_bipartite() {
         let edges: &[[usize; 2]] = &[
-            [0, 6], [0, 7], [1, 8], [2, 9], [2, 10], [2, 11],
-            [3, 10], [3, 11], [4, 11], [4, 12], [5, 12],
+            [0, 6],
+            [0, 7],
+            [1, 8],
+            [2, 9],
+            [2, 10],
+            [2, 11],
+            [3, 10],
+            [3, 11],
+            [4, 11],
+            [4, 12],
+            [5, 12],
         ];
         let req = make_request(13, edges);
         let positions = compute_layout(&req);
@@ -149,11 +157,16 @@ mod tests {
         for (i, p) in positions.iter().enumerate() {
             assert!(
                 p.x.is_finite() && p.y.is_finite(),
-                "node {i} ({}) non-finite: ({}, {})", p.id, p.x, p.y,
+                "node {i} ({}) non-finite: ({}, {})",
+                p.id,
+                p.x,
+                p.y,
             );
             assert!(
                 p.x.abs() <= TARGET_SIZE + 1.0 && p.y.abs() <= TARGET_SIZE + 1.0,
-                "node {i} out of bounds: ({}, {})", p.x, p.y,
+                "node {i} out of bounds: ({}, {})",
+                p.x,
+                p.y,
             );
         }
 
@@ -165,7 +178,10 @@ mod tests {
                 assert!(
                     dist > 1.0,
                     "nodes {i} and {j} overlap (dist={dist:.2}): ({:.1},{:.1}) vs ({:.1},{:.1})",
-                    positions[i].x, positions[i].y, positions[j].x, positions[j].y,
+                    positions[i].x,
+                    positions[i].y,
+                    positions[j].x,
+                    positions[j].y,
                 );
             }
         }
@@ -174,13 +190,46 @@ mod tests {
     #[test]
     fn full_pipeline_large_graph() {
         let edges: &[[usize; 2]] = &[
-            [0, 20], [0, 21], [1, 21], [1, 22], [2, 20], [2, 23],
-            [3, 22], [3, 24], [4, 20], [4, 25], [5, 21], [5, 23],
-            [6, 22], [6, 26], [7, 24], [7, 27], [8, 20], [8, 21],
-            [9, 23], [9, 25], [10, 26], [10, 27], [11, 20], [11, 24],
-            [12, 21], [12, 22], [13, 25], [13, 26], [14, 27], [14, 20],
-            [15, 23], [15, 24], [16, 21], [16, 25], [17, 22], [17, 27],
-            [18, 20], [18, 26], [19, 23], [19, 24],
+            [0, 20],
+            [0, 21],
+            [1, 21],
+            [1, 22],
+            [2, 20],
+            [2, 23],
+            [3, 22],
+            [3, 24],
+            [4, 20],
+            [4, 25],
+            [5, 21],
+            [5, 23],
+            [6, 22],
+            [6, 26],
+            [7, 24],
+            [7, 27],
+            [8, 20],
+            [8, 21],
+            [9, 23],
+            [9, 25],
+            [10, 26],
+            [10, 27],
+            [11, 20],
+            [11, 24],
+            [12, 21],
+            [12, 22],
+            [13, 25],
+            [13, 26],
+            [14, 27],
+            [14, 20],
+            [15, 23],
+            [15, 24],
+            [16, 21],
+            [16, 25],
+            [17, 22],
+            [17, 27],
+            [18, 20],
+            [18, 26],
+            [19, 23],
+            [19, 24],
         ];
         let req = make_request(28, edges);
         let positions = compute_layout(&req);
@@ -284,20 +333,49 @@ mod tests {
         .map(String::from)
         .collect();
         let node_labels: Vec<String> = vec![
-            "CertTemplate", "EnterpriseCA", "CertTemplate", "CertTemplate",
-            "CertTemplate", "CertTemplate", "CertTemplate", "CertTemplate",
-            "CertTemplate", "CertTemplate", "CertTemplate", "CertTemplate",
-            "CertTemplate", "EnterpriseCA", "CertTemplate", "CertTemplate",
-            "EnterpriseCA", "CertTemplate", "CertTemplate", "CertTemplate",
+            "CertTemplate",
+            "EnterpriseCA",
+            "CertTemplate",
+            "CertTemplate",
+            "CertTemplate",
+            "CertTemplate",
+            "CertTemplate",
+            "CertTemplate",
+            "CertTemplate",
+            "CertTemplate",
+            "CertTemplate",
+            "CertTemplate",
+            "CertTemplate",
+            "EnterpriseCA",
+            "CertTemplate",
+            "CertTemplate",
+            "EnterpriseCA",
+            "CertTemplate",
+            "CertTemplate",
+            "CertTemplate",
             "EnterpriseCA",
         ]
         .into_iter()
         .map(String::from)
         .collect();
         let edges: Vec<[usize; 2]> = vec![
-            [19, 20], [2, 1], [9, 1], [12, 13], [0, 1], [5, 1],
-            [10, 1], [6, 1], [4, 1], [15, 16], [7, 1], [14, 13],
-            [17, 16], [3, 1], [11, 1], [8, 1], [18, 16],
+            [19, 20],
+            [2, 1],
+            [9, 1],
+            [12, 13],
+            [0, 1],
+            [5, 1],
+            [10, 1],
+            [6, 1],
+            [4, 1],
+            [15, 16],
+            [7, 1],
+            [14, 13],
+            [17, 16],
+            [3, 1],
+            [11, 1],
+            [8, 1],
+            [18, 16],
         ];
         let req = LayoutRequest {
             nodes: node_names,
@@ -314,8 +392,11 @@ mod tests {
         let names = ["SUB-CA", "ROOT-CA", "SUB-CA-VPN", "CERTEP"];
         eprintln!("\n=== Screen positions (LTR, with labels) ===");
         for (i, p) in pos.iter().enumerate() {
-            let label = targets.iter().position(|&t| t == i)
-                .map(|j| names[j]).unwrap_or("src");
+            let label = targets
+                .iter()
+                .position(|&t| t == i)
+                .map(|j| names[j])
+                .unwrap_or("src");
             eprintln!("  node {i:2} ({label:>10}): x={:7.1}, y={:7.1}", p.x, p.y);
         }
 
@@ -330,8 +411,10 @@ mod tests {
             let avg = parents.iter().map(|&p| pos[p].y).sum::<f32>() / parents.len() as f32;
             let diff = (pos[*target].y - avg).abs();
             let name = names[targets.iter().position(|&t| t == *target).unwrap()];
-            eprintln!("  {name:>10}: y={:.1}, parent_avg={:.1}, diff={diff:.1}",
-                pos[*target].y, avg);
+            eprintln!(
+                "  {name:>10}: y={:.1}, parent_avg={:.1}, diff={diff:.1}",
+                pos[*target].y, avg
+            );
         }
 
         let x_range = pos.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max)

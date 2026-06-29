@@ -155,9 +155,7 @@ fn enforce_layer_spacing(coords: &mut [(f32, f32)], graph: &LayeredGraph, node_s
 
 /// Compute the span (max - min) of a node's neighbor x-coordinates.
 fn neighbor_span(node: usize, coords: &[(f32, f32)], graph: &LayeredGraph) -> f32 {
-    let neighbors = graph.in_adj[node]
-        .iter()
-        .chain(graph.out_adj[node].iter());
+    let neighbors = graph.in_adj[node].iter().chain(graph.out_adj[node].iter());
     let mut min_x = f32::INFINITY;
     let mut max_x = f32::NEG_INFINITY;
     let mut count = 0u32;
@@ -732,20 +730,22 @@ mod tests {
     fn compact_layers_removes_dead_space() {
         let lg = LayeredGraph {
             layers: vec![
-                vec![0, 1],    // layer 0
-                vec![2],       // layer 1
-                vec![],        // layer 2 (empty!)
-                vec![],        // layer 3 (empty!)
-                vec![3, 4],    // layer 4
+                vec![0, 1], // layer 0
+                vec![2],    // layer 1
+                vec![],     // layer 2 (empty!)
+                vec![],     // layer 3 (empty!)
+                vec![3, 4], // layer 4
             ],
             layer_of: vec![0, 0, 1, 4, 4],
-            out_adj: vec![vec![2], vec![2], vec![],  vec![], vec![]],
-            in_adj:  vec![vec![],  vec![],  vec![0, 1], vec![], vec![]],
+            out_adj: vec![vec![2], vec![2], vec![], vec![], vec![]],
+            in_adj: vec![vec![], vec![], vec![0, 1], vec![], vec![]],
             is_virtual: vec![false; 5],
         };
 
         let config = CoordConfig::default();
-        let mut coords: Vec<(f32, f32)> = lg.layer_of.iter()
+        let mut coords: Vec<(f32, f32)> = lg
+            .layer_of
+            .iter()
             .enumerate()
             .map(|(i, &l)| (i as f32 * config.node_sep, l as f32 * config.layer_sep))
             .collect();
@@ -756,10 +756,15 @@ mod tests {
         let eps = 0.01;
         assert!((coords[0].1 - 0.0).abs() < eps, "layer 0 y={}", coords[0].1);
         assert!((coords[1].1 - 0.0).abs() < eps);
-        assert!((coords[2].1 - config.layer_sep).abs() < eps, "layer 1 y={}", coords[2].1);
+        assert!(
+            (coords[2].1 - config.layer_sep).abs() < eps,
+            "layer 1 y={}",
+            coords[2].1
+        );
         assert!(
             (coords[3].1 - 2.0 * config.layer_sep).abs() < eps,
-            "layer 4 y={}", coords[3].1,
+            "layer 4 y={}",
+            coords[3].1,
         );
         assert!((coords[3].1 - coords[4].1).abs() < eps);
     }

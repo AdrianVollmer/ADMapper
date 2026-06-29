@@ -8,7 +8,7 @@
 //! then angular positions are refined to minimize the angle between edges and
 //! the radial direction (edges should point toward/away from the center).
 
-use super::{normalize, NodePosition, TARGET_SIZE};
+use super::{normalize, NodePosition};
 
 pub(crate) fn radial(
     node_ids: &[String],
@@ -40,8 +40,7 @@ pub(crate) fn radial(
     });
 
     // Get layers with crossing-minimized ordering.
-    let ordered_layers =
-        crate::sugiyama::get_ordered_layers(n, edges, sort_keys.as_deref());
+    let ordered_layers = crate::sugiyama::get_ordered_layers(n, edges, sort_keys.as_deref());
 
     if ordered_layers.is_empty() {
         return node_ids
@@ -56,8 +55,6 @@ pub(crate) fn radial(
 
     // Reverse layers so the deepest layer (sinks) is innermost (index 0).
     let layers: Vec<&Vec<usize>> = ordered_layers.iter().rev().collect();
-    let n_layers = layers.len();
-
     // Assign angular positions per ring.
     let mut angle_of = vec![0.0_f32; n];
     let mut radius_of = vec![0.0_f32; n];
@@ -108,8 +105,7 @@ pub(crate) fn radial(
     }
 
     for _pass in 0..10 {
-        for li in 0..n_layers {
-            let layer = &layers[li];
+        for (li, layer) in layers.iter().enumerate() {
             if layer.len() <= 1 {
                 continue;
             }
@@ -194,11 +190,15 @@ mod tests {
         for (i, p) in positions.iter().enumerate() {
             assert!(
                 p.x.is_finite() && p.y.is_finite(),
-                "{label}: node {i} non-finite: ({}, {})", p.x, p.y,
+                "{label}: node {i} non-finite: ({}, {})",
+                p.x,
+                p.y,
             );
             assert!(
                 p.x.abs() <= TARGET_SIZE + 1.0 && p.y.abs() <= TARGET_SIZE + 1.0,
-                "{label}: node {i} out of bounds: ({}, {})", p.x, p.y,
+                "{label}: node {i} out of bounds: ({}, {})",
+                p.x,
+                p.y,
             );
         }
         for i in 0..positions.len() {
@@ -217,8 +217,14 @@ mod tests {
     #[test]
     fn radial_star() {
         let edges: &[[usize; 2]] = &[
-            [0, 1], [0, 2], [0, 3], [0, 4],
-            [0, 5], [0, 6], [0, 7], [0, 8],
+            [0, 1],
+            [0, 2],
+            [0, 3],
+            [0, 4],
+            [0, 5],
+            [0, 6],
+            [0, 7],
+            [0, 8],
         ];
         let req = make_radial_request(9, edges);
         let positions = compute_layout(&req);
@@ -229,9 +235,16 @@ mod tests {
     #[test]
     fn radial_three_layer_dag() {
         let edges: &[[usize; 2]] = &[
-            [0, 3], [0, 4], [1, 4], [1, 5],
-            [2, 3], [2, 5], [3, 6], [4, 6],
-            [4, 7], [5, 7],
+            [0, 3],
+            [0, 4],
+            [1, 4],
+            [1, 5],
+            [2, 3],
+            [2, 5],
+            [3, 6],
+            [4, 6],
+            [4, 7],
+            [5, 7],
         ];
         let req = make_radial_request(8, edges);
         let positions = compute_layout(&req);

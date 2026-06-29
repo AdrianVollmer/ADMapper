@@ -74,11 +74,9 @@ pub fn compute_layout(req: &LayoutRequest) -> Vec<NodePosition> {
         LayoutAlgorithm::Circular => simple::circular(&req.nodes),
         LayoutAlgorithm::Grid => simple::grid(&req.nodes),
         LayoutAlgorithm::Lattice => simple::lattice(&req.nodes),
-        LayoutAlgorithm::Radial => radial::radial(
-            &req.nodes,
-            &req.edges,
-            req.node_labels.as_deref(),
-        ),
+        LayoutAlgorithm::Radial => {
+            radial::radial(&req.nodes, &req.edges, req.node_labels.as_deref())
+        }
     }
 }
 
