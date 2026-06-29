@@ -497,10 +497,12 @@ impl DatabaseBackend for Neo4jDatabase {
                     edge.target_type.as_deref().unwrap_or("Base"),
                 )),
             );
-            map.put(
-                BoltString::new("props"),
-                Self::json_to_bolt(&edge.properties),
-            );
+            let props = if edge.properties.is_null() {
+                BoltType::Map(BoltMap::new())
+            } else {
+                Self::json_to_bolt(&edge.properties)
+            };
+            map.put(BoltString::new("props"), props);
             edges_by_type
                 .entry(edge.rel_type.clone())
                 .or_default()
