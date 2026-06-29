@@ -21,6 +21,7 @@ import math
 import os
 import random
 import socket
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -250,6 +251,26 @@ def random_graph(n_nodes, n_edges, seed=42):
     return nodes, edges
 
 
+def uneven_stars(sizes, bridges=None):
+    """Multiple star clusters with wildly different satellite counts."""
+    TYPES = ["User", "Computer", "OU", "GPO"]
+    nodes, edges = [], []
+    hub_ids = []
+    for ci, n_leaves in enumerate(sizes):
+        hub_id = f"star{ci}_hub"
+        hub_ids.append(hub_id)
+        nodes.append(N(hub_id, f"Star{ci}Hub", "Group"))
+        for li in range(n_leaves):
+            lid = f"star{ci}_leaf{li}"
+            ntype = TYPES[(ci + li) % len(TYPES)]
+            nodes.append(N(lid, f"S{ci}L{li}", ntype))
+            edges.append(E(hub_id, lid, "Contains"))
+    if bridges:
+        for a, b in bridges:
+            edges.append(E(hub_ids[a], hub_ids[b], "TrustedBy"))
+    return nodes, edges
+
+
 def dense_core_periphery(n_core, n_peri):
     nodes = [N(f"core{i}", f"Core{i}", "Group") for i in range(n_core)]
     nodes += [N(f"peri{i}", f"Peri{i}", "User") for i in range(n_peri)]
@@ -291,6 +312,8 @@ def make_test_graphs():
             *random_graph(50, 80)),
         ("dense_core", "Dense Core + Periphery", "10 fully-connected core nodes + 20 leaf nodes",
             *dense_core_periphery(10, 20)),
+        ("uneven_stars", "Uneven Star Clusters", "3 stars: 200 + 3 + 5 satellites, bridged",
+            *uneven_stars([200, 3, 5], bridges=[(0, 1), (1, 2)])),
     ]
 
     graphs = []
@@ -298,6 +321,271 @@ def make_test_graphs():
         gid, title, desc, nodes, edges = item
         graphs.append({"id": gid, "title": title, "desc": desc, "nodes": nodes, "edges": edges})
     return graphs
+
+
+# ── Layout quality scoring ────────────────────────────────────────────────────
+
+
+def _pairwise_distances(positions: dict) -> list[float]:
+    """All pairwise Euclidean distances between positioned nodes."""
+    pts = list(positions.values())
+    dists = []
+    for i in range(len(pts)):
+        for j in range(i + 1, len(pts)):
+            dx = pts[i][0] - pts[j][0]
+            dy = pts[i][1] - pts[j][1]
+            dists.append(math.sqrt(dx * dx + dy * dy))
+    return dists
+
+
+def _edge_lengths(graph: dict, positions: dict) -> list[float]:
+    """Euclidean lengths of all edges with both endpoints positioned."""
+    lengths = []
+    for e in graph["edges"]:
+        sp = positions.get(e["source"])
+        tp = positions.get(e["target"])
+        if sp and tp:
+            dx = sp[0] - tp[0]
+            dy = sp[1] - tp[1]
+            lengths.append(math.sqrt(dx * dx + dy * dy))
+    return lengths
+
+
+def _count_crossings(graph: dict, positions: dict) -> int:
+    """Count edge crossings using line-segment intersection tests."""
+    segs = []
+    for e in graph["edges"]:
+        sp = positions.get(e["source"])
+        tp = positions.get(e["target"])
+        if sp and tp:
+            segs.append((sp, tp))
+
+    def ccw(a, b, c):
+        return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+
+    def intersects(s1, s2):
+        a, b = s1
+        c, d = s2
+        # Skip if they share an endpoint
+        if a == c or a == d or b == c or b == d:
+            return False
+        return ccw(a, c, d) != ccw(b, c, d) and ccw(a, b, c) != ccw(a, b, d)
+
+    crossings = 0
+    for i in range(len(segs)):
+        for j in range(i + 1, len(segs)):
+            if intersects(segs[i], segs[j]):
+                crossings += 1
+    return crossings
+
+
+def _grid_occupancy(positions: dict) -> float:
+    """Fraction of grid cells that contain at least one node (0..1).
+
+    Grid size adapts to node count so the metric stays meaningful for
+    both small (5-node) and large (200+ node) graphs.
+    """
+    n = len(positions)
+    if n < 2:
+        return 1.0
+
+    # Scale grid so that perfect uniform coverage yields ~100% occupancy.
+    # Aim for roughly 1 node per cell on average.
+    grid_size = max(2, min(16, int(math.sqrt(n))))
+
+    pts = list(positions.values())
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    span_x = max_x - min_x or 1.0
+    span_y = max_y - min_y or 1.0
+
+    occupied = set()
+    for x, y in pts:
+        ci = min(int((x - min_x) / span_x * grid_size), grid_size - 1)
+        ri = min(int((y - min_y) / span_y * grid_size), grid_size - 1)
+        occupied.add((ri, ci))
+
+    return len(occupied) / (grid_size * grid_size)
+
+
+def _nearest_neighbor_stats(positions: dict) -> tuple[float, float]:
+    """Compute nearest-neighbor distance statistics.
+
+    Returns (clark_evans_r, nn_cv):
+      - clark_evans_r: ratio of observed mean NN distance to the expected
+        mean under a uniform distribution over the bounding area.
+        R < 1 = clustered, R ~ 1 = uniform, R > 1 = dispersed/regular.
+      - nn_cv: coefficient of variation of NN distances.
+        Low = evenly spaced, high = irregular spacing.
+    """
+    pts = list(positions.values())
+    n = len(pts)
+    if n < 3:
+        return 1.0, 0.0
+
+    nn_dists = []
+    for i in range(n):
+        best = float("inf")
+        for j in range(n):
+            if i == j:
+                continue
+            dx = pts[i][0] - pts[j][0]
+            dy = pts[i][1] - pts[j][1]
+            d = math.sqrt(dx * dx + dy * dy)
+            if d < best:
+                best = d
+        nn_dists.append(best)
+
+    mean_nn = statistics.mean(nn_dists)
+
+    # Clark-Evans: expected mean NN for n points uniform in area A = 0.5 * sqrt(A/n)
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    w = max(xs) - min(xs) or 1.0
+    h = max(ys) - min(ys) or 1.0
+    area = w * h
+    expected_nn = 0.5 * math.sqrt(area / n)
+    r = mean_nn / expected_nn if expected_nn > 1e-9 else 1.0
+
+    # CV
+    cv = statistics.stdev(nn_dists) / mean_nn if mean_nn > 1e-9 else 0.0
+
+    return r, cv
+
+
+def score_layout(graph: dict, positions: dict) -> dict:
+    """Compute layout quality metrics.
+
+    Returns a dict with individual metrics and an overall score (0..100).
+
+    Metrics
+    -------
+    distribution : float  0..1
+        Grid-cell occupancy -- fraction of an adaptive grid covered by nodes.
+    dispersion : float  0..1
+        Clark-Evans R statistic, clamped to 0..1.  Measures whether nodes
+        actually *fill* the bounding area or clump into tight clusters with
+        large empty gaps.  R~1 = uniform use of space, R<<1 = clustered.
+    regularity : float  0..1
+        1 - clamp(nearest-neighbor CV).  Measures how *consistent* the
+        spacing is (independent of whether the space is well-used).
+    edge_consistency : float  0..1
+        1 - clamp(edge-length CV). Edges should have similar lengths.
+    min_separation : float  0..1
+        Fraction of node pairs with distance > a minimal threshold.
+    crossings : int
+        Raw count of edge crossings (lower is better; -1 = skipped).
+    crossing_penalty : float  0..1
+        1 - clamp(crossings / max_possible). Penalises crossings.
+    overall : float  0..100
+        Weighted combination of the above.
+    """
+    n = len(positions)
+    if n < 2:
+        return {
+            "distribution": 1.0, "dispersion": 1.0, "regularity": 1.0,
+            "edge_consistency": 1.0, "min_separation": 1.0,
+            "crossings": 0, "crossing_penalty": 1.0, "overall": 100.0,
+        }
+
+    # -- Distribution: grid occupancy
+    distribution = _grid_occupancy(positions)
+
+    # -- Dispersion + Regularity from nearest-neighbor analysis
+    clark_evans_r, nn_cv = _nearest_neighbor_stats(positions)
+    # R is theoretically 0..2.15 for perfectly regular hex grids, but
+    # for our purposes clamp to 0..1 (uniform = 1, clustered = 0).
+    dispersion = min(1.0, clark_evans_r)
+    regularity = max(0.0, 1.0 - nn_cv / 2.0)
+
+    # -- Edge-length consistency
+    e_lens = _edge_lengths(graph, positions)
+    if len(e_lens) >= 2:
+        e_mean = statistics.mean(e_lens)
+        e_cv = statistics.stdev(e_lens) / e_mean if e_mean > 1e-9 else 0.0
+        edge_consistency = max(0.0, 1.0 - e_cv / 3.0)
+    else:
+        edge_consistency = 1.0
+
+    # -- Minimum separation: what fraction of pairs are above a threshold?
+    #    Threshold = 1% of bounding-box diagonal.
+    pts = list(positions.values())
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    diag = math.sqrt((max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2) or 1.0
+    threshold = diag * 0.01
+    pw = _pairwise_distances(positions)
+    min_separation = sum(1 for d in pw if d > threshold) / len(pw) if pw else 1.0
+
+    # -- Crossings (skip for large graphs -- O(E^2) gets expensive)
+    n_edges = len(graph["edges"])
+    if n_edges <= 500:
+        crossings = _count_crossings(graph, positions)
+        max_cross = max(1, n_edges * (n_edges - 1) // 2)
+        crossing_penalty = max(0.0, 1.0 - crossings / max_cross)
+    else:
+        crossings = -1  # skipped
+        crossing_penalty = 1.0  # neutral
+
+    # -- Overall (weighted average)
+    #    Dispersion is the heaviest weight: it catches the "tight clusters
+    #    floating in a sea of whitespace" problem that other metrics miss.
+    overall = (
+        distribution * 10
+        + dispersion * 30
+        + regularity * 10
+        + edge_consistency * 15
+        + min_separation * 10
+        + crossing_penalty * 25
+    )
+
+    return {
+        "distribution": round(distribution, 3),
+        "dispersion": round(dispersion, 3),
+        "regularity": round(regularity, 3),
+        "edge_consistency": round(edge_consistency, 3),
+        "min_separation": round(min_separation, 3),
+        "crossings": crossings,
+        "crossing_penalty": round(crossing_penalty, 3),
+        "overall": round(overall, 1),
+    }
+
+
+def _score_color(value: float) -> str:
+    """Map a 0..1 metric to a CSS color: red -> yellow -> green."""
+    if value >= 0.75:
+        return "#22c55e"  # green
+    if value >= 0.5:
+        return "#eab308"  # yellow
+    return "#ef4444"  # red
+
+
+def _overall_color(score: float) -> str:
+    """Map overall score (0..100) to a CSS color."""
+    return _score_color(score / 100.0)
+
+
+def render_score_badge(scores: dict) -> str:
+    """Render a compact HTML score badge for a thumbnail cell."""
+    o = scores["overall"]
+    color = _overall_color(o)
+    tooltip_parts = [
+        f"Distribution: {scores['distribution']:.0%}",
+        f"Dispersion: {scores['dispersion']:.0%}",
+        f"Regularity: {scores['regularity']:.0%}",
+        f"Edge consistency: {scores['edge_consistency']:.0%}",
+        f"Min separation: {scores['min_separation']:.0%}",
+    ]
+    if scores["crossings"] >= 0:
+        tooltip_parts.append(f"Crossings: {scores['crossings']}")
+    tooltip = "&#10;".join(tooltip_parts)
+
+    return (
+        f'<div class="score" style="color:{color}" title="{tooltip}">'
+        f'{o:.0f}</div>'
+    )
 
 
 # ── Binary / server management ─────────────────────────────────────────────────
@@ -498,12 +786,13 @@ def render_index(graphs: list, results: dict) -> str:
             if entry is None:
                 cells.append('<td class="cell err">error</td>')
             else:
-                positions, rel_path = entry
+                positions, rel_path, scores = entry
                 svg = render_thumbnail(g, positions)
+                badge = render_score_badge(scores)
                 cells.append(
                     f'<td class="cell">'
                     f'<a href="{rel_path}" target="_blank" title="Open interactive view">'
-                    f'{svg}</a></td>'
+                    f'{svg}</a>{badge}</td>'
                 )
 
         n = len(g["nodes"])
@@ -581,6 +870,7 @@ def render_index(graphs: list, results: dict) -> str:
     }}
     .cell a:hover {{ box-shadow: 0 0 0 2px #818cf8; }}
     .cell.err {{ color: #ef4444; font-size: 11px; padding: 8px; vertical-align: middle; text-align: center; }}
+    .score {{ font-size: 11px; font-weight: 700; text-align: center; padding: 2px 0; font-variant-numeric: tabular-nums; }}
     tr:hover .gh {{ background: #1c2a42; }}
   </style>
 </head>
@@ -653,8 +943,9 @@ def main():
                     html = render_interactive_html(template, data, title)
                     rel = f"graphs/{g['id']}__{l['id']}.html"
                     (OUTPUT_DIR / rel).write_text(html, encoding="utf-8")
-                    results[key] = (positions, rel)
-                    print(f"  {l['label']:<22} OK", flush=True)
+                    scores = score_layout(g, positions)
+                    results[key] = (positions, rel, scores)
+                    print(f"  {l['label']:<22} OK  score={scores['overall']:.0f}", flush=True)
                 except Exception as exc:
                     print(f"  {l['label']:<22} ERROR: {exc}", file=sys.stderr, flush=True)
                     results[key] = None
