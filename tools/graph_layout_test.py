@@ -9,7 +9,8 @@ template), and writes an index.html grid for side-by-side visual comparison.
 Usage (from the repo root):
     python3 tools/graph_layout_test.py [output_dir]
 
-Default output_dir: layout-test-output/
+Default output_dir: e2e/reports/<timestamp>/layout-test/
+  (matching the convention used by e2e/run_tests.py)
 
 The script builds the admapper binary if it is not already present, then
 starts the web server in headless mode to call the real layout API, so the
@@ -20,10 +21,10 @@ import json
 import math
 import os
 import random
+import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -37,8 +38,14 @@ REPO_ROOT = SCRIPT_DIR.parent
 TEMPLATE_PATH = REPO_ROOT / "src" / "frontend" / "export-graph-template.html"
 MANIFEST_PATH = REPO_ROOT / "src" / "backend" / "Cargo.toml"
 BINARY_PATH = REPO_ROOT / "src" / "backend" / "target" / "debug" / "admapper"
+REPORTS_BASE = REPO_ROOT / "e2e" / "reports"
 
-OUTPUT_DIR = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else REPO_ROOT / "layout-test-output"
+_TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+OUTPUT_DIR = (
+    Path(sys.argv[1]).resolve()
+    if len(sys.argv) > 1
+    else REPORTS_BASE / _TIMESTAMP / "layout-test"
+)
 
 # ── Node type → colour (mirrors export-graph-template.html) ───────────────────
 
@@ -300,10 +307,35 @@ def make_test_graphs():
     return graphs
 
 
+# ── Git metadata ───────────────────────────────────────────────────────────────
+
+
+def get_commit() -> str:
+    env_commit = os.environ.get("GIT_COMMIT", "")
+    if env_commit and env_commit != "unknown":
+        return env_commit
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        )
+        if r.returncode == 0:
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 # ── Binary / server management ─────────────────────────────────────────────────
 
 
 def build_binary():
+    # rust-embed requires the frontend build directory to exist
+    build_dir = REPO_ROOT / "build"
+    if not build_dir.exists():
+        build_dir.mkdir()
+        (build_dir / "index.html").write_text("<html><body>placeholder</body></html>")
+
     print("Building admapper binary (headless, no desktop)…", flush=True)
     result = subprocess.run(
         [
@@ -404,7 +436,7 @@ def build_export_payload(graph: dict, positions: dict) -> dict:
     }
 
 
-def render_interactive_html(template: str, data: dict, title: str) -> str:
+def render_interactive_html(template: str, data: dict, title: str, commit: str) -> str:
     html = template.replace(
         "__GRAPH_DATA_PLACEHOLDER__",
         json.dumps(data, indent=2),
@@ -412,6 +444,12 @@ def render_interactive_html(template: str, data: dict, title: str) -> str:
     html = html.replace(
         "<title>ADMapper Graph Export</title>",
         f"<title>{title}</title>",
+    )
+    commit_short = commit[:7] if commit != "unknown" else "unknown"
+    # Append commit info to the export-date span text (runs after the template JS sets it)
+    html = html.replace(
+        'document.getElementById("export-date").textContent = "Exported " + new Date(DATA.exportedAt).toLocaleString();',
+        f'document.getElementById("export-date").textContent = "commit {commit_short} · " + new Date(DATA.exportedAt).toLocaleString();',
     )
     return html
 
@@ -484,7 +522,7 @@ def render_thumbnail(graph: dict, positions: dict) -> str:
 # ── Index HTML ─────────────────────────────────────────────────────────────────
 
 
-def render_index(graphs: list, results: dict) -> str:
+def render_index(graphs: list, results: dict, commit: str, timestamp: str) -> str:
     header_cells = "".join(
         f'<th class="lh">{l["label"]}</th>' for l in LAYOUTS
     )
@@ -521,13 +559,14 @@ def render_index(graphs: list, results: dict) -> str:
 
     rows_html = "\n".join(rows)
     lh_min = THUMB_W + 8
+    commit_short = commit[:7] if commit != "unknown" else "unknown"
 
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ADMapper — Layout Test Grid</title>
+  <title>ADMapper — Layout Test Grid — {commit_short}</title>
   <style>
     *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
@@ -587,7 +626,8 @@ def render_index(graphs: list, results: dict) -> str:
 <body>
   <div id="topbar">
     <h1>ADMapper — Layout Test Grid</h1>
-    <p>Click a thumbnail to open the interactive graph.</p>
+    <p>Click a thumbnail to open the interactive graph.
+       &nbsp;·&nbsp; <code>{commit_short}</code> &nbsp;·&nbsp; {timestamp}</p>
   </div>
   <div class="wrap">
     <table>
@@ -610,11 +650,36 @@ def render_index(graphs: list, results: dict) -> str:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 
+def update_latest_symlink(output_dir: Path) -> None:
+    """Update e2e/reports/latest to point at the current run's parent timestamp dir."""
+    # output_dir is e2e/reports/<timestamp>/layout-test  (or a custom path)
+    # We point latest at the <timestamp> dir, one level up, only when it's inside reports_base.
+    try:
+        parent = output_dir.parent
+        if parent.parent == REPORTS_BASE:
+            latest = REPORTS_BASE / "latest"
+            if latest.is_symlink() or latest.exists():
+                if latest.is_symlink():
+                    latest.unlink()
+                elif latest.is_dir():
+                    shutil.rmtree(latest)
+                else:
+                    latest.unlink()
+            latest.symlink_to(parent.name)
+    except Exception:
+        pass  # symlink creation is best-effort
+
+
 def main():
-    print(f"Output: {OUTPUT_DIR}", flush=True)
+    commit = get_commit()
+    commit_short = commit[:7] if commit != "unknown" else "unknown"
+    timestamp = _TIMESTAMP
+
+    print(f"Output:  {OUTPUT_DIR}", flush=True)
+    print(f"Commit:  {commit_short}", flush=True)
 
     binary = ensure_binary()
-    print(f"Binary: {binary}", flush=True)
+    print(f"Binary:  {binary}", flush=True)
 
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
@@ -622,7 +687,7 @@ def main():
     graphs_dir.mkdir(parents=True, exist_ok=True)
 
     port = free_port()
-    print(f"Starting admapper on port {port}…", flush=True)
+    print(f"Port:    {port}\n", flush=True)
 
     proc = subprocess.Popen(
         [str(binary), "--headless", "--port", str(port)],
@@ -650,7 +715,7 @@ def main():
                     positions = call_layout(port, g, l)
                     data = build_export_payload(g, positions)
                     title = f"{g['title']} — {l['label']}"
-                    html = render_interactive_html(template, data, title)
+                    html = render_interactive_html(template, data, title, commit)
                     rel = f"graphs/{g['id']}__{l['id']}.html"
                     (OUTPUT_DIR / rel).write_text(html, encoding="utf-8")
                     results[key] = (positions, rel)
@@ -661,14 +726,16 @@ def main():
 
             print()
 
-        index_html = render_index(graphs, results)
+        index_html = render_index(graphs, results, commit, timestamp)
         index_path = OUTPUT_DIR / "index.html"
         index_path.write_text(index_html, encoding="utf-8")
+
+        update_latest_symlink(OUTPUT_DIR)
 
         ok = sum(1 for v in results.values() if v is not None)
         total = len(results)
         print(f"Done — {ok}/{total} graphs rendered.")
-        print(f"Open: {index_path}")
+        print(f"Open:  {index_path}")
 
     finally:
         proc.terminate()
