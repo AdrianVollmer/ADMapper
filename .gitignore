@@ -18,7 +18,7 @@ build/
 dist/
 target/
 docs/**/site/
-layout-test-output/
+output/
 
 # Cache
 .mypy_cache/
@@ -39,7 +39,6 @@ admapper.db
 
 # E2E tests (generated)
 e2e/golden/
-e2e/reports/
 test_data.zip
 
 # Generated icons (from src/backend/icons/icon.svg)

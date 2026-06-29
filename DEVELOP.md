@@ -119,7 +119,7 @@ file. The optional second argument specifies which backend to test (`crustdb`,
 
 #### Test Reports
 
-Reports are generated in `e2e/reports/` as XML files with CSS styling for
+Reports are generated in `output/e2e-reports/` as XML files with CSS styling for
 browser viewing.
 
 ## Code Quality

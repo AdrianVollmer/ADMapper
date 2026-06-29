@@ -214,7 +214,7 @@ start_bloodhound() {
 	echo -e "${BLUE}Starting BloodHound CE via dockerhound...${NC}"
 
 	# Ensure reports directory exists (used as output location)
-	local reports_dir="$SCRIPT_DIR/../e2e/reports"
+	local reports_dir="$SCRIPT_DIR/../output/e2e-reports"
 	mkdir -p "$reports_dir"
 
 	# Create isolated data directory for dockerhound (cleaned up on exit)
@@ -452,10 +452,10 @@ run_tests() {
 
 	if [ "$WITH_BLOODHOUND" = true ]; then
 		start_bloodhound
-		# Graph file lands in e2e/reports/ which is mounted rw in the container
+		# Graph file lands in output/e2e-reports/ which is mounted rw in the container
 		bh_env_args=(
 			-e "WITH_BLOODHOUND=1"
-			-e "BH_GRAPH_FILE=/workspace/e2e/reports/bloodhound_graph.json"
+			-e "BH_GRAPH_FILE=/workspace/output/e2e-reports/bloodhound_graph.json"
 		)
 		bh_test_arg="--with-bloodhound"
 	fi
@@ -526,7 +526,7 @@ main() {
 
 	# Show reports location
 	echo ""
-	echo -e "${BLUE}Test reports available in: e2e/reports/${NC}"
+	echo -e "${BLUE}Test reports available in: output/e2e-reports/${NC}"
 
 	exit $exit_code
 }

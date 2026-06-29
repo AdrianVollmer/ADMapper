@@ -254,7 +254,7 @@ jobs:
           FALKORDB_HOST: localhost
           FALKORDB_PORT: 6379
         run: |
-          mkdir -p e2e/reports
+          mkdir -p output/e2e-reports
           python3 e2e/run_tests.py /tmp/e2e-data/graph.json crustdb || true
 
       - name: Run E2E tests (Neo4j)
@@ -280,5 +280,5 @@ jobs:
         if: always()
         with:
           name: e2e-reports
-          path: e2e/reports/
+          path: output/e2e-reports/
           retention-days: 7

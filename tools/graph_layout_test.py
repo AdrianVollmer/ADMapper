@@ -9,7 +9,7 @@ template), and writes an index.html grid for side-by-side visual comparison.
 Usage (from the repo root):
     python3 tools/graph_layout_test.py [output_dir]
 
-Default output_dir: layout-test-output/
+Default output_dir: output/graph-layout-test/
 
 The script builds the admapper binary if it is not already present, then
 starts the web server in headless mode to call the real layout API, so the
@@ -39,7 +39,7 @@ TEMPLATE_PATH = REPO_ROOT / "src" / "frontend" / "export-graph-template.html"
 MANIFEST_PATH = REPO_ROOT / "src" / "backend" / "Cargo.toml"
 BINARY_PATH = REPO_ROOT / "src" / "backend" / "target" / "debug" / "admapper"
 
-OUTPUT_DIR = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else REPO_ROOT / "layout-test-output"
+OUTPUT_DIR = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else REPO_ROOT / "output" / "graph-layout-test"
 
 # ── Node type → colour (mirrors export-graph-template.html) ───────────────────
 
