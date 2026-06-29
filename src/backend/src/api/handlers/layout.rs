@@ -462,8 +462,10 @@ fn assemble_positions(node_ids: &[String], component_positions: &[Vec<(f32, f32)
 
 /// Sugiyama hierarchical layout with Brandes-Kopf coordinate assignment.
 ///
-/// Pipeline: cycle removal → longest-path layering → virtual nodes →
-/// barycenter crossing minimization → Brandes-Kopf coordinates.
+/// Each connected component is laid out independently with its own Sugiyama
+/// pass, then components are packed together using skyline bin-packing.
+/// This prevents unrelated components from introducing edge crossings and
+/// eliminates dead space from shared layering.
 fn hierarchical(
     node_ids: &[String],
     edges: &[[usize; 2]],
@@ -475,23 +477,81 @@ fn hierarchical(
         return Vec::new();
     }
 
-    // Build sort keys: (label, name) for tiebreaking in crossing minimization.
-    let sort_keys: Option<Vec<String>> = node_labels.map(|labels| {
-        node_ids
-            .iter()
-            .enumerate()
-            .map(|(i, name)| {
-                let label = labels.get(i).map(|s| s.as_str()).unwrap_or("");
-                format!("{label}\t{name}")
-            })
-            .collect()
-    });
-
+    let components = connected_components(n, edges);
     let config = crate::sugiyama::SugiyamaConfig::default();
-    let coords = crate::sugiyama::layout(n, edges, &config, sort_keys.as_deref());
 
-    // Apply direction transform (Sugiyama produces top-to-bottom)
-    let positions: Vec<NodePosition> = node_ids
+    // Lay out each component independently.
+    let mut component_coords: Vec<Vec<(f32, f32)>> = Vec::with_capacity(components.len());
+    for comp in &components {
+        let cn = comp.len();
+        let global_to_local: std::collections::HashMap<usize, usize> =
+            comp.iter().enumerate().map(|(li, &gi)| (gi, li)).collect();
+        let local_edges: Vec<[usize; 2]> = edges
+            .iter()
+            .filter_map(|e| {
+                let a = global_to_local.get(&e[0])?;
+                let b = global_to_local.get(&e[1])?;
+                Some([*a, *b])
+            })
+            .collect();
+
+        // Build local sort keys.
+        let local_sort_keys: Option<Vec<String>> = node_labels.map(|labels| {
+            comp.iter()
+                .map(|&gi| {
+                    let name = &node_ids[gi];
+                    let label = labels.get(gi).map(|s| s.as_str()).unwrap_or("");
+                    format!("{label}\t{name}")
+                })
+                .collect()
+        });
+
+        let coords =
+            crate::sugiyama::layout(cn, &local_edges, &config, local_sort_keys.as_deref());
+        component_coords.push(coords);
+    }
+
+    // If only one component, skip packing.
+    if components.len() == 1 {
+        let positions = apply_direction(node_ids, &component_coords[0], direction);
+        return normalize(positions);
+    }
+
+    // Stack components along Sugiyama's x-axis (the across/non-flow axis).
+    // After apply_direction this becomes the non-flow axis in final output:
+    //   T->B / B->T: final x (horizontal stacking)
+    //   L->R / R->L: final y (vertical stacking)
+    let padding = config.node_sep;
+    let mut all_coords = vec![(0.0_f32, 0.0_f32); n];
+    let mut x_offset = 0.0_f32;
+
+    for (ci, comp) in components.iter().enumerate() {
+        let coords = &component_coords[ci];
+        let (mut min_x, mut min_y) = (f32::INFINITY, f32::INFINITY);
+        let mut max_x = f32::NEG_INFINITY;
+        for &(x, y) in coords {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+        }
+        for (li, &gi) in comp.iter().enumerate() {
+            all_coords[gi].0 = coords[li].0 - min_x + x_offset;
+            all_coords[gi].1 = coords[li].1 - min_y;
+        }
+        x_offset += (max_x - min_x).max(0.0) + padding;
+    }
+
+    let positions = apply_direction(node_ids, &all_coords, direction);
+    normalize(positions)
+}
+
+/// Apply direction transform to Sugiyama coordinates (top-to-bottom → desired).
+fn apply_direction(
+    node_ids: &[String],
+    coords: &[(f32, f32)],
+    direction: LayoutDirection,
+) -> Vec<NodePosition> {
+    node_ids
         .iter()
         .enumerate()
         .map(|(i, id)| {
@@ -508,9 +568,7 @@ fn hierarchical(
                 y,
             }
         })
-        .collect();
-
-    normalize(positions)
+        .collect()
 }
 
 // ============================================================================
@@ -1418,5 +1476,67 @@ mod tests {
         let positions = compute_layout(&req);
         assert_eq!(positions.len(), 1);
         assert!(positions[0].x.is_finite() && positions[0].y.is_finite());
+    }
+
+    #[test]
+    fn hier_component_stacking_direction() {
+        // Two disconnected chains: 0->1->2 and 3->4->5
+        let edges: &[[usize; 2]] = &[[0, 1], [1, 2], [3, 4], [4, 5]];
+
+        // L->R: components should stack VERTICALLY (differ in y, similar x range)
+        let req_lr = LayoutRequest {
+            nodes: (0..6).map(|i| format!("n{i}")).collect(),
+            edges: edges.to_vec(),
+            algorithm: LayoutAlgorithm::Hierarchical,
+            direction: Some(LayoutDirection::LeftToRight),
+            iterations: None,
+            node_labels: None,
+            temperature: None,
+        };
+        let pos_lr = compute_layout(&req_lr);
+
+        let a_cy_lr = (pos_lr[0].y + pos_lr[1].y + pos_lr[2].y) / 3.0;
+        let b_cy_lr = (pos_lr[3].y + pos_lr[4].y + pos_lr[5].y) / 3.0;
+        let a_cx_lr = (pos_lr[0].x + pos_lr[1].x + pos_lr[2].x) / 3.0;
+        let b_cx_lr = (pos_lr[3].x + pos_lr[4].x + pos_lr[5].x) / 3.0;
+
+        let y_sep_lr = (a_cy_lr - b_cy_lr).abs();
+        let x_sep_lr = (a_cx_lr - b_cx_lr).abs();
+
+        eprintln!("L->R: A=({:.0},{:.0}), B=({:.0},{:.0}), x_sep={:.0}, y_sep={:.0}",
+            a_cx_lr, a_cy_lr, b_cx_lr, b_cy_lr, x_sep_lr, y_sep_lr);
+
+        assert!(
+            y_sep_lr > x_sep_lr,
+            "L->R: components should stack vertically: y_sep={y_sep_lr:.0} > x_sep={x_sep_lr:.0}"
+        );
+
+        // T->B: components should stack HORIZONTALLY (differ in x, similar y range)
+        let req_tb = LayoutRequest {
+            nodes: (0..6).map(|i| format!("n{i}")).collect(),
+            edges: edges.to_vec(),
+            algorithm: LayoutAlgorithm::Hierarchical,
+            direction: Some(LayoutDirection::TopToBottom),
+            iterations: None,
+            node_labels: None,
+            temperature: None,
+        };
+        let pos_tb = compute_layout(&req_tb);
+
+        let a_cy_tb = (pos_tb[0].y + pos_tb[1].y + pos_tb[2].y) / 3.0;
+        let b_cy_tb = (pos_tb[3].y + pos_tb[4].y + pos_tb[5].y) / 3.0;
+        let a_cx_tb = (pos_tb[0].x + pos_tb[1].x + pos_tb[2].x) / 3.0;
+        let b_cx_tb = (pos_tb[3].x + pos_tb[4].x + pos_tb[5].x) / 3.0;
+
+        let y_sep_tb = (a_cy_tb - b_cy_tb).abs();
+        let x_sep_tb = (a_cx_tb - b_cx_tb).abs();
+
+        eprintln!("T->B: A=({:.0},{:.0}), B=({:.0},{:.0}), x_sep={:.0}, y_sep={:.0}",
+            a_cx_tb, a_cy_tb, b_cx_tb, b_cy_tb, x_sep_tb, y_sep_tb);
+
+        assert!(
+            x_sep_tb > y_sep_tb,
+            "T->B: components should stack horizontally: x_sep={x_sep_tb:.0} > y_sep={y_sep_tb:.0}"
+        );
     }
 }

@@ -748,7 +748,8 @@ def render_thumbnail(graph: dict, positions: dict) -> str:
         return THUMB_PAD + (x - min_x) / span_x * W
 
     def ty(y):
-        # layout y is math-positive-up; SVG y increases downward
+        # Sigma.js uses y-up (positive y = up on screen); SVG uses y-down.
+        # Flip y so thumbnails match what sigma.js renders.
         return THUMB_PAD + (1.0 - (y - min_y) / span_y) * H
 
     parts = [
