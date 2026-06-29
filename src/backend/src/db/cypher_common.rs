@@ -482,17 +482,110 @@ pub fn resolve_node_identifier(
     Ok(None)
 }
 
-pub fn get_node_connections(
-    exec: &impl CypherExecutor,
-    node_id: &str,
-    direction: &str,
-) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
-    debug!(node_id = %node_id, direction = %direction, "Getting node connections");
+/// Classify a row of JSON values into nodes and the relationship.
+///
+/// Both Neo4j and FalkorDB tag their serialised entities with `_type`.
+/// This lets us identify columns by content instead of relying on
+/// positional ordering (which is non-deterministic for Neo4j).
+fn classify_row(row: &[JsonValue]) -> (Vec<DbNode>, Option<&Map<String, JsonValue>>) {
+    let mut nodes = Vec::new();
+    let mut rel: Option<&Map<String, JsonValue>> = None;
+    for val in row {
+        if let Some(obj) = val.as_object() {
+            let type_tag = obj.get("_type").and_then(|v| v.as_str());
+            match type_tag {
+                Some("relationship") => {
+                    rel = Some(obj);
+                }
+                Some("node") => {
+                    if let Some(node) = parse_node_from_value(val) {
+                        nodes.push(node);
+                    }
+                }
+                _ => {
+                    // Fall back to heuristics: has rel_type => relationship,
+                    // has properties.objectid => node.
+                    if obj.contains_key("rel_type") {
+                        rel = Some(obj);
+                    } else if let Some(node) = parse_node_from_value(val) {
+                        nodes.push(node);
+                    }
+                }
+            }
+        }
+    }
+    (nodes, rel)
+}
 
+/// Determine edge source/target objectids from a relationship and the row's nodes.
+///
+/// Both Neo4j and FalkorDB store the internal node IDs in the relationship
+/// JSON as `"source"` and `"target"`, and each node has an `"id"` field with
+/// its internal ID.  We build a mapping from internal-id to objectid and use
+/// the relationship's endpoints to determine the correct direction.
+///
+/// Falls back to positional assignment (first node = source, second = target)
+/// if the internal IDs cannot be matched.
+fn resolve_edge_endpoints(
+    nodes: &[DbNode],
+    rel: &Map<String, JsonValue>,
+    row: &[JsonValue],
+) -> (String, String) {
+    // Build internal-id -> objectid lookup from node values in the row.
+    let mut id_map: Vec<(Option<u64>, String)> = Vec::new();
+    for val in row {
+        if let Some(obj) = val.as_object() {
+            let type_tag = obj.get("_type").and_then(|v| v.as_str());
+            if type_tag == Some("node") || (type_tag.is_none() && obj.contains_key("objectid")) {
+                let internal_id = obj.get("id").and_then(|v| v.as_u64());
+                let objectid = obj
+                    .get("objectid")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| {
+                        obj.get("properties")
+                            .and_then(|p| p.get("objectid"))
+                            .and_then(|v| v.as_str())
+                    })
+                    .unwrap_or("")
+                    .to_string();
+                id_map.push((internal_id, objectid));
+            }
+        }
+    }
+
+    let rel_src = rel.get("source").and_then(|v| v.as_u64());
+    let rel_tgt = rel.get("target").and_then(|v| v.as_u64());
+
+    if let (Some(src_id), Some(tgt_id)) = (rel_src, rel_tgt) {
+        let src_oid = id_map
+            .iter()
+            .find(|(id, _)| *id == Some(src_id))
+            .map(|(_, oid)| oid.clone());
+        let tgt_oid = id_map
+            .iter()
+            .find(|(id, _)| *id == Some(tgt_id))
+            .map(|(_, oid)| oid.clone());
+        if let (Some(s), Some(t)) = (src_oid, tgt_oid) {
+            return (s, t);
+        }
+    }
+
+    // Fallback: use node order (correct for FalkorDB which preserves column order).
+    (
+        nodes.first().map(|n| n.id.clone()).unwrap_or_default(),
+        nodes.get(1).map(|n| n.id.clone()).unwrap_or_default(),
+    )
+}
+
+/// Build the Cypher query for fetching node connections in a given direction.
+///
+/// Exposed publicly so that callers (e.g. the HTTP handler) can record the
+/// query in history without duplicating the pattern logic.
+pub fn node_connections_cypher(node_id: &str, direction: &str) -> String {
     let id_escaped = node_id.replace('\'', "\\'");
     let admin_types = admin_types_cypher_list();
 
-    let cypher = match direction {
+    match direction {
         "incoming" => format!("MATCH (a)-[r]->(b {{objectid: '{id_escaped}'}}) RETURN a, r, b"),
         "outgoing" => format!("MATCH (a {{objectid: '{id_escaped}'}})-[r]->(b) RETURN a, r, b"),
         "admin" => format!(
@@ -507,7 +600,17 @@ pub fn get_node_connections(
             format!("MATCH (a)-[r:MemberOf]->(b {{objectid: '{id_escaped}'}}) RETURN a, r, b")
         }
         _ => format!("MATCH (a {{objectid: '{id_escaped}'}})-[r]-(b) RETURN a, r, b"),
-    };
+    }
+}
+
+pub fn get_node_connections(
+    exec: &impl CypherExecutor,
+    node_id: &str,
+    direction: &str,
+) -> Result<(Vec<DbNode>, Vec<DbEdge>)> {
+    debug!(node_id = %node_id, direction = %direction, "Getting node connections");
+
+    let cypher = node_connections_cypher(node_id, direction);
 
     let rows = exec.exec_rows(&cypher)?;
 
@@ -516,33 +619,41 @@ pub fn get_node_connections(
 
     let mut relationships = Vec::new();
     for row in &rows {
-        if row.len() >= 3 {
-            if let (Some(src_node), Some(tgt_node)) = (
-                parse_node_from_value(&row[0]),
-                parse_node_from_value(&row[2]),
-            ) {
-                node_ids.insert(src_node.id.clone());
-                node_ids.insert(tgt_node.id.clone());
+        if row.len() < 3 {
+            continue;
+        }
+        // Parse by content type rather than position, because Neo4j's
+        // exec_rows returns columns in HashMap iteration order which is
+        // non-deterministic.
+        let (nodes, rel) = classify_row(row);
+        if nodes.len() >= 2 {
+            for n in &nodes {
+                node_ids.insert(n.id.clone());
+            }
+            if let Some(rel_obj) = rel {
+                let rel_type = rel_obj
+                    .get("rel_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("RELATED")
+                    .to_string();
+                let props = rel_obj
+                    .get("properties")
+                    .cloned()
+                    .unwrap_or(JsonValue::Object(Map::new()));
 
-                if let Some(rel) = row[1].as_object() {
-                    let rel_type = rel
-                        .get("rel_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("RELATED")
-                        .to_string();
-                    let props = rel
-                        .get("properties")
-                        .cloned()
-                        .unwrap_or(JsonValue::Object(Map::new()));
-
-                    relationships.push(DbEdge {
-                        source: src_node.id,
-                        target: tgt_node.id,
-                        rel_type,
-                        properties: props,
-                        ..Default::default()
-                    });
-                }
+                // Determine source/target from the relationship's internal
+                // node IDs. Both Neo4j and FalkorDB store these as "source"
+                // and "target" in the serialised JSON, alongside the node's
+                // "id" field.  Build a lookup from internal-id -> objectid so
+                // we can resolve them.
+                let (src, tgt) = resolve_edge_endpoints(&nodes, rel_obj, row);
+                relationships.push(DbEdge {
+                    source: src,
+                    target: tgt,
+                    rel_type,
+                    properties: props,
+                    ..Default::default()
+                });
             }
         }
     }

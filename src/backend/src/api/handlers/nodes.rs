@@ -5,6 +5,7 @@ use crate::api::core;
 use crate::api::types::{
     ApiError, BatchSetTierRequest, BatchSetTierResponse, NodeCounts, NodeStatus, SearchParams,
 };
+use crate::db::types::NewQueryHistoryEntry;
 use crate::db::{DbEdge, DbNode};
 use crate::graph::{FullGraph, GraphEdge, GraphNode};
 use crate::state::AppState;
@@ -13,7 +14,7 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 /// Get all graph nodes.
 pub async fn graph_nodes(State(state): State<AppState>) -> Result<Json<Vec<DbNode>>, ApiError> {
@@ -131,6 +132,9 @@ pub async fn node_counts(
 
 /// Get connections for a node in a specific direction.
 /// Returns the full graph (nodes and relationships) for rendering.
+///
+/// Also records the equivalent Cypher query in history so that clicking
+/// "incoming"/"outgoing" in the sidebar is visible in Run Query (Ctrl+Enter).
 #[instrument(skip(state))]
 pub async fn node_connections(
     State(state): State<AppState>,
@@ -139,12 +143,42 @@ pub async fn node_connections(
     let db = state.require_db()?;
     info!(node_id = %node_id, direction = %direction, "Loading node connections");
 
+    let started = std::time::Instant::now();
+    let started_at_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let cypher = connection_cypher(&node_id, &direction);
+
     let node_id_clone = node_id.clone();
     let direction_clone = direction.clone();
     let (nodes, relationships): (Vec<DbNode>, Vec<DbEdge>) = run_db(db, move |db| {
         db.get_node_connections(&node_id_clone, &direction_clone)
     })
     .await?;
+
+    let duration_ms = started.elapsed().as_millis() as u64;
+    let result_count = relationships.len() as i64;
+
+    // Record in query history so the user can recall it via Run Query.
+    if let Some(history) = state.history() {
+        let query_id = uuid::Uuid::new_v4().to_string();
+        if let Err(e) = history.add(NewQueryHistoryEntry {
+            id: &query_id,
+            name: &cypher,
+            query: &cypher,
+            timestamp: started_at_unix,
+            result_count: Some(result_count),
+            status: "completed",
+            started_at: started_at_unix,
+            duration_ms: Some(duration_ms),
+            error: None,
+            background: false,
+        }) {
+            warn!(error = %e, "Failed to add connection query to history");
+        }
+    }
 
     Ok(Json(FullGraph {
         nodes: nodes.into_iter().map(GraphNode::from).collect(),
@@ -224,4 +258,28 @@ pub async fn batch_set_tier(
 
     info!(updated = result.updated, "Batch set tier");
     Ok(Json(result))
+}
+
+/// Build a human-readable Cypher query string for a node connection direction.
+///
+/// Used to record the query in history when the user clicks a sidebar button.
+fn connection_cypher(node_id: &str, direction: &str) -> String {
+    let id = node_id.replace('\'', "\\'");
+    match direction {
+        "incoming" => format!("MATCH (a)-[r]->(b {{objectid: '{id}'}}) RETURN a, r, b"),
+        "outgoing" => format!("MATCH (a {{objectid: '{id}'}})-[r]->(b) RETURN a, r, b"),
+        "admin" => format!(
+            "MATCH (a {{objectid: '{id}'}})-[r]->(b) \
+             WHERE type(r) IN ['AdminTo','GenericAll','GenericWrite','Owns',\
+             'WriteDacl','WriteOwner','AllExtendedRights','ForceChangePassword','AddMember'] \
+             RETURN a, r, b"
+        ),
+        "memberof" => {
+            format!("MATCH (a {{objectid: '{id}'}})-[r:MemberOf]->(b) RETURN a, r, b")
+        }
+        "members" => {
+            format!("MATCH (a)-[r:MemberOf]->(b {{objectid: '{id}'}}) RETURN a, r, b")
+        }
+        _ => format!("MATCH (a {{objectid: '{id}'}})-[r]-(b) RETURN a, r, b"),
+    }
 }
