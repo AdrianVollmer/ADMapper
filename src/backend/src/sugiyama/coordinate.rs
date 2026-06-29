@@ -91,6 +91,9 @@ pub(crate) fn assign_coordinates(graph: &LayeredGraph, config: &CoordConfig) -> 
         result.push((x, y));
     }
 
+    // Post-process: collapse empty layers so there's no dead vertical space.
+    compact_layers(&mut result, graph, config.layer_sep);
+
     // Post-process: enforce minimum spacing within each layer, preserving
     // the crossing-minimized order.
     enforce_layer_spacing(&mut result, graph, config.node_sep);
@@ -107,6 +110,40 @@ pub(crate) fn assign_coordinates(graph: &LayeredGraph, config: &CoordConfig) -> 
 // ---------------------------------------------------------------------------
 // Post-processing
 // ---------------------------------------------------------------------------
+
+/// Collapse empty layers so that occupied layers are spaced sequentially.
+///
+/// Without this, layers [0, 1, _, _, 4] produce Y = 0, 2, _, _, 8 -- a
+/// large gap where layers 2-3 are empty. After compaction: Y = 0, 2, 4.
+fn compact_layers(coords: &mut [(f32, f32)], graph: &LayeredGraph, layer_sep: f32) {
+    // Build a mapping from original layer index to compacted index,
+    // considering only layers that contain at least one node.
+    let mut occupied: Vec<usize> = graph
+        .layers
+        .iter()
+        .enumerate()
+        .filter(|(_, layer)| !layer.is_empty())
+        .map(|(i, _)| i)
+        .collect();
+    occupied.sort_unstable();
+
+    if occupied.is_empty() {
+        return;
+    }
+
+    // Map: original_layer -> compacted sequential index
+    let mut layer_map = vec![0usize; graph.layers.len()];
+    for (new_idx, &orig_idx) in occupied.iter().enumerate() {
+        layer_map[orig_idx] = new_idx;
+    }
+
+    // Rewrite Y coordinates
+    for (i, &layer_idx) in graph.layer_of.iter().enumerate() {
+        if i < coords.len() {
+            coords[i].1 = layer_map[layer_idx] as f32 * layer_sep;
+        }
+    }
+}
 
 /// Push apart nodes that are too close within the same layer, preserving
 /// the crossing-minimized order and the centre of mass.
@@ -617,5 +654,44 @@ mod tests {
                 diff,
             );
         }
+    }
+
+    /// Disconnected components or long-edge virtual nodes can leave large
+    /// layer gaps.  After compaction, adjacent *occupied* layers should be
+    /// exactly layer_sep apart with no dead space.
+    #[test]
+    fn compact_layers_removes_dead_space() {
+        let lg = LayeredGraph {
+            layers: vec![
+                vec![0, 1],    // layer 0
+                vec![2],       // layer 1
+                vec![],        // layer 2 (empty!)
+                vec![],        // layer 3 (empty!)
+                vec![3, 4],    // layer 4
+            ],
+            layer_of: vec![0, 0, 1, 4, 4],
+            out_adj: vec![vec![2], vec![2], vec![],  vec![], vec![]],
+            in_adj:  vec![vec![],  vec![],  vec![0, 1], vec![], vec![]],
+            is_virtual: vec![false; 5],
+        };
+
+        let config = CoordConfig::default();
+        let mut coords: Vec<(f32, f32)> = lg.layer_of.iter()
+            .enumerate()
+            .map(|(i, &l)| (i as f32 * config.node_sep, l as f32 * config.layer_sep))
+            .collect();
+
+        compact_layers(&mut coords, &lg, config.layer_sep);
+
+        // After compaction: 3 occupied layers (0, 1, 4) -> y = 0, layer_sep, 2*layer_sep
+        let eps = 0.01;
+        assert!((coords[0].1 - 0.0).abs() < eps, "layer 0 y={}", coords[0].1);
+        assert!((coords[1].1 - 0.0).abs() < eps);
+        assert!((coords[2].1 - config.layer_sep).abs() < eps, "layer 1 y={}", coords[2].1);
+        assert!(
+            (coords[3].1 - 2.0 * config.layer_sep).abs() < eps,
+            "layer 4 y={}", coords[3].1,
+        );
+        assert!((coords[3].1 - coords[4].1).abs() < eps);
     }
 }

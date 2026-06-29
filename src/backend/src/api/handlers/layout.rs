@@ -315,7 +315,7 @@ fn lattice(node_ids: &[String]) -> Vec<NodePosition> {
 // Shared normalization
 // ============================================================================
 
-/// Center at origin, scale each axis to fill [-TARGET_SIZE, TARGET_SIZE].
+/// Center at origin, scale each axis independently to fill [-TARGET_SIZE, TARGET_SIZE].
 fn normalize(mut positions: Vec<NodePosition>) -> Vec<NodePosition> {
     if positions.len() <= 1 {
         for p in &mut positions {
@@ -589,5 +589,97 @@ mod tests {
             y_range > 100.0,
             "y range too small: {y_range} (positions: {ys:?})"
         );
+    }
+
+    /// Real graph from hierarchical.json with actual node names and types.
+    /// Verifies barycenters are exact and graph isn't squashed.
+    #[test]
+    fn hierarchical_json_barycenters() {
+        // Node names in hierarchical.json order
+        let node_names: Vec<String> = vec![
+            "WEBSERVERSCCM@CONTOSO.INT",
+            "SUB-CA-CONTOSO-INT@CONTOSO.INT",
+            "CONTOSOSIGNATUREDOCUMENTSFORSAP@CONTOSO.INT",
+            "WEBSERVER1YEAR2048@CONTOSO.INT",
+            "WEBSERVER3YEARS@CONTOSO.INT",
+            "WEBSERVERS4B2@CONTOSO.INT",
+            "WEBSERVER1YEARARV@CONTOSO.INT",
+            "WEBSERVER1YEAR@CONTOSO.INT",
+            "WEBSERVER1YEARSCSP@CONTOSO.INT",
+            "WEBSERVER2YEARSARV@CONTOSO.INT",
+            "WEBSERVER3YEARSARV@CONTOSO.INT",
+            "WEBSERVEREXPORT@CONTOSO.INT",
+            "SUBCA5YEARS@CONTOSO.INT",
+            "ROOT-CA-CONTOSO.INT@CONTOSO.INT",
+            "SUBORDINATECERTIFICATIONAUTHORITY15YEARS@CONTOSO.INT",
+            "SCCMWEBSERVERCERTIFICATE@CONTOSO.INT",
+            "SUB-CA-VPN-CONTOSO-INT@CONTOSO.INT",
+            "USERSAP@CONTOSO.INT",
+            "SCCMCLIENTCERTIFICATEMANUAL@CONTOSO.INT",
+            "KEYRECOVERYAGENTCERTEP@CONTOSO.INT",
+            "CERTEP CONTOSO SERVICE CA@CONTOSO.INT",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let node_labels: Vec<String> = vec![
+            "CertTemplate", "EnterpriseCA", "CertTemplate", "CertTemplate",
+            "CertTemplate", "CertTemplate", "CertTemplate", "CertTemplate",
+            "CertTemplate", "CertTemplate", "CertTemplate", "CertTemplate",
+            "CertTemplate", "EnterpriseCA", "CertTemplate", "CertTemplate",
+            "EnterpriseCA", "CertTemplate", "CertTemplate", "CertTemplate",
+            "EnterpriseCA",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let edges: Vec<[usize; 2]> = vec![
+            [19, 20], [2, 1], [9, 1], [12, 13], [0, 1], [5, 1],
+            [10, 1], [6, 1], [4, 1], [15, 16], [7, 1], [14, 13],
+            [17, 16], [3, 1], [11, 1], [8, 1], [18, 16],
+        ];
+        let req = LayoutRequest {
+            nodes: node_names,
+            edges,
+            algorithm: LayoutAlgorithm::Hierarchical,
+            direction: Some(LayoutDirection::LeftToRight),
+            iterations: None,
+            node_labels: Some(node_labels),
+            temperature: None,
+        };
+        let pos = compute_layout(&req);
+
+        let targets = [1usize, 13, 16, 20];
+        let names = ["SUB-CA", "ROOT-CA", "SUB-CA-VPN", "CERTEP"];
+        eprintln!("\n=== Screen positions (LTR, with labels) ===");
+        for (i, p) in pos.iter().enumerate() {
+            let label = targets.iter().position(|&t| t == i)
+                .map(|j| names[j]).unwrap_or("src");
+            eprintln!("  node {i:2} ({label:>10}): x={:7.1}, y={:7.1}", p.x, p.y);
+        }
+
+        // Targets at exact barycenters of their parents' screen Y.
+        let parent_map: [(usize, &[usize]); 4] = [
+            (1, &[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),
+            (13, &[12, 14]),
+            (16, &[15, 17, 18]),
+            (20, &[19]),
+        ];
+        eprintln!("\n=== Barycenter check ===");
+        for (target, parents) in &parent_map {
+            let avg = parents.iter().map(|&p| pos[p].y).sum::<f32>() / parents.len() as f32;
+            let diff = (pos[*target].y - avg).abs();
+            let name = names[targets.iter().position(|&t| t == *target).unwrap()];
+            eprintln!("  {name:>10}: y={:.1}, parent_avg={:.1}, diff={diff:.1}",
+                pos[*target].y, avg);
+        }
+
+        // Not squashed.
+        let x_range = pos.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max)
+            - pos.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+        let y_range = pos.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max)
+            - pos.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+        assert!(x_range > TARGET_SIZE, "squashed horizontally: {x_range:.0}");
+        assert!(y_range > TARGET_SIZE, "squashed vertically: {y_range:.0}");
     }
 }

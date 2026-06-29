@@ -502,4 +502,44 @@ mod tests {
             "children should be sorted by (label, name); got {actual_order:?}"
         );
     }
+
+    /// Targets should be near the barycenter of their parents.
+    ///
+    /// Mirrors the real graph from hierarchical.json:
+    /// 17 CertTemplates (sources) -> 3 EnterpriseCA (targets).
+    #[test]
+    fn targets_near_parent_barycenter() {
+        // 17 sources (0-16) -> 3 targets (17, 18, 19)
+        let edges: &[[usize; 2]] = &[
+            // 12 sources -> target 17
+            [0, 17], [1, 17], [2, 17], [3, 17], [4, 17], [5, 17],
+            [6, 17], [7, 17], [8, 17], [9, 17], [10, 17], [16, 17],
+            // 2 sources -> target 18
+            [11, 18], [12, 18],
+            // 3 sources -> target 19
+            [13, 19], [14, 19], [15, 19],
+        ];
+        let config = SugiyamaConfig::default();
+        let coords = layout(20, edges, &config, None);
+
+        // Each target's X should be close to the average X of its parents.
+        let parent_sets: [(usize, &[usize]); 3] = [
+            (17, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16]),
+            (18, &[11, 12]),
+            (19, &[13, 14, 15]),
+        ];
+
+        for (target, parents) in &parent_sets {
+            let avg_parent_x =
+                parents.iter().map(|&p| coords[p].0).sum::<f32>() / parents.len() as f32;
+            let diff = (coords[*target].0 - avg_parent_x).abs();
+            assert!(
+                diff < config.node_sep + 0.1,
+                "target {target}: x={:.2}, parent avg={:.2}, diff={:.2}",
+                coords[*target].0,
+                avg_parent_x,
+                diff,
+            );
+        }
+    }
 }

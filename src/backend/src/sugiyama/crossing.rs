@@ -22,11 +22,29 @@ pub(crate) fn minimize_crossings(
     let total = graph.layer_of.len();
     let mut pos = vec![0usize; total];
 
-    // Pre-sort layers by sort key so the initial order reflects the
-    // desired tiebreaking even if the loop exits early (0 crossings).
-    if let Some(keys) = sort_keys {
+    // Pre-sort layers: group nodes by their neighbor set (target affinity)
+    // so the barycenter sweeps start from a reasonable state, then break
+    // ties alphabetically by sort key.  This prevents alphabetical sorting
+    // from scattering nodes that share the same targets.
+    {
+        let adj_key = |node: usize| -> Vec<usize> {
+            let mut targets: Vec<usize> = graph.out_adj[node]
+                .iter()
+                .chain(graph.in_adj[node].iter())
+                .copied()
+                .collect();
+            targets.sort_unstable();
+            targets.dedup();
+            targets
+        };
         for layer in &mut graph.layers {
-            layer.sort_by(|&a, &b| keys.get(a).cmp(&keys.get(b)));
+            layer.sort_by(|&a, &b| {
+                adj_key(a).cmp(&adj_key(b)).then_with(|| {
+                    let ka = sort_keys.and_then(|k| k.get(a));
+                    let kb = sort_keys.and_then(|k| k.get(b));
+                    ka.cmp(&kb)
+                })
+            });
         }
     }
 
@@ -35,7 +53,7 @@ pub(crate) fn minimize_crossings(
     let mut best_crossings = count_all_crossings(&graph.layers, &graph.out_adj, &pos);
     let mut best_order = graph.layers.clone();
 
-    for _ in 0..max_iterations {
+    for iter in 0..max_iterations {
         // Forward sweep (top to bottom): order by barycenter of predecessors
         for l in 1..n_layers {
             order_by_barycenter(&mut graph.layers[l], &graph.in_adj, &pos, sort_keys);
@@ -49,11 +67,13 @@ pub(crate) fn minimize_crossings(
         }
 
         let c = count_all_crossings(&graph.layers, &graph.out_adj, &pos);
-        if c < best_crossings {
+        if c <= best_crossings {
             best_crossings = c;
             best_order.clone_from(&graph.layers);
         }
-        if best_crossings == 0 {
+        // Allow at least one iteration so sort-key tiebreakers take effect
+        // even when the initial ordering already has 0 crossings.
+        if best_crossings == 0 && iter > 0 {
             break;
         }
     }
