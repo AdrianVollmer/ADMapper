@@ -342,14 +342,17 @@ impl SqliteStorage {
         // Insert relationships using prepared statement
         {
             let mut rel_stmt = tx.prepare(
-                "INSERT INTO relationships (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, jsonb(?4))",
+                "INSERT OR IGNORE INTO relationships (source_id, target_id, type_id, properties) VALUES (?1, ?2, ?3, jsonb(?4))",
             )?;
 
             for (source_id, target_id, rel_type, properties) in relationships {
                 let props_json = serde_json::to_string(properties)?;
                 let type_id = type_cache.get(rel_type).copied().unwrap_or(0);
                 rel_stmt.execute(params![source_id, target_id, type_id, props_json])?;
-                rel_ids.push(tx.last_insert_rowid());
+                // Only record actually inserted rows (OR IGNORE skips duplicates)
+                if tx.changes() > 0 {
+                    rel_ids.push(tx.last_insert_rowid());
+                }
             }
         }
 

@@ -5,7 +5,7 @@ use crate::error::Result;
 use super::SqliteStorage;
 
 /// Current schema version.
-pub const SCHEMA_VERSION: i32 = 6;
+pub const SCHEMA_VERSION: i32 = 7;
 
 impl SqliteStorage {
     /// Initialize the database schema.
@@ -63,7 +63,7 @@ impl SqliteStorage {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
-            INSERT INTO meta (key, value) VALUES ('schema_version', '6');
+            INSERT INTO meta (key, value) VALUES ('schema_version', '7');
 
             -- Normalized node labels
             CREATE TABLE node_labels (
@@ -112,6 +112,7 @@ impl SqliteStorage {
             CREATE INDEX idx_edges_type ON relationships(type_id);
             CREATE INDEX idx_edges_source_type ON relationships(source_id, type_id);
             CREATE INDEX idx_edges_target_type ON relationships(target_id, type_id);
+            CREATE UNIQUE INDEX idx_edges_unique ON relationships(source_id, target_id, type_id);
 
             -- Query history table for storing executed queries
             CREATE TABLE query_history (
@@ -174,6 +175,9 @@ impl SqliteStorage {
         }
         if old_version < 6 {
             self.migrate_v5_to_v6()?;
+        }
+        if old_version < 7 {
+            self.migrate_v6_to_v7()?;
         }
         Ok(())
     }
@@ -328,6 +332,29 @@ impl SqliteStorage {
         self.conn.execute(
             "UPDATE meta SET value = '6' WHERE key = 'schema_version'",
             [],
+        )?;
+        Ok(())
+    }
+
+    /// Migration from v6 to v7: Add unique constraint on relationships.
+    ///
+    /// Prevents duplicate edges (same source, target, and type) which enables
+    /// additive imports without clearing the database first.
+    fn migrate_v6_to_v7(&self) -> Result<()> {
+        // Remove any existing duplicate relationships before adding the constraint.
+        // Keep the row with the lowest id for each (source_id, target_id, type_id).
+        self.conn.execute_batch(
+            r#"
+            DELETE FROM relationships WHERE id NOT IN (
+                SELECT MIN(id) FROM relationships
+                GROUP BY source_id, target_id, type_id
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_unique
+                ON relationships(source_id, target_id, type_id);
+
+            UPDATE meta SET value = '7' WHERE key = 'schema_version';
+            "#,
         )?;
         Ok(())
     }
