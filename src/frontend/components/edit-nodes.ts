@@ -4,6 +4,8 @@
  * Modal for performing bulk operations on nodes by name.
  * Users paste node names (one per line), select an action, and apply it.
  * Supports: mark owned, mark not owned, set disabled, set enabled, delete.
+ *
+ * Resolution and mutation happen server-side in a single request.
  */
 
 import { createModal, type ModalHandle } from "../utils/modal";
@@ -13,32 +15,28 @@ import { escapeHtml } from "../utils/html";
 import { getRenderer } from "./graph-view";
 import { updateDetailPanel } from "./sidebars";
 
-/** Search result from the API */
-interface SearchResult {
-  id: string;
-  name: string;
-  type: string;
-  properties: Record<string, unknown>;
-}
-
-/** Result of resolving a name to a node */
-interface ResolvedNode {
-  inputName: string;
-  id: string;
-  name: string;
-  type: string;
-}
-
-/** Actions available for batch editing */
-type BatchAction = "mark-owned" | "mark-not-owned" | "set-disabled" | "set-enabled" | "delete";
+/** Actions available for batch editing (must match backend BatchEditAction) */
+type BatchAction = "mark_owned" | "mark_not_owned" | "set_disabled" | "set_enabled" | "delete";
 
 const BATCH_ACTIONS: { value: BatchAction; label: string; danger: boolean }[] = [
-  { value: "mark-owned", label: "Mark Owned", danger: false },
-  { value: "mark-not-owned", label: "Mark Not Owned", danger: false },
-  { value: "set-enabled", label: "Set as Enabled", danger: false },
-  { value: "set-disabled", label: "Set as Disabled", danger: false },
+  { value: "mark_owned", label: "Mark Owned", danger: false },
+  { value: "mark_not_owned", label: "Mark Not Owned", danger: false },
+  { value: "set_enabled", label: "Set as Enabled", danger: false },
+  { value: "set_disabled", label: "Set as Disabled", danger: false },
   { value: "delete", label: "Delete", danger: true },
 ];
+
+/** Response from the batch edit endpoint */
+interface BatchEditResponse {
+  updated: number;
+  failed: number;
+  results: {
+    name: string;
+    success: boolean;
+    node_id?: string;
+    error?: string;
+  }[];
+}
 
 let modal: ModalHandle | null = null;
 
@@ -120,38 +118,7 @@ function handleClick(action: string): void {
   }
 }
 
-/** Resolve node names to IDs via the search API */
-async function resolveNames(names: string[]): Promise<{ resolved: ResolvedNode[]; unresolved: string[] }> {
-  const resolved: ResolvedNode[] = [];
-  const unresolved: string[] = [];
-
-  // Resolve each name individually via exact search
-  for (const name of names) {
-    try {
-      const results = await api.get<SearchResult[]>(`/api/graph/search?q=${encodeURIComponent(name)}&limit=5`);
-
-      // Find exact match (case-insensitive)
-      const exact = results.find((r) => r.name.toLowerCase() === name.toLowerCase());
-
-      if (exact) {
-        resolved.push({
-          inputName: name,
-          id: exact.id,
-          name: exact.name,
-          type: exact.type,
-        });
-      } else {
-        unresolved.push(name);
-      }
-    } catch {
-      unresolved.push(name);
-    }
-  }
-
-  return { resolved, unresolved };
-}
-
-/** Apply the selected action to all resolved nodes */
+/** Apply the selected action via a single backend request */
 async function applyAction(): Promise<void> {
   if (!modal) return;
 
@@ -159,12 +126,12 @@ async function applyAction(): Promise<void> {
   const actionSelect = document.getElementById("edit-nodes-action") as HTMLSelectElement;
   const statusEl = document.getElementById("edit-nodes-status") as HTMLElement;
 
-  const rawNames = textarea.value
+  const names = textarea.value
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
-  if (rawNames.length === 0) {
+  if (names.length === 0) {
     showError("No node names provided");
     return;
   }
@@ -172,77 +139,69 @@ async function applyAction(): Promise<void> {
   const action = actionSelect.value as BatchAction;
   const actionDef = BATCH_ACTIONS.find((a) => a.value === action)!;
 
-  // Show resolving status
-  showStatus(statusEl, "info", `Resolving ${rawNames.length} node name(s)...`);
+  // Confirm before applying
+  const confirmed = await showConfirm(`${actionDef.label} on ${names.length} node(s)?`, {
+    title: actionDef.label,
+    confirmText: actionDef.label,
+    danger: actionDef.danger,
+  });
 
-  // Disable controls while processing
+  if (!confirmed) return;
+
   setControlsEnabled(false);
+  showStatus(statusEl, "info", `Applying "${actionDef.label}" to ${names.length} node(s)...`);
 
   try {
-    const { resolved, unresolved } = await resolveNames(rawNames);
-
-    if (resolved.length === 0) {
-      showStatus(statusEl, "error", `None of the ${rawNames.length} node name(s) could be resolved.`);
-      setControlsEnabled(true);
-      return;
-    }
-
-    // Build confirmation message
-    let confirmMsg = `${actionDef.label} on ${resolved.length} node(s)?`;
-    if (unresolved.length > 0) {
-      confirmMsg += `\n\n${unresolved.length} node(s) could not be resolved and will be skipped:\n${unresolved
-        .slice(0, 10)
-        .map((n) => "  - " + n)
-        .join("\n")}`;
-      if (unresolved.length > 10) {
-        confirmMsg += `\n  ... and ${unresolved.length - 10} more`;
-      }
-    }
-
-    const confirmed = await showConfirm(confirmMsg, {
-      title: actionDef.label,
-      confirmText: actionDef.label,
-      danger: actionDef.danger,
+    const response = await api.post<BatchEditResponse>("/api/graph/batch-edit-nodes", {
+      names,
+      action,
     });
 
-    if (!confirmed) {
-      statusEl.hidden = true;
-      setControlsEnabled(true);
-      return;
-    }
-
-    showStatus(statusEl, "info", `Applying "${actionDef.label}" to ${resolved.length} node(s)...`);
-
-    const errors: string[] = [];
-    let successCount = 0;
-
-    for (const node of resolved) {
-      try {
-        await applyToNode(node, action);
-        successCount++;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`${node.name}: ${msg}`);
+    // Update local graph for delete/enabled actions
+    if (action === "delete") {
+      const graph = getRenderer()?.sigma.getGraph();
+      if (graph) {
+        for (const r of response.results) {
+          if (r.success && r.node_id && graph.hasNode(r.node_id)) {
+            graph.dropNode(r.node_id);
+          }
+        }
+      }
+    } else if (action === "set_enabled" || action === "set_disabled") {
+      const graph = getRenderer()?.sigma.getGraph();
+      const enabled = action === "set_enabled";
+      if (graph) {
+        for (const r of response.results) {
+          if (r.success && r.node_id && graph.hasNode(r.node_id)) {
+            const props = graph.getNodeAttribute(r.node_id, "properties") ?? {};
+            graph.setNodeAttribute(r.node_id, "properties", { ...props, enabled });
+          }
+        }
       }
     }
 
-    // Update graph view
-    refreshGraph();
+    // Refresh graph
+    const renderer = getRenderer();
+    if (renderer) {
+      renderer.refresh();
+      updateDetailPanel(null, null);
+    }
 
     // Show results
-    if (errors.length === 0) {
-      showSuccess(`${actionDef.label}: ${successCount} node(s) updated`);
+    if (response.failed === 0) {
+      showSuccess(`${actionDef.label}: ${response.updated} node(s) updated`);
       modal.close();
     } else {
+      const failedResults = response.results.filter((r) => !r.success);
       showStatus(
         statusEl,
         "error",
-        `<strong>${successCount} succeeded, ${errors.length} failed:</strong><br>` +
-          errors
+        `<strong>${response.updated} succeeded, ${response.failed} failed:</strong><br>` +
+          failedResults
             .slice(0, 10)
-            .map((e) => escapeHtml(e))
+            .map((r) => escapeHtml(`${r.name}: ${r.error ?? "unknown error"}`))
             .join("<br>") +
-          (errors.length > 10 ? `<br>... and ${errors.length - 10} more` : ""),
+          (failedResults.length > 10 ? `<br>... and ${failedResults.length - 10} more` : ""),
         true
       );
     }
@@ -250,62 +209,6 @@ async function applyAction(): Promise<void> {
     showStatus(statusEl, "error", `Error: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
     setControlsEnabled(true);
-  }
-}
-
-/** Apply a single action to a single node */
-async function applyToNode(node: ResolvedNode, action: BatchAction): Promise<void> {
-  const encodedId = encodeURIComponent(node.id);
-
-  switch (action) {
-    case "mark-owned":
-      await api.postNoContent(`/api/graph/node/${encodedId}/owned`, { owned: true });
-      break;
-    case "mark-not-owned":
-      await api.postNoContent(`/api/graph/node/${encodedId}/owned`, { owned: false });
-      break;
-    case "set-enabled":
-      await api.putNoContent(`/api/graph/nodes/${encodedId}`, {
-        properties: { enabled: true },
-      });
-      updateLocalNodeProperty(node.id, "enabled", true);
-      break;
-    case "set-disabled":
-      await api.putNoContent(`/api/graph/nodes/${encodedId}`, {
-        properties: { enabled: false },
-      });
-      updateLocalNodeProperty(node.id, "enabled", false);
-      break;
-    case "delete":
-      await api.delete(`/api/graph/nodes/${encodedId}`);
-      removeLocalNode(node.id);
-      break;
-  }
-}
-
-/** Update a node property in the local graph */
-function updateLocalNodeProperty(nodeId: string, key: string, value: unknown): void {
-  const graph = getRenderer()?.sigma.getGraph();
-  if (!graph?.hasNode(nodeId)) return;
-
-  const props = graph.getNodeAttribute(nodeId, "properties") ?? {};
-  graph.setNodeAttribute(nodeId, "properties", { ...props, [key]: value });
-}
-
-/** Remove a node from the local graph */
-function removeLocalNode(nodeId: string): void {
-  const graph = getRenderer()?.sigma.getGraph();
-  if (graph?.hasNode(nodeId)) {
-    graph.dropNode(nodeId);
-  }
-}
-
-/** Refresh the graph renderer after changes */
-function refreshGraph(): void {
-  const renderer = getRenderer();
-  if (renderer) {
-    renderer.refresh();
-    updateDetailPanel(null, null);
   }
 }
 

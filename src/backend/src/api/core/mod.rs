@@ -82,7 +82,8 @@ use paths::check_path_to_condition;
 
 #[allow(unused_imports)]
 pub use mutation::{
-    add_edge, add_node, delete_edge, delete_node, graph_choke_points, update_edge, update_node,
+    add_edge, add_node, batch_edit_nodes, delete_edge, delete_node, graph_choke_points,
+    update_edge, update_node,
 };
 
 #[allow(unused_imports)]

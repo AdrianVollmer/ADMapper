@@ -280,6 +280,112 @@ pub fn delete_edge(
     Ok(())
 }
 
+/// Batch edit nodes by name.
+///
+/// Resolves each name to a node (case-insensitive match on `name`), then
+/// applies the requested action. All operations run as individual Cypher
+/// queries within a single blocking task to avoid N round-trips.
+pub fn batch_edit_nodes(
+    db: &dyn DatabaseBackend,
+    request: crate::api::types::BatchEditNodesRequest,
+) -> Result<crate::api::types::BatchEditNodesResponse, String> {
+    use crate::api::types::{BatchEditAction, BatchEditNodeResult};
+
+    let mut updated = 0usize;
+    let mut failed = 0usize;
+    let mut results = Vec::with_capacity(request.names.len());
+
+    for name in &request.names {
+        let escaped = name.replace('\'', "\\'");
+
+        // Resolve name to objectid
+        let resolve_query = format!(
+            "MATCH (n) WHERE toLower(n.name) = toLower('{}') RETURN n.objectid AS oid LIMIT 1",
+            escaped
+        );
+
+        let resolve_result = match db.run_custom_query(&resolve_query) {
+            Ok(v) => v,
+            Err(e) => {
+                failed += 1;
+                results.push(BatchEditNodeResult {
+                    name: name.clone(),
+                    success: false,
+                    node_id: None,
+                    error: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
+
+        // Extract objectid from query result
+        let node_id = resolve_result
+            .as_array()
+            .and_then(|rows| rows.first())
+            .and_then(|row| row.get("oid"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let Some(ref oid) = node_id else {
+            failed += 1;
+            results.push(BatchEditNodeResult {
+                name: name.clone(),
+                success: false,
+                node_id: None,
+                error: Some("Node not found".to_string()),
+            });
+            continue;
+        };
+
+        let escaped_oid = oid.replace('\'', "\\'");
+
+        let action_query = match request.action {
+            BatchEditAction::MarkOwned => {
+                format!("MATCH (n {{objectid: '{}'}}) SET n.owned = true", escaped_oid)
+            }
+            BatchEditAction::MarkNotOwned => {
+                format!("MATCH (n {{objectid: '{}'}}) SET n.owned = false", escaped_oid)
+            }
+            BatchEditAction::SetEnabled => {
+                format!("MATCH (n {{objectid: '{}'}}) SET n.enabled = true", escaped_oid)
+            }
+            BatchEditAction::SetDisabled => {
+                format!("MATCH (n {{objectid: '{}'}}) SET n.enabled = false", escaped_oid)
+            }
+            BatchEditAction::Delete => {
+                format!("MATCH (n {{objectid: '{}'}}) DETACH DELETE n", escaped_oid)
+            }
+        };
+
+        match db.run_custom_query(&action_query) {
+            Ok(_) => {
+                updated += 1;
+                results.push(BatchEditNodeResult {
+                    name: name.clone(),
+                    success: true,
+                    node_id: node_id.clone(),
+                    error: None,
+                });
+            }
+            Err(e) => {
+                failed += 1;
+                results.push(BatchEditNodeResult {
+                    name: name.clone(),
+                    success: false,
+                    node_id: node_id.clone(),
+                    error: Some(e.to_string()),
+                });
+            }
+        }
+    }
+
+    Ok(crate::api::types::BatchEditNodesResponse {
+        updated,
+        failed,
+        results,
+    })
+}
+
 /// Get choke points in the graph using relationship betweenness centrality.
 pub fn graph_choke_points(
     db: &dyn DatabaseBackend,

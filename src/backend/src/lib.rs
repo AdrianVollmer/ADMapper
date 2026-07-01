@@ -292,6 +292,10 @@ pub fn create_api_router(state: AppState) -> Router {
         .route("/api/graph/node/:id/status", get(handlers::node_status))
         .route("/api/graph/node/:id/owned", post(handlers::node_set_owned))
         .route("/api/graph/batch-set-tier", post(handlers::batch_set_tier))
+        .route(
+            "/api/graph/batch-edit-nodes",
+            post(handlers::batch_edit_nodes),
+        )
         .route("/api/graph/path", get(handlers::graph_path))
         .route(
             "/api/graph/paths-to-da",

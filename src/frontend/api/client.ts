@@ -98,6 +98,7 @@ const COMMAND_MAPPING: Record<string, string> = {
   "GET /api/graph/choke-points": "graph_choke_points",
   // Tier management
   "POST /api/graph/batch-set-tier": "batch_set_tier",
+  "POST /api/graph/batch-edit-nodes": "batch_edit_nodes",
   // Mutations
   "POST /api/graph/node": "add_node",
   "POST /api/graph/relationship": "add_edge",

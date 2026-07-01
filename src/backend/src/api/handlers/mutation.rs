@@ -3,7 +3,8 @@
 use super::run_db;
 use crate::api::core;
 use crate::api::types::{
-    AddEdgeRequest, AddNodeRequest, ApiError, UpdateEdgeRequest, UpdateNodeRequest,
+    AddEdgeRequest, AddNodeRequest, ApiError, BatchEditNodesRequest, BatchEditNodesResponse,
+    UpdateEdgeRequest, UpdateNodeRequest,
 };
 use crate::db::{DbError, DbNode};
 use crate::graph::GraphEdge;
@@ -130,4 +131,31 @@ pub async fn delete_edge(
     .await?;
     info!(source = %source_for_log, target = %target_for_log, rel_type = %rel_type_for_log, "Relationship deleted");
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Batch edit nodes by name.
+///
+/// Resolves node names server-side and applies the action in one request.
+#[instrument(skip(state, body))]
+pub async fn batch_edit_nodes(
+    State(state): State<AppState>,
+    Json(body): Json<BatchEditNodesRequest>,
+) -> Result<Json<BatchEditNodesResponse>, ApiError> {
+    let db = state.require_db()?;
+    let count = body.names.len();
+    let action = format!("{:?}", body.action);
+
+    let result = run_db(db, move |db| {
+        core::batch_edit_nodes(db, body).map_err(DbError::Database)
+    })
+    .await?;
+
+    info!(
+        action = %action,
+        requested = count,
+        updated = result.updated,
+        failed = result.failed,
+        "Batch edit nodes"
+    );
+    Ok(Json(result))
 }

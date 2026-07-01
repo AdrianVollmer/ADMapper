@@ -349,6 +349,56 @@ pub struct UpdateEdgeRequest {
 }
 
 // ============================================================================
+// Batch Edit Types
+// ============================================================================
+
+/// Action for batch editing nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchEditAction {
+    MarkOwned,
+    MarkNotOwned,
+    SetEnabled,
+    SetDisabled,
+    Delete,
+}
+
+/// Request body for batch-editing nodes by name.
+#[derive(Debug, Deserialize)]
+pub struct BatchEditNodesRequest {
+    /// Node names to resolve and act on.
+    pub names: Vec<String>,
+    /// Action to perform.
+    pub action: BatchEditAction,
+}
+
+/// Per-node result in batch edit response.
+#[derive(Debug, Serialize)]
+pub struct BatchEditNodeResult {
+    /// The input name that was submitted.
+    pub name: String,
+    /// Whether the node was found and updated.
+    pub success: bool,
+    /// Node ID if resolved, None if not found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+    /// Error message if failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Response for batch node edit.
+#[derive(Debug, Serialize)]
+pub struct BatchEditNodesResponse {
+    /// Total nodes successfully updated.
+    pub updated: usize,
+    /// Total nodes that failed (not found or error).
+    pub failed: usize,
+    /// Per-node results.
+    pub results: Vec<BatchEditNodeResult>,
+}
+
+// ============================================================================
 // Query Types
 // ============================================================================
 
