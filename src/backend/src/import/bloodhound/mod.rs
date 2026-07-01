@@ -53,6 +53,10 @@ mod tier_zero_rids {
 
     /// All tier-0 SID suffixes (works via ends_with matching).
     /// Includes both domain-relative RIDs (e.g. "-512") and well-known SIDs (e.g. "S-1-5-9").
+    ///
+    /// Note: Protected Users (-525) is intentionally excluded. It is a defensive
+    /// group (prevents credential caching, enforces Kerberos) but does not grant
+    /// elevated privileges.
     pub const ALL: &[&str] = &[
         DOMAIN_ADMINS,
         DOMAIN_CONTROLLERS,
@@ -61,7 +65,6 @@ mod tier_zero_rids {
         ENTERPRISE_ADMINS,
         GROUP_POLICY_CREATOR_OWNERS,
         READONLY_DOMAIN_CONTROLLERS,
-        PROTECTED_USERS,
         KEY_ADMINS,
         ENTERPRISE_KEY_ADMINS,
         ADMINISTRATORS,
