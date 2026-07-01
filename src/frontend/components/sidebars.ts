@@ -458,17 +458,18 @@ async function toggleNodeOwned(nodeId: string): Promise<void> {
       owned: newOwned,
     });
 
-    // Refresh the status indicators
+    // Update the local graph property so the change is reflected immediately
+    const graph = getRenderer()?.sigma.getGraph();
+    if (graph?.hasNode(nodeId)) {
+      const props = graph.getNodeAttribute(nodeId, "properties") ?? {};
+      graph.setNodeAttribute(nodeId, "properties", { ...props, owned: newOwned });
+    }
+
+    // Refresh status indicators (owned icon + overflow menu text)
     fetchNodeStatus(nodeId);
 
-    // Update the overflow menu button text
-    const toggleBtn = document.querySelector(`[data-action="toggle-owned"][data-node-id="${nodeId}"]`);
-    if (toggleBtn) {
-      const label = toggleBtn.querySelector("span");
-      if (label) {
-        label.textContent = newOwned ? "Unmark Owned" : "Mark Owned";
-      }
-    }
+    // Refresh the properties list to reflect the new owned value
+    fetchNodeProperties(nodeId);
   } catch (err) {
     console.error("Failed to toggle owned status:", err);
     showError("Failed to update owned status");
