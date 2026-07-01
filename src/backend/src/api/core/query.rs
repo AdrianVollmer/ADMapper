@@ -9,7 +9,7 @@ use crate::state::AppState;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{error, info, warn};
+use tracing::info;
 
 use super::{BrowseEntry, BrowseResponse, QueryHistoryEntry, QueryHistoryResponse, QueryResult};
 use crate::api::types::QueryStatus;
@@ -259,50 +259,22 @@ pub fn import_from_paths(
 
     let mut importer = BloodHoundImporter::new(db, tx);
 
-    for path_str in &paths {
-        let path = Path::new(path_str);
-        let filename = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+    // Build (filename, path) pairs for import_paths
+    let file_pairs: Vec<(String, std::path::PathBuf)> = paths
+        .iter()
+        .map(|p| {
+            let path = Path::new(p);
+            let filename = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            (filename, path.to_path_buf())
+        })
+        .collect();
 
-        info!(filename = %filename, path = %path_str, "Importing file");
-
-        let result = if path_str.ends_with(".zip") {
-            match std::fs::File::open(path) {
-                Ok(file) => importer.import_zip(file, &job_id),
-                Err(e) => {
-                    error!(error = %e, path = %path_str, "Failed to open file");
-                    Err(format!("Failed to open file: {e}"))
-                }
-            }
-        } else if path_str.ends_with(".json") {
-            importer.import_json_file(path, &job_id)
-        } else {
-            warn!(filename = %filename, "Unsupported file type");
-            Err(format!("Unsupported file type: {filename}"))
-        };
-
-        match &result {
-            Ok(progress) => {
-                info!(
-                    filename = %filename,
-                    nodes = progress.nodes_imported,
-                    relationships = progress.edges_imported,
-                    "File imported successfully"
-                );
-                progress_callback(progress);
-            }
-            Err(e) => {
-                error!(filename = %filename, error = %e, "Import failed");
-                // Create error progress and notify
-                let mut error_progress = ImportProgress::new(job_id.clone());
-                error_progress.fail(e.clone());
-                progress_callback(&error_progress);
-                return Err(e.clone());
-            }
-        }
-    }
+    let progress = importer.import_paths(&file_pairs, &job_id)?;
+    progress_callback(&progress);
 
     Ok(job_id)
 }

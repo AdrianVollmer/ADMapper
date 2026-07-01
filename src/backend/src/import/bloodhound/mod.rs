@@ -131,7 +131,7 @@ impl BloodHoundImporter {
         }
     }
 
-    fn send_progress(&self, progress: &ImportProgress) {
+    pub(super) fn send_progress(&self, progress: &ImportProgress) {
         let _ = self.progress_tx.send(progress.clone());
     }
 }

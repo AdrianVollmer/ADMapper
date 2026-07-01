@@ -2176,11 +2176,16 @@ fn test_additive_import_preserves_custom_properties() {
     // Set a custom property via Cypher
     importer
         .db
-        .run_custom_query("MATCH (n {objectid: 'S-1-5-21-USER1'}) SET n.notes = 'high value target'")
+        .run_custom_query(
+            "MATCH (n {objectid: 'S-1-5-21-USER1'}) SET n.notes = 'high value target'",
+        )
         .unwrap();
 
     // Verify the custom property exists
-    let nodes = importer.db.get_nodes_by_ids(&["S-1-5-21-USER1".to_string()]).unwrap();
+    let nodes = importer
+        .db
+        .get_nodes_by_ids(&["S-1-5-21-USER1".to_string()])
+        .unwrap();
     assert_eq!(nodes[0].properties["notes"], "high value target");
 
     // Reset the in-memory dedup sets (simulates a new import session)
@@ -2195,7 +2200,10 @@ fn test_additive_import_preserves_custom_properties() {
     importer.finalize(&mut progress).unwrap();
 
     // Custom property should be preserved (json_patch merges, doesn't replace)
-    let nodes = importer.db.get_nodes_by_ids(&["S-1-5-21-USER1".to_string()]).unwrap();
+    let nodes = importer
+        .db
+        .get_nodes_by_ids(&["S-1-5-21-USER1".to_string()])
+        .unwrap();
     assert_eq!(
         nodes[0].properties["notes"], "high value target",
         "Custom property 'notes' should survive re-import"

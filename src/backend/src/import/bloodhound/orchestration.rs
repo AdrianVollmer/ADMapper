@@ -6,24 +6,84 @@ use crate::import::types::{FailedFile, ImportProgress};
 use serde_json::Value as JsonValue;
 use std::io::{Read, Seek};
 use std::path::Path;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 use zip::ZipArchive;
 
+/// A JSON payload to import: either raw contents read from a file/ZIP entry,
+/// or a path to read lazily from disk.
+enum JsonSource {
+    Contents {
+        filename: String,
+        data: String,
+        size: u64,
+    },
+    File {
+        filename: String,
+        path: std::path::PathBuf,
+        size: u64,
+    },
+}
+
 impl BloodHoundImporter {
-    /// Import from a ZIP file.
-    pub fn import_zip<R: Read + Seek>(
+    /// Import from multiple file paths (ZIP and/or JSON).
+    ///
+    /// ZIPs are extracted in-memory and their JSON entries are appended to the
+    /// work list. Everything is then processed through a single unified progress
+    /// tracker and finalized once at the end.
+    pub fn import_paths<P: AsRef<Path>>(
         &mut self,
-        reader: R,
+        paths: &[(String, P)],
         job_id: &str,
     ) -> Result<ImportProgress, String> {
-        info!(job_id = %job_id, "Opening ZIP archive");
+        info!(file_count = paths.len(), "Importing files");
+
+        let mut sources: Vec<JsonSource> = Vec::new();
+
+        // We collect ZIP errors here and inject them into progress later,
+        // since we don't have a progress object yet at this point.
+        let mut zip_errors: Vec<FailedFile> = Vec::new();
+
+        for (filename, path) in paths {
+            if filename.ends_with(".zip") {
+                let zip_result = std::fs::File::open(path)
+                    .map_err(|e| format!("Failed to open file: {e}"))
+                    .and_then(Self::extract_zip_sources);
+                match zip_result {
+                    Ok(zip_sources) => sources.extend(zip_sources),
+                    Err(e) => {
+                        error!(filename = %filename, error = %e, "Failed to read ZIP");
+                        zip_errors.push(FailedFile {
+                            filename: filename.clone(),
+                            error: e,
+                        });
+                    }
+                }
+            } else if filename.ends_with(".json") {
+                let file_size = std::fs::metadata(path).map_or(0, |m| m.len());
+                sources.push(JsonSource::File {
+                    filename: filename.clone(),
+                    path: path.as_ref().to_path_buf(),
+                    size: file_size,
+                });
+            } else {
+                warn!(filename = %filename, "Unsupported file type, skipping");
+            }
+        }
+
+        let mut result = self.import_sources(sources, job_id)?;
+        result.failed_files.extend(zip_errors);
+        Ok(result)
+    }
+
+    /// Extract JSON entries from a ZIP archive into in-memory sources.
+    fn extract_zip_sources<R: Read + Seek>(reader: R) -> Result<Vec<JsonSource>, String> {
         let mut archive = ZipArchive::new(reader).map_err(|e| {
             error!(error = %e, "Failed to open ZIP");
             format!("Failed to open ZIP: {e}")
         })?;
 
-        // Collect JSON file names and their uncompressed sizes
-        let json_files: Vec<(String, u64)> = (0..archive.len())
+        // Collect file info first (borrow checker: can't hold index info while mutably borrowing archive)
+        let json_entries: Vec<(String, u64)> = (0..archive.len())
             .filter_map(|i| {
                 let file = archive.by_index(i).ok()?;
                 let name = file.name().to_string();
@@ -36,122 +96,79 @@ impl BloodHoundImporter {
             })
             .collect();
 
-        let bytes_total: u64 = json_files.iter().map(|(_, size)| size).sum();
+        info!(file_count = json_entries.len(), "Found JSON files in ZIP");
+        debug!(files = ?json_entries, "JSON files to extract");
 
-        info!(
-            file_count = json_files.len(),
-            bytes_total, "Found JSON files in ZIP"
-        );
-        debug!(files = ?json_files, "JSON files to process");
-
-        let mut progress = ImportProgress::new(job_id.to_string())
-            .with_total_files(json_files.len())
-            .with_bytes_total(bytes_total);
-        self.send_progress(&progress);
-
-        for (file_name, file_size) in &json_files {
-            debug!(file = %file_name, "Processing file");
-            progress.set_current_file(file_name.clone());
-            self.send_progress(&progress);
-
-            let mut file = archive.by_name(file_name).map_err(|e| {
-                error!(file = %file_name, error = %e, "Failed to open file in archive");
-                format!("Failed to read {file_name}: {e}")
-            })?;
-
+        let mut sources = Vec::with_capacity(json_entries.len());
+        for (name, size) in &json_entries {
+            let mut file = archive
+                .by_name(name)
+                .map_err(|e| format!("Failed to read {name}: {e}"))?;
             let mut contents = String::new();
-            file.read_to_string(&mut contents).map_err(|e| {
-                error!(file = %file_name, error = %e, "Failed to read file contents");
-                format!("Failed to read {file_name}: {e}")
-            })?;
-
-            trace!(file = %file_name, size = contents.len(), "Read file contents");
-
-            match self.import_json_str(&contents, &mut progress) {
-                Ok(_) => {
-                    info!(
-                        file = %file_name,
-                        nodes = progress.nodes_imported,
-                        relationships = progress.edges_imported,
-                        "File processed"
-                    );
-                    progress.files_processed += 1;
-                    progress.bytes_processed += file_size;
-                    self.send_progress(&progress);
-                }
-                Err(e) => {
-                    warn!(file = %file_name, error = %e, "Error importing file, continuing");
-                    progress.failed_files.push(FailedFile {
-                        filename: file_name.clone(),
-                        error: e,
-                    });
-                    progress.files_processed += 1;
-                    progress.bytes_processed += file_size;
-                }
-            }
+            file.read_to_string(&mut contents)
+                .map_err(|e| format!("Failed to read {name}: {e}"))?;
+            sources.push(JsonSource::Contents {
+                filename: name.clone(),
+                data: contents,
+                size: *size,
+            });
         }
 
-        self.finalize(&mut progress)?;
-        Ok(progress)
+        Ok(sources)
     }
 
-    /// Import from a single JSON file.
-    pub fn import_json_file<P: AsRef<Path>>(
+    /// Core import logic: process a list of JSON sources with unified progress,
+    /// then finalize.
+    fn import_sources(
         &mut self,
-        path: P,
+        sources: Vec<JsonSource>,
         job_id: &str,
     ) -> Result<ImportProgress, String> {
-        let file_size = std::fs::metadata(&path).map_or(0, |m| m.len());
-        let contents =
-            std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))?;
-
-        let mut progress = ImportProgress::new(job_id.to_string())
-            .with_total_files(1)
-            .with_bytes_total(file_size);
-        progress.set_current_file(path.as_ref().display().to_string());
-        self.send_progress(&progress);
-
-        self.import_json_str(&contents, &mut progress)?;
-
-        progress.files_processed = 1;
-        progress.bytes_processed = file_size;
-
-        self.finalize(&mut progress)?;
-        Ok(progress)
-    }
-
-    /// Import from multiple JSON files with unified progress tracking.
-    pub fn import_json_files<P: AsRef<Path>>(
-        &mut self,
-        paths: &[(String, P)],
-        job_id: &str,
-    ) -> Result<ImportProgress, String> {
-        info!(file_count = paths.len(), "Importing multiple JSON files");
-
-        // Calculate total bytes across all files for weighted progress
-        let bytes_total: u64 = paths
+        let total_bytes: u64 = sources
             .iter()
-            .filter_map(|(_, path)| std::fs::metadata(path).ok())
-            .map(|m| m.len())
+            .map(|s| match s {
+                JsonSource::Contents { size, .. } | JsonSource::File { size, .. } => *size,
+            })
             .sum();
 
         let mut progress = ImportProgress::new(job_id.to_string())
-            .with_total_files(paths.len())
-            .with_bytes_total(bytes_total);
+            .with_total_files(sources.len())
+            .with_bytes_total(total_bytes);
         self.send_progress(&progress);
 
-        for (filename, path) in paths {
+        for source in &sources {
+            let (filename, contents, file_size) = match source {
+                JsonSource::Contents {
+                    filename,
+                    data,
+                    size,
+                } => (
+                    filename.clone(),
+                    std::borrow::Cow::Borrowed(data.as_str()),
+                    *size,
+                ),
+                JsonSource::File {
+                    filename,
+                    path,
+                    size,
+                } => match std::fs::read_to_string(path) {
+                    Ok(data) => (filename.clone(), std::borrow::Cow::Owned(data), *size),
+                    Err(e) => {
+                        error!(file = %filename, error = %e, "Failed to read file");
+                        progress.failed_files.push(FailedFile {
+                            filename: filename.clone(),
+                            error: format!("Failed to read {filename}: {e}"),
+                        });
+                        progress.files_processed += 1;
+                        progress.bytes_processed += size;
+                        continue;
+                    }
+                },
+            };
+
             debug!(file = %filename, "Processing file");
             progress.set_current_file(filename.clone());
             self.send_progress(&progress);
-
-            let metadata = std::fs::metadata(path).ok();
-            let file_size = metadata.map_or(0, |m| m.len());
-
-            let contents = std::fs::read_to_string(path).map_err(|e| {
-                error!(file = %filename, error = %e, "Failed to read file");
-                format!("Failed to read {filename}: {e}")
-            })?;
 
             match self.import_json_str(&contents, &mut progress) {
                 Ok(_) => {
@@ -167,10 +184,9 @@ impl BloodHoundImporter {
                 }
                 Err(e) => {
                     warn!(file = %filename, error = %e, "Error importing file, continuing");
-                    progress.failed_files.push(FailedFile {
-                        filename: filename.clone(),
-                        error: e,
-                    });
+                    progress
+                        .failed_files
+                        .push(FailedFile { filename, error: e });
                     progress.files_processed += 1;
                     progress.bytes_processed += file_size;
                 }
@@ -188,7 +204,7 @@ impl BloodHoundImporter {
         contents: &str,
         progress: &mut ImportProgress,
     ) -> Result<(), String> {
-        // Strip UTF-8 BOM (U+FEFF) if present — some tools write it but JSON doesn't allow it
+        // Strip UTF-8 BOM (U+FEFF) if present -- some tools write it but JSON doesn't allow it
         let contents = contents.strip_prefix('\u{FEFF}').unwrap_or(contents);
 
         // Parse with RawValue to defer entity parsing - reduces peak memory

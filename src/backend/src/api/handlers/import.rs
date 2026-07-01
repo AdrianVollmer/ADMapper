@@ -114,109 +114,29 @@ pub async fn import_bloodhound(
     tokio::task::spawn_blocking(move || {
         let mut importer = BloodHoundImporter::new(db, tx);
 
-        // Separate files by type
-        let (zip_files, json_files): (Vec<_>, Vec<_>) = files
-            .iter()
-            .partition(|(filename, _)| filename.ends_with(".zip"));
+        let result = importer.import_paths(&files, &job_id_clone);
 
-        // Process ZIP files one at a time (they handle multiple files internally)
-        for (filename, temp_path) in &zip_files {
-            info!(filename = %filename, path = %temp_path.display(), "Importing ZIP file");
-            let result = match std::fs::File::open(temp_path) {
-                Ok(file) => importer.import_zip(file, &job_id_clone),
-                Err(e) => {
-                    error!(error = %e, path = %temp_path.display(), "Failed to open temp file");
-                    Err(format!("Failed to open temp file: {e}"))
-                }
-            };
-
-            match &result {
-                Ok(progress) => {
-                    info!(
-                        filename = %filename,
-                        nodes = progress.nodes_imported,
-                        relationships = progress.edges_imported,
-                        "ZIP imported successfully"
-                    );
-                    // Set final_state first, then send to channel to avoid race condition
-                    // where SSE subscriber misses the final message
-                    *job_for_task.final_state.write() = Some(progress.clone());
-                    let _ = job_for_task.channel.send(progress.clone());
-                    state_for_task.emit_import_progress(&job_id_for_events, progress);
-                }
-                Err(e) => {
-                    error!(filename = %filename, error = %e, "ZIP import failed");
-                    let error_progress = ImportProgress {
-                        job_id: job_id_clone.clone(),
-                        status: ImportStatus::Failed,
-                        current_file: Some(filename.clone()),
-                        stage: None,
-                        files_processed: 0,
-                        total_files: 1,
-                        nodes_imported: 0,
-                        edges_imported: 0,
-                        edges_total: 0,
-                        bytes_processed: 0,
-                        bytes_total: 0,
-                        error: Some(e.clone()),
-                        failed_files: Vec::new(),
-                    };
-                    *job_for_task.final_state.write() = Some(error_progress.clone());
-                    let _ = job_for_task.channel.send(error_progress.clone());
-                    state_for_task.emit_import_progress(&job_id_for_events, &error_progress);
-                }
+        let progress = match result {
+            Ok(progress) => {
+                info!(
+                    nodes = progress.nodes_imported,
+                    relationships = progress.edges_imported,
+                    "Import completed successfully"
+                );
+                progress
             }
-        }
-
-        // Process all JSON files together with unified progress tracking
-        if !json_files.is_empty() {
-            // Filter to only .json files (skip unsupported types)
-            let valid_json_files: Vec<(String, &std::path::PathBuf)> = json_files
-                .iter()
-                .filter(|(filename, _)| filename.ends_with(".json"))
-                .map(|(filename, path)| (filename.clone(), path))
-                .collect();
-
-            if !valid_json_files.is_empty() {
-                info!(file_count = valid_json_files.len(), "Importing JSON files");
-                let result = importer.import_json_files(&valid_json_files, &job_id_clone);
-
-                match &result {
-                    Ok(progress) => {
-                        info!(
-                            nodes = progress.nodes_imported,
-                            relationships = progress.edges_imported,
-                            "JSON files imported successfully"
-                        );
-                        // Set final_state first, then send to channel to avoid race condition
-                        *job_for_task.final_state.write() = Some(progress.clone());
-                        let _ = job_for_task.channel.send(progress.clone());
-                        state_for_task.emit_import_progress(&job_id_for_events, progress);
-                    }
-                    Err(e) => {
-                        error!(error = %e, "JSON import failed");
-                        let error_progress = ImportProgress {
-                            job_id: job_id_clone.clone(),
-                            status: ImportStatus::Failed,
-                            current_file: None,
-                            stage: None,
-                            files_processed: 0,
-                            total_files: valid_json_files.len(),
-                            nodes_imported: 0,
-                            edges_imported: 0,
-                            edges_total: 0,
-                            bytes_processed: 0,
-                            bytes_total: 0,
-                            error: Some(e.clone()),
-                            failed_files: Vec::new(),
-                        };
-                        *job_for_task.final_state.write() = Some(error_progress.clone());
-                        let _ = job_for_task.channel.send(error_progress.clone());
-                        state_for_task.emit_import_progress(&job_id_for_events, &error_progress);
-                    }
-                }
+            Err(e) => {
+                error!(error = %e, "Import failed");
+                let mut progress = ImportProgress::new(job_id_clone.clone());
+                progress.status = ImportStatus::Failed;
+                progress.error = Some(e);
+                progress
             }
-        }
+        };
+
+        *job_for_task.final_state.write() = Some(progress.clone());
+        let _ = job_for_task.channel.send(progress.clone());
+        state_for_task.emit_import_progress(&job_id_for_events, &progress);
 
         // Clean up temp files
         for (filename, temp_path) in files {

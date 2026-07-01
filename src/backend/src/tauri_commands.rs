@@ -11,7 +11,7 @@ use crate::settings::Settings;
 use crate::state::AppState;
 use serde_json::Value as JsonValue;
 use tauri::State;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 // ============================================================================
 // App Info Commands
@@ -743,140 +743,38 @@ pub fn import_from_paths(
             }
         });
 
-        let mut total_nodes = 0usize;
-        let mut total_edges = 0usize;
+        // Build (filename, path) pairs for import_paths
+        let file_pairs: Vec<(String, PathBuf)> = paths
+            .iter()
+            .map(|p| {
+                let path = Path::new(p);
+                let filename = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                (filename, PathBuf::from(p))
+            })
+            .collect();
 
-        // Separate ZIP files and JSON files
-        let (zip_paths, json_paths): (Vec<_>, Vec<_>) =
-            paths.iter().partition(|p| p.ends_with(".zip"));
-
-        // Process ZIP files one at a time (they handle multiple files internally)
-        for path_str in &zip_paths {
-            let path = Path::new(path_str);
-            let filename = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string();
-
-            // Emit progress for current file
-            let progress = ImportProgress {
-                job_id: job_id_clone.clone(),
-                status: ImportStatus::Running,
-                total_files: paths.len(),
-                files_processed: 0,
-                current_file: Some(filename.clone()),
-                stage: None,
-                nodes_imported: total_nodes,
-                edges_imported: total_edges,
-                edges_total: 0,
-                bytes_processed: 0,
-                bytes_total: 0,
-                error: None,
-                failed_files: Vec::new(),
-            };
-            state_clone.emit_import_progress(&job_id_clone, &progress);
-
-            let result = match std::fs::File::open(path) {
-                Ok(file) => importer.import_zip(file, &job_id_clone),
-                Err(e) => Err(format!("Failed to open file: {e}")),
-            };
-
-            match result {
-                Ok(file_progress) => {
-                    total_nodes = file_progress.nodes_imported;
-                    total_edges = file_progress.edges_imported;
-                    // Emit progress from importer
-                    state_clone.emit_import_progress(&job_id_clone, &file_progress);
-                }
-                Err(e) => {
-                    let error_progress = ImportProgress {
-                        job_id: job_id_clone.clone(),
-                        status: ImportStatus::Failed,
-                        total_files: paths.len(),
-                        files_processed: 0,
-                        current_file: Some(filename),
-                        stage: None,
-                        nodes_imported: total_nodes,
-                        edges_imported: total_edges,
-                        edges_total: 0,
-                        bytes_processed: 0,
-                        bytes_total: 0,
-                        error: Some(e),
-                        failed_files: Vec::new(),
-                    };
-                    state_clone.emit_import_progress(&job_id_clone, &error_progress);
-                    return;
-                }
+        let progress = match importer.import_paths(&file_pairs, &job_id_clone) {
+            Ok(progress) => {
+                info!(
+                    nodes = progress.nodes_imported,
+                    relationships = progress.edges_imported,
+                    "Import completed successfully"
+                );
+                progress
             }
-        }
-
-        // Process all JSON files together with unified progress tracking
-        if !json_paths.is_empty() {
-            let json_files: Vec<(String, PathBuf)> = json_paths
-                .iter()
-                .filter(|p| p.ends_with(".json"))
-                .map(|p| {
-                    let path = Path::new(p);
-                    let filename = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    (filename, PathBuf::from(p))
-                })
-                .collect();
-
-            if !json_files.is_empty() {
-                let result = importer.import_json_files(&json_files, &job_id_clone);
-
-                match result {
-                    Ok(file_progress) => {
-                        total_nodes = file_progress.nodes_imported;
-                        total_edges = file_progress.edges_imported;
-                        // The importer already emits progress, but we need to forward to Tauri
-                        state_clone.emit_import_progress(&job_id_clone, &file_progress);
-                    }
-                    Err(e) => {
-                        let error_progress = ImportProgress {
-                            job_id: job_id_clone.clone(),
-                            status: ImportStatus::Failed,
-                            total_files: json_files.len(),
-                            files_processed: 0,
-                            current_file: None,
-                            stage: None,
-                            nodes_imported: total_nodes,
-                            edges_imported: total_edges,
-                            edges_total: 0,
-                            bytes_processed: 0,
-                            bytes_total: 0,
-                            error: Some(e),
-                            failed_files: Vec::new(),
-                        };
-                        state_clone.emit_import_progress(&job_id_clone, &error_progress);
-                        return;
-                    }
-                }
+            Err(e) => {
+                error!(error = %e, "Import failed");
+                let mut p = ImportProgress::new(job_id_clone.clone());
+                p.status = ImportStatus::Failed;
+                p.error = Some(e);
+                p
             }
-        }
-
-        // Emit completion
-        let final_progress = ImportProgress {
-            job_id: job_id_clone.clone(),
-            status: ImportStatus::Completed,
-            total_files: paths.len(),
-            files_processed: paths.len(),
-            current_file: None,
-            stage: None,
-            nodes_imported: total_nodes,
-            edges_imported: total_edges,
-            edges_total: 0,
-            bytes_processed: 0,
-            bytes_total: 0,
-            error: None,
-            failed_files: Vec::new(),
         };
-        state_clone.emit_import_progress(&job_id_clone, &final_progress);
+        state_clone.emit_import_progress(&job_id_clone, &progress);
     });
 
     // Return immediately with job_id - import runs in background
