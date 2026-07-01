@@ -49,13 +49,6 @@ impl BloodHoundImporter {
             .with_bytes_total(bytes_total);
         self.send_progress(&progress);
 
-        // Clear existing data for fresh import
-        info!("Clearing existing database data");
-        self.db.clear().map_err(|e| {
-            error!(error = %e, "Failed to clear database");
-            format!("Failed to clear database: {e}")
-        })?;
-
         for (file_name, file_size) in &json_files {
             debug!(file = %file_name, "Processing file");
             progress.set_current_file(file_name.clone());
@@ -146,13 +139,6 @@ impl BloodHoundImporter {
             .with_total_files(paths.len())
             .with_bytes_total(bytes_total);
         self.send_progress(&progress);
-
-        // Clear existing data for fresh import
-        info!("Clearing existing database data");
-        self.db.clear().map_err(|e| {
-            error!(error = %e, "Failed to clear database");
-            format!("Failed to clear database: {e}")
-        })?;
 
         for (filename, path) in paths {
             debug!(file = %filename, "Processing file");

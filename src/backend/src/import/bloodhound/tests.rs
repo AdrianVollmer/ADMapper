@@ -2036,7 +2036,6 @@ fn test_resolve_orphan_names_null_name_placeholders() {
 /// targets, resolve_orphan_names should give those placeholders friendly names.
 #[test]
 fn test_resolve_orphan_names_after_edge_flush() {
-    use crate::db::backend::DatabaseBackend;
     use crate::db::DbEdge;
 
     let importer = test_importer();
@@ -2094,5 +2093,115 @@ fn test_resolve_orphan_names_after_edge_flush() {
     assert_eq!(
         node.name, "CORP.LOCAL-512",
         "Placeholder created by edge flush should get a friendly name"
+    );
+}
+
+// ========================================================================
+// Additive Import Tests
+// ========================================================================
+
+/// Importing data twice should not duplicate nodes or edges, and should
+/// preserve custom properties set between imports.
+#[test]
+fn test_additive_import_no_duplicates() {
+    let mut importer = test_importer();
+
+    let json_content = serde_json::json!({
+        "meta": {"type": "groups", "version": 5},
+        "data": [
+            {
+                "ObjectIdentifier": "S-1-5-21-GROUP1",
+                "Properties": {"name": "Domain Admins"},
+                "Members": [
+                    {"ObjectIdentifier": "S-1-5-21-USER1", "ObjectType": "User"}
+                ]
+            }
+        ]
+    });
+
+    // First import
+    let mut progress = ImportProgress::new("test1".to_string());
+    importer
+        .import_json_str(&json_content.to_string(), &mut progress)
+        .unwrap();
+    importer.finalize(&mut progress).unwrap();
+
+    let (nodes_after_first, edges_after_first) = importer.db.get_stats().unwrap();
+
+    // Reset the in-memory dedup sets (simulates a new import session)
+    importer.seen_nodes.clear();
+    importer.seen_edges.clear();
+
+    // Second import of the same data
+    let mut progress = ImportProgress::new("test2".to_string());
+    importer
+        .import_json_str(&json_content.to_string(), &mut progress)
+        .unwrap();
+    importer.finalize(&mut progress).unwrap();
+
+    let (nodes_after_second, edges_after_second) = importer.db.get_stats().unwrap();
+
+    assert_eq!(
+        nodes_after_first, nodes_after_second,
+        "Re-importing same data should not create duplicate nodes"
+    );
+    assert_eq!(
+        edges_after_first, edges_after_second,
+        "Re-importing same data should not create duplicate edges"
+    );
+}
+
+/// Custom properties set on a node should survive a re-import.
+#[test]
+fn test_additive_import_preserves_custom_properties() {
+    let mut importer = test_importer();
+
+    let json_content = serde_json::json!({
+        "meta": {"type": "users", "version": 5},
+        "data": [
+            {
+                "ObjectIdentifier": "S-1-5-21-USER1",
+                "Properties": {"name": "user1@corp.local"}
+            }
+        ]
+    });
+
+    // First import
+    let mut progress = ImportProgress::new("test1".to_string());
+    importer
+        .import_json_str(&json_content.to_string(), &mut progress)
+        .unwrap();
+    importer.finalize(&mut progress).unwrap();
+
+    // Set a custom property via Cypher
+    importer
+        .db
+        .run_custom_query("MATCH (n {objectid: 'S-1-5-21-USER1'}) SET n.notes = 'high value target'")
+        .unwrap();
+
+    // Verify the custom property exists
+    let nodes = importer.db.get_nodes_by_ids(&["S-1-5-21-USER1".to_string()]).unwrap();
+    assert_eq!(nodes[0].properties["notes"], "high value target");
+
+    // Reset the in-memory dedup sets (simulates a new import session)
+    importer.seen_nodes.clear();
+    importer.seen_edges.clear();
+
+    // Re-import same data
+    let mut progress = ImportProgress::new("test2".to_string());
+    importer
+        .import_json_str(&json_content.to_string(), &mut progress)
+        .unwrap();
+    importer.finalize(&mut progress).unwrap();
+
+    // Custom property should be preserved (json_patch merges, doesn't replace)
+    let nodes = importer.db.get_nodes_by_ids(&["S-1-5-21-USER1".to_string()]).unwrap();
+    assert_eq!(
+        nodes[0].properties["notes"], "high value target",
+        "Custom property 'notes' should survive re-import"
+    );
+    assert_eq!(
+        nodes[0].properties["name"], "user1@corp.local",
+        "Original property should still be present"
     );
 }
