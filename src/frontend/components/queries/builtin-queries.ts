@@ -129,6 +129,42 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
           },
         ],
       },
+      {
+        id: "low-priv-permissions",
+        name: "Low Privilege Group Permissions",
+        queries: [
+          {
+            id: "domain-users-permissions",
+            name: "Domain Users Permissions",
+            description: "Non-MemberOf relationships from Domain Users",
+            query: `MATCH p = (g:Group)-[r]->(target) WHERE g.objectid ENDS WITH '-513' AND type(r) <> 'MemberOf' RETURN p`,
+          },
+          {
+            id: "domain-computers-permissions",
+            name: "Domain Computers Permissions",
+            description: "Non-MemberOf relationships from Domain Computers",
+            query: `MATCH p = (g:Group)-[r]->(target) WHERE g.objectid ENDS WITH '-515' AND type(r) <> 'MemberOf' RETURN p`,
+          },
+          {
+            id: "authenticated-users-permissions",
+            name: "Authenticated Users Permissions",
+            description: "Non-MemberOf relationships from Authenticated Users",
+            query: `MATCH p = (g:Group)-[r]->(target) WHERE g.objectid ENDS WITH '-S-1-5-11' AND type(r) <> 'MemberOf' RETURN p`,
+          },
+          {
+            id: "everyone-permissions",
+            name: "Everyone Permissions",
+            description: "Non-MemberOf relationships from Everyone",
+            query: `MATCH p = (g:Group)-[r]->(target) WHERE g.objectid ENDS WITH '-S-1-1-0' AND type(r) <> 'MemberOf' RETURN p`,
+          },
+          {
+            id: "all-low-priv-permissions",
+            name: "All Low Privilege Groups",
+            description: "Non-MemberOf relationships from any well-known low privilege group",
+            query: `MATCH p = (g:Group)-[r]->(target) WHERE (g.objectid ENDS WITH '-513' OR g.objectid ENDS WITH '-515' OR g.objectid ENDS WITH '-S-1-5-11' OR g.objectid ENDS WITH '-S-1-1-0') AND type(r) <> 'MemberOf' RETURN p`,
+          },
+        ],
+      },
     ],
   },
   {
@@ -146,6 +182,18 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
         name: "AS-REP Roastable",
         description: "Users without preauth required",
         query: `MATCH (u:User) WHERE u.dontreqpreauth = true RETURN u`,
+      },
+      {
+        id: "kerberoastable-with-path",
+        name: "Kerberoastable with Path to Computer",
+        description: "Enabled kerberoastable users with a path to at least one computer",
+        query: `MATCH (u:User) WHERE u.hasspn = true AND u.enabled = true MATCH p = shortestPath((u)-[*1..50]->(c:Computer)) RETURN p`,
+      },
+      {
+        id: "asreproastable-with-path",
+        name: "AS-REP Roastable with Path to Computer",
+        description: "Enabled AS-REP roastable users with a path to at least one computer",
+        query: `MATCH (u:User) WHERE u.dontreqpreauth = true AND u.enabled = true MATCH p = shortestPath((u)-[*1..50]->(c:Computer)) RETURN p`,
       },
     ],
   },
