@@ -26,6 +26,7 @@ import { openListView } from "./list-view";
 import { openGenerateData } from "./generate-data";
 import { openEditTiers } from "./edit-tiers";
 import { openEditExploitLikelihood } from "./edit-exploit-likelihood";
+import { openEditNodes } from "./edit-nodes";
 import { openLicenses } from "./licenses";
 
 /** Action name constants for type-safe dispatch */
@@ -46,6 +47,7 @@ export const Actions = {
   ADD_EDGE: "add-relationship",
   EDIT_TIERS: "edit-tiers",
   EDIT_EXPLOIT_LIKELIHOOD: "edit-exploit-likelihood",
+  EDIT_NODES: "edit-nodes",
   CLEAR_DISABLED: "clear-disabled",
   CLEAR_DB: "clear-db",
   CLEAR_CACHE: "clear-cache",
@@ -122,6 +124,7 @@ const actionHandlers: Record<StaticAction, () => void> = {
   "add-relationship": () => openAddEdge(),
   "edit-tiers": () => openEditTiers(),
   "edit-exploit-likelihood": () => openEditExploitLikelihood(),
+  "edit-nodes": () => openEditNodes(),
   "clear-disabled": () => clearDisabledObjects(),
   "clear-db": () => clearDatabase(),
   "clear-cache": () => clearCache(),
