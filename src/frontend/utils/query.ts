@@ -38,20 +38,20 @@ let currentForegroundQuery: {
  */
 export function abortCurrentForegroundQuery(): void {
   if (currentForegroundQuery) {
-    const queryId = currentForegroundQuery.queryId;
+    // Capture locally: abort() synchronously triggers the onAbort listener,
+    // which calls cleanup() and sets currentForegroundQuery = null.
+    const { queryId, abortController, cleanup } = currentForegroundQuery;
+    currentForegroundQuery = null;
     console.log(`[query] Aborting previous foreground query: ${queryId}`);
 
-    // Abort the frontend tracking
-    currentForegroundQuery.abortController.abort();
-    currentForegroundQuery.cleanup();
+    abortController.abort();
+    cleanup();
 
     // Also tell the backend to abort (fire and forget)
     api.postNoContent(`/api/query/abort/${queryId}`).catch((err) => {
       // Ignore errors - query might have already completed
       console.debug(`[query] Backend abort request failed (probably already complete):`, err);
     });
-
-    currentForegroundQuery = null;
   }
 }
 
