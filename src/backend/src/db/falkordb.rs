@@ -364,7 +364,7 @@ impl DatabaseBackend for FalkorDbDatabase {
              WITH n, count(DISTINCT in_node) AS incoming
              OPTIONAL MATCH (n)-[]->(out_node)
              WITH n, incoming, count(DISTINCT out_node) AS outgoing
-             OPTIONAL MATCH (n)-[admin]->(admin_node) WHERE type(admin) IN [{admin_types}]
+             OPTIONAL MATCH (n)-[admin]->(admin_node:Computer) WHERE type(admin) IN [{admin_types}]
              WITH n, incoming, outgoing, count(DISTINCT admin_node) AS admin_to
              OPTIONAL MATCH (n)-[:MemberOf]->(mo_node)
              WITH n, incoming, outgoing, admin_to, count(DISTINCT mo_node) AS member_of

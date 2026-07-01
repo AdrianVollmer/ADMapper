@@ -269,7 +269,7 @@ fn connection_cypher(node_id: &str, direction: &str) -> String {
         "incoming" => format!("MATCH (a)-[r]->(b {{objectid: '{id}'}}) RETURN a, r, b"),
         "outgoing" => format!("MATCH (a {{objectid: '{id}'}})-[r]->(b) RETURN a, r, b"),
         "admin" => format!(
-            "MATCH (a {{objectid: '{id}'}})-[r]->(b) \
+            "MATCH (a {{objectid: '{id}'}})-[r]->(b:Computer) \
              WHERE type(r) IN ['AdminTo','GenericAll','GenericWrite','Owns',\
              'WriteDacl','WriteOwner','AllExtendedRights','ForceChangePassword','AddMember'] \
              RETURN a, r, b"

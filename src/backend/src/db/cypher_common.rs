@@ -596,7 +596,7 @@ pub fn node_connections_cypher(node_id: &str, direction: &str) -> String {
         "incoming" => format!("MATCH (a)-[r]->(b {{objectid: '{id_escaped}'}}) RETURN a, r, b"),
         "outgoing" => format!("MATCH (a {{objectid: '{id_escaped}'}})-[r]->(b) RETURN a, r, b"),
         "admin" => format!(
-            "MATCH (a {{objectid: '{id_escaped}'}})-[r]->(b) \
+            "MATCH (a {{objectid: '{id_escaped}'}})-[r]->(b:Computer) \
              WHERE type(r) IN [{admin_types}] \
              RETURN a, r, b"
         ),

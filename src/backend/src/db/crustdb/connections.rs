@@ -34,7 +34,7 @@ impl CrustDatabase {
         let escaped_id = node_id.replace('\'', "''");
         let query = match direction {
             "admin" => format!(
-                "MATCH (a {{objectid: '{}'}})-[r]->(b) \
+                "MATCH (a {{objectid: '{}'}})-[r]->(b:Computer) \
                  WHERE type(r) = 'AdminTo' OR type(r) = 'GenericAll' OR type(r) = 'GenericWrite' \
                  OR type(r) = 'Owns' OR type(r) = 'WriteDacl' OR type(r) = 'WriteOwner' \
                  OR type(r) = 'AllExtendedRights' OR type(r) = 'ForceChangePassword' \

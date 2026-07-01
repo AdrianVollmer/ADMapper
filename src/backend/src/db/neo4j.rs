@@ -656,7 +656,7 @@ impl DatabaseBackend for Neo4jDatabase {
             "MATCH (n {{objectid: $id}})
              CALL {{ WITH n MATCH (n)<-[]-(in_node) RETURN count(DISTINCT in_node) AS incoming }}
              CALL {{ WITH n MATCH (n)-[]->(out_node) RETURN count(DISTINCT out_node) AS outgoing }}
-             CALL {{ WITH n MATCH (n)-[admin]->(admin_node) WHERE type(admin) IN [{admin_types}] RETURN count(DISTINCT admin_node) AS admin_to }}
+             CALL {{ WITH n MATCH (n)-[admin]->(admin_node:Computer) WHERE type(admin) IN [{admin_types}] RETURN count(DISTINCT admin_node) AS admin_to }}
              CALL {{ WITH n MATCH (n)-[:MemberOf]->(mo_node) RETURN count(DISTINCT mo_node) AS member_of }}
              CALL {{ WITH n MATCH (n)<-[:MemberOf]-(mem_node) RETURN count(DISTINCT mem_node) AS members }}
              RETURN incoming, outgoing, admin_to, member_of, members"

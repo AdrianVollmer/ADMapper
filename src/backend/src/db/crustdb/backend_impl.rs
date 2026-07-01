@@ -136,10 +136,19 @@ impl DatabaseBackend for CrustDatabase {
             }
         }
 
+        // Filter admin-to targets to Computer nodes only
+        let admin_to_count = if admin_to_nodes.is_empty() {
+            0
+        } else {
+            let ids: Vec<String> = admin_to_nodes.iter().map(|s| s.to_string()).collect();
+            let nodes = CrustDatabase::get_nodes_by_ids(self, &ids).unwrap_or_default();
+            nodes.iter().filter(|n| n.label == "Computer").count()
+        };
+
         Ok((
             incoming_nodes.len(),
             outgoing_nodes.len(),
-            admin_to_nodes.len(),
+            admin_to_count,
             member_of_nodes.len(),
             member_nodes.len(),
         ))
