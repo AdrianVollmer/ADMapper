@@ -205,7 +205,7 @@ export const BUILTIN_QUERIES: QueryCategory[] = [
         id: "admin-sessions",
         name: "Admin Sessions",
         description: "Where users have sessions on computers",
-        query: `MATCH p = (u:User)-[:HasSession]->(c:Computer) RETURN p`,
+        query: `MATCH p = (c:Computer)-[:HasSession]->(u:User) RETURN p`,
       },
       {
         id: "rdp-users",

@@ -424,10 +424,10 @@ function generateDemoGraph(_nodeCount: number): RawADGraph {
   relationships.push({ source: "grp-it", target: "grp-rdp", type: "MemberOf" });
 
   // Sessions
-  relationships.push({ source: "user-alice", target: "comp-dc01", type: "HasSession" });
-  relationships.push({ source: "user-bob", target: "comp-srv01", type: "HasSession" });
-  relationships.push({ source: "user-carol", target: "comp-ws01", type: "HasSession" });
-  relationships.push({ source: "user-dave", target: "comp-ws02", type: "HasSession" });
+  relationships.push({ source: "comp-dc01", target: "user-alice", type: "HasSession" });
+  relationships.push({ source: "comp-srv01", target: "user-bob", type: "HasSession" });
+  relationships.push({ source: "comp-ws01", target: "user-carol", type: "HasSession" });
+  relationships.push({ source: "comp-ws02", target: "user-dave", type: "HasSession" });
 
   // MULTI-EDGES: Multiple different relationships between same nodes
   // alice has multiple permissions on DC01

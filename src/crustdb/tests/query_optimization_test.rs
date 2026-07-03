@@ -73,10 +73,10 @@ fn build_e2e_scale_graph(db: &Database) -> (usize, usize) {
             }
         }
     }
-    // User -> Computer (AdminTo, HasSession): ~2000 rels
+    // Computer -> User (HasSession), User -> Computer (AdminTo): ~2000 rels
     for i in 0..user_count {
         let c = i % computer_count;
-        insert_rel(db, &format!("U_{i}"), &format!("C_{c}"), "HasSession");
+        insert_rel(db, &format!("C_{c}"), &format!("U_{i}"), "HasSession");
         if i % 3 == 0 {
             let c2 = (i * 3 + 7) % computer_count;
             insert_rel(db, &format!("U_{i}"), &format!("C_{c2}"), "AdminTo");
