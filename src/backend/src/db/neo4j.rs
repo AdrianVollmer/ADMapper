@@ -394,9 +394,20 @@ impl DatabaseBackend for Neo4jDatabase {
         // Fire all index-creation queries concurrently to avoid 13 sequential
         // round-trips.  IF NOT EXISTS makes them idempotent on Neo4j 4.0+.
         // Legacy syntax (Neo4j 3.x) is tried per-label only if modern fails.
-        debug!("Creating objectid indexes for faster imports");
+        // A uniqueness constraint on Base.objectid implies an index, so we
+        // create the constraint first and only fall back to plain indexes for
+        // per-label lookups or older Neo4j versions that lack constraint support.
+        debug!("Ensuring objectid uniqueness constraint and indexes");
         let graph = self.graph.clone();
         self.runtime.block_on(async {
+            // Uniqueness constraint on the shared Base label prevents duplicate
+            // objectids across all node types.
+            let constraint = "CREATE CONSTRAINT base_objectid_unique IF NOT EXISTS \
+                              FOR (n:Base) REQUIRE n.objectid IS UNIQUE";
+            if let Err(e) = graph.run(query(constraint)).await {
+                debug!("Base uniqueness constraint skipped (Neo4j may be <4.4): {e}");
+            }
+
             let futures: Vec<_> = cypher_common::NODE_LABELS
                 .iter()
                 .map(|label| {
