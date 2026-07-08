@@ -417,7 +417,7 @@ fn get_node_relationship_counts_match_actual_connections() {
     insert_node(&db, "in-1", "User");
     insert_node(&db, "in-2", "Computer");
     insert_node(&db, "in-3", "Group");
-    insert_node(&db, "out-1", "Group");
+    insert_node(&db, "out-1", "Computer");
     insert_node(&db, "member-group", "Group");
     insert_node(&db, "member-1", "User");
 
