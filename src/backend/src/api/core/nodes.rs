@@ -1,5 +1,7 @@
 //! Node and relationship basic operations.
 
+use std::collections::HashSet;
+
 use crate::db::{DatabaseBackend, DbNode};
 use crate::graph::{FullGraph, GraphEdge, GraphNode};
 
@@ -45,6 +47,7 @@ pub fn graph_search(
 
     let limit = limit.unwrap_or(50);
     let mut results: Vec<DbNode> = Vec::with_capacity(limit);
+    let mut seen: HashSet<String> = HashSet::with_capacity(limit);
     let mut remaining = limit;
 
     // Query each priority label in order
@@ -55,8 +58,12 @@ pub fn graph_search(
         let nodes = db
             .search_nodes(query, remaining, Some(label))
             .map_err(|e| e.to_string())?;
-        remaining = remaining.saturating_sub(nodes.len());
-        results.extend(nodes);
+        for node in nodes {
+            if seen.insert(node.id.clone()) {
+                remaining = remaining.saturating_sub(1);
+                results.push(node);
+            }
+        }
     }
 
     // Fill remainder with non-priority labels.
@@ -70,6 +77,7 @@ pub fn graph_search(
             if !PRIORITY_LABELS
                 .iter()
                 .any(|l| l.eq_ignore_ascii_case(&node.label))
+                && seen.insert(node.id.clone())
             {
                 results.push(node);
                 remaining = remaining.saturating_sub(1);
