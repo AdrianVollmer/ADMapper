@@ -131,6 +131,21 @@ impl BloodHoundImporter {
             format!("Failed to ensure database indexes: {e}")
         })?;
 
+        // Detect fresh database: when no edges exist we can use CREATE
+        // instead of MERGE for relationships, avoiding the per-edge
+        // existence scan that dominates import time on large datasets.
+        match self.db.get_stats() {
+            Ok((_nodes, edges)) => {
+                self.fresh_import = edges == 0;
+                if self.fresh_import {
+                    info!("Fresh database detected, using fast edge creation");
+                }
+            }
+            Err(e) => {
+                debug!(error = %e, "Could not check stats, falling back to MERGE");
+            }
+        }
+
         let total_bytes: u64 = sources
             .iter()
             .map(|s| match s {

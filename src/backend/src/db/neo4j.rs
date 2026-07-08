@@ -303,6 +303,90 @@ impl Neo4jDatabase {
         })
     }
 
+    /// Core edge insertion. When `create_only` is true, uses MATCH+CREATE
+    /// (O(1) per edge, no existence check). When false, uses MATCH+MERGE
+    /// (idempotent, preserves existing properties like `owned`).
+    ///
+    /// Both paths use a two-step approach: first MERGE placeholder nodes for
+    /// any missing endpoints, then handle the relationships separately.
+    fn insert_edges_impl(&self, relationships: &[DbEdge], create_only: bool) -> Result<usize> {
+        if relationships.is_empty() {
+            return Ok(0);
+        }
+
+        let mut edges_by_type: std::collections::HashMap<String, Vec<BoltType>> =
+            std::collections::HashMap::new();
+        for edge in relationships {
+            let mut map = BoltMap::new();
+            map.put(
+                BoltString::new("src"),
+                BoltType::String(BoltString::new(&edge.source)),
+            );
+            map.put(
+                BoltString::new("tgt"),
+                BoltType::String(BoltString::new(&edge.target)),
+            );
+            map.put(
+                BoltString::new("src_type"),
+                BoltType::String(BoltString::new(
+                    edge.source_type.as_deref().unwrap_or("Base"),
+                )),
+            );
+            map.put(
+                BoltString::new("tgt_type"),
+                BoltType::String(BoltString::new(
+                    edge.target_type.as_deref().unwrap_or("Base"),
+                )),
+            );
+            let props = if edge.properties.is_null() {
+                BoltType::Map(BoltMap::new())
+            } else {
+                Self::json_to_bolt(&edge.properties)
+            };
+            map.put(BoltString::new("props"), props);
+            edges_by_type
+                .entry(edge.rel_type.clone())
+                .or_default()
+                .push(BoltType::Map(map));
+        }
+
+        let total = relationships.len();
+        let graph = self.graph.clone();
+        self.runtime.block_on(async {
+            for (rel_type, bolt_edges) in &edges_by_type {
+                for chunk in bolt_edges.chunks(cypher_common::BATCH_SIZE) {
+                    let params = BoltType::List(BoltList {
+                        value: chunk.to_vec(),
+                    });
+
+                    // Step 1: ensure endpoint nodes exist
+                    let ensure = query(
+                        "UNWIND $edges AS row \
+                         MERGE (a:Base {objectid: row.src}) \
+                         ON CREATE SET a.placeholder = true, a.node_type = row.src_type, a.name = row.src \
+                         MERGE (b:Base {objectid: row.tgt}) \
+                         ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type, b.name = row.tgt",
+                    )
+                    .param("edges", params.clone());
+                    graph.run(ensure).await?;
+
+                    // Step 2: create or merge relationships
+                    let rel_verb = if create_only { "CREATE" } else { "MERGE" };
+                    let rel_query = query(&format!(
+                        "UNWIND $edges AS row \
+                         MATCH (a:Base {{objectid: row.src}}) \
+                         MATCH (b:Base {{objectid: row.tgt}}) \
+                         {rel_verb} (a)-[r:{rel_type}]->(b) \
+                         SET r += row.props"
+                    ))
+                    .param("edges", params);
+                    graph.run(rel_query).await?;
+                }
+            }
+            Ok(total)
+        })
+    }
+
     /// Execute a typed write-only query.
     /// Used by backend-specific methods that need parameterized queries.
     fn run_query(&self, q: Query) -> Result<()> {
@@ -483,68 +567,11 @@ impl DatabaseBackend for Neo4jDatabase {
     }
 
     fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
-        if relationships.is_empty() {
-            return Ok(0);
-        }
+        self.insert_edges_impl(relationships, false)
+    }
 
-        let mut edges_by_type: std::collections::HashMap<String, Vec<BoltType>> =
-            std::collections::HashMap::new();
-        for edge in relationships {
-            let mut map = BoltMap::new();
-            map.put(
-                BoltString::new("src"),
-                BoltType::String(BoltString::new(&edge.source)),
-            );
-            map.put(
-                BoltString::new("tgt"),
-                BoltType::String(BoltString::new(&edge.target)),
-            );
-            map.put(
-                BoltString::new("src_type"),
-                BoltType::String(BoltString::new(
-                    edge.source_type.as_deref().unwrap_or("Base"),
-                )),
-            );
-            map.put(
-                BoltString::new("tgt_type"),
-                BoltType::String(BoltString::new(
-                    edge.target_type.as_deref().unwrap_or("Base"),
-                )),
-            );
-            let props = if edge.properties.is_null() {
-                BoltType::Map(BoltMap::new())
-            } else {
-                Self::json_to_bolt(&edge.properties)
-            };
-            map.put(BoltString::new("props"), props);
-            edges_by_type
-                .entry(edge.rel_type.clone())
-                .or_default()
-                .push(BoltType::Map(map));
-        }
-
-        let mut inserted = 0;
-        for (rel_type, bolt_edges) in &edges_by_type {
-            for chunk in bolt_edges.chunks(cypher_common::BATCH_SIZE) {
-                let params = BoltType::List(BoltList {
-                    value: chunk.to_vec(),
-                });
-                let q = query(&format!(
-                    "UNWIND $edges AS row \
-                     MERGE (a:Base {{objectid: row.src}}) \
-                     ON CREATE SET a.placeholder = true, a.node_type = row.src_type, a.name = row.src \
-                     MERGE (b:Base {{objectid: row.tgt}}) \
-                     ON CREATE SET b.placeholder = true, b.node_type = row.tgt_type, b.name = row.tgt \
-                     MERGE (a)-[r:{rel_type}]->(b) \
-                     SET r += row.props"
-                ))
-                .param("edges", params);
-                self.run_query(q)?;
-                inserted += chunk.len();
-            }
-        }
-
-        Ok(inserted)
+    fn create_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        self.insert_edges_impl(relationships, true)
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {

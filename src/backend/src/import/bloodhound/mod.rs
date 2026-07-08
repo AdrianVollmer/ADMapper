@@ -113,6 +113,10 @@ pub struct BloodHoundImporter {
     group_members: HashMap<String, HashSet<String>>,
     /// Domain SID -> domain name (for well-known SID resolution in DCSync)
     domain_sid_to_name: HashMap<String, String>,
+    /// True when importing into an empty database (no pre-existing edges).
+    /// Allows using CREATE instead of MERGE for relationships, which skips
+    /// the expensive per-edge existence scan.
+    fresh_import: bool,
 }
 
 impl BloodHoundImporter {
@@ -131,6 +135,7 @@ impl BloodHoundImporter {
             dcsync_get_changes_all: HashMap::new(),
             group_members: HashMap::new(),
             domain_sid_to_name: HashMap::new(),
+            fresh_import: false,
         }
     }
 

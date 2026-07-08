@@ -74,6 +74,16 @@ pub trait DatabaseBackend: Send + Sync {
     /// Insert a batch of relationships.
     fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize>;
 
+    /// Insert a batch of relationships, assuming none already exist.
+    ///
+    /// Uses CREATE instead of MERGE, skipping the expensive relationship
+    /// existence check. Only safe when the caller guarantees no duplicates
+    /// (e.g. first import into an empty database). Falls back to
+    /// `insert_edges` by default.
+    fn create_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        self.insert_edges(relationships)
+    }
+
     // ========================================================================
     // Statistics
     // ========================================================================

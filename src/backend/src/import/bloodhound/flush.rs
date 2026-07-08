@@ -105,7 +105,12 @@ impl BloodHoundImporter {
 
         for (i, chunk) in self.edge_buffer.chunks(BATCH_SIZE).enumerate() {
             let batch_size = chunk.len();
-            let count = self.db.insert_edges(chunk).map_err(|e| {
+            let count = if self.fresh_import {
+                self.db.create_edges(chunk)
+            } else {
+                self.db.insert_edges(chunk)
+            }
+            .map_err(|e| {
                 error!(error = %e, batch_size, "Failed to insert relationships");
                 format!("Failed to insert relationships: {e}")
             })?;

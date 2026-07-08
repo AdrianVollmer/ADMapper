@@ -269,7 +269,11 @@ impl DatabaseBackend for FalkorDbDatabase {
     }
 
     fn insert_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
-        cypher_common::insert_edges_two_step(self, relationships)
+        cypher_common::insert_edges_two_step(self, relationships, false)
+    }
+
+    fn create_edges(&self, relationships: &[DbEdge]) -> Result<usize> {
+        cypher_common::insert_edges_two_step(self, relationships, true)
     }
 
     fn get_stats(&self) -> Result<(usize, usize)> {

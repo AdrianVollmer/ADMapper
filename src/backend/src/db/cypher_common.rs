@@ -724,6 +724,7 @@ pub fn insert_nodes(exec: &impl CypherExecutor, nodes: &[DbNode]) -> Result<usiz
 pub fn insert_edges_two_step(
     exec: &impl CypherExecutor,
     relationships: &[DbEdge],
+    create_only: bool,
 ) -> Result<usize> {
     if relationships.is_empty() {
         return Ok(0);
@@ -737,6 +738,8 @@ pub fn insert_edges_two_step(
             .or_default()
             .push(relationship);
     }
+
+    let rel_verb = if create_only { "CREATE" } else { "MERGE" };
 
     let mut inserted = 0;
     for (rel_type, type_edges) in edges_by_type {
@@ -780,16 +783,18 @@ pub fn insert_edges_two_step(
             );
             exec.exec_write(&ensure_nodes)?;
 
-            // Step 2: Create edges with flattened properties.
-            let create_edges = format!(
+            // Step 2: create or merge edges with flattened properties.
+            // MERGE preserves user-set properties (e.g. `owned`) on re-import.
+            // CREATE skips the expensive relationship existence scan.
+            let edge_query = format!(
                 "UNWIND [{}] AS row \
                  MATCH (a:Base {{objectid: row.src}}) \
                  MATCH (b:Base {{objectid: row.tgt}}) \
-                 CREATE (a)-[r:{}]->(b) \
+                 {rel_verb} (a)-[r:{}]->(b) \
                  SET r += row.props",
                 items_str, rel_type
             );
-            exec.exec_write(&create_edges)?;
+            exec.exec_write(&edge_query)?;
             inserted += chunk.len();
         }
     }
