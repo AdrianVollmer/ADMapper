@@ -375,6 +375,19 @@ pub async fn graph_choke_points(
         .map_err(|e| format!("Task join error: {e}"))?
 }
 
+/// Batch-edit nodes (resolve, set properties, delete).
+#[tauri::command]
+pub async fn batch_edit_nodes(
+    state: State<'_, AppState>,
+    request: crate::api::types::BatchEditNodesRequest,
+) -> Result<crate::api::types::BatchEditNodesResponse, String> {
+    let db = state.db().ok_or("Not connected to database")?;
+    debug!("Batch edit nodes (IPC)");
+    tokio::task::spawn_blocking(move || core::batch_edit_nodes(db.as_ref(), request))
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
+}
+
 /// Batch-set tiers on filtered nodes.
 #[tauri::command]
 pub async fn batch_set_tier(

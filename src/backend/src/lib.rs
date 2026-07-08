@@ -191,6 +191,7 @@ pub fn run_desktop(database_url: Option<&str>) {
             tauri_commands::delete_edge,
             // Insights (additional)
             tauri_commands::graph_choke_points,
+            tauri_commands::batch_edit_nodes,
             tauri_commands::batch_set_tier,
             // Query
             tauri_commands::graph_query,
