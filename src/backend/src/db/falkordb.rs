@@ -238,16 +238,19 @@ impl DatabaseBackend for FalkorDbDatabase {
     fn clear(&self) -> Result<()> {
         info!("Clearing all data from FalkorDB");
         self.run_query("MATCH (n) DETACH DELETE n")?;
+        self.ensure_indexes()?;
+        debug!("Database cleared and indexes created");
+        Ok(())
+    }
 
-        debug!("Creating objectid indexes for faster imports");
+    fn ensure_indexes(&self) -> Result<()> {
+        debug!("Ensuring objectid indexes exist");
         for label in cypher_common::NODE_LABELS {
             let index_query = format!("CREATE INDEX FOR (n:{}) ON (n.objectid)", label);
             if let Err(e) = self.run_query(&index_query) {
                 debug!("Index creation skipped for {}: {}", label, e);
             }
         }
-
-        debug!("Database cleared and indexes created");
         Ok(())
     }
 

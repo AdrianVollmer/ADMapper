@@ -124,6 +124,13 @@ impl BloodHoundImporter {
         sources: Vec<JsonSource>,
         job_id: &str,
     ) -> Result<ImportProgress, String> {
+        // Ensure indexes exist before inserting data -- critical for MERGE
+        // performance on Cypher backends. Idempotent, so safe on every import.
+        self.db.ensure_indexes().map_err(|e| {
+            error!(error = %e, "Failed to ensure database indexes");
+            format!("Failed to ensure database indexes: {e}")
+        })?;
+
         let total_bytes: u64 = sources
             .iter()
             .map(|s| match s {

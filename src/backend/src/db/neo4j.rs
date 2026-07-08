@@ -390,7 +390,12 @@ impl DatabaseBackend for Neo4jDatabase {
     fn clear(&self) -> Result<()> {
         info!("Clearing all data from Neo4j");
         self.run_query(query("MATCH (n) DETACH DELETE n"))?;
+        self.ensure_indexes()?;
+        debug!("Database cleared and indexes created");
+        Ok(())
+    }
 
+    fn ensure_indexes(&self) -> Result<()> {
         // Fire all index-creation queries concurrently to avoid 13 sequential
         // round-trips.  IF NOT EXISTS makes them idempotent on Neo4j 4.0+.
         // Legacy syntax (Neo4j 3.x) is tried per-label only if modern fails.
@@ -430,8 +435,6 @@ impl DatabaseBackend for Neo4jDatabase {
                 .collect();
             futures::future::join_all(futures).await;
         });
-
-        debug!("Database cleared and indexes created");
         Ok(())
     }
 

@@ -54,6 +54,14 @@ pub trait DatabaseBackend: Send + Sync {
     /// Clear all data from the database.
     fn clear(&self) -> Result<()>;
 
+    /// Ensure required indexes and constraints exist.
+    ///
+    /// Idempotent -- safe to call before every import. Backends that manage
+    /// indexes internally (e.g. CrustDB) can no-op.
+    fn ensure_indexes(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Insert a single node.
     fn insert_node(&self, node: DbNode) -> Result<()>;
 
